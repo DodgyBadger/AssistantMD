@@ -151,6 +151,8 @@
             let savedContent = '';
             let mode = 'edit';
             let historyLoaded = false;
+            let currentFileExists = false;
+            let currentFileHashKnown = false;
             const supportsPreview = /\.(md|markdown)$/i.test(path);
             const lockMessage = 'Available when the active response finishes.';
 
@@ -217,6 +219,11 @@
                     saveButton.disabled = locked || (!isDirty() && !createIfMissing);
                     saveButton.title = locked ? lockMessage : 'Save file';
                 }
+                overlay.querySelectorAll('[data-vault-file-restore]').forEach((button) => {
+                    if (!(button instanceof HTMLButtonElement)) return;
+                    button.disabled = locked;
+                    button.title = locked ? lockMessage : 'Restore this revision';
+                });
                 if (locked && supportsPreview && mode === 'edit') setMode('preview');
             }
 
@@ -245,6 +252,11 @@
                     await previewRevision(revisionButton);
                     return;
                 }
+                const restoreButton = target.closest('[data-vault-file-restore]');
+                if (restoreButton instanceof HTMLButtonElement) {
+                    await restoreRevision(restoreButton);
+                    return;
+                }
                 if (target.closest('[data-vault-file-save="true"]') && editor instanceof HTMLTextAreaElement) {
                     if (interactionLocked()) return;
                     const saved = await saveFile(path, vault, editor, statusLabel, saveButton, () => createIfMissing, (nextHash) => {
@@ -269,6 +281,8 @@
             try {
                 const data = await fetchVaultFile(path, vault);
                 sha256 = data.sha256 || '';
+                currentFileExists = true;
+                currentFileHashKnown = true;
                 if (editor instanceof HTMLTextAreaElement) {
                     editor.value = data.content || '';
                     savedContent = editor.value;
@@ -284,6 +298,8 @@
                 applyInteractionLock();
             } catch (error) {
                 if (error.errorType === 'VaultFileNotFound') {
+                    currentFileExists = false;
+                    currentFileHashKnown = true;
                     if (initialMode === 'history') {
                         showHistoryOnly(`${path} no longer exists.`);
                         return;
@@ -313,6 +329,8 @@
                     return;
                 }
                 if (error.errorType === 'VaultFileNotText') {
+                    currentFileExists = true;
+                    currentFileHashKnown = false;
                     if (initialMode === 'history') {
                         showHistoryOnly('This file is not editable as plain text.');
                         return;
@@ -366,8 +384,15 @@
                 historyList?.querySelectorAll('[data-vault-file-revision]').forEach((row) => {
                     row.classList.toggle('is-active', row === button);
                 });
+                if (button.dataset.vaultFileRevisionExists !== 'true') {
+                    historyPreview.innerHTML = `
+                        ${renderRestoreAction(button)}
+                        <p class="text-sm text-txt-secondary">The file did not exist before this operation.</p>
+                    `;
+                    return;
+                }
                 if (button.dataset.vaultFileRevisionAvailable !== 'true') {
-                    historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">The file did not exist before this operation.</p>';
+                    historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">This revision is no longer available.</p>';
                     return;
                 }
                 historyPreview.innerHTML = '<p class="text-sm text-txt-secondary">Loading revision...</p>';
@@ -384,6 +409,7 @@
                     if (supportsPreview) {
                         const parts = splitMarkdownFrontmatter(content);
                         historyPreview.innerHTML = `
+                            ${renderRestoreAction(button)}
                             ${parts.frontmatter ? `<details class="vault-file-revision-properties"><summary>Properties</summary><pre>${escapeHtml(parts.frontmatter)}</pre></details>` : ''}
                             <div class="vault-file-preview prose prose-sm max-w-none" data-vault-file-revision-markdown></div>
                         `;
@@ -392,10 +418,69 @@
                             callbacks.renderMarkdownPreview?.(revisionMarkdown, parts.body);
                         }
                     } else {
-                        historyPreview.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
+                        historyPreview.innerHTML = `${renderRestoreAction(button)}<pre>${escapeHtml(content)}</pre>`;
                     }
                 } catch (error) {
                     historyPreview.innerHTML = `<p class="state-error text-sm">Unable to load revision: ${escapeHtml(error.message)}</p>`;
+                }
+            }
+
+            function renderRestoreAction(button) {
+                if (!currentFileHashKnown) return '';
+                return `
+                    <div class="vault-file-revision-actions">
+                        <button
+                            type="button"
+                            class="ui-button-secondary"
+                            data-vault-file-restore="${escapeHtml(button.dataset.vaultFileRevision || '')}"
+                            data-vault-file-restore-exists="${escapeHtml(button.dataset.vaultFileRevisionExists || 'false')}"
+                            title="${interactionLocked() ? 'Available when the active response finishes.' : 'Restore this revision'}"
+                            ${interactionLocked() ? 'disabled' : ''}
+                        >
+                            ${icons.RESTORE_ICON_SVG}
+                            <span>Restore this revision</span>
+                        </button>
+                    </div>
+                `;
+            }
+
+            async function restoreRevision(button) {
+                if (interactionLocked() || !currentFileHashKnown) return;
+                if (!confirmDiscard()) return;
+                const snapshotId = button.dataset.vaultFileRestore || '';
+                const restoresFile = button.dataset.vaultFileRestoreExists === 'true';
+                const prompt = restoresFile
+                    ? `Restore this revision to ${path}? The current state will remain available in history.`
+                    : `Restore the earlier absent state by deleting ${path}? The current file will remain available in history.`;
+                if (!window.confirm(prompt)) return;
+                button.disabled = true;
+                try {
+                    const response = await fetch(
+                        `api/vaults/${encodeURIComponent(vault)}/files/revisions/${encodeURIComponent(snapshotId)}/restore`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                expected_sha256: currentFileExists ? sha256 : null,
+                            }),
+                        }
+                    );
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.message || `HTTP ${response.status}`);
+                    }
+                    const result = await response.json();
+                    if (editor instanceof HTMLTextAreaElement) {
+                        savedContent = editor.value;
+                    }
+                    await openFile(path, {
+                        vaultName: vault,
+                        onBack,
+                        initialMode: result.exists && supportsPreview ? 'preview' : 'history',
+                    });
+                } catch (error) {
+                    button.disabled = false;
+                    historyPreview.innerHTML = `<p class="state-error text-sm">Unable to restore revision: ${escapeHtml(error.message)}</p>`;
                 }
             }
         }

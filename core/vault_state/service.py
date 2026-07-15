@@ -714,23 +714,45 @@ class VaultStateService:
             rows = list(session.execute(stmt))
 
         return tuple(
-            VaultFileRevision(
-                snapshot_id=snapshot.id,
-                activity_id=activity.activity_id,
-                activity_kind=activity.kind,
-                activity_source=activity.source,
-                activity_label=activity.label,
-                task_id=activity.task_id,
-                path=mutation.path,
-                operation=mutation.operation,
-                exists=bool(snapshot.exists),
-                content_hash=snapshot.content_hash,
-                snapshot_available=bool(snapshot.exists and snapshot.snapshot_ref),
-                created_at=mutation.created_at,
-                expires_at=snapshot.expires_at,
-            )
+            _file_revision_item(mutation, activity, snapshot)
             for mutation, activity, snapshot in rows
         )
+
+    def get_file_revision(
+        self,
+        *,
+        vault_name: str,
+        snapshot_id: int,
+    ) -> VaultFileRevision | None:
+        """Return one retained mutation revision scoped to a vault."""
+        now = datetime.now(UTC)
+        with self.SessionFactory() as session:
+            row = session.execute(
+                select(VaultMutation, VaultActivity, FileSnapshot)
+                .join(
+                    VaultActivity,
+                    VaultActivity.activity_id == VaultMutation.activity_id,
+                )
+                .join(
+                    FileSnapshot,
+                    FileSnapshot.id == VaultMutation.before_snapshot_id,
+                )
+                .where(
+                    VaultActivity.vault_name == vault_name,
+                    VaultMutation.target_kind == "file",
+                    FileSnapshot.id == snapshot_id,
+                    or_(
+                        FileSnapshot.expires_at.is_(None),
+                        FileSnapshot.expires_at >= now,
+                    ),
+                )
+                .order_by(VaultMutation.created_at.desc(), VaultMutation.id.desc())
+                .limit(1)
+            ).first()
+        if row is None:
+            return None
+        mutation, activity, snapshot = row
+        return _file_revision_item(mutation, activity, snapshot)
 
     def resolve_snapshot_file(self, snapshot_id: int) -> VaultSnapshotFile | None:
         """Resolve one retained file snapshot to an on-disk path under the managed snapshot root."""
@@ -999,4 +1021,26 @@ def _mutation_item(activity: VaultActivity, row: VaultMutation) -> VaultMutation
         created_at=row.created_at,
         expires_at=row.expires_at,
         metadata=metadata,
+    )
+
+
+def _file_revision_item(
+    mutation: VaultMutation,
+    activity: VaultActivity,
+    snapshot: FileSnapshot,
+) -> VaultFileRevision:
+    return VaultFileRevision(
+        snapshot_id=snapshot.id,
+        activity_id=activity.activity_id,
+        activity_kind=activity.kind,
+        activity_source=activity.source,
+        activity_label=activity.label,
+        task_id=activity.task_id,
+        path=mutation.path,
+        operation=mutation.operation,
+        exists=bool(snapshot.exists),
+        content_hash=snapshot.content_hash,
+        snapshot_available=bool(snapshot.exists and snapshot.snapshot_ref),
+        created_at=mutation.created_at,
+        expires_at=snapshot.expires_at,
     )

@@ -20,6 +20,7 @@ class VaultFileReferenceApiScenario(BaseScenario):
         self.create_file(vault, "README.md", "# Vault root\n")
         self.create_file(vault, "root-note.md", "root note\n")
         self.create_file(vault, "script.py", "print('editable')\n")
+        self.create_file(vault, "revision-restore.md", "first revision\n")
         self.create_file(vault, "Pagination/a.md", "a\n")
         self.create_file(vault, "Pagination/b.md", "b\n")
         self.create_file(vault, "Pagination/c.md", "c\n")
@@ -243,6 +244,57 @@ class VaultFileReferenceApiScenario(BaseScenario):
             "Explorer revision should preserve the exact pre-edit content"
         )
 
+        restore_read = self.call_api(
+            f"/api/vaults/{vault.name}/files",
+            params={"path": "revision-restore.md"},
+        )
+        restore_update = self.call_api(
+            f"/api/vaults/{vault.name}/files",
+            method="PUT",
+            params={"path": "revision-restore.md"},
+            data={
+                "content": "second revision\n",
+                "expected_sha256": restore_read.json()["sha256"],
+            },
+        )
+        assert restore_update.status_code == 200
+        restore_history = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "revision-restore.md"},
+        )
+        restore_snapshot_id = restore_history.json()["revisions"][0]["snapshot_id"]
+        restored = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions/{restore_snapshot_id}/restore",
+            method="POST",
+            data={"expected_sha256": restore_update.json()["sha256"]},
+        )
+        assert restored.status_code == 200
+        assert restored.json()["exists"] is True
+        assert (vault / "revision-restore.md").read_text(encoding="utf-8") == (
+            "first revision\n"
+        )
+        restored_history = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions",
+            params={"path": "revision-restore.md"},
+        ).json()["revisions"]
+        assert [row["operation"] for row in restored_history[:2]] == [
+            "restore_revision",
+            "update_vault_file",
+        ]
+        displaced_snapshot = self.call_api(
+            f"/api/vault-state/snapshots/{restored_history[0]['snapshot_id']}/content"
+        )
+        assert displaced_snapshot.text == "second revision\n", (
+            "Restore should retain the displaced current state as another revision"
+        )
+        stale_restore = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions/{restore_snapshot_id}/restore",
+            method="POST",
+            data={"expected_sha256": restore_update.json()["sha256"]},
+        )
+        assert stale_restore.status_code == 409
+        assert stale_restore.json().get("error") == "VaultFileConflict"
+
         missing = self.call_api(
             f"/api/vaults/{vault.name}/files",
             params={"path": "Projects/README.md"},
@@ -277,6 +329,16 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert len(create_revision_rows) == 1
         assert create_revision_rows[0]["exists"] is False
         assert create_revision_rows[0]["snapshot_available"] is False
+        restore_absent = self.call_api(
+            f"/api/vaults/{vault.name}/files/revisions/{create_revision_rows[0]['snapshot_id']}/restore",
+            method="POST",
+            data={"expected_sha256": create.json()["sha256"]},
+        )
+        assert restore_absent.status_code == 200
+        assert restore_absent.json()["exists"] is False
+        assert not (vault / "Projects/README.md").exists(), (
+            "Restoring a pre-create revision should restore file absence"
+        )
 
         vault_events = self._vault_file_events()
         event_hashes = {row["path"]: row["content_hash"] for row in vault_events}

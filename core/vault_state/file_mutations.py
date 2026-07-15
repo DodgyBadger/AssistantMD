@@ -45,6 +45,7 @@ class VaultMutationRejected(Exception):
 
 UNCERTAIN_MUTATION_STAGES = {"refresh", "persist"}
 _MUTATION_LOCKS = tuple(threading.RLock() for _ in range(256))
+_EXPECTED_HASH_UNSET = object()
 
 
 @contextmanager
@@ -233,6 +234,29 @@ def delete_vault_file(
         require_exists=True,
         markdown_only=markdown_only,
         warn_without_task=warn_without_task,
+    )
+
+
+def restore_vault_file(
+    *,
+    vault_path: str | Path,
+    path: str,
+    content: bytes | None,
+    expected_sha256: str | None,
+) -> RecordedMutationResult:
+    """Restore one exact file state while retaining the displaced state."""
+    return mutate_vault_file(
+        vault_path=vault_path,
+        path=path,
+        operation="restore_revision",
+        mutator=(
+            (lambda full_path: full_path.write_bytes(content))
+            if content is not None
+            else (lambda full_path: full_path.unlink())
+        ),
+        require_exists=content is None,
+        create_parent=content is not None,
+        expected_before_hash=expected_sha256,
     )
 
 
@@ -715,6 +739,7 @@ def mutate_vault_file(
     markdown_only: bool = False,
     create_parent: bool = False,
     warn_without_task: bool = True,
+    expected_before_hash: str | None | object = _EXPECTED_HASH_UNSET,
 ) -> RecordedMutationResult:
     """Mutate one vault file while recording task-scoped mutation metadata."""
     vault_root = Path(vault_path).resolve()
@@ -735,6 +760,7 @@ def mutate_vault_file(
             fail_if_exists=fail_if_exists,
             create_parent=create_parent,
             warn_without_task=warn_without_task,
+            expected_before_hash=expected_before_hash,
         )
 
 
@@ -749,6 +775,7 @@ def _mutate_vault_file_locked(
     fail_if_exists: bool,
     create_parent: bool,
     warn_without_task: bool,
+    expected_before_hash: str | None | object,
 ) -> RecordedMutationResult:
     """Mutate one vault file while holding its path mutation lock."""
     before_exists = full_path.exists()
@@ -763,6 +790,14 @@ def _mutate_vault_file_locked(
             f"Cannot mutate '{relative_path}' - file already exists.",
         )
     before_hash = hash_file_bytes(full_path, length=None) if before_exists else None
+    if (
+        expected_before_hash is not _EXPECTED_HASH_UNSET
+        and expected_before_hash != before_hash
+    ):
+        raise VaultMutationRejected(
+            "file_conflict",
+            f"Cannot restore '{relative_path}' because the current file state changed.",
+        )
     identity = resolve_or_create_vault_identity(vault_root)
     vault_name = vault_root.name
     task = get_current_execution_task()

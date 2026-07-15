@@ -43,6 +43,7 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - `/api/vaults/{vault_name}/activity` exposes durable attributed vault activity for the Dashboard tab.
 - `/api/vault-state/snapshots/{snapshot_id}/content` serves retained vault-state snapshot files inline after resolving them under the managed snapshot root.
 - `/api/vaults/{vault_name}/files/revisions` exposes retained exact-path revisions for the Vault Explorer file history view.
+- `/api/vaults/{vault_name}/files/revisions/{snapshot_id}/restore` restores a retained revision under optimistic concurrency and records a new Explorer mutation.
 - `/api/vault-state/cleanup` deletes expired vault activity, mutation, and retained task snapshot artifacts.
 - `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.

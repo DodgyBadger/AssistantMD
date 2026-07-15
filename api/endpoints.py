@@ -55,6 +55,8 @@ from .models import (
     VaultPathMutationResponse,
     VaultFileResponse,
     VaultFileRevisionResponse,
+    VaultFileRevisionRestoreRequest,
+    VaultFileRevisionRestoreResponse,
     VaultFileUpdateRequest,
     ExecutionTaskCancelResponse,
     ExecutionTaskInfo,
@@ -141,6 +143,7 @@ from .services import (
     mutate_vault_path,
     get_vault_file,
     get_vault_file_revisions,
+    restore_vault_file_revision,
     update_vault_file,
     get_chat_edit_proposal,
     get_chat_deferred_review,
@@ -1153,6 +1156,26 @@ async def vault_file_revisions(vault_name: str, path: str, limit: int = 50):
             vault_name=vault_name,
             path=path,
             limit=limit,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/vaults/{vault_name}/files/revisions/{snapshot_id}/restore",
+    response_model=VaultFileRevisionRestoreResponse,
+)
+async def restore_vault_revision(
+    vault_name: str,
+    snapshot_id: int,
+    request: VaultFileRevisionRestoreRequest,
+):
+    """Restore one retained exact-path file revision."""
+    try:
+        return restore_vault_file_revision(
+            vault_name=vault_name,
+            snapshot_id=snapshot_id,
+            expected_sha256=request.expected_sha256,
         )
     except Exception as e:
         return create_error_response(e)

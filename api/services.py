@@ -122,6 +122,7 @@ from core.vault_state.cleanup import cleanup_expired_vault_state
 from core.vault_state.file_mutations import (
     VaultMutationRejected,
     replace_vault_file_content,
+    restore_vault_file,
     write_vault_file,
 )
 from core.vault_state.file_operations import (
@@ -188,6 +189,7 @@ from .models import (
     VaultFileResponse,
     VaultFileRevisionInfo,
     VaultFileRevisionResponse,
+    VaultFileRevisionRestoreResponse,
     EditProposalResponse,
     DeferredReviewCallInfo,
     DeferredReviewResponse,
@@ -500,6 +502,90 @@ def get_vault_file_revisions(
     )
 
 
+def restore_vault_file_revision(
+    *,
+    vault_name: str,
+    snapshot_id: int,
+    expected_sha256: str | None,
+) -> VaultFileRevisionRestoreResponse:
+    """Restore one retained exact-path revision as a new Explorer mutation."""
+    service = VaultStateService()
+    revision = service.get_file_revision(
+        vault_name=vault_name,
+        snapshot_id=snapshot_id,
+    )
+    if revision is None:
+        raise APIException(
+            status_code=404,
+            error_type="VaultFileRevisionNotFound",
+            message=f"Vault file revision not found or no longer retained: {snapshot_id}",
+            details={"snapshot_id": snapshot_id, "vault_name": vault_name},
+        )
+
+    vault_root, normalized, full_path = _resolve_vault_file_path(
+        vault_name,
+        revision.path,
+    )
+    if full_path.exists() and not full_path.is_file():
+        raise APIException(
+            status_code=409,
+            error_type="VaultFileConflict",
+            message=f"Cannot restore over a directory: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+
+    if not revision.exists and not full_path.exists() and expected_sha256 is None:
+        return VaultFileRevisionRestoreResponse(
+            vault_name=vault_name,
+            path=normalized,
+            snapshot_id=snapshot_id,
+            exists=False,
+            sha256=None,
+            message=f"{normalized} is already absent.",
+        )
+
+    content: bytes | None = None
+    if revision.exists:
+        snapshot = service.resolve_snapshot_file(snapshot_id)
+        if snapshot is None:
+            raise APIException(
+                status_code=404,
+                error_type="VaultFileRevisionNotFound",
+                message=f"Revision content is no longer retained: {snapshot_id}",
+                details={"snapshot_id": snapshot_id, "vault_name": vault_name},
+            )
+        content = snapshot.path.read_bytes()
+
+    try:
+        with _explorer_activity(label=f"Restore {normalized}"):
+            mutation = restore_vault_file(
+                vault_path=vault_root,
+                path=normalized,
+                content=content,
+                expected_sha256=expected_sha256,
+            )
+    except VaultMutationRejected as exc:
+        if exc.code in {"file_conflict", "file_not_found"}:
+            raise APIException(
+                status_code=409,
+                error_type="VaultFileConflict",
+                message="The file changed since its revision history was opened. Refresh and retry.",
+                details={"path": normalized, "vault_name": vault_name},
+            ) from exc
+        raise
+
+    return VaultFileRevisionRestoreResponse(
+        vault_name=vault_name,
+        path=normalized,
+        snapshot_id=snapshot_id,
+        exists=mutation.after_exists,
+        sha256=mutation.after_hash,
+        message=(
+            f"Restored {normalized}."
+            if mutation.after_exists
+            else f"Restored the earlier absent state for {normalized}."
+        ),
+    )
 def update_vault_file(
     *,
     vault_name: str,

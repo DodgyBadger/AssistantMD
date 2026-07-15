@@ -128,6 +128,26 @@ class VaultFileRevisionResponse(BaseModel):
     revisions: List[VaultFileRevisionInfo] = Field(default_factory=list)
 
 
+class VaultFileRevisionRestoreRequest(BaseModel):
+    """Optimistic concurrency state for restoring a retained revision."""
+
+    expected_sha256: Optional[str] = Field(
+        ...,
+        description="Current file hash, or null when the caller observed no file.",
+    )
+
+
+class VaultFileRevisionRestoreResponse(BaseModel):
+    """Result of restoring one retained file revision."""
+
+    vault_name: str = Field(..., description="Vault name")
+    path: str = Field(..., description="Restored vault-relative path")
+    snapshot_id: int = Field(..., description="Source revision snapshot id")
+    exists: bool = Field(..., description="Whether the restored state contains a file")
+    sha256: Optional[str] = Field(None, description="Restored content hash")
+    message: str = Field(..., description="Human-readable restore result")
+
+
 class VaultFileReferenceInfo(BaseModel):
     """One file or folder candidate for chat reference insertion."""
 

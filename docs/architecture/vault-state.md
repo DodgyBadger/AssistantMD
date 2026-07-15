@@ -118,6 +118,10 @@ activity and exact path. The file view exposes those retained revisions together
 with task-backed revisions through a path-based history query. History does not
 follow a file across moves or renames. Changes made outside AssistantMD are
 observed by refresh but do not receive a guaranteed before-state snapshot.
+Restoring a retained revision is itself an Explorer mutation: the displaced
+current state is captured first, then the selected content or earlier absent
+state is applied. The caller supplies the current hash, or explicitly reports
+that the file is absent, so stale history views cannot overwrite newer changes.
 
 ## Automatic Rollback
 
@@ -149,13 +153,13 @@ The Dashboard tab shows recent attributed vault activity through:
 
 The API returns one activity per chat turn/task, workflow run, ingestion job, or Vault Explorer command. It exposes terminal and rollback status, logical operation counts, and file or directory mutation details. Multiple chat turns remain distinct while retaining chat-session metadata for labeling.
 
-The activity detail modal links retained pre-mutation snapshots through:
-
-- `GET /api/vault-state/snapshots/{snapshot_id}/content`
+The activity detail modal opens retained pre-mutation snapshots in the unified
+Vault Explorer revision view.
 
 The Vault Explorer file view lists retained revisions for one exact path through:
 
 - `GET /api/vaults/{vault_name}/files/revisions`
+- `POST /api/vaults/{vault_name}/files/revisions/{snapshot_id}/restore`
 
 The endpoint resolves `file_snapshots.snapshot_ref` under the owning `snapshot_sets.snapshot_root` and only serves files inside the managed `system/vault_snapshots/` root.
 

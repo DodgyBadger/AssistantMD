@@ -209,9 +209,11 @@ Explorer actions before this schema will remain absent.
   delete, and file move operations using existing snapshot retention.
 - Add path-based revision history to the Vault Explorer file view, including
   activity source, timestamp, and snapshot preview.
-- Keep rename lineage and restore/undo controls out of this slice. Move
-  operations remain available in Vault Activity, while file history only
-  follows the currently selected path.
+- Restore retained file or absent states as new optimistic-concurrency-checked
+  Explorer mutations, preserving the displaced current state as another
+  revision.
+- Keep rename lineage out of this slice. Move operations remain available in
+  Vault Activity, while file history only follows the currently selected path.
 
 ## Validation Targets
 
@@ -254,7 +256,8 @@ Slice 3 is implemented:
 - Explorer create, edit, delete, and file move operations retain pre-mutation
   file states under their durable activity;
 - the unified file modal exposes exact-path revision history and previews;
+- retained revisions can be restored without losing the displaced file state;
 - revision history intentionally does not follow moved or renamed files.
 
-Slice 2 observation provenance and revision restore/undo remain deferred.
+Slice 2 observation provenance remains deferred.
 Maintainers should run the full validation suite before merge.

@@ -1399,6 +1399,20 @@ details summary::-webkit-details-marker {
     padding: 0.875rem 1rem;
     color: rgb(var(--text-primary));
 }
+.vault-file-revision-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.75rem;
+}
+.vault-file-revision-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.vault-file-revision-actions svg {
+    width: 1rem;
+    height: 1rem;
+}
 .vault-file-history-preview > pre,
 .vault-file-revision-properties pre {
     margin: 0;
