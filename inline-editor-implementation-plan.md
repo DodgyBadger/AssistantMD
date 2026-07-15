@@ -617,4 +617,47 @@ rather than its intermediate implementations.
 Status: completed. The current contracts are documented in the architecture
 overview plus the API/UI, authoring, chat sessions, execution tasks, LLM/tools,
 settings, and vault-state subsystem pages. ADR 0023 records the durable tool,
-review, locking, and restoration decisions.
+review, and automation-boundary decisions.
+
+## ADR Review
+
+The root planning documents were reviewed after architecture alignment. Their
+intermediate implementation sections remain useful history, but the final
+objective audits and hardening outcomes are the relevant source for durable
+decisions. Current behavior remains owned by `docs/architecture/`.
+
+Added records:
+
+1. **Use one chat-native Vault Explorer surface for direct vault interaction.**
+   Record why AssistantMD exposes vault navigation, workspace selection, path
+   references, preview/edit, revisions, and activity snapshots through one
+   shared on-demand surface rather than building a separate Obsidian-style
+   workspace or maintaining multiple picker/editor implementations. Preserve
+   the invariant that direct UI mutations use the same validated vault operation
+   and mutation services as agent writes. This decision complements ADR 0016's
+   canonical-vault-files principle.
+2. **Generalize vault mutation audit into durable activities and reversible
+   exact-path revisions.** Record why task-owned mutation records became a
+   source-neutral activity ledger covering chat, workflows, ingestion, and
+   direct Explorer commands; why pre-mutation snapshots provide exact-path
+   revision history; and why revision restore, explicit activity rollback, and
+   automatic task rollback share one optimistic, atomic, compensating file-state
+   restoration primitive. This ADR should amend ADR 0005 and retain the boundary
+   that directory operations are auditable but not file-state rollbackable.
+
+These decisions are recorded in ADR 0024 and ADR 0025. ADR 0005 now points to
+the generalized activity contract, and ADR 0023 delegates rollback ownership to
+ADR 0025.
+
+Existing coverage is sufficient for the remaining durable decisions:
+
+- ADR 0023 owns the `file_read`/`file_write` split, app-wide
+  `enabled_tools`, Pydantic AI deferred review, automation bypass, persisted
+  continuation, and review-time target checks. It links to ADR 0025 rather than
+  independently owning rollback design.
+- ADRs 0003, 0019, and 0020 already support canonical chat persistence and the
+  separate queued task used to resume a deferred review.
+- Persisted session mode, pending-card reconstruction, composer locking,
+  Markdown preview behavior, text-file eligibility, and responsive card layout
+  are product or UI contracts that should remain in architecture documentation
+  rather than receive individual ADRs.

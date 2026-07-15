@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, backfilled.
+Accepted, backfilled. Amended by
+[0025 - Generalize Vault Mutations Into Durable Activities And Revisions](0025-durable-vault-activities-and-revisions.md).
 
 ## Context
 
@@ -18,6 +19,10 @@ audit and snapshot records. Route supported vault writes through
 `core.vault_state.file_mutations` so the system can capture before-state
 snapshots, record mutation provenance, refresh the manifest, and roll back task
 mutations when configured.
+
+ADR 0025 generalizes task mutation ownership into source-neutral durable
+activities, extends retained snapshots into exact-path revision history, and
+defines the shared atomic restoration contract.
 
 ## Rationale
 
