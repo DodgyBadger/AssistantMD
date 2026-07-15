@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.vault_state.rollback import rollback_task_file_mutations
+from core.vault_state.file_mutations import VaultMutationRejected
 from validation.core.base_scenario import BaseScenario
 
 
@@ -145,6 +146,36 @@ class VaultStateRollbackScenario(BaseScenario):
             "Second rollback should not change restored append content",
         )
 
+        self._prepare_conflicting_retry(task_id)
+        conflict_path = Path(vault) / "notes/preexisting-append.md"
+        untouched_path = Path(vault) / "notes/created-before-failure.md"
+        conflict_path.write_text("Later external edit\n", encoding="utf-8")
+        untouched_path.write_text("created then rolled back\n", encoding="utf-8")
+        try:
+            rollback_task_file_mutations(
+                task_id=task_id,
+                terminal_status="failed",
+                reason="validation conflict retry",
+            )
+        except VaultMutationRejected as exc:
+            self.soft_assert_equal(
+                exc.code,
+                "file_conflict",
+                "Task rollback should report a stale current state",
+            )
+        else:
+            self.soft_assert(False, "Task rollback should reject a later file edit")
+        self.soft_assert_equal(
+            conflict_path.read_text(encoding="utf-8"),
+            "Later external edit\n",
+            "Rejected task rollback must preserve the later file edit",
+        )
+        self.soft_assert_equal(
+            untouched_path.read_text(encoding="utf-8"),
+            "created then rolled back\n",
+            "A conflict must prevent rollback of every other path in the vault",
+        )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
@@ -186,6 +217,35 @@ class VaultStateRollbackScenario(BaseScenario):
                 (task_id,),
             ).fetchone()
             return (row[0], row[1]) if row is not None else None
+        finally:
+            conn.close()
+
+    def _prepare_conflicting_retry(self, task_id: str) -> None:
+        """Retain one mutation group and make its task snapshot eligible again."""
+        db_path = self._get_system_controller()._system_root / "vault_state.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            activity_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT activity_id FROM vault_activities WHERE task_id = ?",
+                    (task_id,),
+                )
+            ]
+            placeholders = ",".join("?" for _ in activity_ids)
+            conn.execute(
+                f"DELETE FROM vault_mutations WHERE activity_id IN ({placeholders}) AND path NOT IN (?, ?)",
+                (
+                    *activity_ids,
+                    "notes/preexisting-append.md",
+                    "notes/created-before-failure.md",
+                ),
+            )
+            conn.execute(
+                "UPDATE snapshot_sets SET status = 'active', rolled_back_at = NULL WHERE task_id = ?",
+                (task_id,),
+            )
+            conn.commit()
         finally:
             conn.close()
 

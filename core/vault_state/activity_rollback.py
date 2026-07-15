@@ -365,6 +365,7 @@ def _execute_activity_rollback_locked(
             expected_exists=path.expected_exists,
             expected_sha256=path.expected_sha256,
             content_path=path.snapshot_path,
+            content_sha256=path.restore_sha256,
         )
         for path in plan.paths
     )

@@ -5,7 +5,7 @@
         const rollbackPreviews = new WeakMap();
 
         function interactionLocked() {
-            return Boolean(state.isLoading || state.pendingDeferredReview);
+            return Boolean(callbacks.isInteractionLocked?.());
         }
         function renderVaultActivityResult(vaultName) {
             if (!vaultName) {

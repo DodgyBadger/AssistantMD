@@ -128,17 +128,10 @@ def vault_file_mutation_lock(
     """Share the vault hierarchy lock and serialize exact file targets."""
     vault_lock = _vault_mutation_lock(vault_path)
     vault_lock.acquire_read()
-    lock_indexes = sorted(
-        {hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS) for path in paths}
-    )
-    locks = [_MUTATION_LOCKS[index] for index in lock_indexes]
-    for lock in locks:
-        lock.acquire()
     try:
-        yield
+        with _exact_path_mutation_locks(*paths):
+            yield
     finally:
-        for lock in reversed(locks):
-            lock.release()
         vault_lock.release_read()
 
 
@@ -150,6 +143,16 @@ def vault_directory_mutation_lock(
     """Exclude file mutations while changing the vault directory hierarchy."""
     vault_lock = _vault_mutation_lock(vault_path)
     vault_lock.acquire_write()
+    try:
+        with _exact_path_mutation_locks(*paths):
+            yield
+    finally:
+        vault_lock.release_write()
+
+
+@contextmanager
+def _exact_path_mutation_locks(*paths: str | Path) -> Iterator[None]:
+    """Acquire striped exact-path locks in deterministic order."""
     lock_indexes = sorted(
         {hash(str(Path(path).resolve())) % len(_MUTATION_LOCKS) for path in paths}
     )
@@ -161,7 +164,6 @@ def vault_directory_mutation_lock(
     finally:
         for lock in reversed(locks):
             lock.release()
-        vault_lock.release_write()
 
 
 def _vault_mutation_lock(vault_path: str | Path) -> _ReentrantReadWriteLock:
@@ -197,6 +199,7 @@ class FileStateRestore:
     expected_sha256: str | None
     content: bytes | None = None
     content_path: Path | None = None
+    content_sha256: str | None = None
 
     @property
     def restore_exists(self) -> bool:
@@ -221,6 +224,18 @@ class CapturedFileState:
     compensation_path: Path | None
     snapshot_id: int | None = None
     snapshot_ref: str | None = None
+
+
+@dataclass(frozen=True)
+class FileStateTransition:
+    """One verified before-to-after transition from an atomic state restore."""
+
+    path: str
+    before_exists: bool
+    before_sha256: str | None
+    after_exists: bool
+    after_sha256: str | None
+    event_sequence: int | None
 
 
 @dataclass(frozen=True)
@@ -414,7 +429,55 @@ def restore_vault_file_states(
         )
 
     vault_root = Path(vault_path).resolve()
-    normalized: list[ResolvedFileStateRestore] = []
+    normalized = _resolve_file_state_restores(vault_root=vault_root, states=states)
+
+    with vault_file_mutation_lock(
+        vault_root,
+        *(item.full_path for item in normalized),
+    ):
+        return _restore_vault_file_states_locked(
+            vault_root=vault_root,
+            states=tuple(normalized),
+            operation=operation,
+            metadata=metadata,
+            context=context,
+        )
+
+
+def restore_file_states_atomically(
+    *,
+    vault_path: str | Path,
+    states: tuple[FileStateRestore, ...],
+) -> tuple[FileStateTransition, ...]:
+    """Restore exact file states with shared locking, verification, and compensation."""
+    if not states:
+        raise VaultMutationRejected("empty_restore", "No file states were provided.")
+    vault_root = Path(vault_path).resolve()
+    resolved = _resolve_file_state_restores(vault_root=vault_root, states=states)
+    with vault_file_mutation_lock(
+        vault_root,
+        *(item.full_path for item in resolved),
+    ):
+        with tempfile.TemporaryDirectory(prefix="assistantmd-restore-") as temp_dir:
+            before_states = _capture_restore_before_states(
+                states=resolved,
+                temp_root=Path(temp_dir),
+            )
+            return _run_file_state_restore_transaction(
+                service=VaultStateService(),
+                vault_root=vault_root,
+                vault_name=vault_root.name,
+                states=resolved,
+                before_states=before_states,
+            )
+
+
+def _resolve_file_state_restores(
+    *,
+    vault_root: Path,
+    states: tuple[FileStateRestore, ...],
+) -> tuple[ResolvedFileStateRestore, ...]:
+    resolved: list[ResolvedFileStateRestore] = []
     seen_paths: set[str] = set()
     for state in states:
         if state.content is not None and state.content_path is not None:
@@ -429,30 +492,18 @@ def restore_vault_file_states(
                 f"File state restoration contains a duplicate path: {relative_path}",
             )
         seen_paths.add(relative_path)
-        full_path = resolve_vault_relative_path(
-            vault_path=vault_root,
-            path=relative_path,
-            markdown_only=False,
-        )
-        normalized.append(
+        resolved.append(
             ResolvedFileStateRestore(
                 request=state,
                 relative_path=relative_path,
-                full_path=full_path,
+                full_path=resolve_vault_relative_path(
+                    vault_path=vault_root,
+                    path=relative_path,
+                    markdown_only=False,
+                ),
             )
         )
-
-    with vault_file_mutation_lock(
-        vault_root,
-        *(item.full_path for item in normalized),
-    ):
-        return _restore_vault_file_states_locked(
-            vault_root=vault_root,
-            states=tuple(normalized),
-            operation=operation,
-            metadata=metadata,
-            context=context,
-        )
+    return tuple(resolved)
 
 
 def _restore_vault_file_states_locked(
@@ -493,17 +544,17 @@ def _restore_vault_file_states_locked(
             created_at=created_at,
             expires_at=snapshot_expires_at,
         )
-        try:
-            _apply_file_state_restores(states)
-            refresh = service.refresh_vault(vault_root, vault_name=vault_name)
-            results = _build_restore_results(
-                states=states,
+
+        def persist_restore(
+            transitions: tuple[FileStateTransition, ...],
+        ) -> tuple[RecordedMutationResult, ...]:
+            results = _build_recorded_restore_results(
+                transitions=transitions,
                 before_states=before_states,
                 identity=identity,
                 vault_name=vault_name,
                 operation=operation,
                 task_id=context.task_id,
-                event_sequence=refresh.latest_sequence,
             )
             _persist_mutation_batch(
                 service=service,
@@ -515,21 +566,15 @@ def _restore_vault_file_states_locked(
                 metadata=metadata,
             )
             return results
-        except Exception as exc:
-            _compensate_file_state_restores(
-                service=service,
-                vault_root=vault_root,
-                vault_name=vault_name,
-                states=states,
-                before_states=before_states,
-                cause=exc,
-            )
-            if isinstance(exc, VaultMutationRejected):
-                raise
-            raise VaultMutationRejected(
-                "restore_failed",
-                f"File-state restoration failed and was compensated: {exc}",
-            ) from exc
+
+        return _run_file_state_restore_transaction(
+            service=service,
+            vault_root=vault_root,
+            vault_name=vault_name,
+            states=states,
+            before_states=before_states,
+            finalize=persist_restore,
+        )
 
 
 def _capture_restore_before_states(
@@ -622,6 +667,8 @@ def _record_restore_snapshots(
 
 def _apply_file_state_restores(states: tuple[ResolvedFileStateRestore, ...]) -> None:
     for item in states:
+        _restore_content_hash(item.request)
+    for item in states:
         if not item.request.restore_exists and item.full_path.exists():
             item.full_path.unlink()
     for item in states:
@@ -634,17 +681,48 @@ def _apply_file_state_restores(states: tuple[ResolvedFileStateRestore, ...]) -> 
             item.full_path.write_bytes(item.request.content or b"")
 
 
-def _build_restore_results(
+def _run_file_state_restore_transaction(
+    *,
+    service: VaultStateService,
+    vault_root: Path,
+    vault_name: str,
+    states: tuple[ResolvedFileStateRestore, ...],
+    before_states: dict[str, CapturedFileState],
+    finalize: Callable[[tuple[FileStateTransition, ...]], Any] | None = None,
+) -> Any:
+    try:
+        _apply_file_state_restores(states)
+        refresh = service.refresh_vault(vault_root, vault_name=vault_name)
+        transitions = _build_file_state_transitions(
+            states=states,
+            before_states=before_states,
+            event_sequence=refresh.latest_sequence,
+        )
+        return finalize(transitions) if finalize is not None else transitions
+    except Exception as exc:
+        _compensate_file_state_restores(
+            service=service,
+            vault_root=vault_root,
+            vault_name=vault_name,
+            states=states,
+            before_states=before_states,
+            cause=exc,
+        )
+        if isinstance(exc, VaultMutationRejected):
+            raise
+        raise VaultMutationRejected(
+            "restore_failed",
+            f"File-state restoration failed and was compensated: {exc}",
+        ) from exc
+
+
+def _build_file_state_transitions(
     *,
     states: tuple[ResolvedFileStateRestore, ...],
     before_states: dict[str, CapturedFileState],
-    identity: VaultIdentity,
-    vault_name: str,
-    operation: str,
-    task_id: str | None,
     event_sequence: int | None,
-) -> tuple[RecordedMutationResult, ...]:
-    results: list[RecordedMutationResult] = []
+) -> tuple[FileStateTransition, ...]:
+    transitions: list[FileStateTransition] = []
     for item in states:
         after_exists = item.full_path.is_file()
         after_hash = (
@@ -660,32 +738,62 @@ def _build_restore_results(
                 f"Cannot complete restoration because '{item.relative_path}' changed during the operation.",
             )
         before = before_states[item.relative_path]
-        results.append(
-            RecordedMutationResult(
-                vault_id=identity.vault_id,
-                vault_name=vault_name,
+        transitions.append(
+            FileStateTransition(
                 path=item.relative_path,
-                related_path=None,
-                operation=operation,
                 before_exists=before.exists,
-                before_hash=before.sha256,
+                before_sha256=before.sha256,
                 after_exists=after_exists,
-                after_hash=after_hash,
-                task_id=task_id,
+                after_sha256=after_hash,
                 event_sequence=event_sequence,
-                before_snapshot_id=before.snapshot_id,
-                snapshot_ref=before.snapshot_ref,
             )
         )
-    return tuple(results)
+    return tuple(transitions)
+
+
+def _build_recorded_restore_results(
+    *,
+    transitions: tuple[FileStateTransition, ...],
+    before_states: dict[str, CapturedFileState],
+    identity: VaultIdentity,
+    vault_name: str,
+    operation: str,
+    task_id: str | None,
+) -> tuple[RecordedMutationResult, ...]:
+    return tuple(
+        RecordedMutationResult(
+            vault_id=identity.vault_id,
+            vault_name=vault_name,
+            path=transition.path,
+            related_path=None,
+            operation=operation,
+            before_exists=transition.before_exists,
+            before_hash=transition.before_sha256,
+            after_exists=transition.after_exists,
+            after_hash=transition.after_sha256,
+            task_id=task_id,
+            event_sequence=transition.event_sequence,
+            before_snapshot_id=before_states[transition.path].snapshot_id,
+            snapshot_ref=before_states[transition.path].snapshot_ref,
+        )
+        for transition in transitions
+    )
 
 
 def _restore_content_hash(state: FileStateRestore) -> str | None:
+    content_hash: str | None
     if state.content_path is not None:
-        return hash_file_bytes(state.content_path, length=None)
-    if state.content is not None:
-        return hash_bytes(state.content, length=None)
-    return None
+        content_hash = hash_file_bytes(state.content_path, length=None)
+    elif state.content is not None:
+        content_hash = hash_bytes(state.content, length=None)
+    else:
+        content_hash = None
+    if state.content_sha256 is not None and content_hash != state.content_sha256:
+        raise VaultMutationRejected(
+            "snapshot_invalid",
+            f"Restore content failed integrity checking: {state.path}",
+        )
+    return content_hash
 
 
 def _compensate_file_state_restores(

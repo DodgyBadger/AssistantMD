@@ -133,6 +133,7 @@ const fileReferences = window.FileReferences.create({
     icons: window.AssistantMDIcons,
     utils: window.AssistantMDUtils,
     callbacks: {
+        isInteractionLocked: vaultMutationInteractionLocked,
         addChatErrorMessage,
         openPathPicker: (options) => vaultPathPicker.open(options),
         closePathPicker: () => vaultPathPicker.close(),
@@ -215,6 +216,7 @@ const vaultActivity = window.VaultActivity.create({
     elements: dashElements,
     utils: window.AssistantMDUtils,
     callbacks: {
+        isInteractionLocked: vaultMutationInteractionLocked,
         formatChatSessionLabel: (session) => sessionControls.formatOptionLabel(session),
         openFileRevision: ({ vaultName, path, snapshotId }) => fileReferences.openFile(path, {
             vaultName,
@@ -226,6 +228,10 @@ const vaultActivity = window.VaultActivity.create({
 });
 
 let dashboardView;
+
+function vaultMutationInteractionLocked() {
+    return Boolean(state.isLoading || state.pendingDeferredReview);
+}
 
 const workflowActions = window.WorkflowActions.create({
     state,

@@ -14,7 +14,7 @@
         }
 
         function interactionLocked() {
-            return Boolean(state.isLoading || state.pendingDeferredReview);
+            return Boolean(callbacks.isInteractionLocked?.());
         }
 
         function insertReference(path) {

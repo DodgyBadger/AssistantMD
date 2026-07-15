@@ -422,6 +422,21 @@ rollback.
   captured for revision history, and split validation/capture/apply/record/
   compensation into focused helpers.
 
+#### H2-06: Automatic and explicit rollback use parallel restore engines
+
+- **Severity:** High.
+- **Smell:** duplicated mutation engine / contract drift.
+- **Evidence:** explicit activity rollback uses the atomic exact-state restore
+  transaction, while automatic terminal-task rollback directly copies retained
+  snapshots and deletes paths.
+- **Consequence:** task rollback lacks the explicit path's current-state check
+  and can overwrite a later edit made after the failed task's mutation. Locking
+  alone prevents overlap but does not reject stale rollback intent.
+- **Correction:** share one policy-neutral atomic restore transaction for path
+  resolution, locking, expected-state validation, snapshot integrity,
+  compensation, application, verification, and vault refresh. Keep task terminal
+  policy and explicit rollback activity/undo policy in separate adapters.
+
 ### Implementation Stages
 
 1. Add focused concurrency scenarios for directory-move versus child mutation
@@ -437,7 +452,7 @@ rollback.
 
 ### Second Pass Outcome
 
-H2-01 through H2-05 are implemented.
+H2-01 through H2-06 are implemented.
 
 - File mutations now share a vault hierarchy lock while retaining exact-path
   serialization; directory creation, cleanup, and move take the exclusive side.
@@ -449,9 +464,13 @@ H2-01 through H2-05 are implemented.
   content from retained snapshots, and uses temporary files for compensation.
   The new rollback and restore methods no longer exceed the project complexity
   threshold.
+- Automatic task rollback now builds expected and desired states from its
+  retained mutation history and uses the same atomic restore transaction as
+  explicit rollback. A later edit causes an explicit conflict rather than being
+  overwritten.
 - File creation commits existence and hash-known state in the open Explorer
   modal, and Activity rollback now follows the same in-flight read-only policy as
-  the Explorer.
+  the Explorer. Both controllers consume one shared interaction-lock callback.
 - Focused scenarios pass for hierarchy concurrency, activity rollback,
   same-file concurrency, automatic task rollback, mutation recording, Explorer
   file APIs, and API endpoints. Ruff, Python compilation, JavaScript syntax,

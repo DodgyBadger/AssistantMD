@@ -5,20 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-import shutil
 
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSnapshot
 from core.runtime.state import get_runtime_context
 from core.settings import get_task_rollback_enabled
-from core.vault_state.file_mutations import vault_file_mutation_lock
+from core.vault_state.file_mutations import (
+    FileStateRestore,
+    restore_file_states_atomically,
+)
+from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import (
-    FileSnapshot,
     SnapshotSet,
     VaultActivity,
     VaultMutation,
 )
-from core.vault_state.pathing import resolve_vault_relative_path
 from core.vault_state.service import VaultStateService
 
 
@@ -51,6 +52,16 @@ class TaskRollbackResult:
     paths_restored: int
     paths_deleted: int
     vaults_refreshed: int
+
+
+@dataclass(frozen=True)
+class TaskRollbackPathPlan:
+    """One task-owned path restoration and its durable attribution."""
+
+    activity: VaultActivity
+    state: FileStateRestore
+    snapshot_id: int | None
+    snapshot_ref: str | None
 
 
 def handle_task_terminal_for_rollback(snapshot: ExecutionTaskSnapshot) -> None:
@@ -86,16 +97,19 @@ def rollback_task_file_mutations(
 ) -> TaskRollbackResult:
     """Rollback retained file mutations for one terminal task when policy requires it."""
     status = str(terminal_status or "").strip().lower()
-    if status not in ROLLBACK_TRIGGER_STATUSES:
-        return _skipped_result(task_id=task_id, status=status, reason="status_not_rollbackable")
-    if not get_task_rollback_enabled():
-        return _skipped_result(task_id=task_id, status=status, reason="task_rollback_disabled")
+    policy_skip_reason = _task_rollback_policy_skip_reason(status)
+    if policy_skip_reason is not None:
+        return _skipped_result(
+            task_id=task_id,
+            status=status,
+            reason=policy_skip_reason,
+        )
 
     service = VaultStateService()
     now = datetime.now(UTC)
     paths_restored = 0
     paths_deleted = 0
-    refreshed_vaults: set[tuple[str, str]] = set()
+    vaults_refreshed = 0
 
     with service.SessionFactory() as session:
         all_rows = (
@@ -166,76 +180,54 @@ def rollback_task_file_mutations(
             },
         )
 
-        grouped = _mutation_groups(rows)
         activities = {
             activity.activity_id: activity
             for activity in session.query(VaultActivity)
             .filter(VaultActivity.task_id == task_id)
             .all()
         }
-        for group in sorted(grouped.values(), key=lambda item: item[-1].id, reverse=True):
-            first = group[0]
-            activity = activities[first.activity_id]
-            vault_root = _vault_root(activity.vault_name)
-            target_path = resolve_vault_relative_path(vault_path=vault_root, path=first.path)
-            if first.before_exists:
-                file_snapshot = (
-                    session.get(FileSnapshot, first.before_snapshot_id)
-                    if first.before_snapshot_id is not None
-                    else None
+        plans = _task_rollback_plans(
+            service=service,
+            rows=rows,
+            activities=activities,
+            task_id=task_id,
+        )
+        for vault_name, path_plans in sorted(plans.items()):
+            vault_root = _vault_root(vault_name)
+            current_identity = resolve_or_create_vault_identity(vault_root)
+            if current_identity.vault_id != path_plans[0].activity.vault_id:
+                raise RuntimeError(
+                    f"Cannot rollback task mutations for an earlier vault named '{vault_name}'"
                 )
-                snapshot_set = (
-                    session.get(SnapshotSet, file_snapshot.snapshot_set_id)
-                    if file_snapshot is not None
-                    else None
-                )
-                with vault_file_mutation_lock(vault_root, target_path):
-                    _restore_snapshot_file(
-                        file_snapshot=file_snapshot,
-                        snapshot_set=snapshot_set,
-                        mutation=first,
-                        target_path=target_path,
-                        task_id=task_id,
-                    )
-                paths_restored += 1
+            transitions = restore_file_states_atomically(
+                vault_path=vault_root,
+                states=tuple(plan.state for plan in path_plans),
+            )
+            vaults_refreshed += 1
+            for plan, transition in zip(path_plans, transitions, strict=True):
+                if plan.state.restore_exists:
+                    paths_restored += 1
+                    event_name = "task_rollback_file_restored"
+                else:
+                    paths_deleted += int(transition.before_exists)
+                    event_name = "task_rollback_file_deleted"
                 logger.add_sink("validation").info(
-                    "task_rollback_file_restored",
+                    event_name,
                     data={
-                        "event": "task_rollback_file_restored",
+                        "event": event_name,
                         "task_id": task_id,
-                        "vault_id": activity.vault_id,
-                        "vault_name": activity.vault_name,
-                        "path": first.path,
-                        "file_snapshot_id": first.before_snapshot_id,
-                        "snapshot_ref": first.snapshot_ref,
+                        "vault_id": plan.activity.vault_id,
+                        "vault_name": plan.activity.vault_name,
+                        "path": plan.state.path,
+                        "file_snapshot_id": plan.snapshot_id,
+                        "snapshot_ref": plan.snapshot_ref,
                     },
                 )
-            else:
-                with vault_file_mutation_lock(vault_root, target_path):
-                    if target_path.exists():
-                        target_path.unlink()
-                        paths_deleted += 1
-                logger.add_sink("validation").info(
-                    "task_rollback_file_deleted",
-                    data={
-                        "event": "task_rollback_file_deleted",
-                        "task_id": task_id,
-                        "vault_id": activity.vault_id,
-                        "vault_name": activity.vault_name,
-                        "path": first.path,
-                    },
-                )
-            refreshed_vaults.add((activity.vault_name, str(vault_root)))
 
         for snapshot in snapshot_sets:
             snapshot.status = "rolled_back"
             snapshot.rolled_back_at = now
         session.commit()
-
-    vaults_refreshed = 0
-    for vault_name, vault_root in sorted(refreshed_vaults):
-        service.refresh_vault(vault_root, vault_name=vault_name)
-        vaults_refreshed += 1
 
     result = TaskRollbackResult(
         task_id=task_id,
@@ -271,40 +263,60 @@ def rollback_task_file_mutations(
     return result
 
 
-def _mutation_groups(rows: list[VaultMutation]) -> dict[tuple[str, str], list[VaultMutation]]:
+def _task_rollback_policy_skip_reason(status: str) -> str | None:
+    if status not in ROLLBACK_TRIGGER_STATUSES:
+        return "status_not_rollbackable"
+    if not get_task_rollback_enabled():
+        return "task_rollback_disabled"
+    return None
+
+
+def _task_rollback_plans(
+    *,
+    service: VaultStateService,
+    rows: list[VaultMutation],
+    activities: dict[str, VaultActivity],
+    task_id: str,
+) -> dict[str, list[TaskRollbackPathPlan]]:
     grouped: dict[tuple[str, str], list[VaultMutation]] = {}
     for row in rows:
-        grouped.setdefault((row.activity_id, row.path), []).append(row)
-    return grouped
+        activity = activities[row.activity_id]
+        grouped.setdefault((activity.vault_name, row.path), []).append(row)
 
-
-def _restore_snapshot_file(
-    *,
-    file_snapshot: FileSnapshot | None,
-    snapshot_set: SnapshotSet | None,
-    mutation: VaultMutation,
-    target_path: Path,
-    task_id: str,
-) -> None:
-    if file_snapshot is None:
-        raise RuntimeError(
-            f"Cannot rollback '{mutation.path}' for task '{task_id}': missing file snapshot"
+    plans: dict[str, list[TaskRollbackPathPlan]] = {}
+    for (vault_name, _path), group in grouped.items():
+        first = group[0]
+        last = group[-1]
+        activity = activities[first.activity_id]
+        content_path = None
+        if first.before_exists:
+            if first.before_snapshot_id is None:
+                raise RuntimeError(
+                    f"Cannot rollback '{first.path}' for task '{task_id}': missing file snapshot"
+                )
+            snapshot = service.resolve_snapshot_file(first.before_snapshot_id)
+            if snapshot is None:
+                raise RuntimeError(
+                    f"Cannot rollback '{first.path}' for task '{task_id}': snapshot file missing"
+                )
+            content_path = snapshot.path
+        plans.setdefault(vault_name, []).append(
+            TaskRollbackPathPlan(
+                activity=activity,
+                state=FileStateRestore(
+                    path=first.path,
+                    expected_exists=bool(last.after_exists),
+                    expected_sha256=last.after_hash,
+                    content_path=content_path,
+                    content_sha256=first.before_hash,
+                ),
+                snapshot_id=first.before_snapshot_id,
+                snapshot_ref=first.snapshot_ref,
+            )
         )
-    if snapshot_set is None:
-        raise RuntimeError(
-            f"Cannot rollback '{mutation.path}' for task '{task_id}': missing snapshot set"
-        )
-    if not file_snapshot.snapshot_ref:
-        raise RuntimeError(
-            f"Cannot rollback '{mutation.path}' for task '{task_id}': missing snapshot ref"
-        )
-    snapshot_path = (Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref).resolve()
-    if not snapshot_path.exists() or not snapshot_path.is_file():
-        raise RuntimeError(
-            f"Cannot rollback '{mutation.path}' for task '{task_id}': snapshot file missing"
-        )
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(snapshot_path, target_path)
+    for path_plans in plans.values():
+        path_plans.sort(key=lambda plan: plan.state.path)
+    return plans
 
 
 def _vault_root(vault_name: str) -> Path:
