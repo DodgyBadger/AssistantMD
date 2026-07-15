@@ -591,3 +591,30 @@ Known Phase 2 follow-ups:
   automatically to include newly registered default chat tools such as
   `propose_file_edits`, or whether the settings repair action remains the
   explicit upgrade path.
+
+## Branch Architecture Documentation Alignment
+
+Before merge, align `docs/architecture/` with the branch's current contracts
+rather than its intermediate implementations.
+
+1. Document `normal` and `inline_edit` as persisted chat-session modes, with
+   `default_chat_mode` applying only when a new session is created.
+2. Document inline review as a durable Pydantic AI deferred-tool pause: the
+   original chat task ends, the pending continuation is stored in SQLite, and a
+   submitted review starts a new task through the same per-session queue.
+3. Document the unified Vault Explorer as the common file-reference, workspace,
+   preview/edit, path-mutation, revision, and activity-snapshot surface.
+4. Document `file_read` and `file_write` as thin model-facing adapters over the
+   shared vault operation and tracked mutation services. Authored scripts use
+   the same app-wide enabled tool registry but never wait for interactive review.
+5. Document the mutation concurrency contract and the shared atomic file-state
+   restoration primitive used by automatic task rollback, activity rollback,
+   and revision restore.
+6. Cross-check all architecture pages and ADR 0023 for retired tool names,
+   stale review semantics, duplicate subsystem ownership, and links to current
+   primary code.
+
+Status: completed. The current contracts are documented in the architecture
+overview plus the API/UI, authoring, chat sessions, execution tasks, LLM/tools,
+settings, and vault-state subsystem pages. ADR 0023 records the durable tool,
+review, locking, and restoration decisions.

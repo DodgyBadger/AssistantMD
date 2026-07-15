@@ -23,8 +23,10 @@ Expose two model-facing tools:
 Both tools are thin adapters over shared operations in
 `core.vault_state.file_operations`. Mutations continue through
 `core.vault_state.file_mutations` for audit, snapshots, refresh, and rollback.
-Mutations targeting the same resolved path are serialized in that shared layer;
-read-modify-write operations hold the same lock from read through persistence.
+File mutations share a process-local vault hierarchy lock while directory
+hierarchy changes hold it exclusively. Mutations targeting the same resolved
+path are serialized in that shared layer; read-modify-write operations hold the
+same locks from read through persistence.
 
 Interactive chats have `normal` and `inline_edit` modes. Inline edit mode
 defers `file_write` through Pydantic AI tool approval and renders the deferred
@@ -39,6 +41,12 @@ existence and content hashes when the card is created; approval is rejected if
 the reviewed target changed before submission. Review overrides may edit
 operation content or a move destination, but cannot change the operation target
 or overwrite policy.
+
+Automatic task rollback, explicit activity rollback, and revision restoration
+share the same exact-file restoration primitive. It validates expected current
+states and retained restore content under the mutation locks, compensates any
+partially applied filesystem changes, and only reports success after manifest
+refresh and required durable finalization complete.
 
 Tool availability is app-wide through `enabled_tools`; chat does not select a
 per-turn tool subset in the UI.

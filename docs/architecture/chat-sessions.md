@@ -11,6 +11,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
 - `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
 - `core/chat/task_execution.py` — task-owned chat execution, event buffering, and per-session queueing
+- `core/chat/deferred_reviews.py` — durable deferred-tool review state and
+  reviewed-target conflict detection
 
 ## SQLite store
 
@@ -18,9 +20,13 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 
 The main tables are:
 
-- **`chat_sessions`** — one row per session: `session_id`, `vault_name`, `created_at`, `last_activity_at`, `title`
+- **`chat_sessions`** — one row per session: identity, vault binding, timestamps,
+  title, and JSON metadata such as workspace and chat mode
 - **`chat_messages`** — full provider-native message objects stored as JSON, plus extracted `content_text`, `role`, `direction`, and `sequence_index` for querying
 - **`chat_tool_events`** — structured tool call and result events keyed by `tool_call_id`, with `args_json`, `result_text`, and optional `artifact_ref`
+- **`chat_deferred_reviews`** — pending and terminal Pydantic AI deferred-tool
+  requests, serialized continuation messages/configuration, review-time target
+  state, submitted results, and resumed task identity
 - **`chat_compaction_checkpoints`** — compaction replay checkpoints with a
   system-maintained replacement history and the raw-message sequence boundary
   covered by that checkpoint
@@ -45,6 +51,41 @@ reorganized.
 Session summaries denormalize the current workspace path into
 `session_summaries.workspace_path` so future retrieval can filter prior work by
 workspace without reparsing chat-session metadata.
+
+## Session Mode
+
+Each session stores a `chat_mode` metadata value:
+
+- `normal` executes enabled chat tools normally.
+- `inline_edit` routes `file_write` calls through inline deferred review.
+
+`default_chat_mode` initializes new sessions only. Changing the mode through
+`PATCH /api/chat/sessions/{session_id}/mode` persists that session's selection,
+and session list/detail/fork contracts return it. Reloading an existing session
+therefore restores its selected mode rather than consulting the current default.
+
+## Deferred Tool Review
+
+Inline review is a durable continuation boundary, not a browser-only artifact.
+When Pydantic AI returns `DeferredToolRequests`, chat execution persists the
+provider-native messages produced so far and stores the deferred requests,
+resume messages, model/tool/context configuration, and review-time file state in
+`chat_deferred_reviews`. The originating execution task then completes with
+`finish_reason="tool_review_required"`.
+
+Session detail returns the newest pending review so the UI can reconstruct the
+card after reload. A session may have only one actionable pending continuation:
+ordinary chat starts are rejected while it remains pending, and the web composer
+is locked until the review is submitted. Terminal review cards are not rebuilt
+on reload; approved and denied tool results become normal provider-native tool
+history when the continuation runs.
+
+Review submission is an atomic state transition from `pending` to `resuming`.
+The backend validates decision call IDs, permitted argument overrides, and any
+captured existing-file hashes before claiming the review. It then starts a new
+chat task through the same per-session execution gate. The review reaches
+`completed`, `failed`, or `cancelled` with that resumed task, preventing duplicate
+submission from replaying a tool call.
 
 ## Markdown transcripts
 
@@ -89,6 +130,9 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
   creation time. Later tasks stay `queued` until older non-terminal chat tasks
   in the same session finish, so each run prepares against completed prior
   history.
+- A deferred-review continuation is also a chat task in that same queue. It
+  resumes with stored messages and `DeferredToolResults` without persisting a
+  second user request.
 - `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
 - `delegate_tool_calls_limit` and `delegate_timeout_seconds` separately bound child agents launched by `delegate(...)`.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.

@@ -17,6 +17,8 @@ Configured built-in tools include vault inspection (`file_read`), vault mutation
 - Build configured Pydantic AI agents for chat/workflow/context runs.
 - Resolve model aliases through settings-backed provider/model mapping.
 - Resolve tool IDs to tool classes/functions from settings through the shared tool-binding layer.
+- Apply chat-mode-specific deferred approval policy without changing the
+  underlying tool implementation.
 - Expose concise tool definitions and virtual-doc pointers to agents.
 - Compose AssistantMD-owned Pydantic AI capabilities for tool exposure, chat context, and tool result handling.
 - Store oversized chat tool output in cache and return compact cache refs.
@@ -24,11 +26,14 @@ Configured built-in tools include vault inspection (`file_read`), vault mutation
 
 ## Chat execution flow (high level)
 
-1. Resolve model and tools from request + settings.
+1. Resolve model and the app-wide enabled tools from settings.
 2. Build agent with AssistantMD capabilities for tool exposure, context management, and tool result handling.
-3. Execute prompt (streaming or non-streaming).
-4. Register a process-local chat execution task for the active session.
-5. Persist provider-native session history to the chat SQLite store.
+3. In `inline_edit` mode, mark `file_write` calls for Pydantic AI deferred
+   approval; all other enabled tools remain immediate.
+4. Execute the prompt under a process-local chat task and persist
+   provider-native session history.
+5. Persist and publish any deferred tool request as a review artifact; an
+   approved or denied review resumes through a separate queued chat task.
 6. Emit tool activity metadata/events.
 7. Run automatic chat history compaction when configured and recommended.
 
@@ -47,6 +52,8 @@ agent behavior toward Pydantic AI's composable capability model.
 ## Tool loading model
 
 - Tool registry source is settings (`tools` section in settings store).
+- Tool availability is the app-wide `enabled_tools` list. Chat has no
+  per-session or per-turn tool selector.
 - `resolve_tool_binding(...)` imports configured modules and finds `BaseTool` subclasses.
 - Chat, delegate child agents, and authored direct-tool calls attach tools through `core/llm/capabilities/assistant_tools.py`.
 - Pydantic AI model providers are constructed with retry-enabled HTTP clients using `pydantic_ai.retries.AsyncTenacityTransport` and `wait_retry_after(...)`. The transport retries provider rate limits, provider 5xx responses, and network request errors with bounded attempts; permanent 4xx responses are left for provider/model error handling. Tool execution is not automatically retried by infrastructure; tool failures should return structured, model-visible failure metadata so the model can decide the next action.
@@ -54,6 +61,36 @@ agent behavior toward Pydantic AI's composable capability model.
 - Tool result caching is handled by chat capabilities rather than tool-call routing parameters.
 - Oversized chat tool output is stored through the authoring cache layer, not the legacy in-memory buffer store.
 - `BufferStore` remains available on `RunContext.deps` for tool compatibility; the deprecated typed output-routing modules that wrote variable-style buffers have been removed.
+
+## Vault File Tools and Inline Review
+
+`file_read` and `file_write` are thin model-facing adapters over
+`core.vault_state.file_operations`. The operation service owns path validation,
+text behavior, and stable rejection metadata. Mutating operations then route
+through `core.vault_state.file_mutations` for locking, snapshots, attribution,
+manifest refresh, and rollback support.
+
+`file_read` supports `read`, `list`, `search`, and `frontmatter`. `file_write`
+supports `write`, `append`, `edit_line`, `replace_text`, `move`, `delete`, and
+`mkdir`. `write` is create-only unless `overwrite=true`; deletion requires an
+exact `confirm_path`.
+
+Chat mode controls review policy at capability preparation time:
+
+- `normal` executes enabled tools normally.
+- `inline_edit` defers each `file_write` call through Pydantic AI approval and
+  leaves `file_read` immediate.
+
+Review decisions are structured deferred-tool results. The browser never
+constructs prompts to describe approval. Approved calls may override only the
+editable content or destination fields allowed by the backend; they cannot
+change the operation target or overwrite policy. Existing-file overwrite,
+move, and delete approvals also validate the reviewed target's existence and
+content hash before a continuation task is accepted. A denial can include a
+user reason, which is returned to the model in the `ToolDenied` result.
+
+Workflows, context scripts, code execution, and delegate agents do not have an
+interactive user-review channel. Their enabled tool calls execute directly.
 
 ## OpenAI Auth Modes
 

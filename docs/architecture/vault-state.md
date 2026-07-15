@@ -9,6 +9,8 @@ Vault state maintains a durable, rebuildable view of vault files and a retained 
 - `core/vault_state/models.py` — SQLite models stored in `system/vault_state.db`
 - `core/vault_state/activity.py` — explicit and task-derived activity attribution
 - `core/vault_state/identity.py` — stable vault id management through `AssistantMD/vault.yaml`
+- `core/vault_state/file_operations.py` — shared validated read/write operation
+  contracts used by tools and API services
 - `core/vault_state/file_mutations.py` — shared mutation API for tracked vault writes
 - `core/vault_state/snapshots.py` — snapshot-set and file-snapshot capture
 - `core/vault_state/rollback.py` — automatic rollback for failed, cancelled, and timed-out tasks
@@ -76,7 +78,12 @@ fail to refresh.
 
 ## Mutation Routing
 
-Vault file writes should route through `core.vault_state.file_mutations` so they can be observed and attributed consistently, with task-backed writes snapshotted for rollback.
+Vault reads and writes exposed by tools or UI services use
+`core.vault_state.file_operations` for path validation, operation semantics, and
+stable rejection metadata. All supported writes then route through
+`core.vault_state.file_mutations` so they are observed and attributed
+consistently, with task-backed and explicit Explorer writes snapshotted for
+rollback or revision history.
 
 Currently tracked mutation helpers include:
 
@@ -86,6 +93,8 @@ Currently tracked mutation helpers include:
 - `replace_vault_file_content(...)`
 - `delete_vault_file(...)`
 - `move_vault_file(...)`
+- `move_vault_directory(...)`
+- `delete_empty_vault_directory_tree(...)`
 
 `file_write` and ingestion output storage use this shared API for supported file mutations. The CI guard `scripts/check_vault_mutation_routing.py` scans core tool/helper/API/ingestion code for direct mutation primitives and fails when new writable paths bypass the shared mutation API, except for explicit allowlisted cases.
 
@@ -94,6 +103,25 @@ Task-backed mutations derive attribution from the active execution task. Direct 
 Unexpected failures in the shared mutation path emit `vault_state_mutation_failed`
 with task context, vault identity, path, operation, stage, before-state metadata,
 and error details before the exception propagates to the caller.
+
+## Mutation Concurrency
+
+Tracked mutation coordination is process-local and lives in
+`core.vault_state.file_mutations`:
+
+- file mutations share a vault hierarchy read lock, allowing unrelated files in
+  one vault to change concurrently
+- directory hierarchy mutations hold the vault's exclusive hierarchy lock so a
+  move or directory deletion cannot race a child file mutation
+- striped exact-path locks serialize operations touching the same resolved path
+  and are acquired in deterministic order for multi-path operations
+- read-modify-write helpers hold those locks from the initial file read through
+  snapshot capture, filesystem mutation, manifest refresh, and mutation
+  persistence
+
+These locks coordinate AssistantMD operations within one application process.
+Optimistic hashes and refresh remain the conflict boundary for changes made by
+external editors or another process.
 
 ## Snapshot Sets
 
@@ -141,6 +169,13 @@ path locks. One conflict, expired snapshot, vault identity mismatch, active
 activity, or directory-level mutation rejects the complete rollback without
 changing any path.
 
+Execution and revision restore use the shared atomic file-state restoration
+primitive in `file_mutations.py`. It verifies every expected existence/hash and
+retained restore payload before writing, captures temporary compensation copies,
+applies all requested path states, refreshes the manifest, and finalizes durable
+records while the affected locks remain held. A failure after writes begin
+restores the displaced states before returning an error.
+
 A successful rollback is recorded as a new `explorer` activity linked to the
 source activity through `source_activity_id` metadata. The displaced current
 states are retained as revisions, so the rollback activity can itself be rolled
@@ -161,11 +196,17 @@ Rollback behavior:
 
 - obeys `task_rollback_enabled`
 - groups mutation rows by vault/path
+- derives each path's expected current state from the task's final recorded
+  mutation and rejects rollback if a later edit changed it
+- restores every supported path in one vault through the same atomic
+  file-state transaction used by explicit activity rollback
 - restores the retained pre-mutation snapshot when the file existed before the task
 - deletes files that were created by the task
-- refreshes each affected vault after rollback
 - marks rollback snapshot sets as `rolled_back`
 - treats repeated rollback attempts as skipped with `already_rolled_back`
+
+Directory-level mutations are retained in the activity ledger but are not
+eligible for automatic or explicit file-state rollback.
 
 Rollback failures are logged as `task_rollback_failed`; they do not replace the original task terminal status.
 

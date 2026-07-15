@@ -40,7 +40,12 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 
 A `date` global is also injected, providing `date.today()`, `date.this_week()`, etc.
 
-Direct tool functions are the same configured tools used by chat where their signatures make sense in scripts. `delegate(...)` is the model-inference tool for scripts; it returns text plus metadata, including a compact `metadata["audit"]` summary of child tool calls and errors.
+Direct tool functions resolve from the app-wide `enabled_tools` registry and use
+the same tool adapters as chat where their signatures make sense in scripts.
+Authoring execution is non-interactive: workflows and context scripts execute
+tool calls directly and never pause for chat inline review. `delegate(...)` is
+the model-inference tool for scripts; it returns text plus metadata, including a
+compact `metadata["audit"]` summary of child tool calls and errors.
 
 ## Helpers
 

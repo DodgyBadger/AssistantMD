@@ -68,6 +68,11 @@ cleanup.
 Task-owned chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
+When a chat run returns deferred tool requests, that process-local task still
+finishes. The durable pending continuation belongs to the chat-session store,
+not to a waiting asyncio task. Submitting the review atomically claims that
+continuation and creates a new queued chat task with the stored messages and
+Pydantic AI deferred-tool results.
 Scheduled ingestion jobs also use the queued background form so scheduler-owned
 imports are visible as ingestion execution tasks while they run.
 Manual and automatic chat history compaction use the inline runner form so the
@@ -113,6 +118,12 @@ execution path.
 For a given chat session, task-owned chat runs are serialized by task creation
 time. Later runs remain `queued` until older non-terminal chat tasks in the same
 `chat_session:<session_id>` scope finish.
+
+Deferred-review resume tasks use the same session gate and task kind. They do
+not persist another user request, and their terminal state is mirrored into the
+durable deferred-review row. A pending review blocks a new ordinary chat run for
+that session, while cancellation remains a normal execution-task operation for
+an active originating or resumed task.
 
 Manual workflow execution is task-oriented at the API layer: `/api/workflows/execute`
 starts the workflow in the background and returns the created task snapshot.
