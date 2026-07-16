@@ -69,6 +69,72 @@ week_start_day: monday          # optional, default monday
 - Manual workflow runs appear as managed tasks in the Dashboard. Long-running
   runs can be checked or cancelled there, and overlapping runs are queued.
 
+### Workflow Outcomes and Failures
+
+A workflow that reaches the end of its script completes successfully. Its final
+expression is script output data, but values inside that expression do not
+control the workflow status. For example, returning `{"status": "failed"}` does
+not fail the workflow.
+
+Use normal Python failure handling:
+
+- Leave required direct tool calls uncaught. Structured tool statuses of
+  `error` or `failed` raise `RuntimeError` inside Monty and fail the workflow.
+- Catch `RuntimeError` only around a specific call when failure is an expected
+  branch. Avoid wrapping the whole workflow in a broad exception handler.
+- Non-error outcomes such as `not_found` and `already_exists` remain ordinary
+  tool results. Inspect `result.metadata["status"]` to branch on them.
+- Use `finish(status="skipped", reason="...")` when there is no work to do.
+- Use `finish(status="failed", reason="...")` for an intentional domain
+  failure that is not already represented by an exception.
+- `finish(status="completed", reason="...")` is available when an explicit
+  successful terminal reason is useful; otherwise reaching the end is enough.
+
+A required call normally needs no extra status handling:
+
+```python
+summary = await delegate(
+    model="gpt-mini",
+    prompt="Summarize the selected notes.",
+)
+```
+
+Expected absence is a normal result rather than an exception:
+
+```python
+notes = await file_read(operation="read", path="optional-notes.md")
+if notes.metadata.get("status") == "not_found":
+    await finish(status="skipped", reason="optional-notes.md does not exist")
+```
+
+Catch a failure narrowly when the script has a real fallback:
+
+```python
+try:
+    source = await tavily_extract(urls=PRIMARY_URL)
+except RuntimeError:
+    source = await browser(url=PRIMARY_URL)
+```
+
+Batch workflows may continue after individual failures, but catching those
+errors makes the script responsible for the aggregate outcome:
+
+```python
+failures = []
+
+for item in selected_items:
+    try:
+        await process_item(item)
+    except RuntimeError as exc:
+        failures.append(f"{item.ref}: {exc}")
+
+if failures:
+    await finish(
+        status="failed",
+        reason=f"{len(failures)} selected items failed; first error: {failures[0]}",
+    )
+```
+
 ---
 
 ## Context Assembly Script
