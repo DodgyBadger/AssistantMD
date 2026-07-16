@@ -267,6 +267,7 @@ dashboardView = window.DashboardView.create({
         fetchExecutionTasks,
         isTerminalTaskStatus,
         openWorkflowFileEditor: workflowActions.openFileEditor,
+        openWorkflowRunHistory: workflowActions.openRunHistory,
         toggleWorkflowEnabled: workflowActions.toggleWorkflowEnabled,
         executeWorkflow: workflowActions.executeWorkflow,
         stopExecutionTask: executionTaskActions.stopExecutionTask,

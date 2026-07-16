@@ -29,6 +29,7 @@ from core.settings import (
 
 from .models import (
     WorkflowLoadErrorsResponse,
+    WorkflowRunHistoryResponse,
     CachePurgeResponse,
     SystemTemplateSeedResponse,
     SystemMigrationRunRequest,
@@ -176,6 +177,7 @@ from .services import (
     scan_import_folder,
     import_url_direct,
     get_workflow_load_errors,
+    get_workflow_run_history,
     purge_expired_cache,
     get_system_database_migration_status,
     run_system_database_migrations,
@@ -458,7 +460,7 @@ async def get_status():
 
 
 @router.get("/system/activity-log", response_model=SystemLogResponse)
-async def system_activity_log(limit_bytes: int = 65_536):
+async def system_activity_log(limit_bytes: int = 2_097_152):
     """
     Retrieve the system activity log, optionally truncated to the provided limit.
     """
@@ -1076,6 +1078,15 @@ async def workflow_load_errors(vault_name: str | None = None, workflow_name: str
         return WorkflowLoadErrorsResponse(
             errors=get_workflow_load_errors(vault_name=vault_name, workflow_name=workflow_name)
         )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/workflows/runs", response_model=WorkflowRunHistoryResponse)
+async def workflow_run_history(global_id: str, limit: int = 50):
+    """Return recent durable outcomes for one workflow."""
+    try:
+        return WorkflowRunHistoryResponse(**get_workflow_run_history(global_id, limit=limit))
     except Exception as e:
         return create_error_response(e)
 

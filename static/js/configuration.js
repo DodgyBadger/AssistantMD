@@ -318,7 +318,7 @@
         };
     }
 
-    async function refreshActivityLog(limitBytes = 65_536) {
+    async function refreshActivityLog(limitBytes = 2_097_152) {
         if (!elements.activityLogViewer || state.isLoadingLog) return;
 
         state.isLoadingLog = true;

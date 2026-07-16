@@ -8,8 +8,8 @@ import logging
 import os
 import inspect
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
+from datetime import datetime, timedelta, timezone
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -43,6 +43,39 @@ _NOISY_LOGFIRE_MESSAGES = frozenset(
     }
 )
 _NOISY_PYDANTIC_SCHEMAS = frozenset({"nullable", "union"})
+ACTIVITY_LOG_RETENTION_DAYS = 30
+ACTIVITY_LOG_MAX_TOTAL_BYTES = 100 * 1024 * 1024
+
+
+class _BoundedTimedActivityHandler(TimedRotatingFileHandler):
+    """Rotate activity daily and cap retained segments by total bytes."""
+
+    def doRollover(self) -> None:
+        super().doRollover()
+        self._prune_total_size()
+
+    def _prune_total_size(self) -> None:
+        active_path = Path(self.baseFilename)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)).timestamp()
+        segments = sorted(
+            (
+                path
+                for path in active_path.parent.glob(f"{active_path.name}.*")
+                if path.is_file() and not path.name.endswith(".lock")
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        retained_bytes = active_path.stat().st_size if active_path.exists() else 0
+        for segment in segments:
+            if segment.stat().st_mtime < cutoff:
+                segment.unlink(missing_ok=True)
+                continue
+            size = segment.stat().st_size
+            if retained_bytes + size <= ACTIVITY_LOG_MAX_TOTAL_BYTES:
+                retained_bytes += size
+                continue
+            segment.unlink(missing_ok=True)
 
 
 class _LogfireNoiseFilteringSampler(Sampler):
@@ -169,7 +202,15 @@ def _ensure_activity_logger() -> logging.Logger:
         log_path = desired_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        handler = RotatingFileHandler(log_path, maxBytes=1_048_576, backupCount=5)
+        handler = _BoundedTimedActivityHandler(
+            log_path,
+            when="midnight",
+            interval=1,
+            backupCount=ACTIVITY_LOG_RETENTION_DAYS,
+            utc=True,
+            encoding="utf-8",
+        )
+        handler._prune_total_size()
         handler.setFormatter(logging.Formatter("%(message)s"))
 
         logger = logging.getLogger("project_assistant.activity")

@@ -69,6 +69,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.scheduling.database",
         description="APScheduler persistent job store.",
     ),
+    "workflow_runs": SystemDatabaseDefinition(
+        name="workflow_runs",
+        owner="core.workflow_runs",
+        description="Durable workflow attempts, outcomes, and failure history.",
+    ),
 }
 
 

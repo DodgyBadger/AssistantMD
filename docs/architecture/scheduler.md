@@ -8,7 +8,9 @@ Scheduler keeps workflow execution aligned with current workflow templates while
 - `core/scheduling/parser.py`
 - `core/scheduling/triggers.py`
 - `core/scheduling/database.py`
+- `core/scheduling/job_history.py`
 - `core/runtime/workflow_governor.py`
+- `core/workflow_runs/`
 
 ## Responsibilities
 
@@ -17,6 +19,7 @@ Scheduler keeps workflow execution aligned with current workflow templates while
 - Preserve timing state when only lightweight args change.
 - Protect reserved system jobs.
 - Dispatch workflow jobs through the runtime workflow governor.
+- Persist workflow attempts and authoritative terminal outcomes.
 
 ## Cron Schedule Semantics
 
@@ -62,12 +65,30 @@ The workflow governor:
   completes
 - optionally limits total concurrent workflow executions across all vaults
 - supplies `workflow_task_timeout_seconds` to the runner when configured
+- creates and finalizes durable workflow run history
 - emits workflow lifecycle validation events
 
 APScheduler remains responsible for schedule timing and persistence. Runtime
 execution policy owns in-process task running mechanics for the actual workflow
 run, while the governor owns workflow-specific result metadata, global workflow
-concurrency policy, and lifecycle logging.
+concurrency policy, lifecycle logging, and durable run finalization.
+
+## Workflow Run History
+
+`workflow_runs.db` stores workflow attempts from scheduler, API, tool, and
+system sources. The governor creates a queued row before lane waits, marks it
+running when execution begins, and finalizes it with the workflow domain result.
+Returned `failed` or `skipped` results remain those statuses even when
+APScheduler reports that the Python job executed normally.
+
+Scheduler events record a `missed` run when a scheduled invocation did not
+execute. Dispatch errors that occur before the governor creates a run are also
+recorded, using an idempotent scheduler event key.
+
+Detailed terminal history is retained for 90 days and at most 500 runs per
+workflow. The latest terminal outcome for a workflow is preserved beyond that
+window. Active execution remains visible through process-local execution tasks;
+the durable ledger is the historical outcome source.
 
 `max_concurrent_workflows` in general settings controls global workflow
 concurrency across vaults. `0` disables the global limit. The per-vault lane is
@@ -98,5 +119,6 @@ system jobs. Each job entry includes:
 - `next_run_time`
 
 Last-run fields are process-local and are populated from APScheduler execution
-events after the current app process starts. They are not persisted across
-container restarts.
+events for system jobs. Workflow last-run fields come from durable workflow run
+history and survive container restarts. Workflow job details also include
+`last_run_id` and `last_run_source` when an outcome exists.

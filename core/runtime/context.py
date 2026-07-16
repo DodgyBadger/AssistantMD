@@ -23,6 +23,7 @@ from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.vault_state import VaultStateService
+from core.workflow_runs import WorkflowRunStore
 from core.scheduling.system_jobs import sync_system_scheduler_jobs
 from . import state as runtime_state
 from .config import RuntimeConfig
@@ -47,6 +48,7 @@ class RuntimeContext:
         ingestion_worker: IngestionWorker
         task_coordinator: Process-local execution task tracker
         workflow_governor: Workflow execution policy layer
+        workflow_run_store: Durable workflow execution history
     """
 
     config: RuntimeConfig
@@ -59,6 +61,7 @@ class RuntimeContext:
     task_coordinator: TaskCoordinator
     task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
+    workflow_run_store: WorkflowRunStore
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime

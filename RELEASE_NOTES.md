@@ -25,6 +25,19 @@ stays focused while files remain directly accessible when needed.
   one step. AssistantMD refuses to overwrite newer changes, and the rollback
   itself can also be undone.
 
+### Workflow History and Health
+
+Workflow results now survive application restarts and remain available on the
+Dashboard. Each workflow shows its latest outcome separately from whether it is
+enabled or scheduled, and its run history records when it ran, how it was
+started, how long it took, and why it failed or was skipped. Missed, failed, and
+timed-out workflows are called out in an attention summary so overnight
+automation problems are visible when you return.
+
+System Activity also keeps daily log segments for up to 30 days, subject to a
+size limit, and the activity viewer reads across those retained segments instead
+of showing only the current log file.
+
 ### Breaking Changes and Upgrade Guidance
 
 Version 0.7 replaces `file_ops_safe` and `file_ops_unsafe` with `file_read` and

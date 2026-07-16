@@ -16,6 +16,7 @@ from core.settings import (
     get_workflow_task_timeout_seconds,
 )
 from core.tools.failures import FailureClassification, classify_exception
+from core.workflow_runs import WorkflowRunStore
 
 from .execution_tasks import (
     ExecutionTaskKind,
@@ -44,11 +45,13 @@ class WorkflowGovernor:
         *,
         task_coordinator: TaskCoordinator,
         task_runner: ExecutionTaskRunner,
+        workflow_run_store: WorkflowRunStore,
         logger: UnifiedLogger | None = None,
     ) -> None:
         self._task_coordinator = task_coordinator
         self._logger = logger or UnifiedLogger(tag="workflow-governor")
         self._task_runner = task_runner
+        self._workflow_run_store = workflow_run_store
         self._global_limit_guard = asyncio.Lock()
         self._global_limit = 0
         self._global_semaphore: asyncio.Semaphore | None = None
@@ -85,6 +88,41 @@ class WorkflowGovernor:
         )
         async with task_context as task:
             active_task_id = task.task_id
+            workflow_run = self._workflow_run_store.create_run(
+                workflow_id=global_id,
+                workflow_name=workflow_name,
+                vault_name=vault_name,
+                source=source_value,
+                task_id=active_task_id,
+                step_name=step_name,
+            )
+            try:
+                await self._task_coordinator.update_metadata(
+                    active_task_id,
+                    {"workflow_run_id": workflow_run.run_id},
+                )
+            except Exception as exc:
+                classification = classify_exception(exc, phase="workflow_setup")
+                reason = f"{type(exc).__name__}: {exc}"
+                self._workflow_run_store.finalize_run(
+                    workflow_run.run_id,
+                    status="failed",
+                    reason=reason,
+                    message=str(exc),
+                    failure=_build_workflow_failure_metadata(
+                        global_id=global_id,
+                        vault_name=vault_name,
+                        workflow_name=workflow_name,
+                        step_name=step_name,
+                        source=source_value,
+                        status="failed",
+                        reason=reason,
+                        classification=classification,
+                        output_files=[],
+                        message=str(exc),
+                    ),
+                )
+                raise
 
             async def _log_vault_gate_queue(
                 queued_task: ExecutionTaskSnapshot,
@@ -127,6 +165,7 @@ class WorkflowGovernor:
                         global_permit_acquired = True
 
                     await self._task_coordinator.mark_started(active_task_id)
+                    self._workflow_run_store.mark_started(workflow_run.run_id)
                     await self._task_coordinator.heartbeat(
                         active_task_id,
                         status="workflow_running",
@@ -195,6 +234,26 @@ class WorkflowGovernor:
                                 ),
                             },
                         )
+                        self._workflow_run_store.finalize_run(
+                            workflow_run.run_id,
+                            status="timed_out",
+                            reason=reason,
+                            message=timeout_result.message,
+                            failure=_build_workflow_failure_metadata(
+                                global_id=global_id,
+                                vault_name=vault_name,
+                                workflow_name=workflow_name,
+                                step_name=step_name,
+                                source=source_value,
+                                status="timed_out",
+                                reason=reason,
+                                classification=timeout_classification,
+                                output_files=[],
+                                message=timeout_result.message,
+                            ),
+                            output_files=[],
+                            execution_time_seconds=timeout_seconds,
+                        )
                         self._log_workflow_event(
                             "workflow_task_timed_out",
                             global_id=global_id,
@@ -258,34 +317,43 @@ class WorkflowGovernor:
                         output_files=result.output_files,
                         message=result.message,
                     )
+                    failure_metadata: dict[str, Any] | None = None
                     if str(result.status or "").strip().lower() == ExecutionTaskStatus.FAILED.value:
+                        failure_metadata = _build_workflow_failure_metadata(
+                            global_id=global_id,
+                            vault_name=vault_name,
+                            workflow_name=workflow_name,
+                            step_name=step_name,
+                            source=source_value,
+                            status=result.status,
+                            reason=result.reason,
+                            classification=FailureClassification(
+                                error_type="WorkflowFailed",
+                                failure_kind="workflow_reported_failure",
+                                retryable=False,
+                                phase="workflow_execution",
+                                message=result.reason or result.message,
+                                suggested_action=(
+                                    "Inspect the workflow result reason and any output artifacts, then resume "
+                                    "only the unfinished items or adjust the workflow before rerunning."
+                                ),
+                            ),
+                            output_files=result.output_files,
+                            message=result.message,
+                        )
                         await self._task_coordinator.update_metadata(
                             active_task_id,
-                            {
-                                "workflow_failure": _build_workflow_failure_metadata(
-                                    global_id=global_id,
-                                    vault_name=vault_name,
-                                    workflow_name=workflow_name,
-                                    step_name=step_name,
-                                    source=source_value,
-                                    status=result.status,
-                                    reason=result.reason,
-                                    classification=FailureClassification(
-                                        error_type="WorkflowFailed",
-                                        failure_kind="workflow_reported_failure",
-                                        retryable=False,
-                                        phase="workflow_execution",
-                                        message=result.reason or result.message,
-                                        suggested_action=(
-                                            "Inspect the workflow result reason and any output artifacts, then resume "
-                                            "only the unfinished items or adjust the workflow before rerunning."
-                                        ),
-                                    ),
-                                    output_files=result.output_files,
-                                    message=result.message,
-                                ),
-                            },
+                            {"workflow_failure": failure_metadata},
                         )
+                    self._workflow_run_store.finalize_run(
+                        workflow_run.run_id,
+                        status=_workflow_run_terminal_status(result),
+                        reason=result.reason,
+                        message=result.message,
+                        failure=failure_metadata,
+                        output_files=result.output_files,
+                        execution_time_seconds=result.execution_time_seconds,
+                    )
                     await self._mark_task_terminal_from_result(active_task_id, result)
                     return result
                 except asyncio.CancelledError:
@@ -342,21 +410,54 @@ class WorkflowGovernor:
                     if global_permit_acquired and global_semaphore is not None:
                         global_semaphore.release()
 
-            return await self._task_runner.run_with_gate(
-                task,
-                ExecutionGatePolicy(
-                    key=workflow_vault_scope(vault_name),
-                    queued_status="queued_for_vault",
-                    queued_metadata={
-                        "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
-                    },
-                    queue_position_key=None,
-                    holder_task_id_key=None,
-                    clear_metadata={"workflow_queue_reason": None},
-                    on_queued=_log_vault_gate_queue,
-                ),
-                _run_in_vault_gate,
-            )
+            try:
+                return await self._task_runner.run_with_gate(
+                    task,
+                    ExecutionGatePolicy(
+                        key=workflow_vault_scope(vault_name),
+                        queued_status="queued_for_vault",
+                        queued_metadata={
+                            "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
+                        },
+                        queue_position_key=None,
+                        holder_task_id_key=None,
+                        clear_metadata={"workflow_queue_reason": None},
+                        on_queued=_log_vault_gate_queue,
+                    ),
+                    _run_in_vault_gate,
+                )
+            except asyncio.CancelledError as exc:
+                self._workflow_run_store.finalize_run(
+                    workflow_run.run_id,
+                    status="cancelled",
+                    reason="cancelled",
+                    message=f"Workflow '{global_id}' was cancelled",
+                )
+                _attach_workflow_run_id(exc, workflow_run.run_id)
+                raise
+            except Exception as exc:
+                classification = classify_exception(exc, phase="workflow_execution")
+                reason = f"{type(exc).__name__}: {exc}"
+                self._workflow_run_store.finalize_run(
+                    workflow_run.run_id,
+                    status="failed",
+                    reason=reason,
+                    message=str(exc),
+                    failure=_build_workflow_failure_metadata(
+                        global_id=global_id,
+                        vault_name=vault_name,
+                        workflow_name=workflow_name,
+                        step_name=step_name,
+                        source=source_value,
+                        status="failed",
+                        reason=reason,
+                        classification=classification,
+                        output_files=[],
+                        message=str(exc),
+                    ),
+                )
+                _attach_workflow_run_id(exc, workflow_run.run_id)
+                raise
 
     async def start_workflow(
         self,
@@ -544,3 +645,26 @@ def _build_workflow_failure_metadata(
         }
     )
     return metadata
+
+
+def _workflow_run_terminal_status(result: WorkflowExecutionResult) -> str:
+    """Normalize workflow results to the durable terminal status contract."""
+    status = str(result.status or "").strip().lower()
+    supported = {
+        ExecutionTaskStatus.COMPLETED.value,
+        ExecutionTaskStatus.FAILED.value,
+        ExecutionTaskStatus.CANCELLED.value,
+        ExecutionTaskStatus.TIMED_OUT.value,
+        ExecutionTaskStatus.SKIPPED.value,
+    }
+    if status in supported:
+        return status
+    return ExecutionTaskStatus.COMPLETED.value if result.success else ExecutionTaskStatus.FAILED.value
+
+
+def _attach_workflow_run_id(exc: BaseException, run_id: str) -> None:
+    """Mark raised failures so the scheduler listener does not duplicate them."""
+    try:
+        setattr(exc, "assistantmd_workflow_run_id", run_id)
+    except Exception:
+        return

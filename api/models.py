@@ -396,6 +396,10 @@ class StatusResponse(BaseModel):
         default_factory=list,
         description="Packaged system workflow templates available to copy into a vault",
     )
+    workflow_runs: Dict[str, "WorkflowRunInfo"] = Field(
+        default_factory=dict,
+        description="Latest durable terminal workflow outcomes keyed by workflow id",
+    )
     configuration_errors: List["ConfigurationError"] = Field(default_factory=list, description="Configuration errors encountered during loading")
     configuration_status: ConfigurationStatusInfo = Field(default_factory=ConfigurationStatusInfo, description="Aggregated configuration health information")
 
@@ -1229,6 +1233,35 @@ class WorkflowLoadErrorsResponse(BaseModel):
         default_factory=list,
         description="Workflow configuration errors discovered during loading",
     )
+
+
+class WorkflowRunInfo(BaseModel):
+    """One durable workflow execution attempt."""
+
+    run_id: str
+    workflow_id: str
+    workflow_name: str
+    vault_name: str
+    source: str
+    status: str
+    queued_at: datetime
+    task_id: Optional[str] = None
+    step_name: Optional[str] = None
+    scheduled_run_time: Optional[datetime] = None
+    reason: Optional[str] = None
+    message: Optional[str] = None
+    failure: Optional[Dict[str, Any]] = None
+    output_files: List[str] = Field(default_factory=list)
+    execution_time_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class WorkflowRunHistoryResponse(BaseModel):
+    """Recent durable runs for one workflow."""
+
+    workflow_id: str
+    runs: List[WorkflowRunInfo] = Field(default_factory=list)
 
 
 #######################################################################

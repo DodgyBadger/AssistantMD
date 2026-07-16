@@ -15,6 +15,7 @@ from core.authoring.template_discovery import WorkflowLoader
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
+from core.workflow_runs import WorkflowRunStore
 from core.settings import validate_settings
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
@@ -187,9 +188,11 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
+        workflow_run_store = WorkflowRunStore(str(config.system_root))
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             task_runner=task_runner,
+            workflow_run_store=workflow_run_store,
         )
         runtime_context = RuntimeContext(
             config=config,
@@ -202,6 +205,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             task_coordinator=task_coordinator,
             task_runner=task_runner,
             workflow_governor=workflow_governor,
+            workflow_run_store=workflow_run_store,
             background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,

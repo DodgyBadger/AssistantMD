@@ -133,6 +133,13 @@ result details are attached to task metadata as `workflow_result` when available
 Failed or timed-out workflow terminal metadata also includes `workflow_failure`
 when the governor can classify the failure.
 
+Workflow execution also creates a durable workflow run record. The execution
+task id is retained as provenance on that record, but the two lifecycles have
+different purposes: execution tasks provide live process-local cancellation and
+status, while `workflow_runs.db` provides restart-safe workflow outcome history.
+Scheduler misses can have durable workflow run records without execution tasks
+because no worker started.
+
 ## Observability
 
 Execution task events use the validation sink and stable event names:

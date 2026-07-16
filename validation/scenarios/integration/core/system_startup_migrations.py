@@ -78,6 +78,17 @@ class SystemStartupMigrationsScenario(BaseScenario):
                 "Startup should record the vault-state migration version",
             )
 
+        with sqlite3.connect(system_root / "workflow_runs.db") as conn:
+            self.soft_assert(
+                self._table_exists(conn, "workflow_runs"),
+                "Startup should create durable workflow run history",
+            )
+            self.soft_assert_equal(
+                self._migration_versions(conn, "workflow_runs"),
+                [1],
+                "Startup should record the workflow-run migration version",
+            )
+
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()

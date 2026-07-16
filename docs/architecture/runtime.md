@@ -11,6 +11,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - `core/runtime/reload_service.py`
 - `core/runtime/execution_tasks.py`
 - `core/runtime/workflow_governor.py`
+- `core/workflow_runs/`
 - `core/system_migrations.py`
 
 ## Responsibilities
@@ -21,6 +22,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Track process-local execution tasks for chat, workflows, ingestion, and history compaction.
 - Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
+- Own the durable workflow run store used by workflow execution and status.
 - Run registered system database migrations during startup.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
@@ -29,7 +31,8 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 
 1. Build `RuntimeConfig`.
 2. `bootstrap_runtime(...)` seeds bootstrap roots, runs registered system database migrations, and validates config.
-3. Initialize workflow loader, ingestion service/worker, scheduler/job store, task coordinator, task runner, and workflow governor.
+3. Initialize workflow loader, ingestion service/worker, scheduler/job store,
+   task coordinator, task runner, workflow run store, and workflow governor.
 4. Register global runtime context.
 5. Sync workflows and reserved system jobs into the scheduler, then resume scheduler.
 6. Start vault-state manifest refresh in the background so web startup is not blocked by a full vault scan.
@@ -92,6 +95,15 @@ Reload behavior:
 - update `runtime.last_config_reload` when runtime exists
 - return structured reload result used by API responses
 
+## System Activity
+
+`core.logger` writes user-facing JSONL diagnostics to `system/activity.log`.
+The active file rotates daily in UTC. Retained segments are kept for up to 30
+days with a 100 MiB total ceiling, and the System Activity API assembles a
+bounded newest-first window across those segments. Validation-runner lifecycle
+messages use validation artifacts and Logfire rather than the persistent user
+activity file.
+
 ## Execution Task Coordination
 
 Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
@@ -111,7 +123,13 @@ work uses this runner for detached job execution.
 `WorkflowGovernor` is the policy layer for workflow runs. It queues workflow
 execution per vault, optionally limits total concurrent workflows across vaults,
 registers workflow tasks, supplies the configured workflow task timeout policy,
-and logs workflow lifecycle events.
+logs workflow lifecycle events, and finalizes durable workflow run history.
+
+`WorkflowRunStore` is durable domain history in `workflow_runs.db`. It records
+queued, running, and terminal workflow states across API, scheduler, tool, and
+system sources. It does not replace process-local execution tasks: tasks remain
+the live cancellation and runtime-status surface, while workflow runs provide
+restart-safe historical outcomes.
 
 ## Common Failure Modes
 

@@ -62,8 +62,8 @@ Each run should store:
 - a stable run id, workflow id, workflow name, and vault;
 - source, optional execution task id, and optional requested step;
 - queued, started, and terminal timestamps;
-- terminal status (`completed`, `failed`, `skipped`, `cancelled`, or
-  `timed_out`);
+- terminal status (`completed`, `failed`, `skipped`, `cancelled`, `timed_out`,
+  or `missed`);
 - a bounded reason/message and structured failure classification;
 - execution duration and compact output-file metadata.
 
@@ -215,6 +215,8 @@ the repository validation workflow.
 
 ## Next Phase
 
-Proceed with Feature Development, starting with the workflow-run ledger and its
-governor integration. This establishes the durable source of truth before the
-Dashboard or activity-log UI contracts are changed.
+Continue Feature Development with cursor pagination and server-side filtering
+for retained System Activity. The durable workflow ledger, Dashboard health and
+run-history surface, daily retained activity segments, multi-segment API reads,
+and primary validation/scheduler noise reductions are implemented. A broader
+emitter audit and raw retained-log export remain open.

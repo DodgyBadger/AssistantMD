@@ -2952,13 +2952,16 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         SchedulerInfo object with scheduler details and job information
     """
     try:
+        runtime = None
+        try:
+            runtime = get_runtime_context()
+        except RuntimeStateError:
+            runtime = None
+
         # If no scheduler provided, get from runtime context
         if scheduler is None:
-            try:
-                runtime = get_runtime_context()
+            if runtime is not None:
                 scheduler = runtime.scheduler
-            except RuntimeStateError:
-                scheduler = None
 
         if scheduler is None:
             # Return default scheduler info if unavailable
@@ -2979,15 +2982,30 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
         # Extract job details from APScheduler
         job_summaries = []
         for job in jobs:
+            job_type = 'system' if job.id in SYSTEM_JOB_IDS else 'workflow'
             history = get_scheduler_job_history(job.id) or {}
+            if job_type == 'workflow' and runtime is not None:
+                workflow_id = job.id.replace('__', '/')
+                latest_run = runtime.workflow_run_store.get_latest_run(workflow_id)
+                if latest_run is not None:
+                    unhealthy = latest_run.status in {'failed', 'timed_out', 'missed'}
+                    history = {
+                        'last_run_time': latest_run.completed_at,
+                        'last_status': latest_run.status,
+                        'last_error': latest_run.reason if unhealthy else None,
+                        'last_run_id': latest_run.run_id,
+                        'last_run_source': latest_run.source,
+                    }
             job_summary = {
                 'id': job.id,
                 'name': job.name,
-                'job_type': 'system' if job.id in SYSTEM_JOB_IDS else 'workflow',
+                'job_type': job_type,
                 'next_run_time': job.next_run_time,
                 'last_run_time': history.get('last_run_time'),
                 'last_status': history.get('last_status'),
                 'last_error': history.get('last_error'),
+                'last_run_id': history.get('last_run_id'),
+                'last_run_source': history.get('last_run_source'),
                 'trigger_type': type(job.trigger).__name__,
                 'trigger_description': str(job.trigger),
                 'max_instances': job.max_instances,
@@ -3253,6 +3271,13 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         enabled_workflows = [summary for summary in workflow_summaries if summary.enabled]
         disabled_workflows = [summary for summary in workflow_summaries if not summary.enabled]
         system_workflow_templates = get_system_workflow_template_summaries()
+        runtime = get_runtime_context()
+        known_workflow_ids = {summary.global_id for summary in workflow_summaries}
+        latest_workflow_runs = {
+            run.workflow_id: run.to_dict()
+            for run in runtime.workflow_run_store.list_latest_runs()
+            if run.workflow_id in known_workflow_ids
+        }
 
         scheduler_info.enabled_workflows = len(enabled_workflows)
         scheduler_info.disabled_workflows = len(disabled_workflows)
@@ -3291,6 +3316,7 @@ async def get_system_status(scheduler=None) -> StatusResponse:
             enabled_workflows=enabled_workflows,
             disabled_workflows=disabled_workflows,
             system_workflow_templates=system_workflow_templates,
+            workflow_runs=latest_workflow_runs,
             configuration_errors=configuration_errors,
             configuration_status=configuration_status,
         )
@@ -3300,6 +3326,21 @@ async def get_system_status(scheduler=None) -> StatusResponse:
     except Exception as e:
         error_msg = f"Failed to collect system status: {str(e)}"
         raise SystemConfigurationError(error_msg) from e
+
+
+def get_workflow_run_history(global_id: str, *, limit: int = 50) -> dict[str, Any]:
+    """Return durable workflow attempts in reverse chronological order."""
+    clean_global_id = str(global_id or "").strip()
+    if "/" not in clean_global_id:
+        raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {clean_global_id}")
+    runtime = get_runtime_context()
+    return {
+        "workflow_id": clean_global_id,
+        "runs": [
+            run.to_dict()
+            for run in runtime.workflow_run_store.list_runs(clean_global_id, limit=limit)
+        ],
+    }
 
 
 def get_workflow_summaries() -> List[WorkflowSummary]:
@@ -3645,7 +3686,7 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
         raise SystemConfigurationError(error_msg) from e
 
 
-async def get_system_activity_log(limit_bytes: int = 65_536) -> SystemLogResponse:
+async def get_system_activity_log(limit_bytes: int = 2_097_152) -> SystemLogResponse:
     """
     Read the system activity log with optional truncation.
 
@@ -3658,12 +3699,23 @@ async def get_system_activity_log(limit_bytes: int = 65_536) -> SystemLogRespons
     log_path = get_system_root() / "activity.log"
 
     if limit_bytes is None or limit_bytes <= 0:
-        limit_bytes = 65_536
+        limit_bytes = 2_097_152
 
-    max_response_bytes = 262_144
+    max_response_bytes = 8_388_608
     limit_bytes = min(limit_bytes, max_response_bytes)
 
-    if not log_path.exists():
+    segments = sorted(
+        (
+            path
+            for path in log_path.parent.glob(f"{log_path.name}.*")
+            if path.is_file() and not path.name.endswith(".lock")
+        ),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if log_path.exists():
+        segments.append(log_path)
+
+    if not segments:
         return SystemLogResponse(
             content="No activity log found yet. Interact with the system to generate entries.",
             truncated=False,
@@ -3673,16 +3725,28 @@ async def get_system_activity_log(limit_bytes: int = 65_536) -> SystemLogRespons
         )
 
     try:
-        raw_bytes = log_path.read_bytes()
+        segment_sizes = [(path, path.stat().st_size) for path in segments]
     except Exception as exc:
         raise SystemConfigurationError(f"Failed to read activity log: {exc}") from exc
 
-    size_bytes = len(raw_bytes)
-    truncated = False
+    size_bytes = sum(size for _, size in segment_sizes)
+    remaining = limit_bytes
+    chunks: list[bytes] = []
+    try:
+        for path, segment_size in reversed(segment_sizes):
+            if remaining <= 0:
+                break
+            with path.open("rb") as handle:
+                if segment_size > remaining:
+                    handle.seek(-remaining, 2)
+                chunk = handle.read(min(segment_size, remaining))
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    except Exception as exc:
+        raise SystemConfigurationError(f"Failed to read activity log: {exc}") from exc
 
-    if size_bytes > limit_bytes:
-        truncated = True
-        raw_bytes = raw_bytes[-limit_bytes:]
+    raw_bytes = b"".join(reversed(chunks))
+    truncated = size_bytes > len(raw_bytes)
 
     content = raw_bytes.decode("utf-8", errors="replace")
     shown_bytes = len(raw_bytes)

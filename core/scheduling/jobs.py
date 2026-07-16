@@ -281,22 +281,29 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
         pass  # Scheduler not available - configurations loaded but jobs not updated
 
     if scheduler is not None:
-        logger.add_sink("validation").info(
+        summary_data = {
+            "event": "workflow_scheduler_sync_completed",
+            "manual_reload": manual_reload,
+            "vaults_discovered": vaults_discovered,
+            "workflows_loaded": workflows_loaded,
+            "enabled_workflows": enabled_workflows_count,
+            "scheduled_workflows_count": len(scheduled_workflow_records),
+            "unscheduled_enabled_workflows_count": len(unscheduled_enabled_records),
+            "disabled_workflows_count": len(disabled_workflow_records),
+            "scheduler_jobs_synced": scheduler_jobs_synced,
+            "created_count": created_count,
+            "replaced_count": replaced_count,
+            "unchanged_count": unchanged_count,
+            "removed_count": removed_count,
+        }
+        logger.info(
+            "Workflow scheduler sync completed",
+            data=summary_data,
+        )
+        logger.set_sinks(["validation"]).info(
             "Workflow scheduler sync completed",
             data={
-                "event": "workflow_scheduler_sync_completed",
-                "manual_reload": manual_reload,
-                "vaults_discovered": vaults_discovered,
-                "workflows_loaded": workflows_loaded,
-                "enabled_workflows": enabled_workflows_count,
-                "scheduled_workflows_count": len(scheduled_workflow_records),
-                "unscheduled_enabled_workflows_count": len(unscheduled_enabled_records),
-                "disabled_workflows_count": len(disabled_workflow_records),
-                "scheduler_jobs_synced": scheduler_jobs_synced,
-                "created_count": created_count,
-                "replaced_count": replaced_count,
-                "unchanged_count": unchanged_count,
-                "removed_count": removed_count,
+                **summary_data,
                 "loaded_workflows": loaded_workflow_records,
                 "scheduled_workflows": scheduled_workflow_records,
                 "unscheduled_enabled_workflows": unscheduled_enabled_records,

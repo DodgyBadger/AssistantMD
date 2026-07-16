@@ -46,7 +46,7 @@ class ValidationRun:
     scenario_results: list
 
 
-logger = UnifiedLogger(tag="validation-runner")
+logger = UnifiedLogger(tag="validation-runner", default_sinks=["validation", "logfire"])
 
 
 class ValidationRunner:

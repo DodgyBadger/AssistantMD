@@ -37,6 +37,12 @@ from core.vault_state.schema import (
     VAULT_STATE_MIGRATIONS,
     ensure_vault_state_schema,
 )
+from core.workflow_runs.schema import (
+    DB_NAME as WORKFLOW_RUNS_DB_NAME,
+    MIGRATION_NAMESPACE as WORKFLOW_RUNS_MIGRATION_NAMESPACE,
+    WORKFLOW_RUN_MIGRATIONS,
+    ensure_workflow_run_schema,
+)
 
 
 logger = UnifiedLogger(tag="system_migrations")
@@ -110,6 +116,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         namespace=VAULT_STATE_MIGRATION_NAMESPACE,
         migrations=VAULT_STATE_MIGRATIONS,
         ensure_schema=lambda system_root: ensure_vault_state_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=WORKFLOW_RUNS_DB_NAME,
+        namespace=WORKFLOW_RUNS_MIGRATION_NAMESPACE,
+        migrations=WORKFLOW_RUN_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_workflow_run_schema(
             system_root,
             apply_migrations=True,
         ),

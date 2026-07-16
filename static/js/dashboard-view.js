@@ -64,6 +64,7 @@
             }));
             const combinedWorkflows = [...enabledWorkflows, ...disabledWorkflows, ...templateWorkflows];
             const schedulerJobs = status.scheduler?.job_details || [];
+            const runByWorkflowId = new Map(Object.entries(status.workflow_runs || {}));
             const schedulerRunning = Boolean(status.scheduler?.running);
             const jobByWorkflowId = new Map(
                 schedulerJobs.map(job => [job.id.replace('__', '/'), job])
@@ -81,16 +82,22 @@
                 `;
                 return;
             }
-            const sortedWorkflows = sortDashboardWorkflows(combinedWorkflows, jobByWorkflowId);
+            const sortedWorkflows = sortDashboardWorkflows(
+                combinedWorkflows,
+                jobByWorkflowId,
+                runByWorkflowId
+            );
 
             elements.workflowsStatus.innerHTML = `
                 ${renderDashboardBadgeStyles()}
+                ${renderWorkflowAttention(status, combinedWorkflows, runByWorkflowId)}
                 <div class="dashboard-table-wrap" role="region" aria-label="Workflows" tabindex="0">
                     <table class="dashboard-table">
                         <thead>
                             <tr>
                                 ${renderDashboardWorkflowSortHeader('id', 'ID')}
                                 ${renderDashboardWorkflowSortHeader('status', 'Status')}
+                                <th>Last Result</th>
                                 ${renderDashboardWorkflowSortHeader('last_run', 'Last Run')}
                                 ${renderDashboardWorkflowSortHeader('next_run', 'Next Run')}
                                 <th>Description</th>
@@ -102,6 +109,7 @@
                                 const job = workflow.is_system_template
                                     ? dashboardSystemWorkflowTemplateJob(workflow, schedulerJobs)
                                     : jobByWorkflowId.get(workflow.global_id);
+                                const latestRun = runByWorkflowId.get(workflow.global_id);
                                 const nextRun = job?.next_run_time
                                     ? new Date(job.next_run_time).toLocaleString('en-US', {
                                         month: 'short',
@@ -110,8 +118,8 @@
                                         minute: '2-digit'
                                     })
                                     : '—';
-                                const lastRun = job?.last_run_time
-                                    ? new Date(job.last_run_time).toLocaleString('en-US', {
+                                const lastRun = latestRun?.completed_at
+                                    ? new Date(latestRun.completed_at).toLocaleString('en-US', {
                                         month: 'short',
                                         day: 'numeric',
                                         hour: 'numeric',
@@ -147,6 +155,7 @@
                                             </button>
                                         </td>
                                         <td>${statusButton}</td>
+                                        <td>${renderWorkflowResultBadge(workflow.global_id, latestRun)}</td>
                                         <td class="cell-xs">${lastRun}</td>
                                         <td class="cell-xs">${nextRun}</td>
                                         <td class="cell-xs subtle">${escapeHtml(description)}</td>
@@ -212,7 +221,55 @@
                     .badge-scheduled { background: rgb(var(--accent-primary) / 0.14); color: rgb(var(--accent-primary)); }
                     .badge-enabled { background: rgb(var(--bg-elevated)); color: rgb(var(--text-primary)); }
                     .badge-disabled { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
+                    .badge-result-completed { background: rgb(var(--state-success) / 0.16); color: rgb(var(--state-success)); }
+                    .badge-result-skipped { background: rgb(var(--text-secondary) / 0.14); color: rgb(var(--text-secondary)); }
+                    .badge-result-failed, .badge-result-timed_out { background: rgb(var(--state-error) / 0.16); color: rgb(var(--state-error)); }
+                    .badge-result-missed, .badge-result-cancelled { background: rgb(var(--state-warning) / 0.18); color: rgb(var(--state-warning)); }
                 </style>
+            `;
+        }
+
+        function renderWorkflowAttention(status, workflows, runByWorkflowId) {
+            const loadedIds = new Set(workflows.map(workflow => workflow.global_id));
+            const unhealthy = workflows
+                .map(workflow => ({ workflow, run: runByWorkflowId.get(workflow.global_id) }))
+                .filter(item => ['failed', 'timed_out', 'missed'].includes(item.run?.status));
+            const loadErrors = (status.configuration_errors || []).filter(error => {
+                const path = String(error.file_path || '');
+                return path.includes('/AssistantMD/Workflows/') || (
+                    error.workflow_name && !loadedIds.has(`${error.vault}/${error.workflow_name}`)
+                );
+            });
+            if (!unhealthy.length && !loadErrors.length) return '';
+
+            const items = [
+                ...unhealthy.map(item => `${item.workflow.global_id}: ${item.run.status}${item.run.reason ? ` — ${item.run.reason}` : ''}`),
+                ...loadErrors.map(error => `${error.workflow_name || error.file_path || 'Workflow'}: ${error.error_message || 'Failed to load'}`)
+            ];
+            return `
+                <div class="state-surface-error border p-3 mb-3 text-sm">
+                    <p class="font-semibold text-txt-primary">Workflow attention required</p>
+                    <ul class="mt-1 space-y-1 text-txt-secondary">
+                        ${items.slice(0, 5).map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+                    </ul>
+                    ${items.length > 5 ? `<p class="mt-1 text-xs text-txt-secondary">${items.length - 5} more issue(s)</p>` : ''}
+                </div>
+            `;
+        }
+
+        function renderWorkflowResultBadge(globalId, run) {
+            if (!run) return '<span class="subtle">—</span>';
+            const status = String(run.status || 'unknown').toLowerCase();
+            const label = status.replaceAll('_', ' ');
+            const title = run.reason || run.message || `View ${globalId} run history`;
+            return `
+                <button
+                    type="button"
+                    class="badge badge-result-${escapeHtml(status)}"
+                    data-dashboard-workflow-history="${escapeHtml(globalId)}"
+                    title="${escapeHtml(title)}"
+                    aria-label="View run history for ${escapeHtml(globalId)}"
+                >${escapeHtml(label)}</button>
             `;
         }
 
@@ -313,17 +370,23 @@
             return Number(a) - Number(b);
         }
 
-        function sortDashboardWorkflows(workflows, jobByWorkflowId) {
+        function sortDashboardWorkflows(workflows, jobByWorkflowId, runByWorkflowId) {
             const sort = state.dashboardWorkflowSort || { column: 'id', direction: 'asc' };
             const direction = sort.direction === 'asc' ? 1 : -1;
             return [...workflows].sort((a, b) => {
-                const compared = compareDashboardWorkflows(a, b, jobByWorkflowId, sort.column);
+                const compared = compareDashboardWorkflows(
+                    a,
+                    b,
+                    jobByWorkflowId,
+                    runByWorkflowId,
+                    sort.column
+                );
                 if (compared !== 0) return compared * direction;
                 return String(a.global_id || '').localeCompare(String(b.global_id || ''));
             });
         }
 
-        function compareDashboardWorkflows(a, b, jobByWorkflowId, column) {
+        function compareDashboardWorkflows(a, b, jobByWorkflowId, runByWorkflowId, column) {
             const aJob = jobByWorkflowId.get(a.global_id);
             const bJob = jobByWorkflowId.get(b.global_id);
             if (column === 'status') {
@@ -332,7 +395,10 @@
                 );
             }
             if (column === 'last_run') {
-                return compareOptionalDates(aJob?.last_run_time, bJob?.last_run_time);
+                return compareOptionalDates(
+                    runByWorkflowId.get(a.global_id)?.completed_at,
+                    runByWorkflowId.get(b.global_id)?.completed_at
+                );
             }
             if (column === 'next_run') {
                 return compareOptionalDates(aJob?.next_run_time, bJob?.next_run_time);
@@ -533,6 +599,13 @@
                     const editButton = target.closest('[data-dashboard-workflow-edit]');
                     if (editButton instanceof HTMLElement) {
                         callbacks.openWorkflowFileEditor(editButton.getAttribute('data-dashboard-workflow-edit') || '');
+                        return;
+                    }
+                    const historyButton = target.closest('[data-dashboard-workflow-history]');
+                    if (historyButton instanceof HTMLElement) {
+                        callbacks.openWorkflowRunHistory(
+                            historyButton.getAttribute('data-dashboard-workflow-history') || ''
+                        );
                         return;
                     }
                     const toggleButton = target.closest('[data-dashboard-workflow-toggle]');

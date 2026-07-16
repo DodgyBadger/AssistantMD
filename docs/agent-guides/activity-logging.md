@@ -23,6 +23,18 @@ For each user-visible operation, activity logging should answer:
 - Avoid sensitive or bulky values: never log secret values, full prompts, full tool arguments, full model outputs, or imported document text. Prefer counts, lengths, paths, refs, hashes, and short errors.
 - Use stable subsystem tags. Do not create many near-duplicate ad hoc tags for the same user workflow.
 
+## Retention And Inspection
+
+System Activity rotates daily in UTC and retains up to 30 days, bounded by a
+100 MiB total-size ceiling. The API reads the newest data across the active log
+and retained segments rather than treating `activity.log` as the complete
+history. Its response remains byte-bounded, so the UI reports when the loaded
+window is truncated.
+
+Keep events compact enough that the default retained window covers useful wall
+time. Large diagnostic arrays belong in validation artifacts even when a compact
+summary of the same decision belongs in System Activity.
+
 ## Validation Sink
 
 Use `logger.set_sinks(["validation"])` for events that should only support scenario assertions or local debugging.
@@ -74,7 +86,7 @@ Failures should include `error_type` and a concise `error`. Add tracebacks only 
 
 - Can the activity log be filtered by a user-known identity such as session id, workflow name, filename, or workspace?
 - Is the event stable enough for validation and future audits?
-- Is the row compact enough for a byte-limited activity-log tail?
+- Is the row compact enough for a byte-limited retained activity window?
 - Did helper-level success noise stay out of System Activity?
 - Does the failure path include enough information to decide the next inspection step?
 - Are secrets, prompts, large outputs, and document contents excluded?
