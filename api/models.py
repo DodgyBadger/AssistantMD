@@ -1181,13 +1181,34 @@ class SecretUpdateRequest(BaseModel):
     value: Optional[str] = Field(None, description="New value for the secret (empty to clear)")
 
 
+class SystemActivityEntryInfo(BaseModel):
+    """One parsed retained System Activity entry."""
+
+    id: str = Field(..., description="Stable identifier within the retained log window")
+    timestamp: datetime = Field(..., description="Event timestamp")
+    level: str = Field(..., description="Normalized log level")
+    tag: str = Field(..., description="Subsystem tag")
+    message: str = Field(..., description="Diagnostic message")
+    boot_id: Optional[int] = Field(None, description="Runtime boot id when available")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Structured diagnostic metadata")
+
+
 class SystemLogResponse(BaseModel):
-    """Response containing contents of the system activity log."""
-    content: str = Field(..., description="Rendered contents of the activity log")
-    truncated: bool = Field(False, description="Whether the log output was truncated")
-    path: str = Field(..., description="Filesystem path to the activity log")
-    size_bytes: int = Field(..., description="Total size of the activity log in bytes")
-    shown_bytes: int = Field(..., description="Number of bytes included in this response")
+    """One structured page from retained System Activity."""
+
+    entries: List[SystemActivityEntryInfo] = Field(
+        default_factory=list,
+        description="Parsed entries ordered newest first",
+    )
+    next_cursor: Optional[str] = Field(None, description="Opaque cursor for the next older page")
+    earliest_retained_timestamp: Optional[datetime] = Field(
+        None,
+        description="Timestamp of the oldest retained parseable entry",
+    )
+    total_matching: int = Field(0, description="Matching entries at and older than this page")
+    retained_size_bytes: int = Field(0, description="Total bytes across retained activity segments")
+    available_levels: List[str] = Field(default_factory=list, description="Levels present in retained history")
+    available_tags: List[str] = Field(default_factory=list, description="Tags present in retained history")
 
 
 class SystemSettingsResponse(BaseModel):

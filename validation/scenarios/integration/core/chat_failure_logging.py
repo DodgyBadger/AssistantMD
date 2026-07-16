@@ -3,6 +3,7 @@ Integration scenario that forces chat execution failure and verifies the
 activity log captures session-scoped diagnostics.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -52,7 +53,7 @@ class ChatFailureLoggingScenario(BaseScenario):
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = activity_log.json()["content"]
+            content = json.dumps(activity_log.json()["entries"])
 
             assert '"message": "Chat task request accepted"' in content, (
                 "Activity log should include chat request acceptance"

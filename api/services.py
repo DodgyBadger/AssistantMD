@@ -22,6 +22,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
 from core.logger import UnifiedLogger
+from core.activity_log import iter_activity_export, query_activity_log
 from core.constants import INLINE_EDIT_DENIAL_MESSAGE
 from core.chat.chat_store import ChatStore
 from core.runtime.state import get_runtime_context, RuntimeStateError
@@ -3714,78 +3715,64 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> Dict[str, Any]:
         raise SystemConfigurationError(error_msg) from e
 
 
-async def get_system_activity_log(limit_bytes: int = 2_097_152) -> SystemLogResponse:
-    """
-    Read the system activity log with optional truncation.
-
-    Args:
-        limit_bytes: Maximum number of bytes to include from the end of the log.
-
-    Returns:
-        SystemLogResponse with the log contents.
-    """
+async def get_system_activity_log(
+    *,
+    limit: int = 200,
+    cursor: str | None = None,
+    levels: tuple[str, ...] = (),
+    tags: tuple[str, ...] = (),
+    search: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> SystemLogResponse:
+    """Return one filtered newest-first page from retained System Activity."""
     log_path = get_system_root() / "activity.log"
 
-    if limit_bytes is None or limit_bytes <= 0:
-        limit_bytes = 2_097_152
+    try:
+        page = query_activity_log(
+            log_path,
+            limit=limit,
+            cursor=cursor,
+            levels=levels,
+            tags=tags,
+            search=search,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except ValueError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidActivityCursor",
+            message=str(exc),
+        ) from exc
+    except OSError as exc:
+        raise SystemConfigurationError(f"Failed to query activity log: {exc}") from exc
 
-    max_response_bytes = 8_388_608
-    limit_bytes = min(limit_bytes, max_response_bytes)
-
-    segments = sorted(
-        (
-            path
-            for path in log_path.parent.glob(f"{log_path.name}.*")
-            if path.is_file() and not path.name.endswith(".lock")
-        ),
-        key=lambda path: path.stat().st_mtime,
-    )
-    if log_path.exists():
-        segments.append(log_path)
-
-    if not segments:
+    if not page.entries:
         return SystemLogResponse(
-            content="No activity log found yet. Interact with the system to generate entries.",
-            truncated=False,
-            path=str(log_path),
-            size_bytes=0,
-            shown_bytes=0
+            entries=[],
+            next_cursor=None,
+            earliest_retained_timestamp=page.earliest_retained_timestamp,
+            total_matching=page.total_matching,
+            retained_size_bytes=page.total_size_bytes,
+            available_levels=page.available_levels,
+            available_tags=page.available_tags,
         )
 
-    try:
-        segment_sizes = [(path, path.stat().st_size) for path in segments]
-    except Exception as exc:
-        raise SystemConfigurationError(f"Failed to read activity log: {exc}") from exc
-
-    size_bytes = sum(size for _, size in segment_sizes)
-    remaining = limit_bytes
-    chunks: list[bytes] = []
-    try:
-        for path, segment_size in reversed(segment_sizes):
-            if remaining <= 0:
-                break
-            with path.open("rb") as handle:
-                if segment_size > remaining:
-                    handle.seek(-remaining, 2)
-                chunk = handle.read(min(segment_size, remaining))
-            chunks.append(chunk)
-            remaining -= len(chunk)
-    except Exception as exc:
-        raise SystemConfigurationError(f"Failed to read activity log: {exc}") from exc
-
-    raw_bytes = b"".join(reversed(chunks))
-    truncated = size_bytes > len(raw_bytes)
-
-    content = raw_bytes.decode("utf-8", errors="replace")
-    shown_bytes = len(raw_bytes)
-
     return SystemLogResponse(
-        content=content,
-        truncated=truncated,
-        path=str(log_path),
-        size_bytes=size_bytes,
-        shown_bytes=shown_bytes
+        entries=page.entries,
+        next_cursor=page.next_cursor,
+        earliest_retained_timestamp=page.earliest_retained_timestamp,
+        total_matching=page.total_matching,
+        retained_size_bytes=page.total_size_bytes,
+        available_levels=page.available_levels,
+        available_tags=page.available_tags,
     )
+
+
+def export_system_activity_log():
+    """Yield retained raw System Activity JSONL in chronological order."""
+    return iter_activity_export(get_system_root() / "activity.log")
 
 
 def _build_settings_response(path: Path) -> SystemSettingsResponse:

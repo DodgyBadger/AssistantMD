@@ -43,6 +43,12 @@ During `setup_scheduler_jobs(...)`:
 - **replace**: trigger or workflow function changed.
 - **remove**: workflow disabled/removed/schedule removed.
 
+System Activity receives one compact sync summary containing counts and the
+manual-reload decision. Per-workflow records and complete loaded/scheduled/
+disabled arrays are validation-only. Meaningful create, replace, and remove
+events remain individually searchable without repeating the full workflow set
+on every synchronization.
+
 ## Job args contract
 
 Workflow jobs run with picklable lightweight args from `create_job_args(...)`:

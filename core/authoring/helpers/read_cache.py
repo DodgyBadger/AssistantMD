@@ -31,7 +31,7 @@ async def execute(
 ) -> RetrievedItem:
     host = context.host
     ref = _parse_call(call)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_read_cache_started",
         data={
             "workflow_id": context.workflow_id,
@@ -67,7 +67,7 @@ async def execute(
             metadata=metadata,
         )
 
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_read_cache_completed",
         data={
             "workflow_id": context.workflow_id,

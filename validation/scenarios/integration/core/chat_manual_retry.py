@@ -1,6 +1,7 @@
 """Integration scenario for manually retrying interrupted chat turns."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -156,7 +157,7 @@ class ChatManualRetryScenario(BaseScenario):
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = activity_log.json()["content"]
+            content = json.dumps(activity_log.json()["entries"])
             assert '"event": "chat_manual_retry_started"' in content, (
                 "Activity log should include manual retry start evidence"
             )

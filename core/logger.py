@@ -7,8 +7,10 @@ import json
 import logging
 import os
 import inspect
+import fcntl
+import time
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
@@ -20,6 +22,11 @@ from logfire.sampling import SamplingOptions
 import yaml
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import get_general_settings
+from core.activity_log import (
+    DEFAULT_MAX_TOTAL_BYTES,
+    DEFAULT_RETENTION_DAYS,
+    prune_activity_segments,
+)
 from core.runtime.paths import get_system_root
 from core.runtime import state as runtime_state
 
@@ -43,39 +50,65 @@ _NOISY_LOGFIRE_MESSAGES = frozenset(
     }
 )
 _NOISY_PYDANTIC_SCHEMAS = frozenset({"nullable", "union"})
-ACTIVITY_LOG_RETENTION_DAYS = 30
-ACTIVITY_LOG_MAX_TOTAL_BYTES = 100 * 1024 * 1024
+ACTIVITY_LOG_RETENTION_DAYS = DEFAULT_RETENTION_DAYS
+ACTIVITY_LOG_MAX_TOTAL_BYTES = DEFAULT_MAX_TOTAL_BYTES
 
 
 class _BoundedTimedActivityHandler(TimedRotatingFileHandler):
-    """Rotate activity daily and cap retained segments by total bytes."""
+    """Serialize daily rollover and appends across application processes."""
+
+    def __init__(self, filename: Path, **kwargs: Any) -> None:
+        self._lock_path = Path(f"{filename}.lock")
+        super().__init__(filename, **kwargs)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock_path.open("a+b") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                self._reopen_if_rotated()
+                if self.shouldRollover(record):
+                    self.doRollover()
+                logging.FileHandler.emit(self, record)
+                self.flush()
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+    def _reopen_if_rotated(self) -> None:
+        active_path = Path(self.baseFilename)
+        if self.stream is None or not active_path.exists():
+            return
+        try:
+            stream_stat = os.fstat(self.stream.fileno())
+            active_stat = active_path.stat()
+        except (OSError, ValueError):
+            return
+        if (stream_stat.st_dev, stream_stat.st_ino) == (active_stat.st_dev, active_stat.st_ino):
+            return
+        self.stream.close()
+        self.stream = self._open()
+        self.rolloverAt = self.computeRollover(int(time.time()))
 
     def doRollover(self) -> None:
         super().doRollover()
         self._prune_total_size()
 
     def _prune_total_size(self) -> None:
-        active_path = Path(self.baseFilename)
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)).timestamp()
-        segments = sorted(
-            (
-                path
-                for path in active_path.parent.glob(f"{active_path.name}.*")
-                if path.is_file() and not path.name.endswith(".lock")
-            ),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
+        prune_activity_segments(
+            Path(self.baseFilename),
+            retention_days=ACTIVITY_LOG_RETENTION_DAYS,
+            max_total_bytes=ACTIVITY_LOG_MAX_TOTAL_BYTES,
         )
-        retained_bytes = active_path.stat().st_size if active_path.exists() else 0
-        for segment in segments:
-            if segment.stat().st_mtime < cutoff:
-                segment.unlink(missing_ok=True)
-                continue
-            size = segment.stat().st_size
-            if retained_bytes + size <= ACTIVITY_LOG_MAX_TOTAL_BYTES:
-                retained_bytes += size
-                continue
-            segment.unlink(missing_ok=True)
+
+    def prune_now(self) -> None:
+        """Run startup pruning under the same inter-process writer lock."""
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock_path.open("a+b") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                self._prune_total_size()
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 class _LogfireNoiseFilteringSampler(Sampler):
@@ -210,7 +243,7 @@ def _ensure_activity_logger() -> logging.Logger:
             utc=True,
             encoding="utf-8",
         )
-        handler._prune_total_size()
+        handler.prune_now()
         handler.setFormatter(logging.Formatter("%(message)s"))
 
         logger = logging.getLogger("project_assistant.activity")

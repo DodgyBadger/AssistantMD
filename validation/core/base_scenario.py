@@ -54,7 +54,10 @@ class BaseScenario(ABC):
     def __init__(self):
         """Initialize scenario with evidence collection and control systems."""
         self.scenario_name = self.__class__.__name__.replace("Test", "").replace("Scenario", "")
-        self.logger = UnifiedLogger(tag=f"scenario-v2-{self.scenario_name.lower()}")
+        self.logger = UnifiedLogger(
+            tag=f"scenario-v2-{self.scenario_name.lower()}",
+            default_sinks=["validation", "logfire"],
+        )
         
         # Create run directory for this scenario
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

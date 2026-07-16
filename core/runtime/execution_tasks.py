@@ -621,7 +621,12 @@ class TaskCoordinator:
             data["step_id"] = step_id
         if extra:
             data.update(extra)
-        self._logger.add_sink("validation").info(
+        log = (
+            self._logger.set_sinks(["validation"])
+            if event in {"execution_task_metadata_updated", "execution_task_heartbeat"}
+            else self._logger.add_sink("validation")
+        )
+        log.info(
             event,
             data=data,
         )

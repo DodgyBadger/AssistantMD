@@ -6,6 +6,7 @@ workspace-local orientation files, and bounded user notes without depending on
 the internal structure of those markdown files.
 """
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -200,7 +201,7 @@ This workspace intentionally has no README.
 
         activity_log = self.call_api("/api/system/activity-log")
         self.soft_assert_equal(activity_log.status_code, 200, "Activity log fetch should succeed")
-        activity_content = activity_log.json()["content"]
+        activity_content = json.dumps(activity_log.json()["entries"])
         self.soft_assert(
             '"event": "context_template_run_completed"' in activity_content,
             "Expected activity log to include context-template completion event",

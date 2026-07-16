@@ -64,11 +64,20 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 - `/api/vaults/{vault_name}/files/revisions/{snapshot_id}/restore` restores a retained revision under optimistic concurrency and records a new Explorer mutation.
 - `/api/vault-state/cleanup` deletes expired vault activity, mutation, and retained task snapshot artifacts.
 - `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution.
+- `/api/system/activity-log` returns newest-first parsed System Activity entries
+  with opaque cursor pagination and server-side time, level, tag, and text
+  filters across retained daily segments. It includes the earliest retained
+  timestamp and available filter values. `/api/system/activity-log/export`
+  streams the retained raw JSONL history in chronological order.
 - `/api/chat/sessions/{session_id}/active-task` and `/api/chat/sessions/{session_id}/cancel` expose chat-session-scoped task lookup and cancellation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.
 - Interactive API docs are available at `/docs` (Swagger UI) and `/openapi.json` (OpenAPI schema).
 - The OpenAPI schema is the source of truth for endpoint shapes.
 - Security: no built-in auth/TLS by default; if deployed remotely, place behind network/auth controls.
+
+The System Activity viewer submits filters to the server, loads older pages on
+demand, and can export the retained raw history. Superseded searches are
+cancelled in the browser so slower responses cannot replace newer results.
 
 ## Inline Review UI
 

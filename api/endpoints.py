@@ -2,9 +2,10 @@
 API endpoint implementations for the AssistantMD system.
 """
 
+from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 
@@ -154,6 +155,7 @@ from .services import (
     submit_chat_deferred_review,
     delete_chat_session,
     get_system_activity_log,
+    export_system_activity_log,
     get_system_settings,
     update_system_settings,
     repair_settings_from_template,
@@ -460,14 +462,38 @@ async def get_status():
 
 
 @router.get("/system/activity-log", response_model=SystemLogResponse)
-async def system_activity_log(limit_bytes: int = 2_097_152):
-    """
-    Retrieve the system activity log, optionally truncated to the provided limit.
-    """
+async def system_activity_log(
+    limit: int = 200,
+    cursor: str | None = None,
+    level: List[str] | None = Query(None),
+    tag: List[str] | None = Query(None),
+    search: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+):
+    """Retrieve one filtered page from retained System Activity."""
     try:
-        return await get_system_activity_log(limit_bytes)
+        return await get_system_activity_log(
+            limit=limit,
+            cursor=cursor,
+            levels=tuple(level or ()),
+            tags=tuple(tag or ()),
+            search=search,
+            start_time=start_time,
+            end_time=end_time,
+        )
     except Exception as e:
         return create_error_response(e)
+
+
+@router.get("/system/activity-log/export")
+async def system_activity_log_export():
+    """Download all retained raw System Activity JSONL segments."""
+    return StreamingResponse(
+        export_system_activity_log(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": 'attachment; filename="assistantmd-activity.jsonl"'},
+    )
 
 
 #######################################################################

@@ -1,5 +1,6 @@
 """Integration scenario for agent-safe model/API failure classification."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -100,7 +101,7 @@ class ModelFailureClassificationScenario(BaseScenario):
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = activity_log.json()["content"]
+            content = json.dumps(activity_log.json()["entries"])
             assert '"failure_kind": "billing"' in content, (
                 "Activity log should include model failure classification"
             )

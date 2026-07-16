@@ -3,6 +3,7 @@ Integration scenario that forces streaming chat execution failure and verifies
 the activity log captures generator-path diagnostics.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -137,7 +138,7 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = activity_log.json()["content"]
+            content = json.dumps(activity_log.json()["entries"])
 
             assert '"message": "Streaming chat execution started"' in content, (
                 "Activity log should include streaming start"

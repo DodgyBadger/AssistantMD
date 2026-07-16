@@ -28,7 +28,7 @@ set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 from validation.core.runner import ValidationRunner  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
 
-logger = UnifiedLogger(tag="validation-cli")
+logger = UnifiedLogger(tag="validation-cli", default_sinks=["validation", "logfire"])
 
 
 def expand_scenario_paths(runner, scenario_specs, *, allow_unmatched: bool = True):

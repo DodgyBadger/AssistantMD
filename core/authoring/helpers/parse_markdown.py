@@ -34,7 +34,7 @@ async def execute(
     context: AuthoringExecutionContext,
 ) -> ParsedMarkdown:
     source = _parse_source(call)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_parse_markdown_started",
         data={
             "workflow_id": context.workflow_id,
@@ -42,7 +42,7 @@ async def execute(
         },
     )
     parsed = parse_markdown_content(source)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_parse_markdown_completed",
         data={
             "workflow_id": context.workflow_id,

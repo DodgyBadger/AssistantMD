@@ -12,6 +12,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - `core/runtime/execution_tasks.py`
 - `core/runtime/workflow_governor.py`
 - `core/workflow_runs/`
+- `core/activity_log.py`
 - `core/system_migrations.py`
 
 ## Responsibilities
@@ -98,11 +99,22 @@ Reload behavior:
 ## System Activity
 
 `core.logger` writes user-facing JSONL diagnostics to `system/activity.log`.
-The active file rotates daily in UTC. Retained segments are kept for up to 30
-days with a 100 MiB total ceiling, and the System Activity API assembles a
-bounded newest-first window across those segments. Validation-runner lifecycle
-messages use validation artifacts and Logfire rather than the persistent user
-activity file.
+The active file rotates daily in UTC under an inter-process lock so concurrent
+application processes cannot split or overwrite a rollover. Retained segments
+are kept for up to 30 days with a 100 MiB total ceiling; expiration and size
+pruning remove the oldest segments first.
+
+`core.activity_log` owns retained-segment discovery, pruning, structured query,
+cursor pagination, and chronological raw export. The System Activity API
+supports server-side time, level, tag, and free-text filters across all retained
+segments and reports the earliest parseable retained timestamp. The System UI
+loads newest entries first and requests older pages explicitly.
+
+Validation CLI, runner, scenario, and controller lifecycle messages use
+validation artifacts and Logfire rather than the persistent user activity file.
+Helper-level authoring events and execution-task heartbeats/metadata updates are
+also validation-only; user-visible starts, terminal outcomes, warnings, and
+failures remain in System Activity.
 
 ## Execution Task Coordination
 

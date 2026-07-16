@@ -37,7 +37,7 @@ async def execute(
     selection, limit = _parse_call(call)
     vault_name = _vault_name_from_workflow_id(context.workflow_id)
     active_session_id = getattr(context.host, "chat_session_id", None)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_sessions_started",
         data={
             "workflow_id": context.workflow_id,
@@ -99,7 +99,7 @@ async def execute(
             "limit": limit,
         },
     )
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_sessions_completed",
         data={
             "workflow_id": context.workflow_id,

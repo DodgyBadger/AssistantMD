@@ -59,7 +59,7 @@ async def execute(
             state_manager=host.state_manager,
             vault_path=host.vault_path or "",
         )
-        logger.add_sink("validation").info(
+        logger.set_sinks(["validation"]).info(
             "authoring_pending_files_filtered",
             data={
                 "workflow_id": context.workflow_id,
@@ -80,7 +80,7 @@ async def execute(
             vault_path=host.vault_path or "",
         )
         host.state_manager.mark_files_processed(file_records)
-        logger.add_sink("validation").info(
+        logger.set_sinks(["validation"]).info(
             "authoring_pending_files_completed",
             data={
                 "workflow_id": context.workflow_id,
@@ -282,7 +282,7 @@ def _capture_completion_baselines(
 ) -> int:
     task = get_current_execution_task()
     if task is None:
-        logger.add_sink("validation").warning(
+        logger.set_sinks(["validation"]).warning(
             "pending_files_snapshot_skipped",
             data={
                 "event": "pending_files_snapshot_skipped",
@@ -332,7 +332,7 @@ def _capture_completion_baselines(
         session.commit()
 
     if snapshot_count:
-        logger.add_sink("validation").info(
+        logger.set_sinks(["validation"]).info(
             "pending_files_snapshots_recorded",
             data={
                 "event": "pending_files_snapshots_recorded",

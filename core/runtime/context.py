@@ -165,7 +165,7 @@ class RuntimeContext:
         )
 
     async def _refresh_vault_state_in_background(self, *, reason: str) -> None:
-        self.logger.add_sink("validation").info(
+        self.logger.set_sinks(["validation"]).info(
             "Starting background vault-state refresh",
             data={
                 "event": "vault_state_background_refresh_started",
@@ -190,7 +190,7 @@ class RuntimeContext:
                 },
             )
             return
-        self.logger.add_sink("validation").info(
+        self.logger.set_sinks(["validation"]).info(
             "Background vault-state refresh completed",
             data={
                 "event": "vault_state_background_refresh_completed",

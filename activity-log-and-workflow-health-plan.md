@@ -280,9 +280,28 @@ Validation must prove:
 - model-facing tool behavior remains recoverable and receives the same
   structured error details rather than a raised Monty-specific exception.
 
-After this hardening slice, continue Feature Development with cursor pagination
-and server-side filtering for retained System Activity. The durable workflow
-ledger, Dashboard health and run-history surface, daily retained activity
-segments, multi-segment API reads, and primary validation/scheduler noise
-reductions are implemented. A broader emitter audit and raw retained-log export
-remain open.
+## Implementation Outcome
+
+Completed on `dev/inline-editor`:
+
+- Durable workflow runs now provide restart-safe latest outcomes and retained
+  per-workflow history across scheduler, API, tool, and system sources.
+- Dashboard workflow health separates configuration state from latest execution
+  outcome and exposes unhealthy summaries, load errors, and run history.
+- Structured tool failures propagate truthfully through Monty, execution tasks,
+  the workflow governor, and durable workflow results. Authored scripts use
+  narrow Python exception handling and explicit `finish(...)` outcomes.
+- System Activity rotates daily under an inter-process writer lock, retains up
+  to 30 days under a 100 MiB ceiling, and removes expired or oldest oversized
+  segments deterministically.
+- The System Activity API provides parsed newest-first entries, opaque cursor
+  pagination, server-side time/level/tag/text filtering, earliest-retained
+  metadata, and chronological raw JSONL export.
+- The System UI searches retained history, loads older pages, exports raw
+  diagnostics, and rejects stale superseded search responses.
+- Validation orchestration and helper-level authoring events are isolated from
+  persistent System Activity. Scheduler sync activity is compact, while
+  meaningful lifecycle outcomes, warnings, and failures remain visible.
+
+The focused workflow-history, authoring-failure, and retained-activity scenarios
+own these contracts. Full validation remains maintainer-owned.

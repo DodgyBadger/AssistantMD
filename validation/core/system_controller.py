@@ -43,7 +43,10 @@ class SystemController:
     
     def __init__(self, run_path: Path):
         self.run_path = run_path
-        self.logger = UnifiedLogger(tag="system-controller")
+        self.logger = UnifiedLogger(
+            tag="system-controller",
+            default_sinks=["validation", "logfire"],
+        )
         self.is_running = False
         self._process: Optional[subprocess.Popen] = None
 

@@ -124,7 +124,7 @@ class DelegateTool(BaseTool):
                     tools=binding.tool_functions,
                     instructions="",
                 )
-                logger.add_sink("validation").info(
+                logger.set_sinks(["validation"]).info(
                     "delegate_tool_binding_resolved",
                     data={
                         "workflow_id": session_id,

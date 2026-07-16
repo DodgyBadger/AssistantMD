@@ -469,7 +469,10 @@
                             <p class="text-sm text-txt-secondary">
                                 Runtime events are written to <code>system/activity.log</code>. Refresh to load the latest entries.
                             </p>
-                            <button id="refresh-activity-log" type="button" class="ui-icon-button is-primary self-start md:self-auto" data-icon="refresh" data-icon-label="Refresh Activity Log"></button>
+                            <div class="flex items-center gap-2 self-start md:self-auto">
+                                <a href="api/system/activity-log/export" class="ui-icon-button" data-icon="download" data-icon-label="Export retained activity"></a>
+                                <button id="refresh-activity-log" type="button" class="ui-icon-button is-primary" data-icon="refresh" data-icon-label="Refresh Activity Log"></button>
+                            </div>
                         </div>
                         <div class="activity-log-controls">
                             <label class="block">
@@ -517,6 +520,7 @@
                         <div class="border border-border-primary rounded-md overflow-hidden">
                             <div id="activity-log-viewer" class="overflow-y-auto text-sm font-mono text-txt-primary max-h-96">Loading system log...</div>
                         </div>
+                        <button id="load-older-activity-log" type="button" class="ui-button-secondary text-sm hidden">Load older</button>
                     </div>
                 </details>
 

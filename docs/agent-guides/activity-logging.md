@@ -28,8 +28,9 @@ For each user-visible operation, activity logging should answer:
 System Activity rotates daily in UTC and retains up to 30 days, bounded by a
 100 MiB total-size ceiling. The API reads the newest data across the active log
 and retained segments rather than treating `activity.log` as the complete
-history. Its response remains byte-bounded, so the UI reports when the loaded
-window is truncated.
+history. Structured responses are entry-bounded and cursor-paginated; filters
+run on the server across retained history, and raw JSONL is available through
+the export endpoint.
 
 Keep events compact enough that the default retained window covers useful wall
 time. Large diagnostic arrays belong in validation artifacts even when a compact
