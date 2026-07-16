@@ -47,8 +47,8 @@ def _parse_call(call: AuthoringCapabilityCall) -> tuple[str, str]:
     if unknown:
         raise ValueError(f"Unsupported finish arguments: {', '.join(unknown)}")
     status = str(call.kwargs.get("status") or "completed").strip().lower()
-    if status not in {"completed", "skipped"}:
-        raise ValueError("finish status must be one of: completed, skipped")
+    if status not in {"completed", "skipped", "failed"}:
+        raise ValueError("finish status must be one of: completed, skipped, failed")
     reason = str(call.kwargs.get("reason") or "").strip()
     return status, reason
 
@@ -63,7 +63,7 @@ def _contract() -> dict[str, object]:
             "status": {
                 "type": "string",
                 "required": False,
-                "description": "Terminal status. Supported values are completed and skipped.",
+                "description": "Terminal status. Supported values are completed, skipped, and failed.",
             },
             "reason": {
                 "type": "string",
@@ -79,6 +79,10 @@ def _contract() -> dict[str, object]:
             {
                 "code": 'await finish(status="skipped", reason="No inputs matched today.")',
                 "description": "Exit early without treating the workflow as a failure.",
+            },
+            {
+                "code": 'await finish(status="failed", reason="Required model is unavailable.")',
+                "description": "Report an intentional domain failure with a concise reason.",
             },
         ],
     }

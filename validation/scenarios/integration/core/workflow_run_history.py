@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 import core.runtime.workflow_governor as governor_module
 import core.scheduling.job_history as job_history_module
-from api.services import collect_scheduler_status
+from api.services import _project_latest_workflow_runs, collect_scheduler_status
 from core.authoring.workflow_execution import WorkflowExecutionResult
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
@@ -151,6 +151,37 @@ class WorkflowRunHistoryScenario(BaseScenario):
                 status="completed",
             )
             pruned_old_run = reloaded_store.get_run(old_run.run_id)
+
+            template_old_time = datetime.now(UTC) - timedelta(minutes=2)
+            reloaded_store.record_terminal_run(
+                workflow_id="FirstVault/system/nightly-session-summarization",
+                workflow_name="system/nightly-session-summarization",
+                vault_name="FirstVault",
+                source="api",
+                status="completed",
+                completed_at=template_old_time,
+            )
+            reloaded_store.record_terminal_run(
+                workflow_id="SecondVault/system/nightly-session-summarization",
+                workflow_name="system/nightly-session-summarization",
+                vault_name="SecondVault",
+                source="api",
+                status="skipped",
+                reason="no sessions pending",
+            )
+            template_history = reloaded_store.list_runs_by_workflow_name(
+                "system/nightly-session-summarization"
+            )
+            projected_runs = _project_latest_workflow_runs(
+                workflow_summaries=[],
+                system_workflow_templates=[
+                    SimpleNamespace(name="nightly-session-summarization")
+                ],
+                latest_runs=reloaded_store.list_latest_runs(),
+            )
+            projected_template_run = projected_runs.get(
+                "system/nightly-session-summarization"
+            )
         finally:
             governor_module.execute_workflow_by_id = original_execute
             governor_module.get_workflow_task_timeout_seconds = original_timeout
@@ -212,6 +243,21 @@ class WorkflowRunHistoryScenario(BaseScenario):
         self.soft_assert(
             pruned_old_run is None,
             "Retention should prune an expired outcome after a newer terminal run exists",
+        )
+        self.soft_assert_equal(
+            [run.vault_name for run in template_history],
+            ["SecondVault", "FirstVault"],
+            "System template history should include attempts from every target vault",
+        )
+        self.soft_assert_equal(
+            projected_template_run.get("status") if projected_template_run else None,
+            "skipped",
+            "System template rows should project the latest cross-vault outcome",
+        )
+        self.soft_assert_equal(
+            projected_template_run.get("vault_name") if projected_template_run else None,
+            "SecondVault",
+            "System template latest outcomes should retain their target vault",
         )
 
         self.teardown_scenario()

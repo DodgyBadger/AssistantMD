@@ -215,8 +215,74 @@ the repository validation workflow.
 
 ## Next Phase
 
-Continue Feature Development with cursor pagination and server-side filtering
-for retained System Activity. The durable workflow ledger, Dashboard health and
-run-history surface, daily retained activity segments, multi-segment API reads,
-and primary validation/scheduler noise reductions are implemented. A broader
-emitter audit and raw retained-log export remain open.
+### Workflow Failure Semantics Hardening
+
+Before expanding retained System Activity queries, correct the authoring failure
+boundary exposed by durable workflow health. A direct Monty tool call currently
+uses the existing `ScriptToolResult` contract, but failed `ToolReturn` values are
+normalized into ordinary script results rather than raised as Python errors.
+Tools such as `session_ops` and `workflow_run` can also return plain error text,
+which leaves the adapter no reliable failure signal. A script can therefore
+reach its final expression and report `completed` after every mandatory tool
+call failed.
+
+Keep one truthful tool implementation while adapting it for its two consumers:
+
+- model-facing Pydantic AI calls receive structured `ToolReturn` failures so the
+  agent can inspect, explain, or retry them;
+- Monty direct calls translate a structured failed `ToolReturn` into a
+  normalized runtime error at the existing direct-tool binding layer;
+- scripts use normal `try`/`except` when a failure is expected, such as probing
+  for an optional file, while uncaught mandatory-tool failures naturally fail
+  the workflow;
+- `finish(...)` accepts an explicit `failed` terminal status for intentional
+  domain failures that are not exceptions;
+- final-expression dictionaries remain output data and do not implicitly set
+  workflow status.
+
+Do not add a second result protocol or require every script to inspect
+`metadata["status"]` after every call. Preserve `ScriptToolResult` for successful
+direct calls. The host-side exception should carry the tool name, operation,
+concise reason, and available failure classification when the tool-return
+metadata identifies a failure. Monty currently exposes external failures through
+its built-in exception taxonomy, so authored code catches a narrowly scoped
+`RuntimeError` rather than importing a host-defined exception class.
+
+Implementation scope:
+
+- audit direct-callable tools for plain-string error returns and normalize them
+  to structured failure envelopes, starting with `session_ops` and
+  `workflow_run`;
+- add the authoring exception and failed-result translation to the shared Monty
+  direct-tool binding path rather than individual tools;
+- expand and document the `finish` terminal-status contract;
+- derive `WorkflowExecutionResult.success` from terminal status instead of
+  always setting it to true, while retaining the governor's existing
+  status-authoritative persistence behavior;
+- update packaged workflows to catch only expected failures and allow mandatory
+  failures to propagate, including model/delegate failures in nightly session
+  summarization and nightly user-notes compaction;
+- document upgrade guidance for custom authoring scripts that intentionally
+  branch on failed tool results.
+
+Validation must prove:
+
+- a model configuration failure inside `session_ops.summarize_session` becomes
+  one durable failed workflow run with the real reason;
+- an uncaught structured tool failure fails Monty execution and the execution
+  task, governor result, and durable workflow result agree;
+- a script can catch the built-in runtime error around an expected probe and
+  continue or finish as skipped;
+- `finish(status="failed")` produces a failed result without manufacturing a
+  runtime exception;
+- packaged workflows never report completed after required model, delegate, or
+  mutation calls fail;
+- model-facing tool behavior remains recoverable and receives the same
+  structured error details rather than a raised Monty-specific exception.
+
+After this hardening slice, continue Feature Development with cursor pagination
+and server-side filtering for retained System Activity. The durable workflow
+ledger, Dashboard health and run-history surface, daily retained activity
+segments, multi-segment API reads, and primary validation/scheduler noise
+reductions are implemented. A broader emitter audit and raw retained-log export
+remain open.

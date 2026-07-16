@@ -72,7 +72,7 @@ Available helpers and reserved inputs:
 - `assemble_context(...)`: build structured message history for downstream chat-style generation
 - `read_cache(...)`: open one cached oversized tool result by cache ref inside the current runtime context
 - `parse_markdown(...)`: turn markdown into frontmatter, sections, headings, code blocks, and image refs
-- `finish(...)`: end the script intentionally with a `completed` or `skipped` terminal status
+- `finish(...)`: end the script intentionally with a `completed`, `skipped`, or `failed` terminal status
 - `date`: resolve common date tokens — `date.today()`, `date.this_week()`, etc.; pass `fmt` for strftime formatting
 - `latest_message`: read-only latest message metadata for context script decision making
 
@@ -103,6 +103,8 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 - direct tool results expose `return_value`, `metadata`, `content`, and `items`
 - use `result.return_value` for the canonical tool result; `content` is reserved for Pydantic AI side-loaded content
 - every bound direct tool includes `result.metadata["tool_name"]`; prefer branching on `result.metadata["status"]` when the tool reports structured status
+- a structured direct-tool status of `error` or `failed` raises `RuntimeError` in Monty; catch it only around a call whose failure is an expected branch
+- non-error outcomes such as `not_found` remain `ScriptToolResult` values and can be inspected through metadata
 - do not parse the human-readable `return_value` from list/search tools when a structured field exists; use `result.items`, `result.metadata`, or a more specific tool operation
 - mutating scripts should receive an explicit bounded target list from the caller; they should not recursively discover their own target set
 
@@ -130,7 +132,7 @@ Use ordinary Python for filtering, sorting, selection, and control flow around t
 
 ### `finish`
 
-- only supported status values: `completed`, `skipped`
+- only supported status values: `completed`, `skipped`, `failed`
 - keyword-only — `await finish(status="skipped", reason="...")`
 - the script result should be the last expression or an explicit `await finish(...)`
 

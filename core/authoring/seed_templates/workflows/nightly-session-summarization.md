@@ -48,7 +48,8 @@ for item in sessions:
         raise ValueError("Cannot summarize a session item without session_id")
 
     # `summarize_session` reads the transcript, extracts durable summary fields,
-    # stores the summary, and refreshes the vector index for session search.
+    # stores the summary, and refreshes the vector index for session search. It
+    # is mandatory: a structured tool failure raises and fails this workflow.
     result = await session_ops(
         operation="summarize_session",
         session_id=session_id,

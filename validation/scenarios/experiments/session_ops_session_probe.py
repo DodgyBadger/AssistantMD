@@ -621,9 +621,12 @@ async def _call_model_retry(tool, ctx, **kwargs) -> str:
 
 async def _call_exception(tool, ctx, **kwargs) -> str:
     try:
-        await tool.function(ctx, **kwargs)
+        result = await tool.function(ctx, **kwargs)
     except Exception as exc:  # noqa: BLE001
         return str(exc)
+    metadata = getattr(result, "metadata", {})
+    if isinstance(metadata, dict) and metadata.get("status") == "failed":
+        return str(getattr(result, "return_value", result))
     raise AssertionError("Expected session_ops call to fail")
 
 

@@ -17,6 +17,11 @@ WORKFLOW_RUN_MIGRATIONS = (
         name="create_workflow_run_history",
         apply=lambda conn: _create_workflow_run_schema(conn),
     ),
+    SQLiteMigration(
+        version=2,
+        name="index_cross_vault_workflow_history",
+        apply=lambda conn: _create_workflow_name_index(conn),
+    ),
 )
 
 
@@ -87,6 +92,7 @@ def _create_workflow_run_schema(conn: sqlite3.Connection) -> None:
         ON workflow_runs(source, completed_at DESC)
         """
     )
+    _create_workflow_name_index(conn)
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_runs_scheduler_event
@@ -94,6 +100,19 @@ def _create_workflow_run_schema(conn: sqlite3.Connection) -> None:
         WHERE scheduler_event_key IS NOT NULL
         """
     )
+    _create_latest_runs_view(conn)
+
+
+def _create_workflow_name_index(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_name_terminal
+        ON workflow_runs(workflow_name, completed_at DESC, run_id DESC)
+        """
+    )
+
+
+def _create_latest_runs_view(conn: sqlite3.Connection) -> None:
     conn.execute("DROP VIEW IF EXISTS workflow_latest_runs")
     conn.execute(
         """

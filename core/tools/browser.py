@@ -26,6 +26,7 @@ from core.settings import (
     get_default_api_timeout,
 )
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 
 
 logger = UnifiedLogger(tag="browser-tool")
@@ -125,7 +126,12 @@ Policy notes:
                     result_type=cls._extract_result_type(str(exc)),
                     error=str(exc),
                 )
-                return cls._format_error(str(exc))
+                return tool_failure_return(
+                    tool_name="browser",
+                    message=cls._format_error(str(exc)),
+                    classification=classify_exception(exc, phase="browser_navigation"),
+                    metadata={"url": url},
+                )
 
         return Tool(
             browser,

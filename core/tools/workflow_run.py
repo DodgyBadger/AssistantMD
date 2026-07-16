@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.authoring.contracts import AssembleContextResult, ContextMessage
@@ -25,10 +26,40 @@ from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from .base import BaseTool
+from .failures import FailureClassification, classify_exception, tool_failure_return
 
 
 logger = UnifiedLogger(tag="workflow-run-tool")
 WORKFLOW_HEARTBEAT_STALE_SECONDS = 60
+
+
+def _workflow_run_failure(
+    *,
+    operation: str,
+    message: str,
+    exc: Exception | None = None,
+    failure_kind: str = "bad_request",
+    suggested_action: str = "Correct the workflow request before retrying.",
+    metadata: dict[str, Any] | None = None,
+) -> ToolReturn:
+    classification = (
+        classify_exception(exc, phase="workflow_run")
+        if exc is not None
+        else FailureClassification(
+            error_type="WorkflowRunError",
+            failure_kind=failure_kind,
+            retryable=False,
+            phase="workflow_run",
+            message="",
+            suggested_action=suggested_action,
+        )
+    )
+    return tool_failure_return(
+        tool_name="workflow_run",
+        message=message,
+        classification=classification,
+        metadata={"operation": operation, **(metadata or {})},
+    )
 
 
 def _heartbeat_age_seconds(task) -> float | None:
@@ -60,7 +91,7 @@ class WorkflowRun(BaseTool):
             workflow_name: str = "",
             step_name: str = "",
             task_id: str = "",
-        ) -> str:
+        ) -> str | ToolReturn:
             """Run or list authored automations in the current vault.
 
             Use operation='run' by default for workflows expected to finish quickly.
@@ -96,7 +127,7 @@ class WorkflowRun(BaseTool):
                 if op == "run":
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
-                        return error
+                        return _workflow_run_failure(operation=op, message=error)
 
                     global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
@@ -107,6 +138,19 @@ class WorkflowRun(BaseTool):
                             workflow_name=name,
                             step_name=single_step,
                         )
+                        if not result.get("success", False) or str(
+                            result.get("status") or ""
+                        ).strip().lower() == "failed":
+                            return _workflow_run_failure(
+                                operation=op,
+                                message=cls._format_run_result(result),
+                                failure_kind="workflow_failed",
+                                suggested_action=(
+                                    "Inspect the workflow result reason and correct the workflow "
+                                    "before retrying."
+                                ),
+                                metadata={"global_id": global_id},
+                            )
                         return cls._format_run_result(result)
                     except Exception as exc:  # pylint: disable=broad-except
                         logger.error(
@@ -120,12 +164,17 @@ class WorkflowRun(BaseTool):
                                 "traceback": traceback.format_exc(),
                             },
                         )
-                        return cls._format_run_error(global_id, single_step, exc)
+                        return _workflow_run_failure(
+                            operation=op,
+                            message=f"Workflow '{global_id}' execution failed",
+                            exc=exc,
+                            metadata={"global_id": global_id, "step_name": single_step},
+                        )
 
                 if op == "start":
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
-                        return error
+                        return _workflow_run_failure(operation=op, message=error)
                     run_type = cls._read_run_type(
                         cls._resolve_workflow_file_path(
                             vault_path=vault_path,
@@ -133,7 +182,13 @@ class WorkflowRun(BaseTool):
                         )
                     )
                     if run_type == "context":
-                        return "operation='start' is only supported for run_type='workflow'. Use operation='run' to dry-run context templates."
+                        return _workflow_run_failure(
+                            operation=op,
+                            message=(
+                                "operation='start' is only supported for run_type='workflow'. "
+                                "Use operation='run' to dry-run context templates."
+                            ),
+                        )
                     global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
                     task = await runtime.workflow_governor.start_workflow(
@@ -148,41 +203,53 @@ class WorkflowRun(BaseTool):
                 if op == "status":
                     normalized_task_id = (task_id or "").strip()
                     if not normalized_task_id:
-                        return "task_id is required for operation='status'."
+                        return _workflow_run_failure(
+                            operation=op,
+                            message="task_id is required for operation='status'.",
+                        )
                     task, error = await cls._get_scoped_workflow_task(
                         task_id=normalized_task_id,
                         vault_name=vault_name,
                     )
                     if error:
-                        return error
+                        return _workflow_run_failure(operation=op, message=error)
                     return cls._format_task_status(task)
 
                 if op == "cancel":
                     normalized_task_id = (task_id or "").strip()
                     if not normalized_task_id:
-                        return "task_id is required for operation='cancel'."
+                        return _workflow_run_failure(
+                            operation=op,
+                            message="task_id is required for operation='cancel'.",
+                        )
                     _, error = await cls._get_scoped_workflow_task(
                         task_id=normalized_task_id,
                         vault_name=vault_name,
                     )
                     if error:
-                        return error
+                        return _workflow_run_failure(operation=op, message=error)
                     cancellation = await runtime.task_coordinator.cancel_task(normalized_task_id)
                     if cancellation is None:
-                        return f"Execution task not found: {normalized_task_id}"
+                        return _workflow_run_failure(
+                            operation=op,
+                            message=f"Execution task not found: {normalized_task_id}",
+                        )
                     return cls._format_task_cancel(cancellation)
 
                 if op in {"enable_workflow", "disable_workflow"}:
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
-                        return error
+                        return _workflow_run_failure(operation=op, message=error)
                     file_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=name)
                     if file_path.exists():
                         run_type = cls._read_run_type(file_path)
                         if run_type == "context":
-                            return (
-                                f"Lifecycle operation '{op}' is only supported for run_type='workflow'. "
-                                f"'{name}' is run_type='context'."
+                            return _workflow_run_failure(
+                                operation=op,
+                                message=(
+                                    f"Lifecycle operation '{op}' is only supported for run_type='workflow'. "
+                                    f"'{name}' is run_type='context'."
+                                ),
                             )
                     result = await cls._set_workflow_enabled_state(
                         operation=op,
@@ -191,9 +258,19 @@ class WorkflowRun(BaseTool):
                     )
                     return cls._format_lifecycle_result(result)
 
-                return "Unknown operation. Available: list, run, start, status, cancel, enable_workflow, disable_workflow"
+                return _workflow_run_failure(
+                    operation=op,
+                    message=(
+                        "Unknown operation. Available: list, run, start, status, cancel, "
+                        "enable_workflow, disable_workflow"
+                    ),
+                )
             except RuntimeStateError as exc:
-                return f"Runtime unavailable: {exc}"
+                return _workflow_run_failure(
+                    operation=str(operation or "").strip().lower(),
+                    message="Runtime unavailable",
+                    exc=exc,
+                )
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(
                     "workflow_run operation failed",
@@ -205,7 +282,11 @@ class WorkflowRun(BaseTool):
                         "traceback": traceback.format_exc(),
                     },
                 )
-                return f"Error performing '{operation}' operation: {exc}"
+                return _workflow_run_failure(
+                    operation=str(operation or "").strip().lower(),
+                    message=f"Error performing '{operation}' operation",
+                    exc=exc,
+                )
 
         return Tool(
             workflow_run,
@@ -448,27 +529,6 @@ Full documentation:
             f"enabled_after: {result.get('enabled_after', '')}",
             f"message: {result.get('message', '')}",
         ]
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_run_error(global_id: str, step_name: str | None, exc: Exception) -> str:
-        tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
-        tail = "".join(tb_lines).strip().splitlines()[-12:]
-        failed_step = getattr(exc, "step_name", None) or step_name or ""
-        template_pointer = getattr(exc, "template_pointer", "")
-        phase = getattr(exc, "phase", "")
-        lines = [
-            "success: False",
-            f"global_id: {global_id}",
-            f"step_name: {failed_step}",
-            f"error_type: {type(exc).__name__}",
-            f"phase: {phase}",
-            f"template_pointer: {template_pointer}",
-            f"message: {exc}",
-        ]
-        if tail:
-            lines.append("traceback_tail:")
-            lines.extend([f"  {line}" for line in tail])
         return "\n".join(lines)
 
     @classmethod

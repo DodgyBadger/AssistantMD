@@ -301,22 +301,6 @@ class WorkflowGovernor:
                         active_task_id,
                         {"workflow_result": result.to_dict()},
                     )
-                    self._log_workflow_event(
-                        "workflow_task_completed",
-                        global_id=global_id,
-                        vault_name=vault_name,
-                        workflow_name=workflow_name,
-                        source=source_value,
-                        task_id=active_task_id,
-                        status=result.status,
-                        reason=result.reason,
-                        step_name=step_name,
-                        expect_failure=expect_failure,
-                        include_load_errors=include_load_errors,
-                        execution_time_seconds=result.execution_time_seconds,
-                        output_files=result.output_files,
-                        message=result.message,
-                    )
                     failure_metadata: dict[str, Any] | None = None
                     if str(result.status or "").strip().lower() == ExecutionTaskStatus.FAILED.value:
                         failure_metadata = _build_workflow_failure_metadata(
@@ -345,6 +329,28 @@ class WorkflowGovernor:
                             active_task_id,
                             {"workflow_failure": failure_metadata},
                         )
+                    self._log_workflow_event(
+                        _workflow_result_event(result),
+                        global_id=global_id,
+                        vault_name=vault_name,
+                        workflow_name=workflow_name,
+                        source=source_value,
+                        task_id=active_task_id,
+                        status=result.status,
+                        reason=result.reason,
+                        step_name=step_name,
+                        expect_failure=expect_failure,
+                        include_load_errors=include_load_errors,
+                        execution_time_seconds=result.execution_time_seconds,
+                        output_files=result.output_files,
+                        message=result.message,
+                        failure_kind=(
+                            failure_metadata.get("failure_kind") if failure_metadata else None
+                        ),
+                        retryable=(
+                            failure_metadata.get("retryable") if failure_metadata else None
+                        ),
+                    )
                     self._workflow_run_store.finalize_run(
                         workflow_run.run_id,
                         status=_workflow_run_terminal_status(result),
@@ -645,6 +651,16 @@ def _build_workflow_failure_metadata(
         }
     )
     return metadata
+
+
+def _workflow_result_event(result: WorkflowExecutionResult) -> str:
+    status = str(result.status or "").strip().lower()
+    return {
+        ExecutionTaskStatus.FAILED.value: "workflow_task_failed",
+        ExecutionTaskStatus.SKIPPED.value: "workflow_task_skipped",
+        ExecutionTaskStatus.CANCELLED.value: "workflow_task_cancelled",
+        ExecutionTaskStatus.TIMED_OUT.value: "workflow_task_timed_out",
+    }.get(status, "workflow_task_completed")
 
 
 def _workflow_run_terminal_status(result: WorkflowExecutionResult) -> str:

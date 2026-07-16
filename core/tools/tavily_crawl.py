@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic_ai.tools import Tool
 from tavily import TavilyClient
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 from core.logger import UnifiedLogger
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value
@@ -72,7 +73,12 @@ class TavilyCrawl(BaseTool):
                     timeout=timeout
                 )
             except Exception as exc:
-                return f"Tavily crawl error: {exc}"
+                return tool_failure_return(
+                    tool_name="tavily_crawl",
+                    message="Tavily crawl failed",
+                    classification=classify_exception(exc, phase="web_crawl"),
+                    metadata={"url": url},
+                )
             
             if not result.get('results'):
                 return f"No content could be crawled from: {url}"

@@ -3,7 +3,7 @@
 
 ## 2026-07-10 - v0.7.0
 
-### Vault Explorer and Inline Editing
+### Vault explorer and inline editing
 
 AssistantMD can now handle routine vault browsing, writing, organization, and
 recovery without leaving the chat window. The new Vault Explorer is a shared,
@@ -25,7 +25,7 @@ stays focused while files remain directly accessible when needed.
   one step. AssistantMD refuses to overwrite newer changes, and the rollback
   itself can also be undone.
 
-### Workflow History and Health
+### Improved observability
 
 Workflow results now survive application restarts and remain available on the
 Dashboard. Each workflow shows its latest outcome separately from whether it is
@@ -38,7 +38,7 @@ System Activity also keeps daily log segments for up to 30 days, subject to a
 size limit, and the activity viewer reads across those retained segments instead
 of showing only the current log file.
 
-### Breaking Changes and Upgrade Guidance
+### Breaking changes and upgrade guidance
 
 Version 0.7 replaces `file_ops_safe` and `file_ops_unsafe` with `file_read` and
 `file_write`. All custom workflows and context assembly scripts that use the old
@@ -63,6 +63,10 @@ After upgrading:
 4. Review custom workflows and context scripts for `file_ops_safe` or `file_ops_unsafe`
    calls and replace them with `file_read` or `file_write`. You can ask chat to inspect
    and update the custom automations in `AssistantMD/Authoring` for you.
+5. Review scripts that intentionally continue after a direct tool error. Structured
+   tool failures now raise `RuntimeError` inside Monty so mandatory failures cannot
+   silently report success. Catch the error narrowly around expected probes;
+   non-error outcomes such as `not_found` remain ordinary tool results.
 
 
 ## 2026-07-06 - v0.6.10

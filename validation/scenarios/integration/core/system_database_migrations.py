@@ -26,7 +26,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            9,
+            10,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -93,8 +93,8 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 self._migration_versions(conn, "workflow_runs"),
-                [1],
-                "Workflow run migration version should be recorded",
+                [1, 2],
+                "Workflow run migration versions should be recorded",
             )
 
         second = run_system_migrations(system_root, backup=True)

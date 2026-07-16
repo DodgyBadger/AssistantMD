@@ -269,6 +269,27 @@ class WorkflowRunStore:
             ).fetchall()
             return [_record_from_row(row) for row in rows]
 
+    def list_runs_by_workflow_name(
+        self,
+        workflow_name: str,
+        *,
+        limit: int = 50,
+    ) -> list[WorkflowRunRecord]:
+        """Return recent attempts for one workflow name across vaults."""
+        clean_limit = max(1, min(int(limit), 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM workflow_runs
+                WHERE workflow_name = ?
+                ORDER BY COALESCE(completed_at, started_at, queued_at) DESC, run_id DESC
+                LIMIT ?
+                """,
+                (_required_text(workflow_name, "workflow_name"), clean_limit),
+            ).fetchall()
+            return [_record_from_row(row) for row in rows]
+
     def list_latest_runs(self) -> list[WorkflowRunRecord]:
         """Return the latest terminal outcome for every known workflow."""
         with self._connect() as conn:

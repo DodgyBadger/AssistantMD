@@ -52,6 +52,25 @@ class AuthoringFinishSignal(RuntimeError):
         return status, reason
 
 
+class AuthoringToolCallError(RuntimeError):
+    """Raised when a direct Monty tool call returns a structured failure."""
+
+    def __init__(
+        self,
+        *,
+        tool_name: str,
+        operation: str = "",
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.tool_name = str(tool_name or "unknown")
+        self.operation = str(operation or "")
+        self.reason = str(reason or "Tool call failed")
+        self.metadata = dict(metadata or {})
+        operation_label = f" operation '{self.operation}'" if self.operation else ""
+        super().__init__(f"{self.tool_name}{operation_label} failed: {self.reason}")
+
+
 @dataclass(frozen=True)
 class AuthoringCapabilityCall:
     """One sandbox-to-host capability invocation."""

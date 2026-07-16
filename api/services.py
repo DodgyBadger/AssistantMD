@@ -232,6 +232,7 @@ from core.authoring.template_discovery import (
 )
 from core.tools.workflow_run import WorkflowRun
 from core.utils.frontmatter import upsert_frontmatter_key
+from core.workflow_runs import WorkflowRunRecord
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
@@ -3272,12 +3273,11 @@ async def get_system_status(scheduler=None) -> StatusResponse:
         disabled_workflows = [summary for summary in workflow_summaries if not summary.enabled]
         system_workflow_templates = get_system_workflow_template_summaries()
         runtime = get_runtime_context()
-        known_workflow_ids = {summary.global_id for summary in workflow_summaries}
-        latest_workflow_runs = {
-            run.workflow_id: run.to_dict()
-            for run in runtime.workflow_run_store.list_latest_runs()
-            if run.workflow_id in known_workflow_ids
-        }
+        latest_workflow_runs = _project_latest_workflow_runs(
+            workflow_summaries=workflow_summaries,
+            system_workflow_templates=system_workflow_templates,
+            latest_runs=runtime.workflow_run_store.list_latest_runs(),
+        )
 
         scheduler_info.enabled_workflows = len(enabled_workflows)
         scheduler_info.disabled_workflows = len(disabled_workflows)
@@ -3334,13 +3334,41 @@ def get_workflow_run_history(global_id: str, *, limit: int = 50) -> dict[str, An
     if "/" not in clean_global_id:
         raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {clean_global_id}")
     runtime = get_runtime_context()
+    system_template_ids = {
+        f"system/{template.name}" for template in get_system_workflow_template_summaries()
+    }
+    if clean_global_id in system_template_ids:
+        runs = runtime.workflow_run_store.list_runs_by_workflow_name(
+            clean_global_id,
+            limit=limit,
+        )
+    else:
+        runs = runtime.workflow_run_store.list_runs(clean_global_id, limit=limit)
     return {
         "workflow_id": clean_global_id,
-        "runs": [
-            run.to_dict()
-            for run in runtime.workflow_run_store.list_runs(clean_global_id, limit=limit)
-        ],
+        "runs": [run.to_dict() for run in runs],
     }
+
+
+def _project_latest_workflow_runs(
+    *,
+    workflow_summaries: list[WorkflowSummary],
+    system_workflow_templates: list[SystemWorkflowTemplateSummary],
+    latest_runs: list[WorkflowRunRecord],
+) -> dict[str, dict[str, Any]]:
+    """Map vault workflows and cross-vault system templates to Dashboard rows."""
+    workflow_ids = {summary.global_id for summary in workflow_summaries}
+    system_template_ids = {
+        f"system/{template.name}" for template in system_workflow_templates
+    }
+    projected: dict[str, dict[str, Any]] = {}
+    for run in latest_runs:
+        if run.workflow_id in workflow_ids:
+            projected[run.workflow_id] = run.to_dict()
+            continue
+        if run.workflow_name in system_template_ids:
+            projected.setdefault(run.workflow_name, run.to_dict())
+    return projected
 
 
 def get_workflow_summaries() -> List[WorkflowSummary]:

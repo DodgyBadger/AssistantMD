@@ -182,15 +182,7 @@ else:
             break
 
     if not archive_path:
-        outcome = {
-            "status": "completed_without_write",
-            "reason": "could not find available archive path",
-            "context_notes_file": context_notes_file,
-            "original_chars": len(context_notes_text),
-            "curated_chars": len(curated_text),
-            "trigger_chars": trigger_chars,
-            "retried": retried,
-        }
+        await finish(status="failed", reason="could not find available user notes archive path")
     else:
         moved = await file_write(
             operation="move",
@@ -198,22 +190,23 @@ else:
             destination=archive_path,
         )
         if moved.metadata.get("status") != "completed":
-            outcome = {
-                "status": "completed_without_write",
-                "reason": "failed to archive original user notes file",
-                "context_notes_file": context_notes_file,
-                "archive_path": archive_path,
-                "move_result": moved.return_value,
-                "retried": retried,
-            }
+            await finish(
+                status="failed",
+                reason=f"failed to archive original user notes file: {moved.return_value}",
+            )
         else:
             written = await file_write(
                 operation="write",
                 path=context_notes_file,
                 content=curated_text.rstrip() + "\n",
             )
+            if written.metadata.get("status") != "completed":
+                await finish(
+                    status="failed",
+                    reason=f"failed to write compacted user notes: {written.return_value}",
+                )
             outcome = {
-                "status": "completed" if written.metadata.get("status") == "completed" else "completed_with_errors",
+                "status": "completed",
                 "context_notes_file": context_notes_file,
                 "archive_path": archive_path,
                 "original_chars": len(context_notes_text),

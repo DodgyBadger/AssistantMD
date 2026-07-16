@@ -176,8 +176,13 @@ class WorkflowLifecycleOpsScenario(BaseScenario):
             workflow_name="/app/data/WorkflowLifecycleVault/AssistantMD/Authoring/daily.md",
         )
         self.soft_assert(
-            "Runtime filesystem roots are not allowed" in invalid_path_out,
+            "Runtime filesystem roots are not allowed" in invalid_path_out.return_value,
             "Absolute runtime-root workflow path should be rejected",
+        )
+        self.soft_assert_equal(
+            invalid_path_out.metadata.get("status"),
+            "failed",
+            "Rejected workflow requests should expose structured failure status",
         )
 
         await self.stop_system()

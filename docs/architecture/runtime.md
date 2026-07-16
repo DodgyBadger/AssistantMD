@@ -130,6 +130,8 @@ queued, running, and terminal workflow states across API, scheduler, tool, and
 system sources. It does not replace process-local execution tasks: tasks remain
 the live cancellation and runtime-status surface, while workflow runs provide
 restart-safe historical outcomes.
+Dashboard rows for packaged system workflow templates aggregate that template's
+vault-scoped runs, while each durable record retains its execution vault.
 
 ## Common Failure Modes
 

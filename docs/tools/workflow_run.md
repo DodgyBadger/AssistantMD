@@ -53,6 +53,9 @@ workflow_run(operation="cancel", task_id="task-id-from-start")
 ## Output Shape
 
 Returns plain text results for discovery, execution, or lifecycle operations.
+Invalid requests and execution failures use a structured failed tool envelope.
+When called directly from Monty, that envelope raises `RuntimeError`; successful
+operations and non-error lifecycle outcomes remain ordinary tool results.
 
 ## Notes
 

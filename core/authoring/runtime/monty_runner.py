@@ -15,6 +15,8 @@ from core.authoring.contracts import (
     AuthoringFinishSignal,
     AuthoringExecutionContext,
     AuthoringHost,
+    AuthoringToolCallError,
+    ScriptToolResult,
 )
 from core.authoring.helpers.runtime_common import (
     coerce_tool_return_value_text,
@@ -221,6 +223,16 @@ def _build_direct_tool_functions(
                     message_history=getattr(host, "message_history", None),
                     prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
                 )
+                tool_result = normalize_tool_result(
+                    _spec.name,
+                    result,
+                    vault_path=host.vault_path or "",
+                )
+                _raise_for_failed_tool_result(
+                    tool_name=_spec.name,
+                    arguments=kwargs,
+                    tool_result=tool_result,
+                )
             except Exception as exc:
                 logger.warning(
                     "authoring_direct_tool_failed",
@@ -234,11 +246,6 @@ def _build_direct_tool_functions(
                     },
                 )
                 raise
-            tool_result = normalize_tool_result(
-                _spec.name,
-                result,
-                vault_path=host.vault_path or "",
-            )
             logger.set_sinks(["validation"]).info(
                 "authoring_direct_tool_completed",
                 data={
@@ -260,6 +267,25 @@ def _build_direct_tool_functions(
         stub_lines.append(f"async def {function_name}(**kwargs: Any) -> ScriptToolResult: ...")
 
     return external_functions, "\n".join(stub_lines)
+
+
+def _raise_for_failed_tool_result(
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    tool_result: ScriptToolResult,
+) -> None:
+    metadata = dict(tool_result.metadata or {})
+    status = str(metadata.get("status") or "").strip().lower()
+    if status not in {"error", "failed"}:
+        return
+    reason = coerce_tool_return_value_text(tool_result.return_value).strip()
+    raise AuthoringToolCallError(
+        tool_name=tool_name,
+        operation=str(metadata.get("operation") or arguments.get("operation") or ""),
+        reason=reason or str(metadata.get("error_type") or status),
+        metadata=metadata,
+    )
 
 
 def _sanitize_tool_name(name: str) -> str:

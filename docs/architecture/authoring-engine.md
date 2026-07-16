@@ -36,7 +36,7 @@ The Monty sandbox exposes async host functions that authoring code calls to do r
 | `read_cache` | Read a cached value |
 | `pending_files` | List files awaiting processing |
 | `parse_markdown` | Parse a markdown file |
-| `finish` | Signal successful completion |
+| `finish` | Signal intentional completed, skipped, or failed termination |
 
 A `date` global is also injected, providing `date.today()`, `date.this_week()`, etc.
 
@@ -46,6 +46,20 @@ Authoring execution is non-interactive: workflows and context scripts execute
 tool calls directly and never pause for chat inline review. `delegate(...)` is
 the model-inference tool for scripts; it returns text plus metadata, including a
 compact `metadata["audit"]` summary of child tool calls and errors.
+
+Model-facing tools retain structured `ToolReturn` failures so an agent can
+inspect or retry them. The Monty direct-tool adapter translates results whose
+structured status is `error` or `failed` into a built-in `RuntimeError` inside
+the sandbox. Uncaught errors fail the authoring run. Scripts may catch a
+narrowly scoped `RuntimeError` around an expected probe; non-error domain
+outcomes such as `not_found` remain ordinary `ScriptToolResult` values.
+Successful direct calls continue to expose `return_value`, `metadata`,
+`content`, and `items`.
+
+Workflow terminal status comes from normal completion, an uncaught exception,
+or explicit `finish(status="completed" | "skipped" | "failed")`. A dictionary
+returned as the final expression is output data and does not implicitly set the
+workflow status.
 
 ## Helpers
 

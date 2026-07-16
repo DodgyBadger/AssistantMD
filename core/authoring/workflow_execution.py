@@ -108,11 +108,14 @@ async def execute_workflow_by_id(
         expect_failure=expect_failure,
     )
     elapsed = perf_counter() - started
-    terminal_status = str(getattr(execution_result, "status", "completed") or "completed")
+    terminal_status = str(
+        getattr(execution_result, "status", "completed") or "completed"
+    ).strip().lower()
     terminal_reason = str(getattr(execution_result, "reason", "") or "")
+    succeeded = terminal_status in {"completed", "skipped"}
 
     return WorkflowExecutionResult(
-        success=True,
+        success=succeeded,
         global_id=target.global_id,
         status=terminal_status,
         execution_time_seconds=elapsed,

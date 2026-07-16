@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.chat.chat_store import ChatStore, StoredChatSession
@@ -39,6 +40,7 @@ from core.vector import VectorService
 from core.vault_state.service import VaultStateService
 
 from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 
 
 logger = UnifiedLogger(tag="session-ops-tool")
@@ -85,7 +87,7 @@ class SessionOps(BaseTool):
             filter: dict[str, Any] | None = None,
             data: dict[str, Any] | None = None,
             summarization_model: str = "gpt-mini",
-        ) -> str:
+        ) -> str | ToolReturn:
             """Search and summarize chat sessions.
 
             :param operation: Operation name.
@@ -325,10 +327,6 @@ class SessionOps(BaseTool):
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except ModelRetry:
                 raise
-            except SessionSummaryEmbeddingPreflightError:
-                raise
-            except SessionSummaryIndexingError:
-                raise
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "session_ops failed",
@@ -339,7 +337,15 @@ class SessionOps(BaseTool):
                         "error": str(exc),
                     },
                 )
-                return f"Error performing '{operation}' operation: {exc}"
+                return tool_failure_return(
+                    tool_name="session_ops",
+                    message=f"Error performing '{operation}' operation",
+                    classification=classify_exception(exc, phase="session_ops"),
+                    metadata={
+                        "operation": str(operation or "").strip().lower(),
+                        "session_id": str(session_id or "").strip(),
+                    },
+                )
 
         return Tool(
             session_ops,

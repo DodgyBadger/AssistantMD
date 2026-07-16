@@ -85,8 +85,8 @@ class SystemStartupMigrationsScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 self._migration_versions(conn, "workflow_runs"),
-                [1],
-                "Startup should record the workflow-run migration version",
+                [1, 2],
+                "Startup should record the workflow-run migration versions",
             )
 
         await self.stop_system()

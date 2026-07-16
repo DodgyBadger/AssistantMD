@@ -277,7 +277,7 @@
                 content.innerHTML = `
                     <div class="dashboard-table-wrap" role="region" aria-label="Workflow run history" tabindex="0">
                         <table class="dashboard-table">
-                            <thead><tr><th>Result</th><th>Finished</th><th>Source</th><th>Duration</th><th>Details</th></tr></thead>
+                            <thead><tr><th>Result</th><th>Finished</th><th>Vault</th><th>Source</th><th>Duration</th><th>Details</th></tr></thead>
                             <tbody>
                                 ${runs.map(run => {
                                     const status = String(run.status || 'unknown').toLowerCase();
@@ -289,6 +289,7 @@
                                         <tr>
                                             <td><span class="badge badge-result-${utils.escapeHtml(status)}">${utils.escapeHtml(status.replaceAll('_', ' '))}</span></td>
                                             <td class="cell-xs">${utils.escapeHtml(finished)}</td>
+                                            <td class="cell-xs">${utils.escapeHtml(run.vault_name || '—')}</td>
                                             <td class="cell-xs">${utils.escapeHtml(run.source || 'unknown')}</td>
                                             <td class="cell-xs">${utils.escapeHtml(duration)}</td>
                                             <td class="cell-xs">${utils.escapeHtml(run.reason || run.message || '—')}</td>
