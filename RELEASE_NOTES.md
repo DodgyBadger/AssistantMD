@@ -40,17 +40,33 @@ be loaded on demand, and the raw JSONL history can be exported for diagnostics.
 Validation and high-volume helper events no longer crowd out user-relevant
 activity.
 
+### Web retrieval
+
+Web research now uses stable `web_search`, `web_extract`, and `web_crawl`
+capabilities. Each capability has an explicit strategy setting, so changing
+between DuckDuckGo, curl, Tavily, or future providers no longer changes the tool
+contract used by chat and authoring scripts. Strategy failures identify the
+configured implementation and never silently fall back to another provider.
+
+The built-in curl extraction path now shares bounded URL retrieval, redirect
+security, and HTML-to-Markdown conversion with URL ingestion. Chromium remains
+available through the separate `browser` tool for dynamic pages. Browser calls
+are serialized by default, bounded per chat/workflow task, and refused when the
+container lacks configured memory headroom. The standard browser-capable
+profile requires at least 2 GB; approximately 1 GB deployments should disable
+`browser` and use `web_extract` for static pages.
+
 ### Breaking changes and upgrade guidance
 
-Version 0.7 replaces `file_ops_safe` and `file_ops_unsafe` with `file_read` and
-`file_write`. All custom workflows and context assembly scripts that use the old
-tools must be updated.
+Revamped several tools:
+- `file_ops_safe` and `file_ops_unsafe` replaced with `file_read` and `file_write`.
+- `web_search_duckduckgo`, `web_search_tavily`, `tavily_extract` and `tavily_crawl` have  been replaced by `web_search`, `web_extract` and `web_crawl`.
+- Choice of provider for each web tool now lives in System settings:  `web_search_strategy`, `web_extract_strategy` and `web_crawl_strategy`.
 
-Per-chat tool selection has also been removed. AssistantMD's core functionality
-now depends on the full tool suite working together, so maintaining a different
-tool set for each chat is no longer practical. The built-in tool suite will stay
-deliberately small enough not to overwhelm the context window. Users who need to
-disable a tool can still do so globally with the `enabled_tools` setting.
+All custom workflows and context assembly scripts that use the old tools must be updated.
+
+Per-chat tool selection has also been removed. AssistantMD's core functionality depends on the full tool suite working together, so maintaining a different tool set for each chat is no longer practical. The built-in tool suite will stay deliberately small enough not to overwhelm the context window. Users who wish to disable a tool can do so globally with the `disabled_tools` setting (which replaces the previous `enabled_tools` setting).
+
 
 After upgrading:
 
@@ -60,12 +76,18 @@ After upgrading:
    current packaged scripts. This overwrites `system/Authoring`, so preserve any
    local changes there first; vault scripts under
    `AssistantMD/Authoring` are not touched.
-3. If System Notices offers **Repair settings from template**, run it and review
-   the new `enabled_tools` setting.
+3. If System Notices offers **Repair settings from template**, run it. This
+   rewrites retired web tool names, converts the old tool allowlist into
+   `disabled_tools`, adds the strategy settings, and preserves custom tool
+   entries. Review `disabled_tools` and select Tavily explicitly for any web
+   capability that should use it.
 4. Review custom workflows and context scripts for `file_ops_safe` or `file_ops_unsafe`
    calls and replace them with `file_read` or `file_write`. You can ask chat to inspect
    and update the custom automations in `AssistantMD/Authoring` for you.
-5. Review scripts that intentionally continue after a direct tool error. Structured
+5. Replace custom uses of `web_search_duckduckgo` or `web_search_tavily` with
+   `web_search`, `tavily_extract` with `web_extract`, and `tavily_crawl` with
+   `web_crawl`.
+6. Review scripts that intentionally continue after a direct tool error. Structured
    tool failures now raise `RuntimeError` inside Monty so mandatory failures cannot
    silently report success. Catch the error narrowly around expected probes;
    non-error outcomes such as `not_found` remain ordinary tool results.

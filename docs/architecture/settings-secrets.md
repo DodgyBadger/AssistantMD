@@ -37,9 +37,18 @@ Runtime-relevant general settings include:
 
 - `default_chat_mode`: initial mode for new chat sessions (`normal` or
   `inline_edit`). A session persists its own selected mode after creation.
-- `enabled_tools`: app-wide list of tool registry names exposed to chat,
-  delegate child agents, workflows, context scripts, and code execution. Chat
-  does not maintain a separate per-session tool selection.
+- `disabled_tools`: app-wide denylist of tool registry names. Registered tools
+  are available to chat, delegate child agents, workflows, context scripts, and
+  code execution unless listed here. Chat does not maintain a separate
+  per-session tool selection.
+- `web_search_strategy`, `web_extract_strategy`, and `web_crawl_strategy`:
+  provider strategy identifiers for the stable web capabilities. Strategy
+  selection is explicit; failures do not trigger another provider.
+- `ingestion_url_fetch_strategy`: URL transport used by durable ingestion,
+  independently of agent web extraction.
+- `browser_max_concurrent_sessions`, `browser_max_calls_per_turn`, and
+  `browser_min_memory_headroom_mb`: Chromium concurrency, task budget, and
+  cgroup launch-admission controls.
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
 - `chat_model_requests_limit`: maximum model requests allowed in one chat
   response; `0` disables the circuit breaker.
@@ -99,6 +108,13 @@ Primary implementation: `core/settings/__init__.py`
 - tool availability warnings (missing required secrets)
 - warnings for missing template entries
 - warnings for unknown non-user-editable entries
+
+Web capability availability includes requirements declared by the selected
+strategy. For example, selecting `tavily` makes that capability unavailable
+with a configuration warning until `TAVILY_API_KEY` is populated. The runtime
+does not substitute a secret-free strategy. Configuration health also warns
+when browser is enabled under a detectable memory limit below the supported
+2 GB browser-capable baseline.
 
 This is why project-level tool additions should also be included in `core/settings/settings.template.yaml`: otherwise they can be flagged as unexpected/deprecated during config reconciliation.
 

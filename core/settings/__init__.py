@@ -29,6 +29,7 @@ from core.settings.store import (
     SETTINGS_TEMPLATE,
     get_enabled_tool_names as get_enabled_tool_names,
     get_enabled_tools_config as get_enabled_tools_config,
+    get_disabled_tool_names as get_disabled_tool_names,
     get_general_settings,
     get_models_config,
     get_providers_config,
@@ -73,7 +74,9 @@ class ConfigurationStatus(BaseModel):
 
     def add_issue(self, name: str, message: str, severity: str = "error") -> None:
         """Append an issue to the collection."""
-        self.issues.append(ConfigurationIssue(name=name, message=message, severity=severity))
+        self.issues.append(
+            ConfigurationIssue(name=name, message=message, severity=severity)
+        )
 
 
 class AppSettings(BaseSettings):
@@ -84,7 +87,9 @@ class AppSettings(BaseSettings):
     handled separately via the secrets store.
     """
 
-    model_config = SettingsConfigDict(env_file=None, extra="ignore", case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=None, extra="ignore", case_sensitive=True
+    )
 
     vaults_root_path: Optional[Path] = Field(default=None, alias="VAULTS_ROOT_PATH")
 
@@ -113,9 +118,7 @@ class AppSettings(BaseSettings):
         """
         secrets = load_secrets(include_empty=False)
         return {
-            key: value
-            for key, value in secrets.items()
-            if key in self._LLM_SECRET_KEYS
+            key: value for key, value in secrets.items() if key in self._LLM_SECRET_KEYS
         }
 
     def has_any_llm_key(self) -> bool:
@@ -168,12 +171,56 @@ def validate_settings(
         required_secrets = []
         if hasattr(tool_config, "required_secret_keys"):
             required_secrets = tool_config.required_secret_keys()
+        strategy_name = ""
+        try:
+            from core.web.config import get_web_tool_strategy_requirements
+
+            strategy_name, strategy_secrets = get_web_tool_strategy_requirements(
+                tool_name
+            )
+            required_secrets = list(
+                dict.fromkeys([*required_secrets, *strategy_secrets])
+            )
+        except Exception as exc:
+            status.tool_availability[tool_name] = False
+            status.add_issue(
+                name=f"tool:{tool_name}",
+                message=f"Tool '{tool_name}' has invalid strategy configuration: {exc}",
+                severity="warning",
+            )
+            continue
         missing_secrets = [key for key in required_secrets if not secret_has_value(key)]
         status.tool_availability[tool_name] = not missing_secrets
         if missing_secrets:
+            strategy_context = (
+                f" with strategy '{strategy_name}'" if strategy_name else ""
+            )
             status.add_issue(
                 name=f"tool:{tool_name}",
-                message=f"Tool '{tool_name}' unavailable until secrets {missing_secrets} are configured.",
+                message=(
+                    f"Tool '{tool_name}'{strategy_context} unavailable until secrets "
+                    f"{missing_secrets} are configured."
+                ),
+                severity="warning",
+            )
+
+    enabled_tool_names = set(get_enabled_tool_names())
+    if "browser" in enabled_tool_names:
+        from core.runtime.resources import read_cgroup_memory_status
+
+        browser_memory = read_cgroup_memory_status()
+        browser_baseline_bytes = 2 * 1024 * 1024 * 1024
+        if (
+            browser_memory.max_bytes is not None
+            and browser_memory.max_bytes < browser_baseline_bytes
+        ):
+            status.add_issue(
+                name="tool:browser:memory",
+                message=(
+                    "Browser is enabled with less than the supported 2 GB memory "
+                    "baseline. Disable browser for the lightweight profile or raise "
+                    "the container/host memory limit."
+                ),
                 severity="warning",
             )
 
@@ -226,7 +273,11 @@ def validate_settings(
             continue
 
         api_key_name = getattr(provider_config, "api_key", None)
-        if isinstance(api_key_name, str) and api_key_name.lower() != "null" and api_key_name:
+        if (
+            isinstance(api_key_name, str)
+            and api_key_name.lower() != "null"
+            and api_key_name
+        ):
             if not secret_has_value(api_key_name):
                 if openai_provider_base_url_available(
                     provider_config,
@@ -285,7 +336,9 @@ def validate_settings(
             severity="warning",
         )
 
-    def _warn_extras(section_name: str, items: Dict[str, Any], default_user_editable: bool):
+    def _warn_extras(
+        section_name: str, items: Dict[str, Any], default_user_editable: bool
+    ):
         template_keys = template_sections.get(section_name, set())
         for key, entry in items.items():
             if key in template_keys:
@@ -323,11 +376,7 @@ def _get_template_setting_positive_int(setting_key: str, fallback: int) -> int:
         raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
     except FileNotFoundError:
         return fallback
-    value = (
-        raw.get("settings", {})
-        .get(setting_key, {})
-        .get("value")
-    )
+    value = raw.get("settings", {}).get(setting_key, {}).get("value")
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -375,7 +424,9 @@ def _add_missing_settings_metadata_issues(
 ) -> None:
     """Warn when existing settings are missing metadata present in the template."""
     try:
-        template_raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+        template_raw = (
+            yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+        )
     except (FileNotFoundError, yaml.YAMLError):
         return
     template_settings = template_raw.get("settings")
@@ -479,6 +530,39 @@ def get_browser_selector_timeout_seconds() -> float:
     except (TypeError, ValueError):
         return 4.0
     return timeout if timeout > 0 else 4.0
+
+
+def get_browser_max_concurrent_sessions() -> int:
+    """Return the process-wide Chromium concurrency limit."""
+    entry = get_general_settings().get("browser_max_concurrent_sessions")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(limit, 8))
+
+
+def get_browser_max_calls_per_turn() -> int:
+    """Return the browser-specific execution-task call limit."""
+    entry = get_general_settings().get("browser_max_calls_per_turn")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 4
+    return max(0, limit)
+
+
+def get_browser_min_memory_headroom_bytes() -> int:
+    """Return required free cgroup memory before Chromium launch."""
+    entry = get_general_settings().get("browser_min_memory_headroom_mb")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        megabytes = int(value)
+    except (TypeError, ValueError):
+        megabytes = 512
+    return max(0, megabytes) * 1024 * 1024
 
 
 def get_default_max_output_tokens() -> int:
@@ -623,7 +707,9 @@ def get_compaction_token_threshold() -> int:
     """Return the estimated token threshold for chat-history compaction."""
     entry = get_general_settings().get("compaction_token_threshold")
     value = getattr(entry, "value", None) if entry is not None else None
-    template_default = _get_template_setting_positive_int("compaction_token_threshold", 80_000)
+    template_default = _get_template_setting_positive_int(
+        "compaction_token_threshold", 80_000
+    )
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -649,9 +735,7 @@ def get_file_list_max_results() -> int:
         "file_ops_safe_list_max_results"
     )
     value = getattr(entry, "value", None) if entry is not None else None
-    template_default = _get_template_setting_positive_int(
-        "file_list_max_results", 200
-    )
+    template_default = _get_template_setting_positive_int("file_list_max_results", 200)
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -731,7 +815,9 @@ def get_task_mutation_retention_days() -> int:
     """Return days to retain attributed vault mutation rows."""
     entry = get_general_settings().get("task_mutation_retention_days")
     value = getattr(entry, "value", None) if entry is not None else None
-    template_default = _get_template_setting_positive_int("task_mutation_retention_days", 365)
+    template_default = _get_template_setting_positive_int(
+        "task_mutation_retention_days", 365
+    )
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -743,7 +829,9 @@ def get_task_snapshot_retention_days() -> int:
     """Return days to retain task snapshot metadata and files."""
     entry = get_general_settings().get("task_snapshot_retention_days")
     value = getattr(entry, "value", None) if entry is not None else None
-    template_default = _get_template_setting_positive_int("task_snapshot_retention_days", 30)
+    template_default = _get_template_setting_positive_int(
+        "task_snapshot_retention_days", 30
+    )
     try:
         parsed = int(value)
     except (TypeError, ValueError):

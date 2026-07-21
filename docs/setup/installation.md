@@ -86,6 +86,17 @@ together.
 
 **Browser tool**: The built-in browser tool requires the Playwright Chromium runtime in addition to the Python package. The published container image includes this. If you build your own image from source, rebuild after pulling the latest Dockerfile changes so the image runs `python -m playwright install --no-shell chromium` during the build.
 
+The standard browser-capable profile requires at least 2 GB of memory available
+to AssistantMD and defaults to one active Chromium session. On an approximately
+1 GB host or container, use the lightweight profile by adding `browser` to
+`disabled_tools`; `web_extract` remains available for ordinary static pages.
+Docker's memory limit, memory reservation, and `shm_size` are separate controls,
+and a 2 GB container limit cannot provide memory that the host does not have.
+
+If the container exits during browser-heavy work without an AssistantMD or
+Logfire terminal event, inspect `docker inspect` for `OOMKilled` and the restart
+count. A kernel OOM kill can terminate the process before in-process logs flush.
+
 **Logfire**: AssistantMD uses the logfire library for rich console logging (what you see if you run `docker logs assistantmd`). You can add a [Logfire API key](https://pydantic.dev) to get even more data including full details of every LLM call. The free tier will be sufficient for many users and is worth grabbing. Be sure to also set logfire=true in the System tab of the web interface.
 
 

@@ -27,6 +27,10 @@ RETIRED_BUILTIN_TOOL_NAMES = frozenset(
         "file_ops_unsafe",
         "propose_file_edits",
         "review_create_file",
+        "tavily_crawl",
+        "tavily_extract",
+        "web_search_duckduckgo",
+        "web_search_tavily",
     }
 )
 
@@ -199,19 +203,45 @@ def get_tools_config() -> Dict[str, ToolConfig]:
 
 
 def get_enabled_tool_names() -> list[str]:
-    """Return app-wide enabled tool names from settings, preserving configured order."""
+    """Return registered tool names not disabled by app-wide policy."""
     settings = load_settings()
     tools = settings.tools
-    enabled_entry = settings.settings.get("enabled_tools") or settings.settings.get("default_chat_tools")
-    raw_enabled = getattr(enabled_entry, "value", None)
-    if raw_enabled is None:
-        return list(tools.keys())
-    if not isinstance(raw_enabled, list):
+    disabled = set(get_disabled_tool_names())
+    return [
+        name
+        for name in tools
+        if name not in disabled and name not in RETIRED_BUILTIN_TOOL_NAMES
+    ]
+
+
+def get_disabled_tool_names() -> list[str]:
+    """Return configured disabled tool names that still exist in the registry."""
+    settings = load_settings()
+    tools = settings.tools
+    entry = settings.settings.get("disabled_tools")
+    raw_disabled = getattr(entry, "value", None)
+    if entry is None:
+        legacy_entry = settings.settings.get("enabled_tools") or settings.settings.get(
+            "default_chat_tools"
+        )
+        legacy_enabled = getattr(legacy_entry, "value", None)
+        if legacy_entry is not None:
+            allowed = (
+                {str(item).strip() for item in legacy_enabled}
+                if isinstance(legacy_enabled, list)
+                else set()
+            )
+            return [
+                name
+                for name in tools
+                if name not in allowed and name not in RETIRED_BUILTIN_TOOL_NAMES
+            ]
+    if not isinstance(raw_disabled, list):
         return []
 
-    enabled: list[str] = []
+    disabled: list[str] = []
     seen: set[str] = set()
-    for item in raw_enabled:
+    for item in raw_disabled:
         name = str(item).strip()
         if (
             not name
@@ -221,8 +251,8 @@ def get_enabled_tool_names() -> list[str]:
         ):
             continue
         seen.add(name)
-        enabled.append(name)
-    return enabled
+        disabled.append(name)
+    return disabled
 
 
 def get_enabled_tools_config() -> Dict[str, ToolConfig]:

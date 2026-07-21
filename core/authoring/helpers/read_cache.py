@@ -114,7 +114,7 @@ def _contract() -> dict[str, object]:
         "examples": [
             {
                 "code": (
-                    'artifact = await read_cache(ref="tool/tavily_extract/call_abc123")\n'
+                    'artifact = await read_cache(ref="tool/web_extract/call_abc123")\n'
                     "artifact.content[:2000]"
                 ),
                 "description": "Open one cached oversized tool result for local exploration.",

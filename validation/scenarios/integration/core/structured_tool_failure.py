@@ -16,8 +16,7 @@ class StructuredToolFailureScenario(BaseScenario):
 
     async def test_scenario(self):
         from core.tools.failures import classify_exception
-        import core.tools.web_search_duckduckgo as duck_module
-        import core.tools.web_search_tavily as tavily_module
+        from core.tools.web_common import web_tool_failure
 
         http_error = _http_status_error(503, retry_after="7")
         classification = classify_exception(http_error, phase="web_search")
@@ -36,44 +35,39 @@ class StructuredToolFailureScenario(BaseScenario):
             "Retry-After should be preserved when present",
         )
 
-        original_ddgs = duck_module.DDGS
-        original_secret = tavily_module.get_secret_value
-        original_client = tavily_module.httpx.Client
-        try:
-            duck_module.DDGS = _TimeoutDuckDuckGo
-            duck_result = duck_module.WebSearchDuckDuckGo.get_tool().function(query="assistantmd")
-            self._assert_failure_metadata(
-                duck_result,
-                expected={
-                    "tool_name": "web_search_duckduckgo",
-                    "status": "failed",
-                    "failure_kind": "transient_provider",
-                    "retryable": True,
-                    "phase": "web_search",
-                    "query": "assistantmd",
-                },
-            )
+        result = web_tool_failure(
+            tool_name="web_search",
+            strategy="tavily",
+            exc=_http_status_error(503, retry_after="5"),
+            phase="web_search",
+        )
+        self._assert_failure_metadata(
+            result,
+            expected={
+                "tool_name": "web_search",
+                "capability": "web_search",
+                "strategy": "tavily",
+                "status": "failed",
+                "failure_kind": "provider_unavailable",
+                "retryable": True,
+                "phase": "web_search",
+                "http_status": 503,
+                "retry_after": "5",
+            },
+        )
 
-            tavily_module.get_secret_value = lambda _name: "test-key"
-            tavily_module.httpx.Client = _FailingTavilyClient
-            tavily_result = tavily_module.WebSearchTavily.get_tool().function(query="assistantmd")
-            self._assert_failure_metadata(
-                tavily_result,
-                expected={
-                    "tool_name": "web_search_tavily",
-                    "status": "failed",
-                    "failure_kind": "provider_unavailable",
-                    "retryable": True,
-                    "phase": "web_search",
-                    "http_status": 503,
-                    "retry_after": "5",
-                    "query": "assistantmd",
-                },
-            )
-        finally:
-            duck_module.DDGS = original_ddgs
-            tavily_module.get_secret_value = original_secret
-            tavily_module.httpx.Client = original_client
+        sensitive_query = "private search phrase"
+        redacted = web_tool_failure(
+            tool_name="web_search",
+            strategy="duckduckgo",
+            exc=RuntimeError(f"provider rejected {sensitive_query}"),
+            phase="web_search",
+            redactions=[sensitive_query],
+        )
+        self.soft_assert(
+            sensitive_query not in str(redacted.return_value),
+            "Structured web failures should redact request text",
+        )
 
         self.teardown_scenario()
         self.assert_no_failures()
@@ -105,35 +99,12 @@ class StructuredToolFailureScenario(BaseScenario):
         )
 
 
-class _TimeoutDuckDuckGo:
-    def __init__(self, *, timeout: int):
-        self.timeout = timeout
-
-    def text(self, **_kwargs):
-        raise TimeoutError("timeout while searching")
-
-
-class _FailingTavilyClient:
-    def __init__(self, *, timeout: float):
-        self.timeout = timeout
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def post(self, *_args, **_kwargs):
-        return _FailingTavilyResponse()
-
-
-class _FailingTavilyResponse:
-    def raise_for_status(self):
-        raise _http_status_error(503, retry_after="5")
-
-
-def _http_status_error(status_code: int, *, retry_after: str | None = None) -> httpx.HTTPStatusError:
+def _http_status_error(
+    status_code: int, *, retry_after: str | None = None
+) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://api.tavily.com/search")
     headers = {"Retry-After": retry_after} if retry_after else {}
     response = httpx.Response(status_code, headers=headers, request=request)
-    return httpx.HTTPStatusError("synthetic status failure", request=request, response=response)
+    return httpx.HTTPStatusError(
+        "synthetic status failure", request=request, response=response
+    )

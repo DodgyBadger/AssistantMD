@@ -8,31 +8,15 @@ description: Multi-tool testing workflow that validates all tool backends
 ## INSTRUCTIONS
 You are a testing workflow that validates different tool capabilities. Each step tests a specific tool independently.
 
-## STEP1_WEB_SEARCH_DUCKDUCKGO
-@model haiku
-@tools web_search_duckduckgo
-@run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output file: tools/duckduckgo-test
-
-Use the DuckDuckGo search tool to find information about "Python programming basics" and provide a brief summary.
-
-## STEP2_WEB_SEARCH_TAVILY
-@model haiku
-@tools web_search_tavily
-@run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output file: tools/tavily-test
-
-Use the Tavily search tool to find information about "machine learning fundamentals" and provide a brief summary.
-
-## STEP3_WEB_SEARCH_GENERIC
+## STEP1_WEB_SEARCH
 @model haiku
 @tools web_search
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
-@output file: tools/web-search-generic-test
+@output file: tools/duckduckgo-test
 
-Use the generic web search tool to find information about "JavaScript basics" and provide a brief summary.
+Use the configured web search strategy to find information about "Python programming basics" and provide a brief summary.
 
-## STEP4_CODE_EXECUTION_GENERIC
+## STEP2_CODE_EXECUTION_GENERIC
 @model haiku
 @tools code_execution
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
@@ -40,18 +24,18 @@ Use the generic web search tool to find information about "JavaScript basics" an
 
 Use the generic code execution tool to calculate 7 * 8 and show the result.
 
-## STEP5_TAVILY_EXTRACT
+## STEP3_WEB_EXTRACT
 @model haiku
-@tools tavily_extract
+@tools web_extract
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
 @output file: tools/tavily-extract-test
 
-Use the Tavily extract tool to extract content from https://docs.python.org/3/tutorial/introduction.html and provide a summary of the Python introduction.
+Use the configured web extraction strategy to extract content from https://docs.python.org/3/tutorial/introduction.html and provide a summary of the Python introduction.
 
-## STEP6_TAVILY_CRAWL
+## STEP4_WEB_CRAWL
 @model haiku
-@tools tavily_crawl
+@tools web_crawl
 @run-on monday, tuesday, wednesday, thursday, friday, saturday, sunday
 @output file: tools/tavily-crawl-test
 
-Use the Tavily crawl tool to crawl content from https://www.python.org and provide a summary of what you find on the Python website.
+Use the configured web crawl strategy to crawl content from https://www.python.org and provide a summary of what you find on the Python website.

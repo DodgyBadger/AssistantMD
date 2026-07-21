@@ -47,6 +47,9 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 
 **4. External communication remains limited, not impossible**
 - The built-in web and browser tools are constrained to narrow retrieval-oriented behavior rather than arbitrary outbound actions.
+- `web_extract` and URL ingestion validate public-network targets at the initial
+  URL and every redirect. Provider strategies are explicit and do not silently
+  fall back to another network path.
 - The `browser` tool is restricted to public-network, read-oriented requests and cannot upload files or initiate downloads.
 - Residual risk still exists wherever the application is intentionally configured to communicate with external providers or websites.
 

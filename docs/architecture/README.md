@@ -29,7 +29,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 3. Bootstrap seeds system authoring files, validates configuration, initializes scheduler + authoring loader + ingestion services + execution task coordination, then sets global runtime context.
 4. Runtime reload syncs discovered workflows into APScheduler jobs.
 5. Chat requests flow through `core/chat/executor.py`, which composes model,
-   app-wide enabled tools, context-template capability, tool-output cache hooks,
+   app-wide tool disablement, context-template capability, tool-output cache hooks,
    execution task tracking, and canonical session persistence. Inline edit mode
    can persist a deferred `file_write` review and resume it through a later task.
 6. Workflow triggers execute through the workflow governor and runtime task runner before running user-authored Python in a Monty sandbox with host-provided capability functions and vault writes.
@@ -48,6 +48,7 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Session Summaries](session-summaries.md) | Derived chat-session summary storage, indexing, and retrieval | `core/memory/`, `core/chat/history_service.py` |
 | [Goals](goals.md) | Lightweight durable goal state, checkpoints, source provenance, and goal-related activity | `core/goals/`, `core/tools/goal_ops.py` |
 | [LLM + Tools](llm-tools.md) | Agent creation, settings-backed tool binding, capability composition, model resolution | `core/llm/`, `core/tools/` |
+| Web Retrieval | Provider strategies, normalized web results, bounded URL transport, public-network policy | `core/web/` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_read.py` |
 | [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |
 | [Ingestion Pipeline](ingestion-pipeline.md) | Import queue, extraction strategies, rendering/storage, worker execution | `core/ingestion/`, `api/services.py` |

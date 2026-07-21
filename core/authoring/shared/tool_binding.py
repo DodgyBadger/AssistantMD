@@ -21,6 +21,7 @@ from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
+from core.web.config import get_web_tool_strategy_requirements
 
 
 logger = UnifiedLogger(tag="workflow-tool-binding")
@@ -111,6 +112,8 @@ def resolve_tool_binding(
             continue
 
         required_secrets = config.required_secret_keys()
+        _strategy_name, strategy_secrets = get_web_tool_strategy_requirements(tool_name)
+        required_secrets = list(dict.fromkeys([*required_secrets, *strategy_secrets]))
         missing_secrets = [key for key in required_secrets if not secret_has_value(key)]
         if missing_secrets:
             skipped_tools.append((tool_name, missing_secrets))

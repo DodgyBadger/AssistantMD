@@ -111,7 +111,7 @@ Catch a failure narrowly when the script has a real fallback:
 
 ```python
 try:
-    source = await tavily_extract(urls=PRIMARY_URL)
+    source = await web_extract(urls=PRIMARY_URL)
 except RuntimeError:
     source = await browser(url=PRIMARY_URL)
 ```

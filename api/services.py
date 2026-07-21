@@ -32,6 +32,7 @@ from core.scheduling.system_jobs import SYSTEM_JOB_IDS
 from core.settings.store import (
     SETTINGS_TEMPLATE,
     get_active_settings_path,
+    get_disabled_tool_names,
     get_enabled_tool_names,
     get_enabled_tools_config,
     get_general_settings,
@@ -53,6 +54,7 @@ from core.settings.config_editor import (
     upsert_model_mapping,
     upsert_provider_config,
 )
+from core.settings.upgrades import upgrade_settings_mapping
 from core.runtime.reload_service import reload_configuration
 from core.settings.secrets_store import (
     get_secret_value,
@@ -3851,8 +3853,8 @@ def repair_settings_from_template() -> SystemSettingsResponse:
     if not isinstance(template_raw, dict):
         raise SystemConfigurationError("Template settings file is not a valid mapping.")
 
-    # Seed merged copy and ensure sections exist
-    merged = dict(active_raw)
+    # Apply centralized contract upgrades before merging template defaults.
+    merged = upgrade_settings_mapping(active_raw, template_raw)
     for section in ("settings", "models", "providers", "tools"):
         if merged.get(section) is None or not isinstance(merged.get(section), dict):
             merged[section] = {}
@@ -4744,16 +4746,16 @@ async def get_metadata() -> MetadataResponse:
         default_context_script = None
 
     try:
-        enabled_tools = get_enabled_tool_names()
+        disabled_tools = get_disabled_tool_names()
     except Exception:
-        enabled_tools = []
+        disabled_tools = []
 
     return MetadataResponse(
         vaults=vaults,
         models=models,
         tools=tools,
         settings={
-            "enabled_tools": enabled_tools,
+            "disabled_tools": disabled_tools,
             "default_chat_mode": get_default_chat_mode(),
             "default_model_thinking": getattr(
                 get_general_settings().get("default_model_thinking"), "value", "default"

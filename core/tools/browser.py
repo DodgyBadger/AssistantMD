@@ -9,24 +9,31 @@ blocked, and browser state is isolated per call.
 
 from __future__ import annotations
 
-import ipaddress
-import socket
-from functools import lru_cache
+import asyncio
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 from markdownify import markdownify as html_to_markdown
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import get_current_execution_task
+from core.runtime.resources import read_cgroup_memory_status
 from core.settings import (
+    get_browser_max_calls_per_turn,
+    get_browser_max_concurrent_sessions,
+    get_browser_min_memory_headroom_bytes,
     get_browser_navigation_timeout_seconds,
     get_browser_selector_timeout_seconds,
     get_default_api_timeout,
 )
 from .base import BaseTool
 from .failures import classify_exception, tool_failure_return
+from core.web.errors import WebUrlPolicyError
+from core.web.security import resolve_public_url, sanitize_url_for_log
 
 
 logger = UnifiedLogger(tag="browser-tool")
@@ -44,6 +51,13 @@ class BrowserTool(BaseTool):
     _MAX_EXTRACTED_TEXT_CHARS = 40_000
     _MAX_FALLBACK_HTML_CHARS = 120_000
     _MIN_PRIMARY_TEXT_CHARS = 500
+    _MAX_TRACKED_CALL_SCOPES = 1024
+    _session_semaphore: asyncio.Semaphore | None = None
+    _session_semaphore_limit = 0
+    _session_semaphore_loop: asyncio.AbstractEventLoop | None = None
+    _active_sessions = 0
+    _call_counts: OrderedDict[str, int] = OrderedDict()
+    _call_counts_lock = Lock()
 
     @staticmethod
     def _get_process_rss_bytes() -> int | None:
@@ -64,9 +78,29 @@ class BrowserTool(BaseTool):
     @classmethod
     def _log_event(cls, event: str, **data: Any) -> None:
         """Emit browser lifecycle events to both activity and validation logs."""
+        original_urls: list[tuple[str, str]] = []
+        for key, value in data.items():
+            if isinstance(value, str) and (key == "url" or key.endswith("_url")):
+                original_urls.append((value, sanitize_url_for_log(value)))
+                data[key] = sanitize_url_for_log(value)
+        error = data.get("error")
+        if isinstance(error, str):
+            for original, sanitized in original_urls:
+                error = error.replace(original, sanitized)
+            data["error"] = error
+        goal = data.pop("goal", None)
+        if isinstance(goal, str) and goal:
+            data["goal_chars"] = len(goal)
         rss_bytes = cls._get_process_rss_bytes()
         if rss_bytes is not None:
             data.setdefault("memory_rss_bytes", rss_bytes)
+        memory = read_cgroup_memory_status()
+        if memory.current_bytes is not None:
+            data.setdefault("cgroup_memory_current_bytes", memory.current_bytes)
+        if memory.max_bytes is not None:
+            data.setdefault("cgroup_memory_max_bytes", memory.max_bytes)
+        if memory.events:
+            data.setdefault("cgroup_memory_events", memory.events)
         logger.add_sink("validation").info(event, data=data)
 
     @classmethod
@@ -84,40 +118,47 @@ class BrowserTool(BaseTool):
         ) -> str:
             """Open a page in a headless browser and extract compact page content.
 
-            :param url: Page URL to open
-            :param goal: Brief extraction goal to guide target selection
-            :param wait_until: Navigation readiness event
-            :param wait_for_selector: Optional selector to wait for after navigation
-            :param extract_selector: Optional selector to extract instead of the main content area
-            :param include_links: Include a short list of visible links from the extracted region
+                        :param url: Page URL to open
+                        :param goal: Brief extraction goal to guide target selection
+                        :param wait_until: Navigation readiness event
+                        :param wait_for_selector: Optional selector to wait for after navigation
+                        :param extract_selector: Optional selector to extract instead of the main content area
+                        :param include_links: Include a short list of visible links from the extracted region
 
-Policy notes:
-            - Only public http/https URLs are allowed by default; `data:` is allowed for testing.
-            - Redirects or subrequests to local/private network targets are blocked.
-            - Only read-oriented HTTP methods are allowed (`GET`, `HEAD`).
-            - Downloads are blocked.
-            - Browser state is isolated per call.
+            Policy notes:
+                        - Only public http/https URLs are allowed by default; `data:` is allowed for testing.
+                        - Redirects or subrequests to local/private network targets are blocked.
+                        - Only read-oriented HTTP methods are allowed (`GET`, `HEAD`).
+                        - Downloads are blocked.
+                        - Browser state is isolated per call.
             """
-            cls._log_event(
-                "tool_invoked",
-                tool="browser",
-                url=url,
-                goal=goal.strip() or None,
-                wait_until=wait_until,
-                wait_for_selector=wait_for_selector.strip() or None,
-                extract_selector=extract_selector.strip() or None,
-                include_links=include_links,
-            )
-
             try:
-                return await cls._browse(
+                cls._record_scoped_call()
+                cls._log_event(
+                    "tool_invoked",
+                    tool="browser",
                     url=url,
-                    goal=goal,
+                    goal=goal.strip() or None,
                     wait_until=wait_until,
-                    wait_for_selector=wait_for_selector,
-                    extract_selector=extract_selector,
+                    wait_for_selector=wait_for_selector.strip() or None,
+                    extract_selector=extract_selector.strip() or None,
                     include_links=include_links,
                 )
+                semaphore = cls._get_session_semaphore()
+                async with semaphore:
+                    cls._active_sessions += 1
+                    try:
+                        cls._assert_memory_headroom()
+                        return await cls._browse(
+                            url=url,
+                            goal=goal,
+                            wait_until=wait_until,
+                            wait_for_selector=wait_for_selector,
+                            extract_selector=extract_selector,
+                            include_links=include_links,
+                        )
+                    finally:
+                        cls._active_sessions -= 1
             except Exception as exc:  # pylint: disable=broad-except
                 cls._log_event(
                     "browser_navigation_failed",
@@ -137,10 +178,73 @@ Policy notes:
             browser,
             name="browser",
             description=(
-                "Open a web page in a headless browser and extract content from the main page region. "
-                "Use this as the fallback for a known URL when tavily_extract fails, "
-                "returns thin content, or reports no content extracted."
+                "Open a dynamic web page in a headless browser and extract content "
+                "from the main page region. Prefer web_extract for ordinary static pages."
             ),
+        )
+
+    @classmethod
+    def _get_session_semaphore(cls) -> asyncio.Semaphore:
+        limit = get_browser_max_concurrent_sessions()
+        loop = asyncio.get_running_loop()
+        if cls._session_semaphore is None or cls._session_semaphore_loop is not loop:
+            cls._session_semaphore = asyncio.Semaphore(limit)
+            cls._session_semaphore_limit = limit
+            cls._session_semaphore_loop = loop
+        elif cls._session_semaphore_limit != limit and cls._active_sessions == 0:
+            cls._session_semaphore = asyncio.Semaphore(limit)
+            cls._session_semaphore_limit = limit
+        return cls._session_semaphore
+
+    @classmethod
+    def _record_scoped_call(cls) -> None:
+        limit = get_browser_max_calls_per_turn()
+        if limit <= 0:
+            return
+        execution_task = get_current_execution_task()
+        if execution_task is not None:
+            scope = execution_task.task_id
+        else:
+            current = asyncio.current_task()
+            scope = f"unscoped:{id(current)}"
+        with cls._call_counts_lock:
+            count = cls._call_counts.pop(scope, 0) + 1
+            cls._call_counts[scope] = count
+            while len(cls._call_counts) > cls._MAX_TRACKED_CALL_SCOPES:
+                cls._call_counts.popitem(last=False)
+        if count > limit:
+            cls._log_event(
+                "browser_launch_refused",
+                tool="browser",
+                reason="task_call_limit",
+                call_count=count,
+                call_limit=limit,
+            )
+            raise RuntimeError(
+                f"Browser call limit exceeded for this execution task ({limit}). "
+                "Use web_extract for static pages or continue in a new scoped task."
+            )
+
+    @classmethod
+    def _assert_memory_headroom(cls) -> None:
+        required = get_browser_min_memory_headroom_bytes()
+        if required <= 0:
+            return
+        memory = read_cgroup_memory_status()
+        available = memory.available_bytes
+        if available is None or available >= required:
+            return
+        cls._log_event(
+            "browser_launch_refused",
+            tool="browser",
+            reason="memory_headroom",
+            available_bytes=available,
+            required_bytes=required,
+        )
+        raise RuntimeError(
+            "Insufficient container memory headroom for Chromium launch: "
+            f"{available // (1024 * 1024)} MiB available, "
+            f"{required // (1024 * 1024)} MiB required."
         )
 
     @classmethod
@@ -342,7 +446,11 @@ Full documentation:
                 page=page,
                 selector=target_selector,
             )
-            return page.locator(target_selector).first, target_selector, "explicit_selector"
+            return (
+                page.locator(target_selector).first,
+                target_selector,
+                "explicit_selector",
+            )
         return await cls._resolve_best_root(page)
 
     @staticmethod
@@ -458,19 +566,21 @@ Full documentation:
         tag_name = (
             await element_locator.evaluate("(node) => node.tagName.toLowerCase()")
         ).strip()
-        element_id = (
-            await element_locator.evaluate("(node) => node.id || ''")
-        ).strip()
+        element_id = (await element_locator.evaluate("(node) => node.id || ''")).strip()
         class_name = (
             await element_locator.evaluate(
                 "(node) => typeof node.className === 'string' ? node.className : ''"
             )
         ).strip()
-        target_selector = cls._describe_element_selector(tag_name, element_id, class_name)
+        target_selector = cls._describe_element_selector(
+            tag_name, element_id, class_name
+        )
         return element_locator, target_selector, "heuristic_fallback"
 
     @classmethod
-    async def _extract_region(cls, *, locator: Any, include_links: bool) -> dict[str, Any]:
+    async def _extract_region(
+        cls, *, locator: Any, include_links: bool
+    ) -> dict[str, Any]:
         """Extract compact content and optional links from a selected page region."""
         payload = await locator.evaluate(
             """(node, options) => {
@@ -777,7 +887,9 @@ Full documentation:
         )
 
     @staticmethod
-    def _describe_element_selector(tag_name: str, element_id: str, class_name: str) -> str:
+    def _describe_element_selector(
+        tag_name: str, element_id: str, class_name: str
+    ) -> str:
         """Build a human-readable selector label for logging and output."""
         if element_id:
             return f"{tag_name}#{element_id}"
@@ -800,36 +912,18 @@ Full documentation:
     @staticmethod
     def _validate_url(url: str) -> None:
         """Reject non-web schemes and local/private network targets."""
-        parsed = urlparse((url or "").strip())
-        if parsed.scheme not in {"http", "https", "data"}:
+        normalized = (url or "").strip()
+        parsed = urlsplit(normalized)
+        if parsed.scheme == "data":
+            return
+        if parsed.scheme not in {"http", "https"}:
             raise ValueError(
                 "result_type: blocked\nOnly http, https, and data URLs are supported"
             )
-        if parsed.scheme == "data":
-            return
-
-        hostname = (parsed.hostname or "").strip().lower()
-        if not hostname:
-            raise ValueError("result_type: invalid_request\nURL must include a hostname")
-        if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(
-            ".local"
-        ):
-            raise ValueError("result_type: blocked\nLocal network targets are not allowed")
-
         try:
-            address = ipaddress.ip_address(hostname)
-        except ValueError:
-            for resolved_address in BrowserTool._resolve_hostname_addresses(hostname):
-                if BrowserTool._is_blocked_address(resolved_address):
-                    raise ValueError(
-                        "result_type: blocked\nPrivate or local network targets are not allowed"
-                    )
-            return
-
-        if BrowserTool._is_blocked_address(address):
-            raise ValueError(
-                "result_type: blocked\nPrivate or local network targets are not allowed"
-            )
+            resolve_public_url(normalized)
+        except WebUrlPolicyError as exc:
+            raise ValueError(f"result_type: blocked\n{exc}") from exc
 
     @staticmethod
     def _format_error(message: str) -> str:
@@ -845,40 +939,3 @@ Full documentation:
         if first_line.startswith("result_type:"):
             return first_line.split(":", 1)[1].strip() or "error"
         return "error"
-
-    @staticmethod
-    def _is_blocked_address(address: ipaddress._BaseAddress) -> bool:
-        """Return True when an address falls within the blocked local/private ranges."""
-        return (
-            address.is_private
-            or address.is_loopback
-            or address.is_link_local
-            or address.is_reserved
-            or address.is_multicast
-        )
-
-    @staticmethod
-    @lru_cache(maxsize=256)
-    def _resolve_hostname_addresses(hostname: str) -> tuple[ipaddress._BaseAddress, ...]:
-        """Resolve hostname addresses so hostnames that land on private IPs are also blocked."""
-        try:
-            infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
-        except socket.gaierror:
-            return ()
-
-        addresses: list[ipaddress._BaseAddress] = []
-        seen: set[str] = set()
-        for family, _, _, _, sockaddr in infos:
-            raw_address = ""
-            if family == socket.AF_INET:
-                raw_address = sockaddr[0]
-            elif family == socket.AF_INET6:
-                raw_address = sockaddr[0]
-            if not raw_address or raw_address in seen:
-                continue
-            seen.add(raw_address)
-            try:
-                addresses.append(ipaddress.ip_address(raw_address))
-            except ValueError:
-                continue
-        return tuple(addresses)

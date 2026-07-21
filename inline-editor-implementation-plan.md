@@ -606,7 +606,7 @@ rather than its intermediate implementations.
    preview/edit, path-mutation, revision, and activity-snapshot surface.
 4. Document `file_read` and `file_write` as thin model-facing adapters over the
    shared vault operation and tracked mutation services. Authored scripts use
-   the same app-wide enabled tool registry but never wait for interactive review.
+   the same registry-minus-`disabled_tools` policy but never wait for interactive review.
 5. Document the mutation concurrency contract and the shared atomic file-state
    restoration primitive used by automatic task rollback, activity rollback,
    and revision restore.
@@ -652,7 +652,7 @@ ADR 0025.
 Existing coverage is sufficient for the remaining durable decisions:
 
 - ADR 0023 owns the `file_read`/`file_write` split, app-wide
-  `enabled_tools`, Pydantic AI deferred review, automation bypass, persisted
+  `disabled_tools`, Pydantic AI deferred review, automation bypass, persisted
   continuation, and review-time target checks. It links to ADR 0025 rather than
   independently owning rollback design.
 - ADRs 0003, 0019, and 0020 already support canonical chat persistence and the
@@ -673,5 +673,5 @@ released `file_ops_safe`/`file_ops_unsafe` migration.
 Upgrade guidance now directs users to restart for automatic database migrations,
 check the System / Misc migration fallback, refresh packaged System Authoring
 scripts with an overwrite warning, repair settings when prompted, review
-`enabled_tools`, and update custom `AssistantMD/Authoring` automations to use
+`disabled_tools`, and update custom `AssistantMD/Authoring` automations to use
 `file_read` and `file_write`.

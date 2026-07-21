@@ -286,7 +286,7 @@ Add failing assertions before implementation:
 
 - Split complex orchestration after scenario coverage is green.
 - Correct TypeError handling in shared tool binding.
-- Enforce enabled tools in the external surface adapter.
+- Enforce app-wide disabled-tool policy in the external surface adapter.
 - Align ADR, architecture docs, release notes, and implementation plans with the
   resulting current contract.
 - Run duplication and dead-code searches for retired tool names and proposal

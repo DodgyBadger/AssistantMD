@@ -98,10 +98,9 @@ UNTRUSTED_WEB_DATA_END = "[END UNTRUSTED WEB DATA]"
 WEB_SOURCE_TOOL_NAMES = frozenset(
     {
         "browser",
-        "tavily_crawl",
-        "tavily_extract",
-        "web_search_duckduckgo",
-        "web_search_tavily",
+        "web_crawl",
+        "web_extract",
+        "web_search",
     }
 )
 

@@ -53,7 +53,7 @@ class CodeExecutionScenario(BaseScenario):
                 if case_name == "allow_cache_read":
                     return {
                         "code": (
-                            'artifact = await read_cache(ref="tool/tavily_extract/call_seeded")\n'
+                            'artifact = await read_cache(ref="tool/web_extract/call_seeded")\n'
                             'artifact.content if artifact.exists else "CACHE_NOT_FOUND"'
                         )
                     }
@@ -99,7 +99,7 @@ class CodeExecutionScenario(BaseScenario):
                 if case_name == "full_surface":
                     return {
                         "code": (
-                            'cached = await read_cache(ref="tool/tavily_extract/call_seeded_full_surface")\n'
+                            'cached = await read_cache(ref="tool/web_extract/call_seeded_full_surface")\n'
                             'await file_read(operation="read", path="notes/structured.md")\n'
                             f'parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n'
                             'listed = await file_read(operation="list", path="tasks")\n'
@@ -151,7 +151,7 @@ class CodeExecutionScenario(BaseScenario):
             upsert_cache_artifact(
                 owner_id=f"{vault.name}/chat/code_execution_allow_cache_read",
                 session_key="code_execution_allow_cache_read",
-                artifact_ref="tool/tavily_extract/call_seeded",
+                artifact_ref="tool/web_extract/call_seeded",
                 cache_mode="session",
                 ttl_seconds=None,
                 raw_content="SEEDED_CACHE_CONTENT",
@@ -163,7 +163,7 @@ class CodeExecutionScenario(BaseScenario):
             upsert_cache_artifact(
                 owner_id=f"{vault.name}/chat/code_execution_full_surface",
                 session_key="code_execution_full_surface",
-                artifact_ref="tool/tavily_extract/call_seeded_full_surface",
+                artifact_ref="tool/web_extract/call_seeded_full_surface",
                 cache_mode="session",
                 ttl_seconds=None,
                 raw_content="FULL_SURFACE_CACHE_CONTENT",
@@ -397,7 +397,7 @@ class CodeExecutionScenario(BaseScenario):
                 name="authoring_read_cache_completed",
                 expected={
                     "workflow_id": "CodeExecutionVault/chat/code_execution_full_surface",
-                    "ref": "tool/tavily_extract/call_seeded_full_surface",
+                    "ref": "tool/web_extract/call_seeded_full_surface",
                     "exists": True,
                 },
             )

@@ -40,8 +40,8 @@ the reviewed target changed before submission. Review overrides may edit
 operation content or a move destination, but cannot change the operation target
 or overwrite policy.
 
-Tool availability is app-wide through `enabled_tools`; chat does not select a
-per-turn tool subset in the UI.
+Tool availability is app-wide through the registered tool set minus
+`disabled_tools`; chat does not select a per-turn tool subset in the UI.
 
 ## Consequences
 
@@ -53,7 +53,7 @@ per-turn tool subset in the UI.
 - `move(overwrite=true)` represents explicit destination replacement.
 - `write(overwrite=true, content="")` represents clearing a file; there is no
   separate truncate operation.
-- Existing settings may retain retired tool entries, but enabled-tool resolution
+- Existing settings may retain retired tool entries, but tool resolution
   ignores retired built-in names and settings repair prunes them.
 - Persisted historical tool events can still be interpreted by compatibility
   adapters without keeping the retired executable tools registered.

@@ -330,10 +330,9 @@ def _project_tool_items(
         )
     if tool_name in {
         "browser",
-        "web_search_duckduckgo",
-        "web_search_tavily",
-        "tavily_extract",
-        "tavily_crawl",
+        "web_search",
+        "web_extract",
+        "web_crawl",
     } and return_value_text.strip():
         return (
             RetrievedItem(

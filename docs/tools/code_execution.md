@@ -65,7 +65,7 @@ Scope comes from the current runtime context:
 
 Available helpers and reserved inputs:
 
-- direct tool functions such as `file_read(...)`, `file_write(...)`, `delegate(...)`, `browser(...)`, or `tavily_extract(...)`: invoke a tool by name with keyword arguments
+- direct tool functions such as `file_read(...)`, `file_write(...)`, `delegate(...)`, `web_extract(...)`, or `browser(...)`: invoke a tool by name with keyword arguments
 - `pending_files(...)`: filter a file result set to the pending (unprocessed) subset and explicitly complete the items you finished
 - `retrieve_sessions(...)`: select current-vault chat session metadata, such as sessions pending summarization
 - `retrieve_history(...)`: read broker-owned conversation history as safe atomic units
@@ -200,9 +200,9 @@ Uses `read_cache` first so re-running the script does not repeat the extraction 
 code_execution(
     code="""
 # Read from cache if the extraction was already stored
-artifact = await read_cache(ref="tool/tavily_extract/call_abc123")
+artifact = await read_cache(ref="tool/web_extract/call_abc123")
 if not artifact.exists:
-    result = await tavily_extract(urls=["https://example.com/article"])
+    result = await web_extract(urls=["https://example.com/article"])
     parsed = await parse_markdown(value=result.return_value)
 else:
     parsed = await parse_markdown(value=artifact.content)

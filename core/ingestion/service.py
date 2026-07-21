@@ -39,6 +39,7 @@ from core.ingestion.jobs import (
     update_job_outputs,
 )
 from core.logger import UnifiedLogger
+from core.web.security import sanitize_url_for_log
 
 
 class IngestionService:
@@ -52,7 +53,14 @@ class IngestionService:
         self._load_builtin_handlers()
         init_db()
 
-    def enqueue_job(self, source_uri: str, vault: str, source_type: str, mime_hint: str | None, options: dict | None) -> IngestionJob:
+    def enqueue_job(
+        self,
+        source_uri: str,
+        vault: str,
+        source_type: str,
+        mime_hint: str | None,
+        options: dict | None,
+    ) -> IngestionJob:
         opts = options or {}
         return create_job(source_uri, vault, source_type, mime_hint, opts)
 
@@ -106,18 +114,26 @@ class IngestionService:
             relative_dir = ""
 
             if job.source_type == SourceKind.URL.value:
-                importer_fn = self._resolve_importer_for_url(job.source_uri, job.mime_hint)
+                importer_fn = self._resolve_importer_for_url(
+                    job.source_uri, job.mime_hint
+                )
                 if importer_fn is None:
                     msg = "Unsupported URL ingestion source"
-                    self.logger.warning(msg, metadata={"job_id": job_id, "source": job.source_uri})
+                    self.logger.warning(
+                        msg, metadata={"job_id": job_id, "source": job.source_uri}
+                    )
                     self.mark_failed(job_id, msg)
                     return
-                url_cfg = ingestion_settings.get("url", {}) if isinstance(ingestion_settings, dict) else {}
+                url_cfg = (
+                    ingestion_settings.get("url", {})
+                    if isinstance(ingestion_settings, dict)
+                    else {}
+                )
                 raw_doc = importer_fn(
                     job.source_uri,
                     timeout=url_cfg.get("read_timeout_seconds", 10),
                     connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
-                    backend=url_cfg.get("fetch_backend", "curl"),
+                    strategy=url_cfg.get("fetch_strategy", "curl"),
                 )
             else:
                 source_path = Path(job.source_uri)
@@ -133,7 +149,9 @@ class IngestionService:
                 importer_fn = self._resolve_importer(source_path, job.mime_hint)
                 if importer_fn is None:
                     msg = f"Unsupported file type for ingestion: {source_path.name}"
-                    self.logger.warning(msg, metadata={"job_id": job_id, "mime_hint": job.mime_hint})
+                    self.logger.warning(
+                        msg, metadata={"job_id": job_id, "mime_hint": job.mime_hint}
+                    )
                     self.mark_failed(job_id, msg)
                     return
 
@@ -141,7 +159,11 @@ class IngestionService:
 
             suffix = source_path.suffix.lower() if source_path else ""
             options = job.options if isinstance(job.options, dict) else {}
-            pdf_mode = str(options.get("pdf_mode", "markdown")).strip().lower() if isinstance(options, dict) else "markdown"
+            pdf_mode = (
+                str(options.get("pdf_mode", "markdown")).strip().lower()
+                if isinstance(options, dict)
+                else "markdown"
+            )
             if source_path:
                 relative_dir = self._compute_relative_import_dir(
                     source_path=source_path,
@@ -154,7 +176,9 @@ class IngestionService:
                     vault=vault,
                     source_path=source_path,
                     relative_dir=relative_dir,
-                    base_output_dir=ingestion_settings.get("output_base_dir", "Imported/"),
+                    base_output_dir=ingestion_settings.get(
+                        "output_base_dir", "Imported/"
+                    ),
                     dpi=150,
                 )
                 update_job_outputs(job_id, outputs)
@@ -173,7 +197,11 @@ class IngestionService:
                 return
 
             strategies = self._get_strategies(job, suffix, ingestion_settings)
-            extractor_opts = options.get("extractor_options", {}) if isinstance(options, dict) else {}
+            extractor_opts = (
+                options.get("extractor_options", {})
+                if isinstance(options, dict)
+                else {}
+            )
             self.logger.info(
                 "ingestion_strategies_resolved",
                 data={
@@ -247,7 +275,11 @@ class IngestionService:
             )
             if job.source_type == SourceKind.URL.value:
                 try:
-                    url_cfg = ingestion_settings.get("url", {}) if isinstance(ingestion_settings, dict) else {}
+                    url_cfg = (
+                        ingestion_settings.get("url", {})
+                        if isinstance(ingestion_settings, dict)
+                        else {}
+                    )
                 except Exception:
                     url_cfg = {}
                 self.logger.error(
@@ -255,10 +287,12 @@ class IngestionService:
                     metadata={
                         "job_id": job_id,
                         "vault": job.vault,
-                        "source_uri": job.source_uri,
+                        "source_uri": sanitize_url_for_log(job.source_uri),
                         "source_type": job.source_type,
-                        "fetch_backend": url_cfg.get("fetch_backend", "curl"),
-                        "connect_timeout_seconds": url_cfg.get("connect_timeout_seconds"),
+                        "fetch_strategy": url_cfg.get("fetch_strategy", "curl"),
+                        "connect_timeout_seconds": url_cfg.get(
+                            "connect_timeout_seconds"
+                        ),
                         "read_timeout_seconds": url_cfg.get("read_timeout_seconds"),
                         "error_type": type(exc).__name__,
                         "error": str(exc),
@@ -272,7 +306,9 @@ class IngestionService:
             source_parent = source_path.parent.resolve()
             import_root_resolved = import_root.resolve()
             if str(source_parent).startswith(str(import_root_resolved)):
-                relative_dir = str(source_parent.relative_to(import_root_resolved)).strip("/")
+                relative_dir = str(
+                    source_parent.relative_to(import_root_resolved)
+                ).strip("/")
                 if relative_dir in ("", "."):
                     return ""
                 return f"{relative_dir}/"
@@ -313,7 +349,9 @@ class IngestionService:
         try:
             import fitz  # PyMuPDF
         except ImportError as exc:
-            raise RuntimeError("PyMuPDF is required for PDF page image rendering") from exc
+            raise RuntimeError(
+                "PyMuPDF is required for PDF page image rendering"
+            ) from exc
 
         source_filename = str(source_path) if source_path else raw_doc.source_uri
         paths = resolve_import_output_paths(
@@ -330,7 +368,11 @@ class IngestionService:
         data_root = Path(get_data_root())
         vault_root = data_root / vault
 
-        payload = raw_doc.payload if isinstance(raw_doc.payload, (bytes, bytearray)) else raw_doc.payload.encode("utf-8")
+        payload = (
+            raw_doc.payload
+            if isinstance(raw_doc.payload, (bytes, bytearray))
+            else raw_doc.payload.encode("utf-8")
+        )
         doc = fitz.open(stream=payload, filetype="pdf")
         zoom = max(1, int(dpi)) / 72.0
         matrix = fitz.Matrix(zoom, zoom)
@@ -358,7 +400,9 @@ class IngestionService:
 
         manifest = {
             "source": {
-                "name": source_path.name if source_path else (raw_doc.suggested_title or "import.pdf"),
+                "name": source_path.name
+                if source_path
+                else (raw_doc.suggested_title or "import.pdf"),
                 "path": str(source_path) if source_path else raw_doc.source_uri,
                 "mime": raw_doc.mime or "application/pdf",
                 "sha256": source_hash,
@@ -428,9 +472,11 @@ class IngestionService:
         base_output_dir = "Imported/"
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
-        url_fetch_backend = "curl"
+        url_fetch_strategy = "curl"
         try:
-            pdf_default_strategies = list(general_settings.get("ingestion_pdf_default_strategies").value)
+            pdf_default_strategies = list(
+                general_settings.get("ingestion_pdf_default_strategies").value
+            )
         except Exception:
             pdf_default_strategies = []
         try:
@@ -444,29 +490,44 @@ class IngestionService:
             ocr_endpoint = str(general_settings.get("ingestion_ocr_endpoint").value)
         except Exception:
             try:
-                ocr_endpoint = str(general_settings.get("ingestion_pdf_ocr_endpoint").value)
+                ocr_endpoint = str(
+                    general_settings.get("ingestion_pdf_ocr_endpoint").value
+                )
             except Exception:
                 ocr_endpoint = "https://api.mistral.ai/v1/ocr"
         try:
-            image_default_strategies = list(general_settings.get("ingestion_image_default_strategies").value)
+            image_default_strategies = list(
+                general_settings.get("ingestion_image_default_strategies").value
+            )
         except Exception:
             image_default_strategies = []
         try:
-            base_output_dir = str(general_settings.get("ingestion_output_path_pattern").value)
+            base_output_dir = str(
+                general_settings.get("ingestion_output_path_pattern").value
+            )
         except Exception:
             base_output_dir = "Imported/"
         try:
-            url_read_timeout_seconds = int(general_settings.get("ingestion_url_read_timeout_seconds").value)
+            url_read_timeout_seconds = int(
+                general_settings.get("ingestion_url_read_timeout_seconds").value
+            )
         except Exception:
             url_read_timeout_seconds = 10
         try:
-            url_connect_timeout_seconds = int(general_settings.get("ingestion_url_connect_timeout_seconds").value)
+            url_connect_timeout_seconds = int(
+                general_settings.get("ingestion_url_connect_timeout_seconds").value
+            )
         except Exception:
             url_connect_timeout_seconds = 10
         try:
-            url_fetch_backend = str(general_settings.get("ingestion_url_fetch_backend").value).strip().lower() or "curl"
+            url_fetch_strategy = (
+                str(general_settings.get("ingestion_url_fetch_strategy").value)
+                .strip()
+                .lower()
+                or "curl"
+            )
         except Exception:
-            url_fetch_backend = "curl"
+            url_fetch_strategy = "curl"
 
         return {
             "pdf": {
@@ -483,7 +544,7 @@ class IngestionService:
             "url": {
                 "read_timeout_seconds": max(1, url_read_timeout_seconds),
                 "connect_timeout_seconds": max(1, url_connect_timeout_seconds),
-                "fetch_backend": url_fetch_backend,
+                "fetch_strategy": url_fetch_strategy,
             },
         }
 
@@ -507,7 +568,9 @@ class IngestionService:
         candidates = extractor_registry.get(strategy_id.lower())
         return candidates[0] if candidates else None
 
-    def _get_strategies(self, job: IngestionJob, suffix: str, ingestion_settings: dict) -> list[str]:
+    def _get_strategies(
+        self, job: IngestionJob, suffix: str, ingestion_settings: dict
+    ) -> list[str]:
         """
         Determine strategy order for a job from options or mime defaults.
         """
@@ -521,15 +584,29 @@ class IngestionService:
             return ["html_markdownify"]
 
         # Defaults from settings
-        pdf_cfg = ingestion_settings.get("pdf", {}) if isinstance(ingestion_settings, dict) else {}
-        image_cfg = ingestion_settings.get("image", {}) if isinstance(ingestion_settings, dict) else {}
+        pdf_cfg = (
+            ingestion_settings.get("pdf", {})
+            if isinstance(ingestion_settings, dict)
+            else {}
+        )
+        image_cfg = (
+            ingestion_settings.get("image", {})
+            if isinstance(ingestion_settings, dict)
+            else {}
+        )
         if suffix == ".pdf":
             cfg_strategies = pdf_cfg.get("default_strategies") or []
-            default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["pdf_text", "pdf_ocr"]
+            default_strats = (
+                [str(s) for s in cfg_strategies]
+                if cfg_strategies
+                else ["pdf_text", "pdf_ocr"]
+            )
             return default_strats
         if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
             cfg_strategies = image_cfg.get("default_strategies") or []
-            default_strats = [str(s) for s in cfg_strategies] if cfg_strategies else ["image_ocr"]
+            default_strats = (
+                [str(s) for s in cfg_strategies] if cfg_strategies else ["image_ocr"]
+            )
             return default_strats
         return []
 
@@ -580,7 +657,11 @@ class IngestionService:
                 )
                 continue
             try:
-                result = extractor_fn(raw_doc, extractor_options) if extractor_fn.__code__.co_argcount > 1 else extractor_fn(raw_doc)
+                result = (
+                    extractor_fn(raw_doc, extractor_options)
+                    if extractor_fn.__code__.co_argcount > 1
+                    else extractor_fn(raw_doc)
+                )
             except Exception as exc:
                 warning = f"{strat}:error:{exc}"
                 warnings.append(warning)
@@ -625,13 +706,18 @@ class IngestionService:
 
     def _job_log_context(self, job: IngestionJob) -> dict[str, Any]:
         options = job.options if isinstance(job.options, dict) else {}
+        source_uri = (
+            sanitize_url_for_log(job.source_uri)
+            if job.source_type == SourceKind.URL.value
+            else job.source_uri
+        )
         return {
             "job_id": job.id,
             "vault": job.vault,
-            "source_uri": job.source_uri,
+            "source_uri": source_uri,
             "source_type": job.source_type,
             "mime_hint": job.mime_hint,
-            "options": options,
+            "option_keys": sorted(options.keys()),
         }
 
     @staticmethod
