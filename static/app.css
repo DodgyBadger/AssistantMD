@@ -2329,7 +2329,7 @@ details[open] summary.collapsible-summary .chevron {
 }
 .file-reference-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 0.5rem;
 }
 .file-reference-search,

@@ -59,11 +59,11 @@
                         ` : ''}
                         ${showSearch ? `
                             <div class="file-reference-toolbar">
-                                <input data-vault-path-picker-query type="search" class="file-reference-search" placeholder="${escapeHtml(options.searchPlaceholder || 'Search files in workspace or vault...')}" aria-label="Search files" />
                                 <select data-vault-path-picker-scope class="file-reference-scope" aria-label="Search scope">
-                                    <option value="workspace">Workspace</option>
-                                    <option value="vault">Vault</option>
+                                    <option value="workspace">Workspace only</option>
+                                    <option value="vault">Entire vault</option>
                                 </select>
+                                <input data-vault-path-picker-query type="search" class="file-reference-search" placeholder="${escapeHtml(options.searchPlaceholder || 'Search workspace...')}" aria-label="Search files" />
                             </div>
                         ` : ''}
                         ${options.explorer ? '<div class="vault-explorer-action-panel hidden" data-vault-explorer-action-panel></div>' : ''}
@@ -79,6 +79,14 @@
             if (scopeSelect instanceof HTMLSelectElement) {
                 scopeSelect.value = options.initialScope || (workspacePath() ? 'workspace' : 'vault');
             }
+
+            function syncSearchPlaceholder() {
+                if (!(queryInput instanceof HTMLInputElement) || options.searchPlaceholder) return;
+                queryInput.placeholder = scopeSelect?.value === 'vault'
+                    ? 'Search entire vault...'
+                    : 'Search workspace...';
+            }
+            syncSearchPlaceholder();
 
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
@@ -158,7 +166,10 @@
             });
             const debouncedLoad = debounce(loadRoot, 180);
             queryInput?.addEventListener('input', debouncedLoad);
-            scopeSelect?.addEventListener('change', loadRoot);
+            scopeSelect?.addEventListener('change', () => {
+                syncSearchPlaceholder();
+                loadRoot();
+            });
             const initialPath = options.revealInitialPath ? '' : (options.initialPath || '');
             loadResults(overlay, options, initialPath)
                 .then(() => {
