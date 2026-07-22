@@ -259,7 +259,9 @@
         async function fetchFileRefs({ path = '', query = '', scope = 'workspace', offset = 0, signal = undefined, options = {} } = {}) {
             const params = new URLSearchParams();
             if (path) params.set('path', path);
-            if (!options.vaultName && workspacePath()) params.set('workspace_path', workspacePath());
+            if (scope === 'workspace' && workspacePath()) {
+                params.set('workspace_path', workspacePath());
+            }
             if (query) params.set('query', query);
             if (offset) params.set('offset', String(offset));
             params.set('scope', scope || 'workspace');
