@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from pydantic_ai.messages import (
-    BuiltinToolReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    NativeToolReturnPart,
     SystemPromptPart,
     TextPart,
     ToolCallPart,
@@ -82,7 +82,7 @@ def extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
-            elif isinstance(part, (ToolReturnPart, BuiltinToolReturnPart)):
+            elif isinstance(part, (ToolReturnPart, NativeToolReturnPart)):
                 tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
