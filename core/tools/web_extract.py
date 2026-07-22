@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from pydantic_ai.tools import Tool
+from pydantic_ai.messages import ToolReturn
 
 from core.tools.base import BaseTool
 from core.tools.web_common import log_web_capability_completed, web_tool_failure
@@ -20,16 +21,23 @@ class WebExtract(BaseTool):
         del vault_path
         service = WebCapabilityService()
 
-        async def web_extract(*, urls: str | list[str]) -> str:
+        async def web_extract(
+            *, urls: str | list[str], include_images: bool = False
+        ) -> str | ToolReturn:
             """Extract content from one or more known URLs.
 
             :param urls: One URL or a list of up to ten URLs
+            :param include_images: Whether the selected strategy should return image metadata
             """
             normalized_urls = [urls] if isinstance(urls, str) else list(urls)
             strategy = get_web_strategy_name("web_extract")
             started_at = time.monotonic()
             try:
-                result = await service.extract(urls=normalized_urls, strategy=strategy)
+                result = await service.extract(
+                    urls=normalized_urls,
+                    include_images=include_images,
+                    strategy=strategy,
+                )
                 if not result.items:
                     reason = (
                         result.failures[0].error
@@ -52,10 +60,14 @@ class WebExtract(BaseTool):
                 duration_seconds=time.monotonic() - started_at,
                 failure_count=len(result.failures),
             )
-            sections = [
-                f"# Content from {item.effective_url}\n\n{item.content}"
-                for item in result.items
-            ]
+            sections: list[str] = []
+            for item in result.items:
+                section = f"# Content from {item.effective_url}\n\n{item.content}"
+                if item.images:
+                    section += "\n\n## Images\n\n" + "\n".join(
+                        f"- {image_url}" for image_url in item.images
+                    )
+                sections.append(section)
             if result.failures:
                 sections.append(
                     "## URLs not extracted\n\n"

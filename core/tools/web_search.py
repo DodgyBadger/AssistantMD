@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from pydantic_ai.tools import Tool
+from pydantic_ai.messages import ToolReturn
 
 from core.tools.base import BaseTool
 from core.tools.web_common import log_web_capability_completed, web_tool_failure
@@ -20,7 +21,7 @@ class WebSearch(BaseTool):
         del vault_path
         service = WebCapabilityService()
 
-        async def web_search(*, query: str, max_results: int = 3) -> str:
+        async def web_search(*, query: str, max_results: int = 3) -> str | ToolReturn:
             """Search the web using the configured strategy.
 
             :param query: Search query to look up

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from tavily import TavilyClient
+from tavily import TavilyClient  # type: ignore[import-untyped]
 
 from core.settings import get_default_api_timeout
 from core.settings.secrets_store import get_secret_value

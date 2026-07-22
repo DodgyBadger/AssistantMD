@@ -9,7 +9,7 @@ from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
 from core.tools.failures import classify_exception, tool_failure_return
-from core.web.security import sanitize_url_for_log
+from core.web.security import sanitize_url_for_log, sanitize_urls_in_text_for_log
 
 
 logger = UnifiedLogger(tag="web-capabilities")
@@ -30,7 +30,7 @@ def web_tool_failure(
 ) -> ToolReturn:
     """Log and return one structured web capability failure."""
     classification = classify_exception(exc, phase=phase)
-    error_text = str(exc)
+    error_text = sanitize_urls_in_text_for_log(str(exc))
     for value in redactions or []:
         if value:
             error_text = error_text.replace(value, "[redacted]")

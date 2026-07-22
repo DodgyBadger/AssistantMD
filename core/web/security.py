@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from urllib.parse import urlsplit, urlunsplit
 
 from core.web.errors import WebUrlPolicyError
+
+
+_HTTP_URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
 def resolve_public_url(url: str) -> tuple[str, tuple[str, ...]]:
@@ -42,6 +46,9 @@ def sanitize_url_for_log(url: str) -> str:
         parsed = urlsplit(str(url or "").strip())
     except ValueError:
         return "invalid-url"
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return f"{scheme}:[redacted]" if scheme else "invalid-url"
     hostname = parsed.hostname or "unknown-host"
     try:
         port = parsed.port
@@ -49,7 +56,15 @@ def sanitize_url_for_log(url: str) -> str:
         port = None
     netloc = f"{hostname}:{port}" if port is not None else hostname
     path = parsed.path or "/"
-    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
+    return urlunsplit((scheme, netloc, path, "", ""))
+
+
+def sanitize_urls_in_text_for_log(text: str) -> str:
+    """Sanitize HTTP(S) URLs embedded in diagnostic text."""
+    return _HTTP_URL_IN_TEXT_RE.sub(
+        lambda match: sanitize_url_for_log(match.group(0)),
+        str(text or ""),
+    )
 
 
 def _resolve_addresses(hostname: str) -> list[str]:

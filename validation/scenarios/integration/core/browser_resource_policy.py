@@ -26,7 +26,8 @@ class BrowserResourcePolicyScenario(BaseScenario):
         original_headroom = browser_module.get_browser_min_memory_headroom_bytes
         original_memory = browser_module.read_cgroup_memory_status
         BrowserTool._session_semaphore = None
-        BrowserTool._session_semaphore_loop = None
+        BrowserTool._session_semaphore_limit = 0
+        BrowserTool._active_sessions = 0
         BrowserTool._call_counts.clear()
 
         active = 0
@@ -99,7 +100,8 @@ class BrowserResourcePolicyScenario(BaseScenario):
             browser_module.get_browser_min_memory_headroom_bytes = original_headroom
             browser_module.read_cgroup_memory_status = original_memory
             BrowserTool._session_semaphore = None
-            BrowserTool._session_semaphore_loop = None
+            BrowserTool._session_semaphore_limit = 0
+            BrowserTool._active_sessions = 0
             BrowserTool._call_counts.clear()
 
         self.teardown_scenario()

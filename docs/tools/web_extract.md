@@ -9,6 +9,9 @@ vault.
 ## Arguments
 
 - `urls`: one URL or a list of up to ten URLs
+- `include_images`: request image metadata from strategies that support it;
+  defaults to `false`. A selected strategy that cannot honor the option fails
+  clearly rather than ignoring it.
 
 ## Example
 

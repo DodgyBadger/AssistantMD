@@ -50,18 +50,12 @@ def load_url(
             f"Access blocked ({fetched.status_code}). Some sites require a browser/session; save as PDF or paste content manually."
         )
     if fetched.status_code >= 400:
-        raise RuntimeError(
-            f"URL fetch failed with status {fetched.status_code}: {source_uri}"
-        )
+        raise RuntimeError(f"URL fetch failed with status {fetched.status_code}")
 
     content_type = fetched.headers.get("content-type", "") or ""
     mime = content_type.split(";")[0].strip() or None
 
-    text: str
-    try:
-        text = fetched.body.decode("utf-8", errors="replace")
-    except Exception:
-        text = fetched.body.decode("utf-8", errors="replace")
+    text = fetched.body.decode("utf-8", errors="replace")
 
     title = _extract_title(text) or source_uri
 

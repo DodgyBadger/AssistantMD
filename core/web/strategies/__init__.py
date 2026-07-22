@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from core.web.registry import WebStrategyRegistry, web_strategy_registry
+from core.web.registry import (
+    StrategyHandler,
+    WebCapability,
+    WebStrategyRegistry,
+    web_strategy_registry,
+)
 from core.web.strategies.extract_curl import extract_with_curl
 from core.web.strategies.extract_tavily import extract_with_tavily
 from core.web.strategies.search_duckduckgo import search_with_duckduckgo
@@ -14,12 +19,19 @@ def register_builtin_web_strategies(
     registry: WebStrategyRegistry = web_strategy_registry,
 ) -> None:
     """Register built-ins once for the supplied registry."""
+    capabilities: tuple[WebCapability, ...] = (
+        "web_search",
+        "web_extract",
+        "web_crawl",
+    )
     existing = {
         (capability, name)
-        for capability in ("web_search", "web_extract", "web_crawl")
+        for capability in capabilities
         for name in registry.names(capability)
     }
-    registrations = (
+    registrations: tuple[
+        tuple[WebCapability, str, StrategyHandler, tuple[str, ...]], ...
+    ] = (
         ("web_search", "duckduckgo", search_with_duckduckgo, ()),
         ("web_search", "tavily", search_with_tavily, ("TAVILY_API_KEY",)),
         ("web_extract", "curl", extract_with_curl, ()),

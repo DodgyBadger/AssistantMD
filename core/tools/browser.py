@@ -12,11 +12,12 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any
 from urllib.parse import urlsplit
 
 from markdownify import markdownify as html_to_markdown
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.logger import UnifiedLogger
@@ -33,7 +34,11 @@ from core.settings import (
 from .base import BaseTool
 from .failures import classify_exception, tool_failure_return
 from core.web.errors import WebUrlPolicyError
-from core.web.security import resolve_public_url, sanitize_url_for_log
+from core.web.security import (
+    resolve_public_url,
+    sanitize_url_for_log,
+    sanitize_urls_in_text_for_log,
+)
 
 
 logger = UnifiedLogger(tag="browser-tool")
@@ -52,10 +57,10 @@ class BrowserTool(BaseTool):
     _MAX_FALLBACK_HTML_CHARS = 120_000
     _MIN_PRIMARY_TEXT_CHARS = 500
     _MAX_TRACKED_CALL_SCOPES = 1024
-    _session_semaphore: asyncio.Semaphore | None = None
+    _session_semaphore: BoundedSemaphore | None = None
     _session_semaphore_limit = 0
-    _session_semaphore_loop: asyncio.AbstractEventLoop | None = None
     _active_sessions = 0
+    _session_state_lock = Lock()
     _call_counts: OrderedDict[str, int] = OrderedDict()
     _call_counts_lock = Lock()
 
@@ -115,7 +120,7 @@ class BrowserTool(BaseTool):
             wait_for_selector: str = "",
             extract_selector: str = "",
             include_links: bool = False,
-        ) -> str:
+        ) -> str | ToolReturn:
             """Open a page in a headless browser and extract compact page content.
 
                         :param url: Page URL to open
@@ -144,34 +149,38 @@ class BrowserTool(BaseTool):
                     extract_selector=extract_selector.strip() or None,
                     include_links=include_links,
                 )
-                semaphore = cls._get_session_semaphore()
-                async with semaphore:
-                    cls._active_sessions += 1
-                    try:
-                        cls._assert_memory_headroom()
-                        return await cls._browse(
-                            url=url,
-                            goal=goal,
-                            wait_until=wait_until,
-                            wait_for_selector=wait_for_selector,
-                            extract_selector=extract_selector,
-                            include_links=include_links,
-                        )
-                    finally:
-                        cls._active_sessions -= 1
+                semaphore = await cls._acquire_session_slot()
+                try:
+                    cls._assert_memory_headroom()
+                    return await cls._browse(
+                        url=url,
+                        goal=goal,
+                        wait_until=wait_until,
+                        wait_for_selector=wait_for_selector,
+                        extract_selector=extract_selector,
+                        include_links=include_links,
+                    )
+                finally:
+                    cls._release_session_slot(semaphore)
             except Exception as exc:  # pylint: disable=broad-except
+                safe_error = sanitize_urls_in_text_for_log(str(exc)).replace(
+                    url, sanitize_url_for_log(url)
+                )
                 cls._log_event(
                     "browser_navigation_failed",
                     tool="browser",
                     url=url,
-                    result_type=cls._extract_result_type(str(exc)),
-                    error=str(exc),
+                    result_type=cls._extract_result_type(safe_error),
+                    error=safe_error,
                 )
+                safe_exc = RuntimeError(safe_error)
                 return tool_failure_return(
                     tool_name="browser",
-                    message=cls._format_error(str(exc)),
-                    classification=classify_exception(exc, phase="browser_navigation"),
-                    metadata={"url": url},
+                    message=cls._format_error(safe_error),
+                    classification=classify_exception(
+                        safe_exc, phase="browser_navigation"
+                    ),
+                    metadata={"url": sanitize_url_for_log(url)},
                 )
 
         return Tool(
@@ -184,17 +193,27 @@ class BrowserTool(BaseTool):
         )
 
     @classmethod
-    def _get_session_semaphore(cls) -> asyncio.Semaphore:
-        limit = get_browser_max_concurrent_sessions()
-        loop = asyncio.get_running_loop()
-        if cls._session_semaphore is None or cls._session_semaphore_loop is not loop:
-            cls._session_semaphore = asyncio.Semaphore(limit)
-            cls._session_semaphore_limit = limit
-            cls._session_semaphore_loop = loop
-        elif cls._session_semaphore_limit != limit and cls._active_sessions == 0:
-            cls._session_semaphore = asyncio.Semaphore(limit)
-            cls._session_semaphore_limit = limit
-        return cls._session_semaphore
+    async def _acquire_session_slot(cls) -> BoundedSemaphore:
+        """Acquire one process-wide Chromium slot without blocking the event loop."""
+        while True:
+            limit = get_browser_max_concurrent_sessions()
+            with cls._session_state_lock:
+                if cls._session_semaphore is None or (
+                    cls._session_semaphore_limit != limit and cls._active_sessions == 0
+                ):
+                    cls._session_semaphore = BoundedSemaphore(limit)
+                    cls._session_semaphore_limit = limit
+                semaphore = cls._session_semaphore
+                if semaphore.acquire(blocking=False):
+                    cls._active_sessions += 1
+                    return semaphore
+            await asyncio.sleep(0.05)
+
+    @classmethod
+    def _release_session_slot(cls, semaphore: BoundedSemaphore) -> None:
+        with cls._session_state_lock:
+            semaphore.release()
+            cls._active_sessions = max(0, cls._active_sessions - 1)
 
     @classmethod
     def _record_scoped_call(cls) -> None:

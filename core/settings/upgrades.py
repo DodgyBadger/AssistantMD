@@ -28,16 +28,11 @@ def upgrade_settings_mapping(
     enabled_values = _entry_list(enabled_entry)
     if "disabled_tools" not in settings and enabled_entry is not None:
         old_values = list(enabled_values or [])
-        legacy_web_enabled = any(value in _WEB_TOOL_RENAMES for value in old_values)
         rewritten: list[str] = []
         for value in old_values:
             mapped = _WEB_TOOL_RENAMES.get(value, value)
             if mapped not in rewritten:
                 rewritten.append(mapped)
-        if legacy_web_enabled:
-            for capability in ("web_search", "web_extract", "web_crawl"):
-                if capability not in rewritten:
-                    rewritten.append(capability)
         available_names = _available_tool_names(upgraded, template)
         disabled = [name for name in available_names if name not in rewritten]
         settings["disabled_tools"] = _template_entry_with_value(

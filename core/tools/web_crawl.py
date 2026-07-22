@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from pydantic_ai.tools import Tool
+from pydantic_ai.messages import ToolReturn
 
 from core.tools.base import BaseTool
 from core.tools.web_common import log_web_capability_completed, web_tool_failure
@@ -27,7 +28,7 @@ class WebCrawl(BaseTool):
             max_depth: int = 1,
             max_pages: int = 10,
             allow_external: bool = False,
-        ) -> str:
+        ) -> str | ToolReturn:
             """Crawl related pages from a starting URL.
 
             :param url: Starting URL

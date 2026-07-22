@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented and hardened. Focused validation passed on 2026-07-21; the broader
+Implemented and hardened. Focused validation passed on 2026-07-22; the broader
 maintainer-owned validation suite remains pending.
 
 ## Goal
@@ -486,3 +486,82 @@ validation workflow.
 All five implementation slices are complete. The resulting contract is recorded
 in ADR 0027 and the web, ingestion, settings, tool, browser, setup, and release
 documentation referenced above.
+
+## Hardening Pass (2026-07-22)
+
+### Resolved Findings
+
+#### High
+
+- **Policy drift — settings repair broadened tool authority.**
+  `core/settings/upgrades.py` enabled search, extraction, and crawl when any one
+  retired web tool appeared in the legacy allowlist. Repair now maps only the
+  legacy capabilities that were actually enabled.
+- **Bypass path — inherited proxies defeated DNS pinning.**
+  `core/web/fetchers/curl.py` used `--resolve` without disabling environment
+  proxies, allowing proxy-side DNS resolution to bypass the public-network
+  policy. DNS-pinned fetches now force direct transport.
+- **Sensitive diagnostic data — browser failures retained raw URLs.**
+  `core/tools/browser.py` could persist query credentials or `data:` payloads in
+  structured metadata and exception text. Shared sanitization now covers both
+  fields and embedded URLs in web/curl diagnostics.
+
+#### Medium
+
+- **Contract drift — `web_extract` omitted `include_images`.** The tool now
+  exposes and forwards the declared provider-neutral option and formats returned
+  image metadata.
+- **Partial-result loss — one rejected extraction URL aborted the batch.**
+  `core/web/service.py` now dispatches valid URLs and returns policy rejections
+  as typed per-item failures.
+- **Invalid lifecycle state — browser concurrency was event-loop-local.** The
+  browser gate now uses one lock-protected process-wide semaphore and supports
+  dynamic limit changes only while no sessions are active.
+- **Misleading success — curl defaulted a missing status to HTTP 200.** Header
+  status now falls back to curl's transport metadata and fails closed if neither
+  exists.
+- **Failure coupling — invalid strategy configuration aborted binding.** Invalid
+  capabilities now follow the visible unavailable-tool path while other tools
+  continue binding.
+
+#### Low
+
+- **Duplicate error path — URL ingestion decoded identically in both `try` and
+  `except`.** The redundant branch was removed, and HTTP-status errors no longer
+  embed full source URLs.
+- **Type-contract drift — tool callables claimed structured failures were
+  strings.** Changed-surface annotations now represent `ToolReturn` failures,
+  strategy capability literals, and dynamic third-party boundaries accurately.
+
+### Corrections
+
+- Corrected a settings-upgrade policy drift that enabled every stable web
+  capability when any retired provider tool was enabled. Repair now maps only
+  the capabilities present in the legacy allowlist.
+- Sanitized browser failure metadata and exception text before they enter
+  canonical tool history, including redaction of embedded `data:` URL payloads.
+- Applied the same embedded-URL sanitizer to stable web capability failures so
+  provider and redirect diagnostics cannot bypass per-argument redaction.
+- Preserved valid extraction results when another requested URL violates the
+  public-network policy, reporting the rejected URL as a per-item failure.
+- Made invalid strategy configuration follow the existing unavailable-tool
+  binding path instead of aborting an entire chat/delegate binding pass.
+- Replaced the event-loop-local browser semaphore with a lock-protected
+  process-wide admission gate so multiple event loops cannot launch Chromium
+  concurrently past the configured limit.
+- Removed a duplicate ingestion decode error path and stopped embedding full
+  source URLs in HTTP-status exceptions.
+- Made curl status handling fail closed when neither headers nor transport
+  metadata contain an HTTP status, and stopped retaining successful stderr in
+  normalized fetch metadata.
+- Corrected changed-surface type contracts for structured tool failures,
+  capability-literal strategy registration, and dynamic third-party adapters.
+- Restored the declared model-facing `include_images` argument on `web_extract`,
+  forwarded it to the selected strategy, and retained returned image metadata
+  in model-visible output.
+- Forced the DNS-pinned curl transport to bypass inherited HTTP(S) proxy
+  settings, preventing proxy-side resolution from bypassing the shared
+  public-network target policy.
+- Added focused scenario assertions for both contracts. Targeted checks are
+  recorded in the handoff; the maintainer-owned full validation suite remains
+  pending.

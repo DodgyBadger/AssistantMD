@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any, cast
 
 from markdownify import markdownify
 
@@ -28,7 +29,7 @@ def html_to_markdown(
         source = _SCRIPT_STYLE_RE.sub("", source)
         source = _COMMENT_RE.sub("", source)
     options = dict(markdownify_options or {})
-    converted = markdownify(source, heading_style="ATX", **options).strip()
+    converted = markdownify(source, heading_style="ATX", **cast(Any, options)).strip()
     if not converted:
         raise WebExtractionError("HTML extraction produced no content")
     return converted

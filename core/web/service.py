@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from core.settings.secrets_store import secret_has_value
 from core.web.config import get_web_strategy_name
-from core.web.errors import WebStrategyConfigurationError
-from core.web.models import WebCrawlResult, WebExtractionResult, WebSearchResult
+from core.web.errors import WebStrategyConfigurationError, WebUrlPolicyError
+from core.web.models import (
+    WebCrawlResult,
+    WebExtractionResult,
+    WebItemFailure,
+    WebSearchResult,
+)
 from core.web.registry import WebCapability, WebStrategyRegistry, web_strategy_registry
 from core.web.security import resolve_public_url
 from core.web.strategies import register_builtin_web_strategies
@@ -68,16 +73,42 @@ class WebCapabilityService:
     ) -> WebExtractionResult:
         """Extract URLs through exactly one configured strategy."""
         normalized_urls = _normalize_urls(urls)
+        valid_urls: list[str] = []
+        policy_failures: list[WebItemFailure] = []
         for url in normalized_urls:
-            resolve_public_url(url)
+            try:
+                resolve_public_url(url)
+            except WebUrlPolicyError as exc:
+                policy_failures.append(
+                    WebItemFailure(
+                        source_url=url,
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                )
+            else:
+                valid_urls.append(url)
         selected = self.assert_available("web_extract", strategy)
+        if not valid_urls:
+            return WebExtractionResult(
+                strategy=selected,
+                items=[],
+                failures=policy_failures,
+            )
         spec = self.registry.resolve("web_extract", selected)
         result = await spec.handler(
-            urls=normalized_urls,
+            urls=valid_urls,
             include_images=bool(include_images),
         )
         _assert_result_strategy(selected, result.strategy)
-        return result
+        if not policy_failures:
+            return result
+        return WebExtractionResult(
+            strategy=result.strategy,
+            items=result.items,
+            failures=[*policy_failures, *result.failures],
+            metadata=result.metadata,
+        )
 
     async def crawl(
         self,

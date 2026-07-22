@@ -78,7 +78,9 @@ def resolve_tool_binding(
     """Resolve workflow tools from DSL text or SDK literals."""
     normalized_value = _normalize_tool_value(value, allow_empty=False)
     if DirectiveValueParser.is_empty(normalized_value):
-        raise ValueError("Tools directive requires explicit value - tools disabled by default for security")
+        raise ValueError(
+            "Tools directive requires explicit value - tools disabled by default for security"
+        )
 
     normalized = DirectiveValueParser.normalize_string(normalized_value, to_lower=True)
     if normalized in ["true", "yes", "1", "on", "all"]:
@@ -93,7 +95,9 @@ def resolve_tool_binding(
                 tool_names.append(name)
 
     configs = get_enabled_tools_config()
-    disabled_or_unknown = [tool_name for tool_name in tool_names if tool_name not in configs]
+    disabled_or_unknown = [
+        tool_name for tool_name in tool_names if tool_name not in configs
+    ]
     if disabled_or_unknown:
         available_tools = ", ".join(configs.keys())
         requested = ", ".join(disabled_or_unknown)
@@ -105,6 +109,7 @@ def resolve_tool_binding(
     tool_functions: list[object] = []
     tool_specs: list[ToolSpec] = []
     skipped_tools: list[tuple[str, list[str]]] = []
+    invalid_tools: list[tuple[str, str]] = []
 
     for tool_name in tool_names:
         config = configs.get(tool_name)
@@ -112,7 +117,22 @@ def resolve_tool_binding(
             continue
 
         required_secrets = config.required_secret_keys()
-        _strategy_name, strategy_secrets = get_web_tool_strategy_requirements(tool_name)
+        try:
+            _strategy_name, strategy_secrets = get_web_tool_strategy_requirements(
+                tool_name
+            )
+        except Exception as exc:
+            reason = str(exc)
+            invalid_tools.append((tool_name, reason))
+            logger.warning(
+                "Tool skipped due to invalid strategy configuration",
+                data={
+                    "tool": tool_name,
+                    "error_type": type(exc).__name__,
+                    "error": reason,
+                },
+            )
+            continue
         required_secrets = list(dict.fromkeys([*required_secrets, *strategy_secrets]))
         missing_secrets = [key for key in required_secrets if not secret_has_value(key)]
         if missing_secrets:
@@ -131,7 +151,9 @@ def resolve_tool_binding(
                 tool_function,
                 tool_name=tool_name,
                 tool_instructions=tool_class.get_instructions(),
-                requires_approval=True if tool_name in (approval_tool_names or set()) else None,
+                requires_approval=True
+                if tool_name in (approval_tool_names or set())
+                else None,
             )
             tool_functions.append(wrapped_tool)
             tool_specs.append(
@@ -151,7 +173,16 @@ def resolve_tool_binding(
         skipped_messages = [
             f"{name} (missing {', '.join(missing)})" for name, missing in skipped_tools
         ]
-        note = "NOTE: The following tools were unavailable and skipped: " + "; ".join(skipped_messages)
+        note = "NOTE: The following tools were unavailable and skipped: " + "; ".join(
+            skipped_messages
+        )
+        tool_instructions = (tool_instructions + "\n\n" + note).strip()
+    if invalid_tools:
+        invalid_messages = [f"{name} ({reason})" for name, reason in invalid_tools]
+        note = (
+            "NOTE: The following tools had invalid configuration and were skipped: "
+            + "; ".join(invalid_messages)
+        )
         tool_instructions = (tool_instructions + "\n\n" + note).strip()
 
     return ToolBindingResult(
@@ -185,7 +216,11 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
                     fallback_functions.append(fn)
 
     tool_specs = list(specs_by_name.values())
-    tool_functions = [spec.tool_function for spec in tool_specs] if tool_specs else fallback_functions
+    tool_functions = (
+        [spec.tool_function for spec in tool_specs]
+        if tool_specs
+        else fallback_functions
+    )
     tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
 
     if notes:
@@ -194,7 +229,11 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
             if note not in unique_notes:
                 unique_notes.append(note)
         note_block = "\n".join(unique_notes)
-        tool_instructions = (tool_instructions + "\n\n" + note_block).strip() if tool_instructions else note_block
+        tool_instructions = (
+            (tool_instructions + "\n\n" + note_block).strip()
+            if tool_instructions
+            else note_block
+        )
 
     return ToolBindingResult(
         tool_functions=tool_functions,
@@ -259,18 +298,24 @@ def _load_tool_class(tool_name: str) -> Type:
     configs = _get_tool_configs()
     if tool_name not in configs:
         available_tools = ", ".join(configs.keys())
-        raise ValueError(f"Unknown tool '{tool_name}'. Available tools: {available_tools}")
+        raise ValueError(
+            f"Unknown tool '{tool_name}'. Available tools: {available_tools}"
+        )
 
     config = configs[tool_name]
     try:
         module = importlib.import_module(config.module)
     except ImportError as exc:
-        raise ValueError(f"Could not import module '{config.module}' for tool '{tool_name}': {exc}") from exc
+        raise ValueError(
+            f"Could not import module '{config.module}' for tool '{tool_name}': {exc}"
+        ) from exc
 
     for _name, obj in inspect.getmembers(module, inspect.isclass):
         if obj != BaseTool and issubclass(obj, BaseTool):
             return obj
-    raise ValueError(f"No BaseTool subclass found in module '{config.module}' for tool '{tool_name}'")
+    raise ValueError(
+        f"No BaseTool subclass found in module '{config.module}' for tool '{tool_name}'"
+    )
 
 
 def _tokenize_tools(value: str) -> list[str]:
@@ -306,7 +351,9 @@ def _parse_tools(value: str) -> list[str]:
         if not base:
             continue
         if "(" in base or ")" in base:
-            raise ValueError("Tool parameters are no longer supported in tools declarations")
+            raise ValueError(
+                "Tool parameters are no longer supported in tools declarations"
+            )
         parsed.append(base.lower())
     return parsed
 
@@ -325,7 +372,8 @@ def _wrap_tool_function(
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+                tool_instructions
+                or f"No usage instructions available for tool '{tool_name}'.",
             )
         binding_error = _tool_argument_binding_error(
             original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
@@ -347,7 +395,8 @@ def _wrap_tool_function(
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+                tool_instructions
+                or f"No usage instructions available for tool '{tool_name}'.",
             )
         binding_error = _tool_argument_binding_error(
             original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
@@ -436,8 +485,12 @@ def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
     return False
 
 
-def _format_tool_type_error(tool_name: str, exc: Exception, instructions: str | None) -> str:
-    prefix = f"Invalid parameters for tool '{tool_name}': {exc}. Use named parameters only."
+def _format_tool_type_error(
+    tool_name: str, exc: Exception, instructions: str | None
+) -> str:
+    prefix = (
+        f"Invalid parameters for tool '{tool_name}': {exc}. Use named parameters only."
+    )
     if instructions:
         return f"{prefix}\n\n{instructions}"
     return prefix

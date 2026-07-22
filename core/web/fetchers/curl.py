@@ -10,7 +10,11 @@ from typing import Mapping
 from urllib.parse import urljoin, urlsplit
 
 from core.web.models import WebFetchResult
-from core.web.security import resolve_public_url, sanitize_url_for_log
+from core.web.security import (
+    resolve_public_url,
+    sanitize_url_for_log,
+    sanitize_urls_in_text_for_log,
+)
 
 
 _MAX_REDIRECTS = 5
@@ -90,6 +94,10 @@ def _fetch_once(
                 "--show-error",
                 "--proto",
                 "=http,https",
+                # A configured HTTP(S) proxy would resolve and connect to the target
+                # itself, bypassing the public-address pin enforced by --resolve.
+                "--noproxy",
+                "*",
                 "--max-time",
                 str(read_timeout_seconds),
                 "--connect-timeout",
@@ -142,16 +150,23 @@ def _fetch_once(
 
         raw_headers = headers_path.read_bytes() if headers_path.exists() else b""
         status_code, response_headers = _parse_header_dump(raw_headers)
-        effective_url, remote_ip, duration = _parse_curl_meta(completed.stdout or "")
+        meta_status, effective_url, remote_ip, duration = _parse_curl_meta(
+            completed.stdout or ""
+        )
+        resolved_status = status_code or meta_status
+        if resolved_status is None:
+            raise RuntimeError(
+                f"URL fetch failed for {sanitize_url_for_log(url)}: "
+                "curl returned no HTTP status"
+            )
         return WebFetchResult(
             source_url=url,
             effective_url=effective_url or url,
-            status_code=status_code or 200,
+            status_code=resolved_status,
             headers=response_headers,
             body=body,
             remote_ip=remote_ip,
             duration_seconds=duration,
-            metadata={"stderr": (completed.stderr or "").strip()},
         )
 
 
@@ -169,19 +184,22 @@ def _parse_header_dump(raw: bytes) -> tuple[int, dict[str, str]]:
     return status_code, headers
 
 
-def _parse_curl_meta(stdout: str) -> tuple[str | None, str | None, float | None]:
+def _parse_curl_meta(
+    stdout: str,
+) -> tuple[int | None, str | None, str | None, float | None]:
     marker = "__CURL_META__"
     index = stdout.rfind(marker)
     if index < 0:
-        return None, None, None
+        return None, None, None, None
     parts = stdout[index + len(marker) :].strip().split("|")
     if len(parts) < 4:
-        return None, None, None
+        return None, None, None, None
+    status_code = int(parts[0]) if parts[0].isdigit() and parts[0] != "000" else None
     try:
         duration = float(parts[3])
     except ValueError:
         duration = None
-    return parts[1] or None, parts[2] or None, duration
+    return status_code, parts[1] or None, parts[2] or None, duration
 
 
 def _map_curl_error(
@@ -192,6 +210,7 @@ def _map_curl_error(
     max_bytes: int,
 ) -> RuntimeError:
     display_url = sanitize_url_for_log(source_url)
+    safe_stderr = sanitize_urls_in_text_for_log(stderr).replace(source_url, display_url)
     if return_code == 28:
         return RuntimeError(
             f"URL fetch timed out after {timeout_seconds}s: {display_url}"
@@ -203,7 +222,7 @@ def _map_curl_error(
     if return_code == 63:
         return RuntimeError(f"Response exceeded {max_bytes} bytes")
     if return_code in {35, 51, 58, 60}:
-        detail = stderr.strip() or f"curl exit {return_code}"
+        detail = safe_stderr.strip() or f"curl exit {return_code}"
         return RuntimeError(f"URL fetch TLS/SSL error for {display_url}: {detail}")
-    detail = stderr.strip() or f"curl exit {return_code}"
+    detail = safe_stderr.strip() or f"curl exit {return_code}"
     return RuntimeError(f"URL fetch failed for {display_url}: {detail}")
