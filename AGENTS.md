@@ -39,4 +39,5 @@ Start with the phase that matches the current request. Open only that guide firs
 - [Project Structure](docs/agent-guides/project-structure.md)
 - [Coding Standards](docs/agent-guides/coding-standards.md)
 - [Activity Logging](docs/agent-guides/activity-logging.md)
+- [Logfire](docs/agent-guides/logfire.md)
 - [Git and Review Workflow](docs/agent-guides/git-and-review.md)

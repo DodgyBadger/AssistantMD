@@ -59,4 +59,19 @@ echo "Ensuring Playwright Chromium runtime is installed..."
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
 python3 -m playwright install --with-deps chromium || echo "WARNING: Playwright browser install failed"
 
+# 6. Register the Logfire MCP endpoint. OAuth login remains an interactive step.
+LOGFIRE_MCP_URL="https://logfire-eu.pydantic.dev/mcp"
+if command -v codex >/dev/null 2>&1; then
+  if codex mcp get logfire >/dev/null 2>&1; then
+    echo "Logfire MCP is already registered."
+  else
+    echo "Registering Logfire MCP..."
+    codex mcp add logfire --url "${LOGFIRE_MCP_URL}" \
+      || echo "WARNING: failed to register Logfire MCP"
+  fi
+  echo "To authenticate Logfire MCP, run: codex mcp login logfire"
+else
+  echo "WARNING: codex CLI not found; skipping Logfire MCP registration."
+fi
+
 echo "=== setup.sh: finished ==="
