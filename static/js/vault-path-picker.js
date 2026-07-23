@@ -45,6 +45,19 @@
                         </div>
                         <div class="app-modal-actions">
                             ${options.explorer ? `
+                                <form class="vault-explorer-header-create hidden" data-vault-explorer-header-create data-direct-path="true">
+                                    <label class="vault-explorer-visually-hidden" data-vault-explorer-header-create-label for="${escapeHtml(id)}-create-path">New path</label>
+                                    <input id="${escapeHtml(id)}-create-path" name="value" class="vault-explorer-header-create-input" autocomplete="off" required />
+                                    <button type="submit" class="ui-icon-button is-primary is-compact" aria-label="Create" title="Create">${icons.CHECK_ICON_SVG}</button>
+                                    <button type="button" class="ui-icon-button is-compact" data-vault-explorer-header-create-cancel aria-label="Cancel creation" title="Cancel creation">${icons.X_ICON_SVG}</button>
+                                </form>
+                                <div class="vault-explorer-header-new">
+                                    <button type="button" class="ui-icon-button is-compact" data-vault-explorer-new aria-label="Create file or folder" title="Create file or folder">${icons.PLUS_ICON_SVG}</button>
+                                    <div class="vault-explorer-header-new-menu hidden" data-vault-explorer-new-menu>
+                                        <button type="button" data-vault-explorer-create-kind="file">New file</button>
+                                        <button type="button" data-vault-explorer-create-kind="directory">New folder</button>
+                                    </div>
+                                </div>
                                 <button type="button" class="ui-icon-button is-compact" data-vault-explorer-refresh aria-label="Refresh vault" title="Refresh vault">${icons.REFRESH_ICON_SVG}</button>
                             ` : ''}
                             <button type="button" class="ui-icon-button is-compact" data-vault-path-picker-close aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
@@ -73,12 +86,17 @@
                 </section>
             `;
             document.body.appendChild(overlay);
+            syncInteractionLocks();
 
             const queryInput = overlay.querySelector('[data-vault-path-picker-query]');
             const scopeSelect = overlay.querySelector('[data-vault-path-picker-scope]');
+            const headerCreateInput = overlay.querySelector('.vault-explorer-header-create-input');
             if (scopeSelect instanceof HTMLSelectElement) {
                 scopeSelect.value = options.initialScope || (workspacePath() ? 'workspace' : 'vault');
             }
+            headerCreateInput?.addEventListener('input', () => {
+                headerCreateInput.setCustomValidity('');
+            });
 
             function syncSearchPlaceholder() {
                 if (!(queryInput instanceof HTMLInputElement) || options.searchPlaceholder) return;
@@ -91,8 +109,28 @@
             overlay.addEventListener('click', async (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                if (!target.closest('.vault-explorer-header-new')) {
+                    overlay.querySelector('[data-vault-explorer-new-menu]')?.classList.add('hidden');
+                }
                 if (event.target === overlay || target.closest('[data-vault-path-picker-close]')) {
                     close();
+                    return;
+                }
+                if (target.closest('[data-vault-explorer-header-create-cancel]')) {
+                    closeHeaderCreateForm(overlay);
+                    return;
+                }
+                if (target.closest('[data-vault-explorer-new]')) {
+                    toggleHeaderCreateMenu(overlay);
+                    return;
+                }
+                const createKindButton = target.closest('[data-vault-explorer-create-kind]');
+                if (createKindButton instanceof HTMLButtonElement) {
+                    if (isReadOnly(options)) return;
+                    showHeaderCreateForm(
+                        overlay,
+                        createKindButton.dataset.vaultExplorerCreateKind || 'file'
+                    );
                     return;
                 }
                 if (target.closest('[data-vault-explorer-refresh]')) {
@@ -154,6 +192,11 @@
             });
             overlay.addEventListener('submit', async (event) => {
                 const form = event.target;
+                if (form instanceof HTMLFormElement && form.matches('[data-vault-explorer-header-create]')) {
+                    event.preventDefault();
+                    await submitExplorerMutation(overlay, form, options);
+                    return;
+                }
                 if (!(form instanceof HTMLFormElement) || !form.matches('[data-vault-explorer-mutation-form]')) return;
                 event.preventDefault();
                 await submitExplorerMutation(overlay, form, options);
@@ -167,6 +210,7 @@
             const debouncedLoad = debounce(loadRoot, 180);
             queryInput?.addEventListener('input', debouncedLoad);
             scopeSelect?.addEventListener('change', () => {
+                closeHeaderCreateForm(overlay);
                 syncSearchPlaceholder();
                 loadRoot();
             });
@@ -211,7 +255,15 @@
             overlay.querySelectorAll('[data-vault-explorer-mutation-form] button[type="submit"]').forEach((button) => {
                 if (button instanceof HTMLButtonElement) button.disabled = readOnly;
             });
-            if (readOnly) closeActionPanel(overlay);
+            const newButton = overlay.querySelector('[data-vault-explorer-new]');
+            if (newButton instanceof HTMLButtonElement) {
+                newButton.disabled = readOnly;
+                newButton.title = readOnly ? lockMessage : 'Create file or folder';
+            }
+            if (readOnly) {
+                closeActionPanel(overlay);
+                closeHeaderCreateForm(overlay);
+            }
         }
 
         async function loadResults(overlay, options, path = '') {
@@ -465,6 +517,52 @@
             panel.innerHTML = '';
         }
 
+        function toggleHeaderCreateMenu(overlay) {
+            const menu = overlay.querySelector('[data-vault-explorer-new-menu]');
+            if (!(menu instanceof HTMLElement)) return;
+            closeHeaderCreateForm(overlay);
+            menu.classList.toggle('hidden');
+        }
+
+        function closeHeaderCreateForm(overlay) {
+            const form = overlay.querySelector('[data-vault-explorer-header-create]');
+            const menu = overlay.querySelector('[data-vault-explorer-new-menu]');
+            form?.classList.add('hidden');
+            menu?.classList.add('hidden');
+            if (form instanceof HTMLFormElement) {
+                form.dataset.operation = '';
+                form.querySelector('input')?.setCustomValidity('');
+            }
+        }
+
+        function showHeaderCreateForm(overlay, kind) {
+            const form = overlay.querySelector('[data-vault-explorer-header-create]');
+            const input = form?.querySelector('input');
+            const label = form?.querySelector('[data-vault-explorer-header-create-label]');
+            if (!(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement)) return;
+
+            const scope = overlay.querySelector('[data-vault-path-picker-scope]');
+            const parent = scope instanceof HTMLSelectElement
+                && scope.value === 'workspace'
+                ? workspacePath()
+                : '';
+            const normalizedKind = kind === 'directory' ? 'directory' : 'file';
+            const labelText = normalizedKind === 'directory' ? 'New folder path' : 'New file path';
+            form.dataset.operation = normalizedKind === 'directory'
+                ? 'create_directory'
+                : 'create_file';
+            input.value = parent ? `${parent}/` : '';
+            input.placeholder = normalizedKind === 'directory'
+                ? 'Folder/path'
+                : 'Folder/file.md';
+            input.setAttribute('aria-label', labelText);
+            if (label instanceof HTMLElement) label.textContent = labelText;
+            form.classList.remove('hidden');
+            overlay.querySelector('[data-vault-explorer-new-menu]')?.classList.add('hidden');
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        }
+
         function showCreateForm(overlay, kind, parent) {
             showMutationForm(overlay, {
                 operation: kind === 'directory' ? 'create_directory' : 'create_file',
@@ -523,6 +621,7 @@
 
         async function submitExplorerMutation(overlay, form, options) {
             const operation = form.dataset.operation || '';
+            const directPath = form.dataset.directPath === 'true';
             const sourcePath = form.dataset.path || '';
             const parent = form.dataset.parent || '';
             const valueInput = form.elements.namedItem('value');
@@ -534,24 +633,40 @@
                 return;
             }
             if (submit instanceof HTMLButtonElement) submit.disabled = true;
-            if (operation.startsWith('create_') && (!value || value === '.' || value === '..' || /[\\/]/.test(value))) {
-                if (status) status.innerHTML = '<span class="state-error">Enter a name without path separators.</span>';
+            const invalidCreateValue = operation.startsWith('create_') && (
+                !value
+                || value === '.'
+                || value === '..'
+                || (!directPath && /[\\/]/.test(value))
+            );
+            if (invalidCreateValue) {
+                const message = directPath
+                    ? 'Enter a vault-relative path.'
+                    : 'Enter a name without path separators.';
+                if (valueInput instanceof HTMLInputElement) {
+                    valueInput.setCustomValidity(message);
+                    valueInput.reportValidity();
+                }
+                if (status) status.innerHTML = `<span class="state-error">${escapeHtml(message)}</span>`;
                 if (submit instanceof HTMLButtonElement) submit.disabled = false;
                 return;
             }
+            if (valueInput instanceof HTMLInputElement) valueInput.setCustomValidity('');
             if (status) status.textContent = 'Working...';
             try {
                 const targetPath = operation.startsWith('create_')
-                    ? [parent, value].filter(Boolean).join('/')
+                    ? (directPath ? value : [parent, value].filter(Boolean).join('/'))
                     : sourcePath;
                 const payload = { operation, path: targetPath };
                 if (operation === 'move') payload.destination = value;
                 const result = await options.onMutate?.(payload);
                 closeActionPanel(overlay);
+                closeHeaderCreateForm(overlay);
                 const reveal = operation === 'move' ? value : (operation.startsWith('create_') ? targetPath : parentPath(sourcePath));
                 await refreshExplorer(overlay, options, reveal);
                 if (operation === 'create_file') options.onOpenFile?.(result?.path || targetPath);
             } catch (error) {
+                if (directPath) setStatus(overlay, error.message, true);
                 if (status) status.innerHTML = `<span class="state-error">${escapeHtml(error.message)}</span>`;
                 if (submit instanceof HTMLButtonElement) submit.disabled = false;
             }
