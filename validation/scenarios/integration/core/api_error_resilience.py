@@ -86,6 +86,20 @@ class ApiErrorResilienceScenario(BaseScenario):
             "Classification should mark permanent bad requests non-retryable",
         )
 
+        overloaded = classify_exception(
+            RuntimeError("Our servers are currently overloaded. Please try again later."),
+            phase="agent_stream",
+        )
+        self.soft_assert_equal(
+            overloaded.failure_kind,
+            "provider_overloaded",
+            "Streamed provider overload errors should have a distinct failure classification",
+        )
+        self.soft_assert(
+            overloaded.retryable,
+            "Streamed provider overload errors should support manual retry",
+        )
+
         self.soft_assert(
             callable(wait_retry_after),
             "Pydantic AI wait_retry_after should be available for retry timing",

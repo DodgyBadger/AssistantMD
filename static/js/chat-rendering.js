@@ -254,13 +254,12 @@
 
             const title = document.createElement('div');
             title.className = 'text-sm font-medium';
-            title.textContent = latestFailure.retryable
-                ? 'Response interrupted before it finished.'
-                : 'Response failed before it finished.';
+            const failureCopy = latestFailureCopy(latestFailure);
+            title.textContent = failureCopy.title;
 
             const detail = document.createElement('div');
             detail.className = 'mt-1 text-xs opacity-80';
-            detail.textContent = latestFailure.error_type || latestFailure.failure_kind || 'Chat task failed';
+            detail.textContent = failureCopy.detail;
 
             panel.appendChild(title);
             panel.appendChild(detail);
@@ -285,6 +284,39 @@
             row.appendChild(panel);
             appendChatMessageNode(row, { forceScroll: false });
             icons.hydrateIconButtons(row);
+        }
+
+        function latestFailureCopy(latestFailure) {
+            if (latestFailure.failure_kind === 'provider_overloaded') {
+                return {
+                    title: 'The model service is temporarily overloaded.',
+                    detail: 'The provider could not complete this response. You can retry the interrupted turn.'
+                };
+            }
+            if (latestFailure.failure_kind === 'provider_unavailable') {
+                return {
+                    title: 'The model service is temporarily unavailable.',
+                    detail: 'The provider could not complete this response. You can retry the interrupted turn.'
+                };
+            }
+            if (latestFailure.failure_kind === 'rate_limited') {
+                return {
+                    title: 'The model service is temporarily rate-limited.',
+                    detail: 'Wait briefly, then retry the interrupted turn.'
+                };
+            }
+            if (['transient_network', 'transient_provider'].includes(latestFailure.failure_kind)) {
+                return {
+                    title: 'The connection to the model service was interrupted.',
+                    detail: 'You can retry the interrupted turn.'
+                };
+            }
+            return {
+                title: latestFailure.retryable
+                    ? 'Response interrupted before it finished.'
+                    : 'Response failed before it finished.',
+                detail: latestFailure.error_type || latestFailure.failure_kind || 'Chat task failed'
+            };
         }
 
         function groupToolEventsById(toolEvents) {

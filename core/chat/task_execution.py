@@ -971,7 +971,10 @@ async def _run_prepared_chat_stream_task(
                 attached_image_count=prepared.attached_image_count,
                 context_template=prepared.context_template,
                 workspace_path=prepared.workspace_path,
-                extra=chat_executor._summarize_tool_activity(tool_activity),
+                extra={
+                    **chat_executor._summarize_tool_activity(tool_activity),
+                    "task_id": task.task_id,
+                },
                 exc=exc,
             )
             chat_executor._record_latest_turn_failure(
@@ -988,7 +991,7 @@ async def _run_prepared_chat_stream_task(
                 task.task_id,
                 "error",
                 _error_event_data(
-                    "\n\nError: An unexpected error occurred",
+                    _stream_failure_display_message(classification.failure_kind),
                     classification.to_metadata(),
                 ),
             )
@@ -1067,6 +1070,31 @@ def _error_event_data(message: str, details: dict[str, Any]) -> dict[str, Any]:
         }],
         "details": details,
     }
+
+
+def _stream_failure_display_message(failure_kind: str) -> str:
+    """Return concise user-facing copy for a classified stream failure."""
+    if failure_kind == "provider_overloaded":
+        return (
+            "\n\nThe model service is temporarily overloaded. "
+            "You can retry this interrupted turn."
+        )
+    if failure_kind == "provider_unavailable":
+        return (
+            "\n\nThe model service is temporarily unavailable. "
+            "You can retry this interrupted turn."
+        )
+    if failure_kind == "rate_limited":
+        return (
+            "\n\nThe model service is temporarily rate-limited. "
+            "You can retry this interrupted turn shortly."
+        )
+    if failure_kind in {"transient_network", "transient_provider"}:
+        return (
+            "\n\nThe connection to the model service was interrupted. "
+            "You can retry this interrupted turn."
+        )
+    return "\n\nError: An unexpected error occurred"
 
 
 async def _publish_tool_call_started(

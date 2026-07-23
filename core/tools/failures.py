@@ -185,6 +185,17 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
         )
 
     lowered = str(exc).lower()
+    if "overloaded" in lowered:
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="provider_overloaded",
+            retryable=True,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Retry with backoff; use another model/provider if capacity pressure continues."
+            ),
+        )
     if any(token in lowered for token in ("timeout", "temporarily", "rate limit", "too many requests")):
         return FailureClassification(
             error_type=type(exc).__name__,

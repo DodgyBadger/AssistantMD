@@ -138,7 +138,8 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = json.dumps(activity_log.json()["entries"])
+            entries = activity_log.json()["entries"]
+            content = json.dumps(entries)
 
             assert '"message": "Streaming chat execution started"' in content, (
                 "Activity log should include streaming start"
@@ -157,6 +158,17 @@ class ChatStreamFailureLoggingScenario(BaseScenario):
             )
             assert '"tool_call_count": 0' in content, (
                 "Activity log should include compact streaming tool summary"
+            )
+            failure_entries = [
+                entry
+                for entry in entries
+                if entry.get("message") == "Streaming chat execution failed"
+            ]
+            assert failure_entries and all(
+                (entry.get("data") or {}).get("task_id")
+                for entry in failure_entries
+            ), (
+                "Activity log should identify the failed streaming task"
             )
             assert '"error_type": "RuntimeError"' in content, (
                 "Activity log should include the streaming exception type"
