@@ -284,6 +284,27 @@ body.chat-focus-mode {
 .chat-focus-divider {
     display: none;
 }
+.chat-focus-explorer-button {
+    display: none;
+}
+.chat-focus-explorer-button,
+.chat-topbar-icon-button {
+    position: relative;
+}
+.chat-focus-explorer-button.has-workspace::after,
+.chat-topbar-icon-button.has-workspace::after {
+    content: "";
+    position: absolute;
+    top: 0.3rem;
+    right: 0.3rem;
+    width: 0.45rem;
+    height: 0.45rem;
+    border: 1px solid rgb(var(--bg-card));
+    border-radius: 9999px;
+    background: rgb(var(--accent-primary));
+    box-shadow: 0 0 0 1px rgb(var(--accent-primary) / 0.28);
+    pointer-events: none;
+}
 body.chat-focus-mode #app-shell {
     max-width: none;
     width: 100%;
@@ -305,6 +326,32 @@ body.chat-focus-mode #chat-content {
 }
 body.chat-focus-mode #chat-settings-bar {
     display: none;
+}
+body.chat-focus-mode .chat-focus-explorer-button {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: rgb(var(--text-secondary));
+    opacity: 0.75;
+}
+body.chat-focus-mode .chat-focus-explorer-button:hover,
+body.chat-focus-mode .chat-focus-explorer-button:focus-visible {
+    color: rgb(var(--text-primary));
+    opacity: 1;
+    outline: none;
+}
+body.chat-focus-mode .chat-focus-explorer-button svg {
+    width: 1.15rem;
+    height: 1.15rem;
 }
 body.chat-focus-mode #chat-workspace {
     flex: 1 1 auto;

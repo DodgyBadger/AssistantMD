@@ -20,6 +20,7 @@
                 elements.workspaceUnlockBtn.classList.toggle('hidden', !(hasSession && hasWorkspace && locked));
                 elements.workspaceUnlockBtn.disabled = state.isLoading;
             }
+            callbacks.syncExplorerButtons?.();
         }
 
         function currentPath() {

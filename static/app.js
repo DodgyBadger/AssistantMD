@@ -65,6 +65,7 @@ const chatElements = {
     chatInput: document.getElementById('chat-input'),
     attachBtn: document.getElementById('attach-btn'),
     fileReferenceBtn: document.getElementById('file-reference-btn'),
+    focusExplorerBtn: document.getElementById('chat-focus-explorer-btn'),
     attachInput: document.getElementById('attach-input'),
     attachCountBadge: document.getElementById('attach-count-badge'),
     attachmentPopover: document.getElementById('chat-attachment-popover'),
@@ -124,6 +125,7 @@ const workspacePicker = window.WorkspacePicker.create({
         addChatErrorMessage,
         closePathPicker: () => vaultPathPicker.close(),
         openVaultExplorer: (options) => fileReferences.openExplorer(options),
+        syncExplorerButtons: syncVaultExplorerButtons,
     },
 });
 
@@ -799,13 +801,6 @@ function syncChatControlLocks() {
     if (chatElements.sessionBrowserTrigger) {
         chatElements.sessionBrowserTrigger.disabled = state.isLoading;
     }
-    if (chatElements.fileReferenceBtn) {
-        const explorerReadOnly = state.isLoading || Boolean(state.pendingDeferredReview);
-        chatElements.fileReferenceBtn.disabled = false;
-        chatElements.fileReferenceBtn.title = explorerReadOnly
-            ? 'Open vault explorer in read-only mode'
-            : 'Open vault explorer';
-    }
     if (chatElements.newSessionTrigger) {
         chatElements.newSessionTrigger.disabled = state.isLoading;
     }
@@ -813,6 +808,28 @@ function syncChatControlLocks() {
     fileReferences.syncInteractionLocks();
     vaultActivity.syncInteractionLocks();
     syncSendButtonState();
+}
+
+function syncVaultExplorerButtons() {
+    const workspacePath = (chatElements.workspacePathInput?.value || '').trim();
+    const explorerReadOnly = state.isLoading || Boolean(state.pendingDeferredReview);
+    const baseTitle = explorerReadOnly
+        ? 'Open vault explorer in read-only mode'
+        : 'Open vault explorer';
+    const title = workspacePath
+        ? `${baseTitle}\nWorkspace: ${workspacePath}`
+        : baseTitle;
+    const ariaLabel = workspacePath
+        ? `${baseTitle} for workspace ${workspacePath}`
+        : baseTitle;
+
+    [chatElements.fileReferenceBtn, chatElements.focusExplorerBtn].forEach((button) => {
+        if (!button) return;
+        button.disabled = false;
+        button.classList.toggle('has-workspace', Boolean(workspacePath));
+        button.title = title;
+        button.setAttribute('aria-label', ariaLabel);
+    });
 }
 
 function populateThinkingSelector() {
@@ -1317,11 +1334,9 @@ function setupEventListeners() {
         chatElements.workspaceUnlockBtn.addEventListener('click', workspacePicker.unlockPath);
     }
 
-    if (chatElements.fileReferenceBtn) {
-        chatElements.fileReferenceBtn.addEventListener('click', () => {
-            fileReferences.openPicker();
-        });
-    }
+    [chatElements.fileReferenceBtn, chatElements.focusExplorerBtn].forEach((button) => {
+        button?.addEventListener('click', () => fileReferences.openPicker());
+    });
 
     if (chatElements.attachBtn && chatElements.attachInput) {
         chatElements.attachBtn.addEventListener('click', () => {
