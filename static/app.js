@@ -659,8 +659,7 @@ function applyChatStreamPayload(payload, assistantMessage) {
     if (eventType === 'thinking_delta') {
         const delta = payload.delta?.content;
         if (delta) {
-            assistantMessage.thinkingText += delta;
-            renderAssistantMarkdown(assistantMessage);
+            appendAssistantThinkingDelta(assistantMessage, delta);
         }
         return { finished: false, messageCount: 0 };
     }
@@ -1848,6 +1847,10 @@ function renderAssistantMarkdown(context, options = {}) {
 
 function appendAssistantDelta(context, delta) {
     chatRendering.appendAssistantDelta(context, delta);
+}
+
+function appendAssistantThinkingDelta(context, delta) {
+    chatRendering.appendAssistantThinkingDelta(context, delta);
 }
 
 function setAssistantStatus(context, label, state = 'thinking') {

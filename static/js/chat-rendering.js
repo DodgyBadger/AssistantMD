@@ -835,9 +835,7 @@
                 thinkingText: '',
                 collapseThinking: false,
                 thinkingExpanded: false,
-                draftText: '',
                 errorMessages: [],
-                hasTools: false,
                 toolSummary: null,
                 postProcessTimer: null,
                 archivedToolEvents: false
@@ -892,10 +890,23 @@
             if (!context || !delta) {
                 return;
             }
-            if (context.hasTools) {
-                context.fullText += delta;
-            } else {
-                context.draftText += delta;
+            const answerStarted = !context.fullText;
+            context.fullText += delta;
+            if (answerStarted && context.thinkingText) {
+                context.collapseThinking = true;
+                context.thinkingExpanded = false;
+            }
+            renderAssistantMarkdown(context);
+        }
+
+        function appendAssistantThinkingDelta(context, delta) {
+            if (!context || !delta) {
+                return;
+            }
+            context.thinkingText += delta;
+            if (context.fullText && !context.collapseThinking) {
+                context.collapseThinking = true;
+                context.thinkingExpanded = false;
             }
             renderAssistantMarkdown(context);
         }
@@ -913,13 +924,12 @@
         }
 
         function renderAssistantThinking(context) {
-            const thinking = [context.thinkingText, context.draftText]
-                .filter(Boolean)
-                .join('\n\n')
-                .trim();
+            const thinking = context.thinkingText.trim();
             if (!thinking && context.thinkingDiv) {
                 context.thinkingDiv.remove();
                 context.thinkingDiv = null;
+                context.thinkingTextSpan = null;
+                context.thinkingToggle = null;
                 return;
             }
             if (!thinking) {
@@ -939,9 +949,24 @@
         }
 
         function renderPlainAssistantThinking(context, text) {
+            if (context.thinkingTextSpan && !context.thinkingToggle) {
+                context.thinkingTextSpan.textContent = text;
+                return;
+            }
+            context.thinkingDiv.innerHTML = '';
             context.thinkingDiv.className = 'assistant-thinking';
-            context.thinkingDiv.textContent = text;
-            context.thinkingTextSpan = null;
+
+            const label = document.createElement('div');
+            label.className = 'assistant-thinking-label';
+            label.textContent = 'Reasoning';
+
+            const textSpan = document.createElement('div');
+            textSpan.className = 'assistant-thinking-text';
+            textSpan.textContent = text;
+
+            context.thinkingDiv.appendChild(label);
+            context.thinkingDiv.appendChild(textSpan);
+            context.thinkingTextSpan = textSpan;
             context.thinkingToggle = null;
         }
 
@@ -962,24 +987,29 @@
             const toggle = document.createElement('button');
             toggle.type = 'button';
             toggle.className = 'assistant-thinking-toggle';
-            toggle.title = 'Show thinking';
+            toggle.title = 'Show reasoning';
 
             const chevron = document.createElement('span');
             chevron.className = 'assistant-thinking-chevron';
             chevron.setAttribute('aria-hidden', 'true');
             chevron.textContent = '▸';
 
-            const textSpan = document.createElement('span');
+            const label = document.createElement('span');
+            label.className = 'assistant-thinking-label';
+            label.textContent = 'Reasoning';
+
+            const textSpan = document.createElement('div');
             textSpan.className = 'assistant-thinking-text';
 
             toggle.appendChild(chevron);
-            toggle.appendChild(textSpan);
+            toggle.appendChild(label);
             toggle.addEventListener('click', () => {
                 context.thinkingExpanded = !context.thinkingExpanded;
                 setThinkingExpanded(context, context.thinkingExpanded);
             });
 
             context.thinkingDiv.appendChild(toggle);
+            context.thinkingDiv.appendChild(textSpan);
             context.thinkingToggle = toggle;
             context.thinkingTextSpan = textSpan;
         }
@@ -991,7 +1021,7 @@
             context.thinkingDiv.classList.toggle('is-expanded', expanded);
             context.thinkingDiv.classList.toggle('is-collapsed', !expanded);
             context.thinkingToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-            context.thinkingToggle.title = expanded ? 'Hide thinking' : 'Show thinking';
+            context.thinkingToggle.title = expanded ? 'Hide reasoning' : 'Show reasoning';
             const chevron = context.thinkingToggle.querySelector('.assistant-thinking-chevron');
             if (chevron) {
                 chevron.textContent = expanded ? '▾' : '▸';
@@ -1002,27 +1032,6 @@
             return String(text || '')
                 .replace(/([.!?]["')\]]?)(?=[A-Z])/g, '$1 ')
                 .replace(/[ \t]{2,}/g, ' ');
-        }
-
-        function promoteAssistantDraftToThinking(context) {
-            if (!context || !context.fullText) {
-                return;
-            }
-            context.draftText = context.draftText
-                ? `${context.draftText}\n\n${context.fullText}`
-                : context.fullText;
-            context.fullText = '';
-            renderAssistantMarkdown(context);
-        }
-
-        function promoteAssistantDraftToAnswer(context) {
-            if (!context || !context.draftText || context.hasTools) {
-                return;
-            }
-            context.fullText = context.fullText
-                ? `${context.fullText}\n\n${context.draftText}`
-                : context.draftText;
-            context.draftText = '';
         }
 
         function setAssistantStatus(context, label, state = 'thinking') {
@@ -1044,10 +1053,6 @@
             let entry = context.toolStatusMap.get(toolId);
 
             if (payload.event === 'tool_call_started' || !entry) {
-                if (payload.event === 'tool_call_started') {
-                    context.hasTools = true;
-                    promoteAssistantDraftToThinking(context);
-                }
                 ensureToolCallsSection(context);
                 entry = createToolStatusEntry(context, toolId, payload);
                 if (payload.event === 'tool_call_started') {
@@ -1133,7 +1138,6 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
-            promoteAssistantDraftToAnswer(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1649,6 +1653,7 @@
             removeLoadingMessage,
             createAssistantStreamingMessage,
             appendAssistantDelta,
+            appendAssistantThinkingDelta,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,
