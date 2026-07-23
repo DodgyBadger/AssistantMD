@@ -687,7 +687,7 @@
                 role === 'user'
                     ? 'message-user'
                     : role === 'error'
-                    ? 'state-surface-error border'
+                    ? 'message-error'
                     : 'message-assistant prose prose-sm max-w-none'
             }`;
 

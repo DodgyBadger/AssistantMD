@@ -1765,6 +1765,15 @@ details summary::-webkit-details-marker {
     font-size: 0.875rem;
     line-height: 1.7142857;
 }
+.message-bubble.message-error {
+    border: 1px solid rgb(var(--state-error) / 0.35);
+    background: rgb(var(--state-error) / 0.12);
+    color: rgb(var(--state-error));
+}
+.message-bubble.message-error .message-footer {
+    border-top-color: rgb(var(--state-error) / 0.25);
+    color: rgb(var(--state-error));
+}
 .message-bubble.message-assistant {
     background: rgb(var(--accent-primary) / 0.08);
     border: 1px solid rgb(var(--border-primary));
