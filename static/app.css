@@ -1395,6 +1395,17 @@ details summary::-webkit-details-marker {
 .vault-file-preview a:hover {
     color: rgb(var(--accent-hover));
 }
+.vault-file-preview .vault-markdown-tag {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    border-radius: 9999px;
+    background: rgb(var(--accent-primary) / 0.12);
+    color: rgb(var(--accent-primary));
+    font-size: 0.88em;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+}
 .vault-file-preview blockquote {
     color: rgb(var(--text-secondary));
     border-inline-start-color: rgb(var(--border-primary));

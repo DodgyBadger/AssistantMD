@@ -480,7 +480,7 @@
 
         function renderMarkdownPreview(container, markdownContent = '', options = {}) {
             renderAssistantHtml(container, markdownContent, options);
-            postProcessAssistantBody(container);
+            postProcessAssistantBody(container, { decorateVaultTags: true });
         }
 
         function protectLatexForMarkdown(markdown) {
@@ -550,12 +550,74 @@
             });
         }
 
-        function postProcessAssistantBody(bodyDiv) {
+        function postProcessAssistantBody(bodyDiv, { decorateVaultTags = false } = {}) {
             if (!bodyDiv) return;
             enforceExternalLinkBehavior(bodyDiv);
             renderAssistantMath(bodyDiv);
             attachCodeCopyButtons(bodyDiv);
+            if (decorateVaultTags) {
+                decorateVaultMarkdownTags(bodyDiv);
+            }
             callbacks.enhanceFileLinks?.(bodyDiv);
+        }
+
+        function decorateVaultMarkdownTags(container) {
+            const textNodes = [];
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    const parent = node.parentElement;
+                    if (!parent || parent.closest(
+                        'a, button, code, pre, textarea, .assistant-latex-segment, .vault-markdown-tag'
+                    )) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    return vaultTagMatches(node.textContent || '').length
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
+                },
+            });
+            while (walker.nextNode()) {
+                textNodes.push(walker.currentNode);
+            }
+            textNodes.forEach(decorateVaultTagTextNode);
+        }
+
+        function decorateVaultTagTextNode(node) {
+            const text = node.textContent || '';
+            const matches = vaultTagMatches(text);
+            if (!matches.length) return;
+
+            let cursor = 0;
+            const fragment = document.createDocumentFragment();
+            matches.forEach(({ start, end, value }) => {
+                if (start > cursor) {
+                    fragment.appendChild(document.createTextNode(text.slice(cursor, start)));
+                }
+                const tag = document.createElement('span');
+                tag.className = 'vault-markdown-tag';
+                tag.textContent = value;
+                fragment.appendChild(tag);
+                cursor = end;
+            });
+            if (cursor < text.length) {
+                fragment.appendChild(document.createTextNode(text.slice(cursor)));
+            }
+            node.parentNode?.replaceChild(fragment, node);
+        }
+
+        function vaultTagMatches(text) {
+            const matches = [];
+            const pattern =
+                /(^|[\s([{"'“‘>])#([\p{L}\p{M}\p{N}_-]+(?:\/[\p{L}\p{M}\p{N}_-]+)*)(?![\p{L}\p{M}\p{N}_/-])/gu;
+            for (const match of text.matchAll(pattern)) {
+                const tagBody = match[2] || '';
+                if (!/[\p{L}\p{M}_-]/u.test(tagBody)) continue;
+                const prefixLength = (match[1] || '').length;
+                const start = (match.index || 0) + prefixLength;
+                const value = `#${tagBody}`;
+                matches.push({ start, end: start + value.length, value });
+            }
+            return matches;
         }
 
         function renderAssistantMath(bodyDiv) {
