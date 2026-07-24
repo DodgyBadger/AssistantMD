@@ -61,6 +61,7 @@
                     if (!interactionLocked()) callbacks.setWorkspace?.(path);
                 },
                 onMutate: (payload) => mutatePath(payload, vault),
+                onUpload: (file, path) => uploadFile(file, path, vault),
                 onClose: () => {
                     pickerOpen = false;
                 },
@@ -527,6 +528,24 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.detail || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function uploadFile(file, path, vaultName = '') {
+            if (interactionLocked()) {
+                throw new Error('Wait for the active response to finish.');
+            }
+            const vault = vaultName || selectedVault();
+            const body = new FormData();
+            body.append('file', file, file.name);
+            const response = await fetch(
+                `api/vaults/${encodeURIComponent(vault)}/files/upload?path=${encodeURIComponent(path)}`,
+                { method: 'POST', body }
+            );
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || errorData.detail || `HTTP ${response.status}`);

@@ -165,6 +165,11 @@ settings:
     description: "Maximum number of results returned by file_read list operations. 0 = disabled."
     category: "Files"
     restart_required: false
+  vault_upload_max_mb_per_file:
+    value: 100
+    description: "Maximum size in MB for one Vault Explorer file upload. 0 disables Vault Explorer uploads."
+    category: "Files"
+    restart_required: false
   vault_state_enabled:
     value: true
     description: "Enable vault-state manifest refresh and change-feed maintenance."

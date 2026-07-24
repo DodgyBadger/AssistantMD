@@ -133,6 +133,7 @@ from core.vault_state.file_mutations import (
     replace_vault_file_content,
     restore_vault_file,
     write_vault_file,
+    write_vault_file_bytes,
 )
 from core.vault_state.file_operations import (
     VaultFileOperationRejected,
@@ -389,14 +390,29 @@ def resolve_vault_root(vault_name: str) -> Path:
 
 
 def _normalize_vault_file_path(path: str | None) -> str:
-    normalized = normalize_vault_relative_path(path or "")
-    if not normalized:
+    raw_path = str(path or "").strip()
+    slash_normalized = raw_path.replace("\\", "/")
+    has_drive_prefix = (
+        len(slash_normalized) >= 3
+        and slash_normalized[0].isalpha()
+        and slash_normalized[1:3] == ":/"
+    )
+    path_parts = slash_normalized.split("/")
+    if (
+        not raw_path
+        or raw_path.startswith(("/", "\\"))
+        or has_drive_prefix
+        or any(part in {".", ".."} for part in path_parts)
+        or any(ord(character) < 32 for character in raw_path)
+        or len(raw_path) > 1000
+    ):
         raise APIException(
             status_code=400,
             error_type="InvalidVaultFilePath",
-            message="Vault file path is required.",
-            details={"path": path},
+            message="A safe vault-relative file path is required.",
+            details={"path": raw_path[:100]},
         )
+    normalized = normalize_vault_relative_path(raw_path)
     return normalized
 
 
@@ -1313,6 +1329,75 @@ def mutate_vault_path(
             destination=destination,
             content=content,
         )
+
+
+def upload_vault_file(
+    *,
+    vault_name: str,
+    path: str,
+    content: bytes,
+) -> VaultPathMutationResponse:
+    """Create one binary-safe vault file from an Explorer upload."""
+    vault_root, normalized, _ = resolve_vault_upload_target(
+        vault_name=vault_name,
+        path=path,
+    )
+
+    with _explorer_activity(label=f"Upload {normalized}"):
+        try:
+            mutation = write_vault_file_bytes(
+                vault_path=vault_root,
+                path=normalized,
+                content=content,
+                fail_if_exists=True,
+                warn_without_task=False,
+            )
+        except VaultMutationRejected as exc:
+            raise _vault_path_mutation_error(
+                exc,
+                vault_name=vault_name,
+                path=normalized,
+            ) from exc
+
+    logger.info(
+        "Vault Explorer upload completed",
+        data={
+            "event": "vault_explorer_upload_completed",
+            "vault_name": vault_name,
+            "path": normalized,
+            "size_bytes": len(content),
+            "event_sequence": mutation.event_sequence,
+        },
+    )
+    return VaultPathMutationResponse(
+        operation="upload",
+        path=normalized,
+        kind="file",
+        message=f"Uploaded {normalized}.",
+        metadata={
+            "size_bytes": len(content),
+            "task_id": mutation.task_id,
+            "vault_id": mutation.vault_id,
+            "event_sequence": mutation.event_sequence,
+        },
+    )
+
+
+def resolve_vault_upload_target(
+    *,
+    vault_name: str,
+    path: str,
+) -> tuple[Path, str, Path]:
+    """Resolve one create-only upload target inside a configured vault."""
+    vault_root, normalized, full_path = _resolve_vault_file_path(vault_name, path)
+    if full_path.exists():
+        raise APIException(
+            status_code=409,
+            error_type="VaultPathExists",
+            message=f"Vault path already exists: {normalized}",
+            details={"path": normalized, "vault_name": vault_name},
+        )
+    return vault_root, normalized, full_path
 
 
 def _mutate_vault_path_attributed(

@@ -15,6 +15,34 @@ AssistantMD is designed as a **single-user application** running on your local m
 
 Keep these constraints in mind before putting the application on a public interface.
 
+## Vault File Uploads
+
+Vault Explorer uploads intentionally accept arbitrary file content because
+vaults may contain PDFs, images, office documents, and other user-owned
+artifacts. The upload boundary:
+
+- requires an existing configured vault and a safe vault-relative destination;
+- rejects absolute paths, `.`/`..` components, control characters, overlong
+  paths, and paths that resolve through symlinks outside the selected vault;
+- treats the multipart filename as display metadata only and uses the validated
+  API path as the destination;
+- accepts exactly one multipart file per request;
+- enforces `vault_upload_max_mb_per_file` and never overwrites an existing
+  destination; and
+- writes through vault mutation history.
+
+Uploaded content is not malware-scanned. AssistantMD does not execute uploaded
+files or render unknown binary types inline, but explicitly importing an
+untrusted PDF or image hands that content to the configured ingestion parser.
+Keep parser dependencies current and only import documents you are willing to
+process.
+
+The application-level size check is not a substitute for an edge request-body
+limit. In particular, a chunked multipart request may be spooled by the HTTP
+stack before the application can reject its file bytes, and repeated
+within-limit uploads can consume vault storage. Remote deployments should set
+request-size, rate, and storage limits at the authenticated reverse proxy.
+
 ## Prompt Injection
 
 ### The Risk

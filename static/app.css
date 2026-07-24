@@ -678,6 +678,41 @@ details summary::-webkit-details-marker {
     flex-direction: column;
     gap: 0.65rem;
 }
+.vault-explorer-upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+.vault-explorer-upload-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 10rem;
+    overflow-y: auto;
+}
+.vault-explorer-upload-item {
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.8fr) minmax(10rem, 1.5fr) auto;
+    gap: 0.6rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid rgb(var(--border-primary));
+    border-radius: 0.35rem;
+    background: rgb(var(--bg-card));
+    color: rgb(var(--text-primary));
+}
+.vault-explorer-upload-item > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+    .vault-explorer-upload-item {
+        grid-template-columns: 1fr auto;
+    }
+    .vault-explorer-upload-item .cell-mono {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
 .vault-explorer-move-destination,
 .vault-explorer-move-preview {
     display: flex;
@@ -701,7 +736,10 @@ details summary::-webkit-details-marker {
     cursor: pointer;
 }
 .vault-explorer-choosing-destination .vault-explorer-row-actions,
-.vault-explorer-choosing-destination .vault-explorer-header-new {
+.vault-explorer-choosing-destination .vault-explorer-header-new,
+.vault-explorer-choosing-destination [data-vault-explorer-upload],
+.vault-explorer-preparing-upload .vault-explorer-header-new,
+.vault-explorer-preparing-upload [data-vault-explorer-upload] {
     visibility: hidden;
 }
 .workspace-tree-select.is-move-destination {

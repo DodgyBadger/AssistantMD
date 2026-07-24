@@ -6,6 +6,8 @@
         let activeOptions = null;
         let rootLoadGeneration = 0;
         let rootAbortController = null;
+        let activeUploadFiles = [];
+        let uploadInProgress = false;
 
         function selectedVault() {
             return elements.vaultSelector?.value || '';
@@ -58,6 +60,8 @@
                                         <button type="button" data-vault-explorer-create-kind="directory">New folder</button>
                                     </div>
                                 </div>
+                                <input type="file" class="hidden" data-vault-explorer-upload-input multiple />
+                                <button type="button" class="ui-icon-button is-compact" data-vault-explorer-upload aria-label="Upload files" title="Upload files">${icons.IMPORT_ICON_SVG}</button>
                                 <button type="button" class="ui-icon-button is-compact" data-vault-explorer-refresh aria-label="Refresh vault" title="Refresh vault">${icons.REFRESH_ICON_SVG}</button>
                             ` : ''}
                             <button type="button" class="ui-icon-button is-compact" data-vault-path-picker-close aria-label="Close" title="Close">${icons.X_ICON_SVG}</button>
@@ -91,6 +95,7 @@
             const queryInput = overlay.querySelector('[data-vault-path-picker-query]');
             const scopeSelect = overlay.querySelector('[data-vault-path-picker-scope]');
             const headerCreateInput = overlay.querySelector('.vault-explorer-header-create-input');
+            const uploadInput = overlay.querySelector('[data-vault-explorer-upload-input]');
             if (scopeSelect instanceof HTMLSelectElement) {
                 scopeSelect.value = options.initialScope || (workspacePath() ? 'workspace' : 'vault');
             }
@@ -113,6 +118,7 @@
                     overlay.querySelector('[data-vault-explorer-new-menu]')?.classList.add('hidden');
                 }
                 if (event.target === overlay || target.closest('[data-vault-path-picker-close]')) {
+                    if (uploadInProgress) return;
                     close();
                     return;
                 }
@@ -122,6 +128,12 @@
                 }
                 if (target.closest('[data-vault-explorer-new]')) {
                     toggleHeaderCreateMenu(overlay);
+                    return;
+                }
+                if (target.closest('[data-vault-explorer-upload]')) {
+                    if (!isReadOnly(options) && uploadInput instanceof HTMLInputElement) {
+                        uploadInput.click();
+                    }
                     return;
                 }
                 const createKindButton = target.closest('[data-vault-explorer-create-kind]');
@@ -147,6 +159,7 @@
                     return;
                 }
                 if (target.closest('[data-vault-explorer-action-cancel]')) {
+                    if (uploadInProgress) return;
                     closeActionPanel(overlay);
                     return;
                 }
@@ -201,6 +214,11 @@
                     await submitExplorerMutation(overlay, form, options);
                     return;
                 }
+                if (form instanceof HTMLFormElement && form.matches('[data-vault-explorer-upload-form]')) {
+                    event.preventDefault();
+                    await submitUploads(overlay, form, options);
+                    return;
+                }
                 if (!(form instanceof HTMLFormElement) || !form.matches('[data-vault-explorer-mutation-form]')) return;
                 event.preventDefault();
                 await submitExplorerMutation(overlay, form, options);
@@ -223,6 +241,11 @@
             });
             const debouncedLoad = debounce(loadRoot, 180);
             queryInput?.addEventListener('input', debouncedLoad);
+            uploadInput?.addEventListener('change', () => {
+                activeUploadFiles = Array.from(uploadInput.files || []);
+                uploadInput.value = '';
+                if (activeUploadFiles.length) showUploadForm(overlay);
+            });
             scopeSelect?.addEventListener('change', () => {
                 closeHeaderCreateForm(overlay);
                 syncSearchPlaceholder();
@@ -253,6 +276,8 @@
             activePickerId = '';
             activeOnClose = null;
             activeOptions = null;
+            activeUploadFiles = [];
+            uploadInProgress = false;
         }
 
         function syncInteractionLocks() {
@@ -273,6 +298,11 @@
             if (newButton instanceof HTMLButtonElement) {
                 newButton.disabled = readOnly;
                 newButton.title = readOnly ? lockMessage : 'Create file or folder';
+            }
+            const uploadButton = overlay.querySelector('[data-vault-explorer-upload]');
+            if (uploadButton instanceof HTMLButtonElement) {
+                uploadButton.disabled = readOnly;
+                uploadButton.title = readOnly ? lockMessage : 'Upload files';
             }
             if (readOnly) {
                 closeActionPanel(overlay);
@@ -529,13 +559,18 @@
         function closeActionPanel(overlay, { restoreFocus = true } = {}) {
             const panel = actionPanel(overlay);
             if (!(panel instanceof HTMLElement)) return;
+            const wasUpload = Boolean(
+                panel.querySelector('[data-vault-explorer-upload-form]')
+            );
             const sourcePath = panel.querySelector(
                 '[data-vault-explorer-mutation-form]'
             )?.getAttribute('data-path') || '';
             panel.classList.add('hidden');
             panel.innerHTML = '';
             overlay.classList.remove('vault-explorer-choosing-destination');
+            overlay.classList.remove('vault-explorer-preparing-upload');
             syncMoveDestinationSelection(overlay);
+            if (wasUpload) activeUploadFiles = [];
             if (restoreFocus && sourcePath) {
                 const sourceMenuButton = Array.from(
                     overlay.querySelectorAll('[data-vault-explorer-more]')
@@ -543,7 +578,165 @@
                     button.getAttribute('data-vault-explorer-more') === sourcePath
                 ));
                 sourceMenuButton?.focus();
+            } else if (restoreFocus && wasUpload) {
+                overlay.querySelector('[data-vault-explorer-upload]')?.focus();
             }
+        }
+
+        function showUploadForm(overlay) {
+            const panel = actionPanel(overlay);
+            if (!(panel instanceof HTMLElement) || !activeUploadFiles.length) return;
+            const selectedFiles = activeUploadFiles;
+            closeActionPanel(overlay, { restoreFocus: false });
+            activeUploadFiles = selectedFiles;
+            closeHeaderCreateForm(overlay);
+            const scope = overlay.querySelector('[data-vault-path-picker-scope]');
+            const initialDestination = scope instanceof HTMLSelectElement
+                && scope.value === 'workspace'
+                ? workspacePath()
+                : '';
+            panel.innerHTML = `
+                <div class="vault-explorer-action-header">
+                    <strong>Upload files</strong>
+                    <button type="button" class="ui-icon-button is-compact" data-vault-explorer-action-cancel aria-label="Cancel" title="Cancel">${icons.X_ICON_SVG}</button>
+                </div>
+                <form class="vault-explorer-upload-form" data-vault-explorer-upload-form>
+                    <label>Destination folder
+                        <input name="destination" value="${escapeHtml(initialDestination)}" class="vault-explorer-path-input" autocomplete="off" placeholder="Vault root" />
+                    </label>
+                    <div class="vault-explorer-upload-list" data-vault-explorer-upload-list></div>
+                    <p class="text-xs text-txt-secondary">To convert PDFs or images to Markdown, upload them to <span class="cell-mono">AssistantMD/Import</span>, then use Import Files.</p>
+                    <div class="vault-explorer-form-actions">
+                        <button type="button" class="ui-button-secondary" data-vault-explorer-action-cancel>Cancel</button>
+                        <button type="submit" class="ui-button-primary">Upload</button>
+                    </div>
+                    <div class="text-sm" data-vault-explorer-form-status></div>
+                </form>`;
+            panel.classList.remove('hidden');
+            overlay.classList.add('vault-explorer-preparing-upload');
+            const destinationInput = panel.querySelector('input[name="destination"]');
+            destinationInput?.addEventListener('input', () => {
+                destinationInput.setCustomValidity('');
+                renderUploadPaths(panel);
+            });
+            renderUploadPaths(panel);
+            destinationInput?.focus();
+            if (destinationInput instanceof HTMLInputElement) {
+                destinationInput.setSelectionRange(
+                    destinationInput.value.length,
+                    destinationInput.value.length
+                );
+            }
+        }
+
+        function renderUploadPaths(panel) {
+            const list = panel.querySelector('[data-vault-explorer-upload-list]');
+            const destinationInput = panel.querySelector('input[name="destination"]');
+            if (!(list instanceof HTMLElement)) return;
+            const destination = destinationInput instanceof HTMLInputElement
+                ? destinationInput.value.trim().replace(/\/+$/, '')
+                : '';
+            list.innerHTML = activeUploadFiles.map((file) => `
+                <div class="vault-explorer-upload-item">
+                    <span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                    <span class="cell-mono text-txt-secondary">${escapeHtml(joinPath(destination, file.name))}</span>
+                    <span class="text-txt-secondary">${formatFileSize(file.size)}</span>
+                </div>
+            `).join('');
+        }
+
+        async function submitUploads(overlay, form, options) {
+            if (isReadOnly(options) || !activeUploadFiles.length) return;
+            const destinationInput = form.elements.namedItem('destination');
+            const destination = destinationInput instanceof HTMLInputElement
+                ? destinationInput.value.trim().replace(/\/+$/, '')
+                : '';
+            const invalidDestination = destination.startsWith('/')
+                || destination.includes('\\')
+                || destination.split('/').includes('..');
+            if (invalidDestination) {
+                const message = 'Enter a vault-relative destination folder.';
+                if (destinationInput instanceof HTMLInputElement) {
+                    destinationInput.setCustomValidity(message);
+                    destinationInput.reportValidity();
+                }
+                return;
+            }
+
+            const submit = form.querySelector('button[type="submit"]');
+            const status = form.querySelector('[data-vault-explorer-form-status]');
+            setUploadInteractionState(overlay, form, true);
+            const failures = [];
+            const uploadedPaths = [];
+            uploadInProgress = true;
+            try {
+                for (const file of activeUploadFiles) {
+                    const path = joinPath(destination, file.name);
+                    if (status) status.textContent = `Uploading ${file.name}...`;
+                    try {
+                        if (typeof options.onUpload !== 'function') {
+                            throw new Error('File uploads are unavailable.');
+                        }
+                        const result = await options.onUpload(file, path);
+                        uploadedPaths.push(result?.path || path);
+                    } catch (error) {
+                        failures.push({ file, message: error.message });
+                    }
+                }
+            } finally {
+                uploadInProgress = false;
+                setUploadInteractionState(overlay, form, false);
+            }
+
+            if (uploadedPaths.length) {
+                try {
+                    await refreshExplorer(overlay, options, uploadedPaths[0]);
+                } catch (refreshError) {
+                    setStatus(
+                        overlay,
+                        `Upload succeeded, but the Explorer could not refresh: ${refreshError.message}`,
+                        true
+                    );
+                }
+            }
+            if (!failures.length) {
+                closeActionPanel(overlay, { restoreFocus: false });
+                return;
+            }
+
+            activeUploadFiles = failures.map(({ file }) => file);
+            renderUploadPaths(form);
+            if (status) {
+                status.innerHTML = failures.map(({ file, message }) => (
+                    `<div class="state-error">${escapeHtml(file.name)}: ${escapeHtml(message)}</div>`
+                )).join('');
+            }
+            if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        }
+
+        function setUploadInteractionState(overlay, form, busy) {
+            form.querySelectorAll('button, input').forEach((control) => {
+                if (
+                    control instanceof HTMLButtonElement
+                    || control instanceof HTMLInputElement
+                ) {
+                    control.disabled = busy;
+                }
+            });
+            const closeButton = overlay.querySelector('[data-vault-path-picker-close]');
+            if (closeButton instanceof HTMLButtonElement) closeButton.disabled = busy;
+            overlay.querySelectorAll(
+                '[data-vault-explorer-upload], [data-vault-explorer-refresh]'
+            ).forEach((control) => {
+                if (control instanceof HTMLButtonElement) control.disabled = busy;
+            });
+            if (!busy) syncInteractionLocks();
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
         }
 
         function toggleHeaderCreateMenu(overlay) {

@@ -56,6 +56,13 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
   submits structured per-call decisions and editable argument values; backend
   services construct Pydantic AI approval/denial results and resume chat.
 - Multipart chat image uploads enforce configured image count, per-image bytes, and total image bytes at the API boundary while reading upload streams. Oversized uploads return `413` before task creation.
+- Vault Explorer file uploads use
+  `POST /api/vaults/{vault_name}/files/upload?path=<vault-relative-path>`.
+  The endpoint accepts one multipart file per request, enforces
+  `vault_upload_max_mb_per_file` while reading, rejects existing destinations,
+  and records the binary-safe create through the shared vault mutation history.
+  A value of `0` disables Explorer uploads. The Explorer sends multi-file
+  selections as independent requests so partial batch results remain explicit.
 - `/api/vaults/{vault_name}/activity` exposes durable attributed vault activity for the Dashboard tab.
 - `/api/vaults/{vault_name}/activity/{activity_id}/rollback` previews and applies
   all-or-nothing activity rollback.

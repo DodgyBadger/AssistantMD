@@ -8,6 +8,8 @@ from typing import List
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
+from starlette.datastructures import FormData, UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.logger import UnifiedLogger
 from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
@@ -26,6 +28,8 @@ from core.settings import (
     get_chunking_max_image_bytes_total,
     get_chunking_max_image_mb_per_image,
     get_chunking_max_images_per_prompt,
+    get_vault_upload_max_bytes_per_file,
+    get_vault_upload_max_mb_per_file,
 )
 
 from .models import (
@@ -145,7 +149,9 @@ from .services import (
     list_vault_directories,
     list_vault_file_references,
     resolve_vault_path_references,
+    resolve_vault_upload_target,
     mutate_vault_path,
+    upload_vault_file,
     get_vault_file,
     get_vault_file_revisions,
     restore_vault_file_revision,
@@ -210,6 +216,7 @@ router = APIRouter(prefix="/api", tags=["AssistantMD API"])
 logger = UnifiedLogger(tag="api-endpoints")
 _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
 _CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
+_VAULT_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 
 
 def _looks_like_workflow_path(value: str) -> bool:
@@ -327,6 +334,118 @@ async def _read_chat_image_upload(item, *, display_name: str) -> bytes:
             )
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+async def _read_vault_upload(
+    upload: UploadFile,
+    *,
+    max_upload_bytes: int,
+    max_upload_mb: int,
+) -> bytes:
+    """Read one vault upload while enforcing the API payload boundary."""
+    chunks: list[bytes] = []
+    total_bytes = 0
+    while True:
+        chunk = await upload.read(_CHAT_UPLOAD_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_upload_bytes:
+            raise APIException(
+                status_code=413,
+                error_type="VaultUploadTooLarge",
+                message=(
+                    f"Upload exceeds the configured {max_upload_mb} MB per-file limit."
+                ),
+                details={
+                    "filename": str(upload.filename or "")[:255],
+                    "max_bytes": max_upload_bytes,
+                    "size_bytes": total_bytes,
+                    "setting": "vault_upload_max_mb_per_file",
+                },
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _validate_vault_upload_content_length(
+    request: Request,
+    *,
+    max_upload_bytes: int,
+) -> None:
+    """Reject a declared multipart body that cannot fit one configured upload."""
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length is None:
+        return
+    try:
+        content_length = int(raw_content_length)
+    except ValueError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultUploadContentLength",
+            message="Upload Content-Length must be a non-negative integer.",
+        ) from exc
+    if content_length < 0:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultUploadContentLength",
+            message="Upload Content-Length must be a non-negative integer.",
+        )
+    max_request_bytes = max_upload_bytes + _VAULT_UPLOAD_MULTIPART_OVERHEAD_BYTES
+    if content_length > max_request_bytes:
+        raise APIException(
+            status_code=413,
+            error_type="VaultUploadTooLarge",
+            message="Upload request exceeds the configured per-file limit.",
+            details={
+                "max_bytes": max_upload_bytes,
+                "request_bytes": content_length,
+                "setting": "vault_upload_max_mb_per_file",
+            },
+        )
+
+
+async def _parse_single_vault_upload(
+    request: Request,
+    *,
+    max_upload_bytes: int,
+) -> tuple[FormData, UploadFile]:
+    """Parse exactly one multipart file and reject unrelated request parts."""
+    content_type = (request.headers.get("content-type") or "").lower()
+    if not content_type.startswith("multipart/form-data"):
+        raise APIException(
+            status_code=415,
+            error_type="InvalidVaultUploadContentType",
+            message="Vault uploads require multipart/form-data.",
+        )
+    try:
+        form = await request.form(
+            max_files=1,
+            max_fields=0,
+            max_part_size=min(max_upload_bytes, 1024 * 1024),
+        )
+    except StarletteHTTPException as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultUploadMultipart",
+            message=str(exc.detail),
+        ) from exc
+
+    parts = form.multi_items()
+    files = form.getlist("file")
+    if (
+        len(parts) != 1
+        or len(files) != 1
+        or parts[0][0] != "file"
+        or not isinstance(files[0], UploadFile)
+    ):
+        await form.close()
+        raise APIException(
+            status_code=400,
+            error_type="InvalidVaultUploadMultipart",
+            message="Vault uploads require exactly one multipart file field named 'file'.",
+        )
+    return form, files[0]
 
 
 async def _start_chat_task_request(
@@ -1214,6 +1333,53 @@ async def mutate_vault_explorer_path(
         )
     except Exception as e:
         return create_error_response(e)
+
+
+@router.post("/vaults/{vault_name}/files/upload", response_model=VaultPathMutationResponse)
+async def upload_vault_explorer_file(
+    vault_name: str,
+    path: str,
+    request: Request,
+):
+    """Upload one create-only binary file into the selected vault."""
+    form: FormData | None = None
+    try:
+        max_upload_mb = get_vault_upload_max_mb_per_file()
+        max_upload_bytes = get_vault_upload_max_bytes_per_file()
+        if max_upload_bytes == 0:
+            raise APIException(
+                status_code=403,
+                error_type="VaultUploadsDisabled",
+                message="Vault Explorer uploads are disabled in settings.",
+                details={"setting": "vault_upload_max_mb_per_file"},
+            )
+        _, normalized_path, _ = resolve_vault_upload_target(
+            vault_name=vault_name,
+            path=path,
+        )
+        _validate_vault_upload_content_length(
+            request,
+            max_upload_bytes=max_upload_bytes,
+        )
+        form, upload = await _parse_single_vault_upload(
+            request,
+            max_upload_bytes=max_upload_bytes,
+        )
+        content = await _read_vault_upload(
+            upload,
+            max_upload_bytes=max_upload_bytes,
+            max_upload_mb=max_upload_mb,
+        )
+        return upload_vault_file(
+            vault_name=vault_name,
+            path=normalized_path,
+            content=content,
+        )
+    except Exception as e:
+        return create_error_response(e)
+    finally:
+        if form is not None:
+            await form.close()
 
 
 @router.get("/vaults/{vault_name}/files", response_model=VaultFileResponse)

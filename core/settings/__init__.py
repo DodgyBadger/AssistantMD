@@ -839,6 +839,26 @@ def get_task_snapshot_retention_days() -> int:
     return parsed if parsed >= 0 else template_default
 
 
+def get_vault_upload_max_mb_per_file() -> int:
+    """Return the configured per-file Vault Explorer upload limit in MB."""
+    entry = get_general_settings().get("vault_upload_max_mb_per_file")
+    value = getattr(entry, "value", None) if entry is not None else None
+    template_default = _get_template_setting_positive_int(
+        "vault_upload_max_mb_per_file",
+        100,
+    )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return template_default
+    return parsed if parsed >= 0 else template_default
+
+
+def get_vault_upload_max_bytes_per_file() -> int:
+    """Return the configured per-file Vault Explorer upload limit in bytes."""
+    return get_vault_upload_max_mb_per_file() * 1024 * 1024
+
+
 def get_chunking_max_images_per_prompt() -> int:
     """Return max image attachments per chunked prompt."""
     entry = get_general_settings().get("chunking_max_images_per_prompt")
