@@ -673,6 +673,42 @@ details summary::-webkit-details-marker {
     justify-content: space-between;
     margin-bottom: 0.6rem;
 }
+.vault-explorer-move-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+.vault-explorer-move-destination,
+.vault-explorer-move-preview {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.vault-explorer-move-destination strong,
+.vault-explorer-move-preview .cell-mono {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.vault-explorer-move-destination strong {
+    flex: 1;
+}
+.vault-explorer-choosing-destination .workspace-tree-select[data-vault-path-picker-kind="file"] {
+    cursor: default;
+    opacity: 0.55;
+}
+.vault-explorer-choosing-destination .workspace-tree-select[data-vault-path-picker-kind="directory"] {
+    cursor: pointer;
+}
+.vault-explorer-choosing-destination .vault-explorer-row-actions,
+.vault-explorer-choosing-destination .vault-explorer-header-new {
+    visibility: hidden;
+}
+.workspace-tree-select.is-move-destination {
+    color: rgb(var(--accent-primary));
+    background: rgb(var(--accent-primary) / 0.12);
+    box-shadow: inset 0 0 0 1px rgb(var(--accent-primary) / 0.4);
+}
 .vault-explorer-form-actions button {
     min-height: 2rem;
     padding: 0.35rem 0.65rem;

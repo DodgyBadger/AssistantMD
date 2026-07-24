@@ -176,6 +176,10 @@
                 if (selectButton instanceof HTMLElement) {
                     const path = selectButton.getAttribute('data-vault-path-picker-select') || '';
                     const kind = selectButton.getAttribute('data-vault-path-picker-kind') || '';
+                    if (moveForm(overlay)) {
+                        if (kind === 'directory') selectMoveDestination(overlay, path);
+                        return;
+                    }
                     if (kind === 'directory' && options.expandDirectoriesOnSelect) {
                         const row = selectButton.closest('[data-vault-path-picker-row]');
                         const rowToggle = row?.querySelector(':scope > .workspace-tree-row [data-vault-path-picker-toggle]');
@@ -200,6 +204,16 @@
                 if (!(form instanceof HTMLFormElement) || !form.matches('[data-vault-explorer-mutation-form]')) return;
                 event.preventDefault();
                 await submitExplorerMutation(overlay, form, options);
+            });
+            overlay.addEventListener('input', (event) => {
+                const input = event.target;
+                if (
+                    input instanceof HTMLInputElement
+                    && input.matches('[data-vault-explorer-move-name]')
+                ) {
+                    input.setCustomValidity('');
+                    updateMovePreview(overlay);
+                }
             });
 
             const loadRoot = () => loadResults(overlay, options).catch((error) => {
@@ -373,6 +387,7 @@
                         : '<div class="py-1 text-xs text-txt-secondary">No child files.</div>';
                 }
                 children.dataset.loaded = 'true';
+                syncMoveDestinationSelection(overlay);
             } catch (error) {
                 children.innerHTML = `<div class="py-1 text-xs state-error">Unable to load paths: ${escapeHtml(error.message)}</div>`;
             }
@@ -440,7 +455,8 @@
                                     ${kind === 'directory' ? `<button type="button" data-vault-explorer-row-action="workspace" data-path="${escapeHtml(path)}" data-kind="${kind}">Set as workspace</button>` : ''}
                                     ${kind === 'directory' ? `<button type="button" data-vault-explorer-row-action="create_file" data-path="${escapeHtml(path)}" data-kind="${kind}">Create file</button>` : ''}
                                     ${kind === 'directory' ? `<button type="button" data-vault-explorer-row-action="create_directory" data-path="${escapeHtml(path)}" data-kind="${kind}">Create folder</button>` : ''}
-                                    <button type="button" data-vault-explorer-row-action="move" data-path="${escapeHtml(path)}" data-kind="${kind}">Move or rename</button>
+                                    <button type="button" data-vault-explorer-row-action="rename" data-path="${escapeHtml(path)}" data-kind="${kind}">Rename</button>
+                                    <button type="button" data-vault-explorer-row-action="move" data-path="${escapeHtml(path)}" data-kind="${kind}">Move</button>
                                     <button type="button" class="state-error" data-vault-explorer-row-action="delete" data-path="${escapeHtml(path)}" data-kind="${kind}">Delete</button>
                                 </div>
                             </div>
@@ -510,11 +526,24 @@
             return overlay.querySelector('[data-vault-explorer-action-panel]');
         }
 
-        function closeActionPanel(overlay) {
+        function closeActionPanel(overlay, { restoreFocus = true } = {}) {
             const panel = actionPanel(overlay);
             if (!(panel instanceof HTMLElement)) return;
+            const sourcePath = panel.querySelector(
+                '[data-vault-explorer-mutation-form]'
+            )?.getAttribute('data-path') || '';
             panel.classList.add('hidden');
             panel.innerHTML = '';
+            overlay.classList.remove('vault-explorer-choosing-destination');
+            syncMoveDestinationSelection(overlay);
+            if (restoreFocus && sourcePath) {
+                const sourceMenuButton = Array.from(
+                    overlay.querySelectorAll('[data-vault-explorer-more]')
+                ).find((button) => (
+                    button.getAttribute('data-vault-explorer-more') === sourcePath
+                ));
+                sourceMenuButton?.focus();
+            }
         }
 
         function toggleHeaderCreateMenu(overlay) {
@@ -592,7 +621,64 @@
                     <div class="text-sm" data-vault-explorer-form-status></div>
                 </form>`;
             panel.classList.remove('hidden');
-            panel.querySelector('input')?.focus();
+            const input = panel.querySelector('input');
+            input?.focus();
+            if (
+                operation === 'rename'
+                && input instanceof HTMLInputElement
+            ) {
+                const extensionIndex = kind === 'file' ? value.lastIndexOf('.') : -1;
+                input.setSelectionRange(
+                    0,
+                    extensionIndex > 0 ? extensionIndex : value.length
+                );
+            }
+        }
+
+        function showMoveForm(overlay, { path, kind }) {
+            const panel = actionPanel(overlay);
+            if (!(panel instanceof HTMLElement)) return;
+            const initialParent = parentPath(path);
+            const name = baseName(path);
+            const workspace = workspacePath();
+            panel.innerHTML = `
+                <div class="vault-explorer-action-header">
+                    <strong>Move ${escapeHtml(kind)}</strong>
+                    <button type="button" class="ui-icon-button is-compact" data-vault-explorer-action-cancel aria-label="Cancel" title="Cancel">${icons.X_ICON_SVG}</button>
+                </div>
+                <form class="vault-explorer-mutation-form vault-explorer-move-form" data-vault-explorer-mutation-form data-operation="move" data-path="${escapeHtml(path)}" data-kind="${escapeHtml(kind)}" data-destination="${escapeHtml(initialParent)}">
+                    <p class="text-txt-secondary">Choose a destination folder in the tree.</p>
+                    <div class="vault-explorer-move-destination">
+                        <span>Destination</span>
+                        <strong class="cell-mono" data-vault-explorer-move-destination>${escapeHtml(initialParent || 'Vault root')}</strong>
+                        ${workspace ? `<button type="button" class="ui-button-secondary" data-vault-explorer-move-shortcut="${escapeHtml(workspace)}">Workspace root</button>` : ''}
+                        <button type="button" class="ui-button-secondary" data-vault-explorer-move-shortcut="">Vault root</button>
+                    </div>
+                    <label>${kind === 'directory' ? 'Folder name' : 'File name'}
+                        <input name="value" value="${escapeHtml(name)}" class="vault-explorer-path-input" data-vault-explorer-move-name autocomplete="off" required />
+                    </label>
+                    <div class="vault-explorer-move-preview">
+                        <span class="text-txt-secondary">New path</span>
+                        <span class="cell-mono text-txt-primary" data-vault-explorer-move-preview></span>
+                    </div>
+                    <div class="vault-explorer-form-actions">
+                        <button type="button" class="ui-button-secondary" data-vault-explorer-action-cancel>Cancel</button>
+                        <button type="submit" class="ui-button-primary">Move</button>
+                    </div>
+                    <div class="text-sm" data-vault-explorer-form-status></div>
+                </form>`;
+            panel.classList.remove('hidden');
+            overlay.classList.add('vault-explorer-choosing-destination');
+            panel.querySelectorAll('[data-vault-explorer-move-shortcut]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    selectMoveDestination(
+                        overlay,
+                        button.getAttribute('data-vault-explorer-move-shortcut') || ''
+                    );
+                });
+            });
+            updateMovePreview(overlay);
+            syncMoveDestinationSelection(overlay);
         }
 
         function toggleRowMenu(overlay, button) {
@@ -612,8 +698,18 @@
             if (action === 'workspace') return options.onSetWorkspace?.(path);
             if (action === 'create_file') return showCreateForm(overlay, 'file', path);
             if (action === 'create_directory') return showCreateForm(overlay, 'directory', path);
-            if (action === 'move') {
-                showMutationForm(overlay, { operation: 'move', title: 'Move or rename', label: 'New vault-relative path', value: path, submitLabel: 'Move', path, kind });
+            if (action === 'rename') {
+                showMutationForm(overlay, {
+                    operation: 'rename',
+                    title: `Rename ${kind}`,
+                    label: 'New name',
+                    value: baseName(path),
+                    submitLabel: 'Rename',
+                    path,
+                    kind,
+                });
+            } else if (action === 'move') {
+                showMoveForm(overlay, { path, kind });
             } else if (action === 'delete') {
                 showMutationForm(overlay, { operation: 'delete', title: `Delete ${kind}`, submitLabel: 'Delete', path, kind });
             }
@@ -639,7 +735,13 @@
                 || value === '..'
                 || (!directPath && /[\\/]/.test(value))
             );
-            if (invalidCreateValue) {
+            const invalidLocalName = ['rename', 'move'].includes(operation) && (
+                !value
+                || value === '.'
+                || value === '..'
+                || /[\\/]/.test(value)
+            );
+            if (invalidCreateValue || invalidLocalName) {
                 const message = directPath
                     ? 'Enter a vault-relative path.'
                     : 'Enter a name without path separators.';
@@ -651,19 +753,52 @@
                 if (submit instanceof HTMLButtonElement) submit.disabled = false;
                 return;
             }
+            if (
+                operation === 'rename'
+                && joinPath(parentPath(sourcePath), value) === sourcePath
+            ) {
+                const message = 'Enter a different name.';
+                if (valueInput instanceof HTMLInputElement) {
+                    valueInput.setCustomValidity(message);
+                    valueInput.reportValidity();
+                }
+                if (status) {
+                    status.innerHTML = `<span class="state-error">${escapeHtml(message)}</span>`;
+                }
+                if (submit instanceof HTMLButtonElement) submit.disabled = false;
+                return;
+            }
             if (valueInput instanceof HTMLInputElement) valueInput.setCustomValidity('');
             if (status) status.textContent = 'Working...';
             try {
+                const destination = operation === 'rename'
+                    ? joinPath(parentPath(sourcePath), value)
+                    : operation === 'move'
+                        ? joinPath(form.dataset.destination || '', value)
+                        : '';
                 const targetPath = operation.startsWith('create_')
                     ? (directPath ? value : [parent, value].filter(Boolean).join('/'))
                     : sourcePath;
-                const payload = { operation, path: targetPath };
-                if (operation === 'move') payload.destination = value;
+                const payload = {
+                    operation: operation === 'rename' ? 'move' : operation,
+                    path: targetPath,
+                };
+                if (['rename', 'move'].includes(operation)) payload.destination = destination;
                 const result = await options.onMutate?.(payload);
-                closeActionPanel(overlay);
+                closeActionPanel(overlay, { restoreFocus: false });
                 closeHeaderCreateForm(overlay);
-                const reveal = operation === 'move' ? value : (operation.startsWith('create_') ? targetPath : parentPath(sourcePath));
-                await refreshExplorer(overlay, options, reveal);
+                const reveal = ['rename', 'move'].includes(operation)
+                    ? destination
+                    : (operation.startsWith('create_') ? targetPath : parentPath(sourcePath));
+                try {
+                    await refreshExplorer(overlay, options, reveal);
+                } catch (refreshError) {
+                    setStatus(
+                        overlay,
+                        `The change succeeded, but the Explorer could not refresh: ${refreshError.message}`,
+                        true
+                    );
+                }
                 if (operation === 'create_file') options.onOpenFile?.(result?.path || targetPath);
             } catch (error) {
                 if (directPath) setStatus(overlay, error.message, true);
@@ -685,6 +820,77 @@
             const parts = String(path || '').split('/').filter(Boolean);
             parts.pop();
             return parts.join('/');
+        }
+
+        function baseName(path) {
+            return String(path || '').split('/').filter(Boolean).pop() || '';
+        }
+
+        function joinPath(parent, name) {
+            return [parent, name].filter(Boolean).join('/');
+        }
+
+        function moveForm(overlay) {
+            const form = overlay.querySelector(
+                '[data-vault-explorer-mutation-form][data-operation="move"]'
+            );
+            return form instanceof HTMLFormElement ? form : null;
+        }
+
+        function selectMoveDestination(overlay, destination) {
+            const form = moveForm(overlay);
+            if (!form) return;
+            const source = form.dataset.path || '';
+            const kind = form.dataset.kind || '';
+            const status = form.querySelector('[data-vault-explorer-form-status]');
+            if (
+                kind === 'directory'
+                && (destination === source || destination.startsWith(`${source}/`))
+            ) {
+                if (status) {
+                    status.innerHTML = '<span class="state-error">A folder cannot be moved into itself.</span>';
+                }
+                return;
+            }
+            form.dataset.destination = destination;
+            if (status) status.textContent = '';
+            updateMovePreview(overlay);
+            syncMoveDestinationSelection(overlay);
+        }
+
+        function updateMovePreview(overlay) {
+            const form = moveForm(overlay);
+            if (!form) return;
+            const destination = form.dataset.destination || '';
+            const nameInput = form.querySelector('[data-vault-explorer-move-name]');
+            const name = nameInput instanceof HTMLInputElement ? nameInput.value.trim() : '';
+            const destinationLabel = form.querySelector('[data-vault-explorer-move-destination]');
+            const preview = form.querySelector('[data-vault-explorer-move-preview]');
+            const submit = form.querySelector('button[type="submit"]');
+            const newPath = joinPath(destination, name);
+            if (destinationLabel) destinationLabel.textContent = destination || 'Vault root';
+            if (preview) preview.textContent = newPath || 'Choose a name';
+            if (submit instanceof HTMLButtonElement) {
+                submit.disabled = !name || newPath === (form.dataset.path || '');
+            }
+        }
+
+        function syncMoveDestinationSelection(overlay) {
+            const form = moveForm(overlay);
+            const destination = form?.dataset.destination;
+            overlay.querySelectorAll('[data-vault-path-picker-row]').forEach((row) => {
+                if (!(row instanceof HTMLElement)) return;
+                const rowPath = row.getAttribute('data-vault-path-picker-row') || '';
+                const rowButton = row.querySelector(
+                    ':scope > .workspace-tree-row [data-vault-path-picker-select]'
+                );
+                const selected = destination !== undefined && rowPath === destination;
+                rowButton?.classList.toggle(
+                    'is-move-destination',
+                    selected
+                );
+                rowButton?.setAttribute('aria-selected', selected ? 'true' : 'false');
+            });
         }
 
         function debounce(fn, delayMs) {
