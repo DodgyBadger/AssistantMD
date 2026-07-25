@@ -9,23 +9,28 @@ import json
 import logging
 import os
 import time
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from types import ModuleType
+from typing import Any, Literal, cast
 
 import logfire
 import yaml
+from fastapi import FastAPI
 from logfire.sampling import SamplingOptions
+from opentelemetry.context import Context
 from opentelemetry.sdk.trace.sampling import (
     ALWAYS_ON,
     Decision,
     Sampler,
     SamplingResult,
 )
+from opentelemetry.trace import Link, SpanKind, TraceState
+from opentelemetry.util.types import AttributeValue
 
 from core.activity_log import (
     DEFAULT_MAX_TOTAL_BYTES,
@@ -128,13 +133,13 @@ class _LogfireNoiseFilteringSampler(Sampler):
 
     def should_sample(
         self,
-        parent_context,
-        trace_id,
-        name,
-        kind=None,
-        attributes=None,
-        links=None,
-        trace_state=None,
+        parent_context: Context | None,
+        trace_id: int,
+        name: str,
+        kind: SpanKind | None = None,
+        attributes: Mapping[str, AttributeValue] | None = None,
+        links: Sequence[Link] | None = None,
+        trace_state: TraceState | None = None,
     ) -> SamplingResult:
         span_message = ""
         schema_name = ""
@@ -204,7 +209,9 @@ def refresh_logfire_configuration(force: bool = False) -> None:
     if not force and _logfire_config_state == desired_state:
         return
 
-    send_option: str | bool = "if-token-present" if enabled else False
+    send_option: Literal["if-token-present"] | bool = (
+        "if-token-present" if enabled else False
+    )
 
     logfire.configure(
         send_to_logfire=send_option,
@@ -271,7 +278,7 @@ def _ensure_activity_logger() -> logging.Logger:
 def _resolve_activity_log_path() -> Path:
     """Determine the correct activity log path based on the active runtime context."""
     try:
-        return get_system_root() / "activity.log"
+        return Path(get_system_root()) / "activity.log"
     except Exception:
         # Last-resort fallback if path resolution fails unexpectedly
         return Path("/app/system") / "activity.log"
@@ -296,7 +303,7 @@ def _validation_enabled() -> bool:
 def _warnings_deduped() -> bool:
     """Return True when warning deduplication is enabled."""
     features = _validation_features()
-    return features.get("dedupe_warnings", True)
+    return bool(features.get("dedupe_warnings", True))
 
 
 def _resolve_validation_artifact_dir() -> Path | None:
@@ -308,14 +315,12 @@ def _resolve_validation_artifact_dir() -> Path | None:
     artifacts_dir = features.get("validation_artifacts_dir")
     if artifacts_dir:
         try:
-            path = Path(artifacts_dir)
+            return Path(artifacts_dir) / "validation_events"
         except (TypeError, ValueError):
-            path = None
-        else:
-            return path / "validation_events"
+            pass
 
     try:
-        return get_system_root().parent / "artifacts" / "validation_events"
+        return Path(get_system_root()).parent / "artifacts" / "validation_events"
     except Exception:
         return None
 
@@ -435,11 +440,15 @@ def _emit_validation_record(
 
 
 def _emit_logfire_record(
-    logfire_client, level: str, message: str, tag: str, data: dict[str, Any]
+    logfire_client: ModuleType,
+    level: str,
+    message: str,
+    tag: str,
+    data: dict[str, Any],
 ) -> None:
     """Mirror a record to Logfire if configured."""
     log_method = getattr(logfire_client, level, None)
-    payload = {"tag": tag}
+    payload: dict[str, Any] = {"tag": tag}
     boot_id = _get_runtime_boot_id()
     if boot_id is not None:
         payload["boot_id"] = boot_id
@@ -479,16 +488,16 @@ class UnifiedLogger:
                 "logfire",
             ]
         )
-        self._logfire_instance = None  # Lazy initialization
+        self._logfire_instance: ModuleType | None = None  # Lazy initialization
 
     @property
-    def _logfire(self):
+    def _logfire(self) -> ModuleType:
         """Lazy-loaded Logfire instance."""
         if self._logfire_instance is None:
             self._logfire_instance = self._setup_logfire()
         return self._logfire_instance
 
-    def _setup_logfire(self):
+    def _setup_logfire(self) -> ModuleType:
         """Set up Logfire client with console fallback."""
         refresh_logfire_configuration()
         global _logfire_instrumented
@@ -501,7 +510,7 @@ class UnifiedLogger:
             # Uncomment for detailed database query debugging when needed.
             # logfire.instrument_sqlalchemy()
             _logfire_instrumented = True
-        return logfire
+        return cast(ModuleType, logfire)
 
     # Sink-Based Logging
 
@@ -538,7 +547,7 @@ class UnifiedLogger:
         self._log("debug", message, data=data, **fields)
 
     @contextmanager
-    def span(self, operation: str, **span_data: Any):
+    def span(self, operation: str, **span_data: Any) -> Iterator[None]:
         """
         Manual instrumentation span for critical code paths.
 
@@ -551,7 +560,7 @@ class UnifiedLogger:
             yield
 
     @asynccontextmanager
-    async def async_span(self, operation: str, **span_data: Any):
+    async def async_span(self, operation: str, **span_data: Any) -> AsyncIterator[None]:
         """
         Async manual instrumentation span for critical code paths.
 
@@ -590,7 +599,7 @@ class UnifiedLogger:
 
         timestamp = datetime.now(UTC).isoformat(timespec="milliseconds")
         boot_id = _get_runtime_boot_id()
-        record = {
+        record: dict[str, Any] = {
             "timestamp": timestamp,
             "level": level,
             "tag": self.tag,
@@ -601,19 +610,15 @@ class UnifiedLogger:
             record["boot_id"] = boot_id
 
         if level == "warning" and _warnings_deduped():
-            issue = None
-            if isinstance(payload, dict):
-                issue = payload.get("issue")
-            dedupe_key = (record["tag"], record["message"], issue)
+            raw_issue = payload.get("issue")
+            issue = str(raw_issue) if raw_issue is not None else None
+            dedupe_key = (self.tag, message, issue)
             with _warning_dedupe_lock:
                 global _warning_dedupe_boot_id
                 global _warning_dedupe_keys
-                if (
-                    record.get("boot_id") is not None
-                    and record["boot_id"] != _warning_dedupe_boot_id
-                ):
+                if boot_id is not None and boot_id != _warning_dedupe_boot_id:
                     _warning_dedupe_keys.clear()
-                    _warning_dedupe_boot_id = record["boot_id"]
+                    _warning_dedupe_boot_id = boot_id
                 if dedupe_key in _warning_dedupe_keys:
                     return
                 _warning_dedupe_keys.add(dedupe_key)
@@ -629,7 +634,7 @@ class UnifiedLogger:
 
     # Instrumentation Setup
 
-    def setup_instrumentation(self, app=None) -> None:
+    def setup_instrumentation(self, app: FastAPI | None = None) -> None:
         """
         Set up additional automatic instrumentation for the application.
 
