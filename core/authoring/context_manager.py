@@ -38,8 +38,11 @@ from core.authoring.runtime import (
     Workspace,
     run_authoring_monty,
 )
-from core.authoring.template_discovery import load_template
-from core.authoring.template_loader import parse_authoring_template_text
+from core.authoring.template_discovery import TemplateRecord, load_template
+from core.authoring.template_loader import (
+    AuthoringTemplateSource,
+    parse_authoring_template_text,
+)
 from core.constants import VALID_WEEK_DAYS
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
@@ -47,7 +50,7 @@ from core.utils.hash import hash_file_content
 from core.utils.messages import extract_role_and_text
 
 logger = UnifiedLogger(tag="context-manager")
-_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_ADAPTER: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +152,7 @@ def summarize_input_files(
             if content:
                 preview = content.strip().replace("\n", " ")
                 if len(preview) > preview_limit:
-                    preview = f"{preview[:preview_limit - 1]}…"
+                    preview = f"{preview[: preview_limit - 1]}…"
             summaries.append(
                 {
                     "filepath": file_data.get("filepath"),
@@ -309,7 +312,7 @@ def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
             )
         ]
     if isinstance(item, ToolExchange | ToolExchangeBatch):
-        restored: list[ModelMessage] = []
+        restored_messages: list[ModelMessage] = []
         for payload in (item.request_message, item.response_message):
             message = _deserialize_model_message(payload)
             if message is None:
@@ -322,8 +325,8 @@ def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
                         )
                     )
                 ]
-            restored.append(message)
-        return restored
+            restored_messages.append(message)
+        return restored_messages
     raise ValueError("Unsupported assembled context item type")
 
 
@@ -363,6 +366,7 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                         if isinstance(exchange, ToolExchange):
                             exchanges.append(exchange)
                         elif isinstance(exchange, dict):
+                            call_arguments = exchange.get("call_arguments")
                             exchanges.append(
                                 ToolExchange(
                                     tool_call_id=str(
@@ -376,10 +380,8 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                                         exchange.get("response_message") or {}
                                     ),
                                     call_arguments=(
-                                        dict(exchange.get("call_arguments"))
-                                        if isinstance(
-                                            exchange.get("call_arguments"), dict
-                                        )
+                                        dict(call_arguments)
+                                        if isinstance(call_arguments, dict)
                                         else None
                                     ),
                                     result_text=(
@@ -400,6 +402,7 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                     )
                     continue
                 if "request_message" in item and "response_message" in item:
+                    call_arguments = item.get("call_arguments")
                     normalized_messages.append(
                         ToolExchange(
                             tool_call_id=str(item.get("tool_call_id") or ""),
@@ -407,8 +410,8 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                             request_message=dict(item.get("request_message") or {}),
                             response_message=dict(item.get("response_message") or {}),
                             call_arguments=(
-                                dict(item.get("call_arguments"))
-                                if isinstance(item.get("call_arguments"), dict)
+                                dict(call_arguments)
+                                if isinstance(call_arguments, dict)
                                 else None
                             ),
                             result_text=(
@@ -523,8 +526,8 @@ async def _build_authoring_context_history(
     vault_name: str,
     vault_path: str,
     workspace_path: str = "",
-    template,
-    source,
+    template: TemplateRecord,
+    source: AuthoringTemplateSource,
 ) -> list[ModelMessage]:
     if not messages:
         return []
