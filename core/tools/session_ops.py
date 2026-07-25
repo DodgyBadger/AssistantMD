@@ -133,7 +133,9 @@ class SessionOps(BaseTool):
                         "session_ops filter is only supported for list_sessions and search_sessions."
                     )
                 if op == "list_sessions":
-                    _require(active_vault_name, "vault_name is required")
+                    active_vault_name = _require(
+                        active_vault_name, "vault_name is required"
+                    )
                     result = _list_sessions(
                         vault_name=active_vault_name,
                         limit=_require_integer_limit(
@@ -144,8 +146,12 @@ class SessionOps(BaseTool):
                         workspace_filter=workspace_filter,
                     )
                 elif op == "upsert_session_summary":
-                    _require(active_vault_name, "vault_name is required")
-                    _require(active_session_id, "session_id is required")
+                    active_vault_name = _require(
+                        active_vault_name, "vault_name is required"
+                    )
+                    active_session_id = _require(
+                        active_session_id, "session_id is required"
+                    )
                     summary_data = _upsert_data(data)
                     summary_metadata = _with_current_history_metadata(
                         _summary_data_value(summary_data, "metadata"),
@@ -211,8 +217,12 @@ class SessionOps(BaseTool):
                         "session_summary": refreshed.to_dict() if refreshed else None,
                     }
                 elif op == "summarize_session":
-                    _require(active_vault_name, "vault_name is required")
-                    _require(active_session_id, "session_id is required")
+                    active_vault_name = _require(
+                        active_vault_name, "vault_name is required"
+                    )
+                    active_session_id = _require(
+                        active_session_id, "session_id is required"
+                    )
                     await _preflight_session_summary_embeddings()
                     extraction = await _summarize_session(
                         vault_name=active_vault_name,
@@ -289,23 +299,29 @@ class SessionOps(BaseTool):
                         "session_summary": refreshed.to_dict() if refreshed else None,
                     }
                 elif op == "get_session_summary":
-                    _require(active_vault_name, "vault_name is required")
-                    _require(active_session_id, "session_id is required")
-                    session_summary = store.get_session_summary(
+                    active_vault_name = _require(
+                        active_vault_name, "vault_name is required"
+                    )
+                    active_session_id = _require(
+                        active_session_id, "session_id is required"
+                    )
+                    current_summary = store.get_session_summary(
                         vault_name=active_vault_name,
                         session_id=active_session_id,
                     )
                     result = {
-                        "status": "found" if session_summary else "not_found",
+                        "status": "found" if current_summary else "not_found",
                         "operation": op,
                         "vault_name": active_vault_name,
                         "session_id": active_session_id,
                         "session_summary": (
-                            session_summary.to_dict() if session_summary else None
+                            current_summary.to_dict() if current_summary else None
                         ),
                     }
                 elif op == "search_sessions":
-                    _require(active_vault_name, "vault_name is required")
+                    active_vault_name = _require(
+                        active_vault_name, "vault_name is required"
+                    )
                     normalized_mode = str(mode or "")
                     _validate_search_sessions_request(
                         mode=normalized_mode,
@@ -469,11 +485,12 @@ class _SessionSourceSummary(BaseModel):
     source_summary: str = Field(default="")
 
 
-def _require(value: object, message: str) -> None:
+def _require[RequiredT](value: RequiredT | None, message: str) -> RequiredT:
     if value is None:
         raise ValueError(message)
     if isinstance(value, str) and not value.strip():
         raise ValueError(message)
+    return value
 
 
 def _session_title(*, vault_name: str, session_id: str) -> str | None:
@@ -608,7 +625,7 @@ def _session_filter_to_dict(
 def _active_workspace_path(*, vault_name: str | None, session_id: str | None) -> str:
     if not vault_name or not session_id:
         return ""
-    return ChatStore().get_session_workspace_path(session_id, vault_name)
+    return ChatStore().get_session_workspace_path(session_id, vault_name) or ""
 
 
 def _list_sessions(
@@ -1050,8 +1067,8 @@ def _merge_transcript_matches(
     sessions_by_id = {session.session_id: session for session in sessions}
     for row in rows:
         session_id = str(row["session_id"])
-        session = sessions_by_id.get(session_id)
-        if session is None:
+        candidate_session = sessions_by_id.get(session_id)
+        if candidate_session is None:
             continue
         session_summary = store.get_session_summary(
             vault_name=vault_name,
@@ -1065,16 +1082,16 @@ def _merge_transcript_matches(
             session_id,
             {
                 "session_id": session_id,
-                "vault_name": session.vault_name,
+                "vault_name": candidate_session.vault_name,
                 "session_summary": (
                     session_summary.to_dict() if session_summary else None
                 ),
                 "chat_session": {
                     "session_id": session_id,
-                    "vault_name": session.vault_name,
-                    "title": session.title,
-                    "created_at": session.created_at,
-                    "last_activity_at": session.last_activity_at,
+                    "vault_name": candidate_session.vault_name,
+                    "title": candidate_session.title,
+                    "created_at": candidate_session.created_at,
+                    "last_activity_at": candidate_session.last_activity_at,
                 },
                 "evidence": [],
             },
@@ -1145,8 +1162,11 @@ def _bm25_rank_score(rank: float) -> float:
 def _normalize_vector_score(score: float) -> float:
     if score <= SUMMARY_VECTOR_MIN_SCORE:
         return 0.0
-    return round(
-        (score - SUMMARY_VECTOR_MIN_SCORE) / (1.0 - SUMMARY_VECTOR_MIN_SCORE), 6
+    return float(
+        round(
+            (score - SUMMARY_VECTOR_MIN_SCORE) / (1.0 - SUMMARY_VECTOR_MIN_SCORE),
+            6,
+        )
     )
 
 
@@ -1243,13 +1263,15 @@ def _build_first_pass_prompt(
         for message in messages
     )
     title = session.title or ""
-    return SESSION_SUMMARY_INTENT_PROMPT.format(
-        session_id=session.session_id,
-        vault_name=session.vault_name,
-        title=title,
-        created_at=session.created_at,
-        last_activity_at=session.last_activity_at,
-        transcript=transcript,
+    return str(
+        SESSION_SUMMARY_INTENT_PROMPT.format(
+            session_id=session.session_id,
+            vault_name=session.vault_name,
+            title=title,
+            created_at=session.created_at,
+            last_activity_at=session.last_activity_at,
+            transcript=transcript,
+        )
     )
 
 
@@ -1259,11 +1281,13 @@ def _build_second_pass_prompt(
     summary_intent: dict[str, str],
 ) -> str:
     title = session.title or ""
-    return SESSION_SUMMARY_CLASSIFICATION_PROMPT.format(
-        session_id=session.session_id,
-        title=title,
-        summary=summary_intent["summary"],
-        user_intent=summary_intent["user_intent"],
+    return str(
+        SESSION_SUMMARY_CLASSIFICATION_PROMPT.format(
+            session_id=session.session_id,
+            title=title,
+            summary=summary_intent["summary"],
+            user_intent=summary_intent["user_intent"],
+        )
     )
 
 
@@ -1274,12 +1298,14 @@ def _build_source_summary_prompt(
     tool_event_log: str,
 ) -> str:
     title = session.title or ""
-    return SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT.format(
-        session_id=session.session_id,
-        title=title,
-        summary=summary_intent["summary"],
-        user_intent=summary_intent["user_intent"],
-        tool_event_log=tool_event_log,
+    return str(
+        SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT.format(
+            session_id=session.session_id,
+            title=title,
+            summary=summary_intent["summary"],
+            user_intent=summary_intent["user_intent"],
+            tool_event_log=tool_event_log,
+        )
     )
 
 
@@ -1371,7 +1397,7 @@ async def _index_session_summary_fields(
                 "indexed_fields": indexed_fields,
             },
         )
-        return indexed_fields
+        return int(indexed_fields)
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "session_summary_field_indexing_failed",
