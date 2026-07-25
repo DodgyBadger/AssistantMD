@@ -22,9 +22,9 @@ the canonical `uv run ...` baseline is:
   discovered findings.
 - `uv run black --check api core validation`: passes across all 297 files after
   normalizing 202 files.
-- `uv run mypy api core`: 644 errors in 70 of 192 production source files after
-  the first shared-foundation typing batch. Lint and annotation modernization
-  initially produced 663 errors in 80 files.
+- `uv run mypy api core`: 609 errors in 67 of 192 production source files after
+  the settings/configuration batch. Lint and annotation modernization initially
+  produced 663 errors in 80 files.
 - The largest production mypy categories are `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
   (29), `no-any-return` (27), `union-attr` (24), and missing/untyped imports
@@ -85,6 +85,10 @@ ADR 0025 (durable vault activities).
    - First batch complete: runtime configuration/background spawning, ingestion
      pipeline/registry, tool utilities, and parser helpers now pass focused
      mypy checks. Authoring-contract and workflow-governor queue scenarios pass.
+   - Settings batch complete: YAML secret representers, configuration editor
+     models, environment-path projection, and numeric setting coercion now have
+     explicit contracts. System template refresh and disabled-tool registry
+     scenarios pass.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral

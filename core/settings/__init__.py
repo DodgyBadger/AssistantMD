@@ -110,7 +110,7 @@ class AppSettings(BaseSettings):
 
     @field_validator("vaults_root_path", mode="before")
     @classmethod
-    def _expand_vault_path(cls, value):
+    def _expand_vault_path(cls, value: Any) -> Path | None:
         """Expand user paths to absolute Path instances."""
         if value in (None, ""):
             return None
@@ -137,7 +137,13 @@ class AppSettings(BaseSettings):
 
         Used by validation routines to produce targeted warnings.
         """
-        required = {"VAULTS_ROOT_PATH": self.vaults_root_path}
+        required = {
+            "VAULTS_ROOT_PATH": (
+                str(self.vaults_root_path)
+                if self.vaults_root_path is not None
+                else None
+            )
+        }
         return required
 
 
@@ -344,7 +350,7 @@ def validate_settings(
 
     def _warn_extras(
         section_name: str, items: dict[str, Any], default_user_editable: bool
-    ):
+    ) -> None:
         template_keys = template_sections.get(section_name, set())
         for key, entry in items.items():
             if key in template_keys:
@@ -459,12 +465,26 @@ def _add_missing_settings_metadata_issues(
         )
 
 
+def _setting_int(value: Any | None) -> int:
+    """Convert a non-null setting value to an integer."""
+    if value is None:
+        raise TypeError("Setting value is missing.")
+    return int(value)
+
+
+def _setting_float(value: Any | None) -> float:
+    """Convert a non-null setting value to a float."""
+    if value is None:
+        raise TypeError("Setting value is missing.")
+    return float(value)
+
+
 def get_default_api_timeout() -> float:
     """Return the configured API timeout, falling back to 120 seconds."""
     entry = get_general_settings().get("default_api_timeout")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        return float(value)
+        return _setting_float(value)
     except (TypeError, ValueError):
         return 120.0
 
@@ -499,7 +519,7 @@ def get_workflow_task_timeout_seconds() -> float:
     entry = get_general_settings().get("workflow_task_timeout_seconds")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        timeout = float(value)
+        timeout = _setting_float(value)
     except (TypeError, ValueError):
         return 0.0
     return timeout if timeout > 0 else 0.0
@@ -510,7 +530,7 @@ def get_max_concurrent_workflows() -> int:
     entry = get_general_settings().get("max_concurrent_workflows")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        limit = int(value)
+        limit = _setting_int(value)
     except (TypeError, ValueError):
         return 0
     return limit if limit > 0 else 0
@@ -521,7 +541,7 @@ def get_browser_navigation_timeout_seconds() -> float:
     entry = get_general_settings().get("browser_navigation_timeout_seconds")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        timeout = float(value)
+        timeout = _setting_float(value)
     except (TypeError, ValueError):
         return 20.0
     return timeout if timeout > 0 else 20.0
@@ -532,7 +552,7 @@ def get_browser_selector_timeout_seconds() -> float:
     entry = get_general_settings().get("browser_selector_timeout_seconds")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        timeout = float(value)
+        timeout = _setting_float(value)
     except (TypeError, ValueError):
         return 4.0
     return timeout if timeout > 0 else 4.0
@@ -543,7 +563,7 @@ def get_browser_max_concurrent_sessions() -> int:
     entry = get_general_settings().get("browser_max_concurrent_sessions")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        limit = int(value)
+        limit = _setting_int(value)
     except (TypeError, ValueError):
         return 1
     return max(1, min(limit, 8))
@@ -554,7 +574,7 @@ def get_browser_max_calls_per_turn() -> int:
     entry = get_general_settings().get("browser_max_calls_per_turn")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        limit = int(value)
+        limit = _setting_int(value)
     except (TypeError, ValueError):
         return 4
     return max(0, limit)
@@ -565,7 +585,7 @@ def get_browser_min_memory_headroom_bytes() -> int:
     entry = get_general_settings().get("browser_min_memory_headroom_mb")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        megabytes = int(value)
+        megabytes = _setting_int(value)
     except (TypeError, ValueError):
         megabytes = 512
     return max(0, megabytes) * 1024 * 1024
@@ -576,7 +596,7 @@ def get_default_max_output_tokens() -> int:
     entry = get_general_settings().get("max_output_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        return int(value)
+        return _setting_int(value)
     except (TypeError, ValueError):
         return 0
 
@@ -600,7 +620,7 @@ def get_auto_cache_max_tokens() -> int:
     entry = get_general_settings().get("auto_cache_max_tokens")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        return int(value)
+        return _setting_int(value)
     except (TypeError, ValueError):
         return 0
 
@@ -610,7 +630,7 @@ def get_chat_tool_calls_limit() -> int:
     entry = get_general_settings().get("chat_tool_calls_limit")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return 0
     return parsed if parsed > 0 else 0
@@ -623,7 +643,7 @@ def get_chat_model_requests_limit() -> int:
     if value is None:
         return _get_template_setting_positive_int("chat_model_requests_limit", 150)
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return _get_template_setting_positive_int("chat_model_requests_limit", 150)
     return parsed if parsed > 0 else 0
@@ -651,7 +671,7 @@ def get_delegate_tool_calls_limit() -> int:
 
         return DELEGATE_DEFAULT_MAX_TOOL_CALLS
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         from core.constants import DELEGATE_DEFAULT_MAX_TOOL_CALLS
 
@@ -666,7 +686,7 @@ def get_delegate_model_requests_limit() -> int:
     if value is None:
         return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return _get_template_setting_positive_int("delegate_model_requests_limit", 75)
     return parsed if parsed > 0 else 0
@@ -681,7 +701,7 @@ def get_delegate_timeout_seconds() -> float:
 
         return DELEGATE_DEFAULT_TIMEOUT_SECONDS
     try:
-        parsed = float(value)
+        parsed = _setting_float(value)
     except (TypeError, ValueError):
         from core.constants import DELEGATE_DEFAULT_TIMEOUT_SECONDS
 
@@ -703,7 +723,7 @@ def get_compaction_keep_recent() -> int:
     value = getattr(entry, "value", None) if entry is not None else None
     template_default = _get_template_setting_positive_int("compaction_keep_recent", 8)
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed > 0 else template_default
@@ -717,7 +737,7 @@ def get_compaction_token_threshold() -> int:
         "compaction_token_threshold", 80_000
     )
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed > 0 else template_default
@@ -728,7 +748,7 @@ def get_file_search_timeout_seconds() -> float:
     entry = get_general_settings().get("file_search_timeout_seconds")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        timeout = float(value)
+        timeout = _setting_float(value)
     except (TypeError, ValueError):
         return 10.0
     return timeout if timeout > 0 else 10.0
@@ -743,7 +763,7 @@ def get_file_list_max_results() -> int:
     value = getattr(entry, "value", None) if entry is not None else None
     template_default = _get_template_setting_positive_int("file_list_max_results", 200)
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
@@ -780,7 +800,7 @@ def get_vault_scan_interval_seconds() -> int:
     entry = get_general_settings().get("vault_scan_interval_seconds")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return 0
     return parsed if parsed > 0 else 0
@@ -825,7 +845,7 @@ def get_task_mutation_retention_days() -> int:
         "task_mutation_retention_days", 365
     )
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
@@ -839,7 +859,7 @@ def get_task_snapshot_retention_days() -> int:
         "task_snapshot_retention_days", 30
     )
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
@@ -854,7 +874,7 @@ def get_vault_upload_max_mb_per_file() -> int:
         100,
     )
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
@@ -871,7 +891,7 @@ def get_chunking_max_images_per_prompt() -> int:
     value = getattr(entry, "value", None) if entry is not None else None
     template_default = 20
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default
     return parsed if parsed >= 0 else template_default
@@ -886,7 +906,7 @@ def get_chunking_max_image_mb_per_image() -> int:
         "chunking_max_image_mb_per_image", 5
     )
     try:
-        parsed_mb = int(value_mb)
+        parsed_mb = _setting_int(value_mb)
     except (TypeError, ValueError):
         parsed_mb = template_default
     return parsed_mb if parsed_mb >= 0 else template_default
@@ -909,7 +929,7 @@ def get_chunking_max_image_bytes_per_image() -> int:
         * 1024
     )
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return template_default_bytes
     return parsed if parsed >= 0 else template_default_bytes
@@ -922,7 +942,7 @@ def get_chunking_max_image_bytes_total() -> int:
     value_mb = getattr(entry_mb, "value", None) if entry_mb is not None else None
     if value_mb is not None:
         try:
-            parsed_mb = int(value_mb)
+            parsed_mb = _setting_int(value_mb)
         except (TypeError, ValueError):
             parsed_mb = 100
         parsed_mb = parsed_mb if parsed_mb >= 0 else 100
@@ -932,7 +952,7 @@ def get_chunking_max_image_bytes_total() -> int:
     entry = settings.get("chunking_max_image_bytes_total")
     value = getattr(entry, "value", None) if entry is not None else None
     try:
-        parsed = int(value)
+        parsed = _setting_int(value)
     except (TypeError, ValueError):
         return 100 * 1024 * 1024
     return parsed if parsed >= 0 else 100 * 1024 * 1024

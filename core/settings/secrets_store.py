@@ -13,6 +13,7 @@ import shutil
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, overload
 
 import yaml
 
@@ -26,8 +27,11 @@ class _SecretsDumper(yaml.SafeDumper):
     """Custom YAML dumper that renders None values as empty strings."""
 
 
-def _represent_none(self, _):  # type: ignore[override]
-    return self.represent_scalar("tag:yaml.org,2002:null", "")
+def _represent_none(
+    dumper: yaml.SafeDumper,
+    _: None,
+) -> yaml.ScalarNode:
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
 
 
 _SecretsDumper.add_representer(type(None), _represent_none)
@@ -111,7 +115,18 @@ def _write_raw(path: Path, data: dict[str, str | None]) -> None:
     os.replace(tmp_path, path)
 
 
-def load_secrets(include_empty: bool = False) -> dict[str, str]:
+@overload
+def load_secrets(*, include_empty: Literal[True]) -> dict[str, str | None]: ...
+
+
+@overload
+def load_secrets(*, include_empty: Literal[False] = False) -> dict[str, str]: ...
+
+
+def load_secrets(
+    *,
+    include_empty: bool = False,
+) -> dict[str, str] | dict[str, str | None]:
     """
     Load all secrets from disk.
 

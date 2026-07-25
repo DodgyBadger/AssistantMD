@@ -7,6 +7,7 @@ sections (tools, core providers).
 """
 
 import json
+from typing import Any, Literal
 
 import yaml
 
@@ -15,6 +16,7 @@ from core.settings.store import (
     ModelConfig,
     ProviderConfig,
     SettingsEntry,
+    SettingsFile,
     load_settings,
     refresh_settings_cache,
     save_settings,
@@ -23,7 +25,7 @@ from core.settings.store import (
 from . import SettingsError, refresh_configuration_status_cache
 
 
-def _persist_changes(settings_file) -> None:
+def _persist_changes(settings_file: SettingsFile) -> None:
     """Persist settings to disk and refresh related caches."""
     save_settings(settings_file)
     refresh_settings_cache()
@@ -77,7 +79,7 @@ def _template_general_settings() -> dict[str, SettingsEntry]:
     return result
 
 
-def _coerce_setting_value(raw_value: str, current_value):
+def _coerce_setting_value(raw_value: str, current_value: Any) -> Any:
     """Attempt to convert the provided raw string into the original setting type."""
     raw_value = raw_value if raw_value is not None else ""
 
@@ -118,13 +120,15 @@ def _coerce_setting_value(raw_value: str, current_value):
     return raw_value
 
 
-def _merged_general_settings(settings_file) -> dict[str, SettingsEntry]:
+def _merged_general_settings(
+    settings_file: SettingsFile,
+) -> dict[str, SettingsEntry]:
     merged = dict(_template_general_settings())
     merged.update(settings_file.settings)
     return merged
 
 
-def _setting_list_value(settings_file, name: str) -> list[str]:
+def _setting_list_value(settings_file: SettingsFile, name: str) -> list[str]:
     entry = _merged_general_settings(settings_file).get(name)
     raw_value = getattr(entry, "value", []) if entry else []
     if not isinstance(raw_value, list):
@@ -133,7 +137,7 @@ def _setting_list_value(settings_file, name: str) -> list[str]:
 
 
 def _provider_can_be_edited(
-    settings_file,
+    settings_file: SettingsFile,
     name: str,
     existing: ProviderConfig | None,
 ) -> bool:
@@ -222,7 +226,7 @@ def upsert_provider_config(
     name: str,
     api_key: str | None = None,
     base_url: str | None = None,
-    auth_mode: str | None = None,
+    auth_mode: Literal["api_key", "oauth"] | None = None,
     oauth_api_key_fallback_enabled: bool | None = None,
 ) -> ProviderConfig:
     """
