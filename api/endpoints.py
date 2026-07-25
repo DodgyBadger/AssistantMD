@@ -658,7 +658,7 @@ async def cancel_task(task_id: str) -> ExecutionTaskCancelResponse | JSONRespons
         return create_error_response(e)
 
 
-@router.get("/chat/tasks/{task_id}/events")
+@router.get("/chat/tasks/{task_id}/events", response_model=None)
 async def chat_task_events(
     task_id: str, after_sequence: int = 0
 ) -> StreamingResponse | JSONResponse:
@@ -1178,7 +1178,7 @@ async def vault_activity_rollback(
         return create_error_response(e)
 
 
-@router.get("/vault-state/snapshots/{snapshot_id}/content")
+@router.get("/vault-state/snapshots/{snapshot_id}/content", response_model=None)
 async def vault_snapshot_content(snapshot_id: int) -> FileResponse | JSONResponse:
     """Serve one retained vault-state file snapshot inline."""
     try:
@@ -1648,7 +1648,7 @@ async def update_chat_session_summary_endpoint(
         return create_error_response(e)
 
 
-@router.delete("/chat/sessions/{session_id}/summary")
+@router.delete("/chat/sessions/{session_id}/summary", response_model=None)
 async def delete_chat_session_summary_endpoint(
     session_id: str, vault_name: str
 ) -> dict[str, Any] | JSONResponse:
@@ -1672,7 +1672,7 @@ async def chat_session_detail(
         return create_error_response(e)
 
 
-@router.delete("/chat/sessions/{session_id}")
+@router.delete("/chat/sessions/{session_id}", response_model=None)
 async def delete_chat_session_endpoint(
     session_id: str, vault_name: str
 ) -> dict[str, Any] | JSONResponse:
@@ -1685,7 +1685,7 @@ async def delete_chat_session_endpoint(
         return create_error_response(e)
 
 
-@router.patch("/chat/sessions/{session_id}/title")
+@router.patch("/chat/sessions/{session_id}/title", response_model=None)
 async def set_session_title(
     session_id: str, request: ChatSessionTitleRequest
 ) -> dict[str, Any] | JSONResponse:
