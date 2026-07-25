@@ -54,7 +54,7 @@ class DelegateTool(BaseTool):
     """Run a bounded child agent over a prompt with optional tools."""
 
     @classmethod
-    def get_tool(cls, vault_path: str = None) -> Tool:
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         _vault_path = vault_path or ""
 
         async def delegate(
@@ -400,7 +400,7 @@ def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
         for part in getattr(message, "parts", ()) or ():
             if isinstance(part, ToolCallPart):
                 total_tool_call_count += 1
-                call = {
+                call: dict[str, Any] = {
                     "tool": part.tool_name,
                     "call_id": part.tool_call_id,
                     "arguments": _compact_value(

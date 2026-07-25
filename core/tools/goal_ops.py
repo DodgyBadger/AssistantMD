@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai import RunContext
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.goals.store import GOAL_FIELD_UNSET, GoalOpsStore
@@ -24,7 +25,7 @@ class GoalOps(BaseTool):
     """Create, inspect, and update durable goal_ops records."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the goal_ops tool."""
 
         async def goal_ops(
@@ -37,7 +38,7 @@ class GoalOps(BaseTool):
             limit: int | str = "",
             workspace_path_hint: str = "",
             data: dict[str, Any] | None = None,
-        ):
+        ) -> str | ToolReturn:
             """Create, inspect, and update durable goal state.
 
             :param operation: Operation name.
@@ -324,10 +325,10 @@ Full documentation:
                 )
             return {"source_type": "chat", "source_id": session_id}
         if source == "session":
-            session_id = _optional_filter_text(data.get("session_id"))
-            if not session_id:
+            filtered_session_id = _optional_filter_text(data.get("session_id"))
+            if not filtered_session_id:
                 raise ValueError("list_goals source='session' requires data.session_id")
-            return {"source_type": "chat", "source_id": session_id}
+            return {"source_type": "chat", "source_id": filtered_session_id}
         raise ValueError("list_goals source must be one of: current_session, session")
 
 

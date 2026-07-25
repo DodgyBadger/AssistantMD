@@ -70,7 +70,7 @@ class SessionOps(BaseTool):
     """Search and summarize chat sessions."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the session operations tool."""
 
         async def session_ops(
@@ -1562,5 +1562,5 @@ def _artifact_role_for_mutation(
 
 def _datetime_to_text(value: Any) -> str:
     if hasattr(value, "isoformat"):
-        return value.isoformat()
+        return str(value.isoformat())
     return str(value)

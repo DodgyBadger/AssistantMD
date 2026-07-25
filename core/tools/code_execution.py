@@ -28,7 +28,7 @@ class CodeExecution(BaseTool):
     """Execute one constrained local Python snippet in the current chat session."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the chat-scoped constrained local code execution tool."""
 
         async def code_execution(

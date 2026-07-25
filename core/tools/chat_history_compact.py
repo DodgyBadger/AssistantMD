@@ -26,7 +26,7 @@ class ChatHistoryCompact(BaseTool):
     """Check or compact the active chat session history."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the chat history compaction tool."""
 
         async def chat_history_compact(

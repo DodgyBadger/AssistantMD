@@ -86,7 +86,7 @@ class WorkflowRun(BaseTool):
     """Run authored automations in the current vault and list available names."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the workflow run tool bound to the current vault path."""
 
         async def workflow_run(
@@ -117,6 +117,9 @@ class WorkflowRun(BaseTool):
                 vault_name = cls._resolve_vault_name(
                     vault_path, runtime.config.data_root
                 )
+                resolved_vault_path = vault_path or str(
+                    runtime.config.data_root / vault_name
+                )
 
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
@@ -139,7 +142,7 @@ class WorkflowRun(BaseTool):
                     single_step = (step_name or "").strip() or None
                     try:
                         result = await cls._execute_authoring_artifact(
-                            vault_path=vault_path,
+                            vault_path=resolved_vault_path,
                             vault_name=vault_name,
                             workflow_name=name,
                             step_name=single_step,
@@ -185,7 +188,7 @@ class WorkflowRun(BaseTool):
                         return _workflow_run_failure(operation=op, message=error)
                     run_type = cls._read_run_type(
                         cls._resolve_workflow_file_path(
-                            vault_path=vault_path,
+                            vault_path=resolved_vault_path,
                             workflow_name=name,
                         )
                     )
@@ -251,7 +254,7 @@ class WorkflowRun(BaseTool):
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
                     file_path = cls._resolve_workflow_file_path(
-                        vault_path=vault_path, workflow_name=name
+                        vault_path=resolved_vault_path, workflow_name=name
                     )
                     if file_path.exists():
                         run_type = cls._read_run_type(file_path)

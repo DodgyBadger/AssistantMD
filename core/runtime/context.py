@@ -8,6 +8,7 @@ for scheduler, workflow loader, and related components.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -69,7 +70,7 @@ class RuntimeContext:
     session_buffers: dict[str, BufferStore] = field(default_factory=dict)
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
-    async def start(self):
+    async def start(self) -> None:
         """
         Start runtime services if needed.
 
@@ -78,7 +79,7 @@ class RuntimeContext:
         """
         pass
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Gracefully shutdown all runtime services and clear global context."""
         self.logger.info("Shutting down runtime context")
 
@@ -98,7 +99,7 @@ class RuntimeContext:
         # Clear global runtime context to allow clean restart
         runtime_state.clear_runtime_context()
 
-    def sync_shutdown(self):
+    def sync_shutdown(self) -> asyncio.Task[None] | None:
         """
         Synchronous wrapper for shutdown.
 
@@ -116,13 +117,14 @@ class RuntimeContext:
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             asyncio.run(self.shutdown())
+            return None
 
     async def reload_workflows(
         self,
         manual: bool = True,
         *,
         refresh_vault_state: bool = True,
-    ):
+    ) -> dict[str, Any]:
         """
         Convenience method to reload workflow configurations.
 
@@ -134,10 +136,12 @@ class RuntimeContext:
         """
         if manual:
             self.logger.info("Reloading workflows (manual=True)")
-        results = await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        results: dict[str, Any] = dict(
+            await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        )
         results.update(self.sync_system_scheduler_jobs())
         if not refresh_vault_state:
-            return results
+            return dict(results)
         try:
             vault_state_results = VaultStateService().refresh_all_vaults(
                 self.config.data_root
@@ -158,7 +162,7 @@ class RuntimeContext:
                 "vault_state_failed": 1,
             }
         results.update(vault_state_results)
-        return results
+        return dict(results)
 
     def start_background_vault_state_refresh(self, *, reason: str) -> None:
         """Start a non-blocking refresh of all vault-state manifests."""
@@ -208,14 +212,16 @@ class RuntimeContext:
 
     def sync_system_scheduler_jobs(self) -> dict[str, int]:
         """Synchronize built-in scheduler jobs with current settings."""
-        return sync_system_scheduler_jobs(
-            scheduler=self.scheduler,
-            data_root=self.config.data_root,
-            ingestion_worker=self.ingestion_worker,
-            ingestion_interval=self.ingestion_interval,
+        return dict(
+            sync_system_scheduler_jobs(
+                scheduler=self.scheduler,
+                data_root=self.config.data_root,
+                ingestion_worker=self.ingestion_worker,
+                ingestion_interval=self.ingestion_interval,
+            )
         )
 
-    def get_runtime_summary(self) -> dict:
+    def get_runtime_summary(self) -> dict[str, Any]:
         """
         Get runtime context summary for diagnostics.
 
