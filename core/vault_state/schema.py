@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from typing import cast
+
+from sqlalchemy import Table
 
 from core.database import (
     connect_sqlite_from_system_db,
@@ -45,13 +48,18 @@ def ensure_vault_state_schema(
         try:
             create_tables(
                 engine,
-                VaultRecord.__table__,
-                VaultFile.__table__,
-                VaultFileEvent.__table__,
-                VaultActivity.__table__,
-                VaultMutation.__table__,
-                SnapshotSet.__table__,
-                FileSnapshot.__table__,
+                *(
+                    cast(Table, model.__table__)
+                    for model in (
+                        VaultRecord,
+                        VaultFile,
+                        VaultFileEvent,
+                        VaultActivity,
+                        VaultMutation,
+                        SnapshotSet,
+                        FileSnapshot,
+                    )
+                ),
             )
         finally:
             engine.dispose()

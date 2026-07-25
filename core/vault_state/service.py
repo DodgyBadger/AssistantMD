@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -235,6 +235,7 @@ class VaultStateService:
                     or existing.artifact_class != artifact_class
                 )
                 if not needs_hash:
+                    assert existing is not None
                     existing.last_seen_at = now
                     existing.vault_name = resolved_name
                     files_unchanged += 1
@@ -458,7 +459,7 @@ class VaultStateService:
                 else:
                     session.refresh(activity)
             session.expunge(activity)
-            return activity
+            return cast(VaultActivity, activity)
 
     def finish_activity(
         self,
