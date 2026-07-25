@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
+from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.mistral import MistralModel
@@ -23,7 +24,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from pydantic_ai.settings import ModelSettings
-from tenacity import retry_if_exception, stop_after_attempt
+from tenacity import RetryCallState, retry_if_exception, stop_after_attempt
 
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
 from core.llm.model_utils import get_provider_config, resolve_model, validate_api_keys
@@ -104,7 +105,7 @@ def _apply_openai_oauth_responses_settings(settings_kwargs: dict[str, object]) -
 def _is_retryable_model_http_exception(exc: BaseException) -> bool:
     """Return whether Pydantic AI model HTTP transport should retry the exception."""
     if isinstance(exc, httpx.HTTPStatusError):
-        status_code = exc.response.status_code
+        status_code = int(exc.response.status_code)
         return status_code == 429 or 500 <= status_code <= 599
     return isinstance(exc, httpx.RequestError)
 
@@ -115,7 +116,7 @@ def _raise_retryable_model_status(response: httpx.Response) -> None:
         response.raise_for_status()
 
 
-def _log_model_retry_before_sleep(retry_state) -> None:
+def _log_model_retry_before_sleep(retry_state: RetryCallState) -> None:
     """Emit one lifecycle event before Pydantic AI retry transport sleeps."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     logger.add_sink("validation").warning(
@@ -158,18 +159,19 @@ def _build_retrying_model_http_client() -> httpx.AsyncClient:
     )
 
 
-def _mark_provider_owns_http_client(
-    provider: object, http_client: httpx.AsyncClient
-) -> object:
+def _mark_provider_owns_http_client[ProviderT](
+    provider: ProviderT, http_client: httpx.AsyncClient
+) -> ProviderT:
     """Mark a custom retry client as provider-owned for Pydantic AI lifecycle hooks."""
-    provider._own_http_client = http_client
-    provider._http_client_factory = _build_retrying_model_http_client
+    untyped_provider: Any = provider
+    untyped_provider._own_http_client = http_client
+    untyped_provider._http_client_factory = _build_retrying_model_http_client
     return provider
 
 
 def build_model_instance(
     value: str, *, thinking: ThinkingValue = None
-) -> ModelExecutionSpec | object:
+) -> ModelExecutionSpec | Model:
     """Build a Pydantic AI model instance from a user-friendly alias string.
 
     Args:
@@ -213,7 +215,7 @@ def build_model_instance(
                 GoogleProvider(api_key=api_key, http_client=http_client),
                 http_client,
             ),
-            settings=GoogleModelSettings(**settings_kwargs),
+            settings=cast(GoogleModelSettings, settings_kwargs),
         )
 
     elif provider == "anthropic":
@@ -226,7 +228,7 @@ def build_model_instance(
                 AnthropicProvider(api_key=api_key, http_client=http_client),
                 http_client,
             ),
-            settings=AnthropicModelSettings(**settings_kwargs),
+            settings=cast(AnthropicModelSettings, settings_kwargs),
         )
 
     elif provider == "openai":
@@ -245,12 +247,14 @@ def build_model_instance(
                 openai_build.provider,
                 http_client,
             ),
-            settings=OpenAIResponsesModelSettings(**settings_kwargs),
+            settings=cast(OpenAIResponsesModelSettings, settings_kwargs),
         )
 
     elif provider == "grok":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("GROK_API_KEY")
+        if not api_key:
+            raise ValueError("GROK_API_KEY is required for the Grok provider")
         http_client = _build_retrying_model_http_client()
         return OpenAIModel(
             model_string,
@@ -258,7 +262,7 @@ def build_model_instance(
                 GrokProvider(api_key=api_key, http_client=http_client),
                 http_client,
             ),
-            settings=OpenAIResponsesModelSettings(**settings_kwargs),
+            settings=cast(ModelSettings, settings_kwargs),
         )
 
     elif provider == "mistral":
@@ -271,7 +275,7 @@ def build_model_instance(
                 MistralProvider(api_key=api_key, http_client=http_client),
                 http_client,
             ),
-            settings=ModelSettings(**settings_kwargs),
+            settings=cast(ModelSettings, settings_kwargs),
         )
 
     elif provider == "openrouter":
@@ -286,7 +290,7 @@ def build_model_instance(
                 OpenRouterProvider(api_key=api_key, http_client=http_client),
                 http_client,
             ),
-            settings=OpenRouterModelSettings(**settings_kwargs),
+            settings=cast(OpenRouterModelSettings, settings_kwargs),
         )
 
     else:
@@ -315,5 +319,5 @@ def build_model_instance(
                 ),
                 http_client,
             ),
-            settings=ModelSettings(**settings_kwargs),
+            settings=cast(ModelSettings, settings_kwargs),
         )

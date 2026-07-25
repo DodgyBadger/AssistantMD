@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 229 errors in 45 of 192 production source files after
-  typing session operations. Lint and
+- `uv run mypy api core`: 209 errors in 44 of 192 production source files after
+  typing model construction. Lint and
   annotation modernization
   initially produced 663 errors in 80 files.
 - The largest production mypy categories are `arg-type` (228),
@@ -132,6 +132,11 @@ ADR 0025 (durable vault activities).
      cross one value-returning validation boundary, search candidates avoid
      optional-variable reuse, and summary/index helper results are explicit.
      Session tool, retrieval helper, and persistence scenarios pass.
+   - Model-factory batch complete: provider identity survives retry-client
+     ownership wiring, provider-specific settings cross explicit typed
+     boundaries, retry callbacks are typed, and Grok key absence fails before
+     provider construction. Model failure, compaction, and usage-limit
+     scenarios pass.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral
