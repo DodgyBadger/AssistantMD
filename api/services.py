@@ -10,6 +10,7 @@ import re
 import shutil
 import uuid
 from collections import Counter
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -73,7 +74,7 @@ from core.llm.openai_oauth import (
 from core.llm.openai_oauth import (
     start_openai_oauth as start_openai_oauth_attempt,
 )
-from core.llm.thinking import normalize_thinking_value
+from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.logger import UnifiedLogger
 from core.memory.session_summary import SessionSummaryStore
 from core.runtime.execution_tasks import (
@@ -827,6 +828,7 @@ def _deferred_review_response(review: StoredDeferredReview) -> DeferredReviewRes
     """Translate a stored deferred review into its API representation."""
     return DeferredReviewResponse(
         artifact_ref=review.artifact_ref,
+        artifact_kind="deferred_tool_review",
         vault_name=review.vault_name,
         session_id=review.session_id,
         originating_task_id=review.originating_task_id,
@@ -1098,7 +1100,7 @@ def _validate_deferred_review_overrides(
 
 def _deferred_resume_options(
     resume_config: dict[str, Any], *, artifact_ref: str
-) -> tuple[list[str], str, str | None, str | None, str]:
+) -> tuple[list[str], str, ThinkingValue, str | None, str]:
     model = str(resume_config.get("model") or "").strip()
     if not model:
         raise APIException(
@@ -1244,7 +1246,9 @@ def list_vault_file_references(
     """Return file/folder candidates for chat reference insertion."""
     vault_root = resolve_vault_root(vault_name)
     normalized_workspace = _normalize_workspace_path(workspace_path)
-    normalized_scope = scope if scope in {"workspace", "vault"} else "workspace"
+    normalized_scope: Literal["workspace", "vault"] = (
+        scope if scope in {"workspace", "vault"} else "workspace"
+    )
     normalized_query = (query or "").strip().lower()
     bounded_limit = min(
         max(int(limit or _VAULT_FILE_REFERENCE_LIMIT), 1), _VAULT_FILE_REFERENCE_LIMIT
@@ -1274,6 +1278,7 @@ def list_vault_file_references(
             scope=normalized_scope,
             items=items,
             truncated=truncated,
+            next_offset=None,
         )
 
     base_relative = _normalize_workspace_path(path)
@@ -1432,6 +1437,7 @@ def upload_vault_file(
     return VaultPathMutationResponse(
         operation="upload",
         path=normalized,
+        destination="",
         kind="file",
         message=f"Uploaded {normalized}.",
         metadata={
@@ -1494,6 +1500,7 @@ def _mutate_vault_path_attributed(
         return VaultPathMutationResponse(
             operation=operation,
             path=normalized,
+            destination="",
             kind="file",
             message=f"Created {normalized}.",
             metadata={
@@ -1586,7 +1593,7 @@ def _mutate_vault_path_attributed(
 def _explorer_activity(
     *,
     label: str,
-):
+) -> Iterator[VaultActivityContext]:
     """Track one synchronous Explorer command as durable vault activity."""
     context = VaultActivityContext(
         activity_id=f"activity_{uuid.uuid4().hex}",

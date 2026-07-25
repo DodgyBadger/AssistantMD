@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 474 errors in 55 of 192 production source files after
-  typing the API transport boundary. Lint and annotation modernization
+- `uv run mypy api core`: 466 errors in 55 of 192 production source files after
+  the first API service contract batch. Lint and annotation modernization
   initially produced 663 errors in 80 files.
 - The largest production mypy categories are `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -102,6 +102,9 @@ ADR 0025 (durable vault activities).
      image uploads are narrowed to actual upload objects, and the mismatched
      deferred-review vault error path uses the service exception's real field.
      The endpoint module now passes production mypy.
+   - API service contract work started: deferred-review thinking values,
+     Explorer mutation defaults, file-reference paging/scope, and activity
+     context iteration now preserve their concrete domain types.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral
