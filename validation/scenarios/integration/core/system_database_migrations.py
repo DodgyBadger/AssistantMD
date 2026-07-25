@@ -31,7 +31,9 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         )
 
         after = run_system_migrations(system_root, backup=True)
-        self.soft_assert_equal(after.pending_count, 0, "Registered migrations should be applied")
+        self.soft_assert_equal(
+            after.pending_count, 0, "Registered migrations should be applied"
+        )
 
         target_by_db = {target.db_name: target for target in after.targets}
         chat_target = target_by_db["chat_sessions"]
@@ -39,16 +41,29 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         goal_target = target_by_db["goal_ops"]
         vault_target = target_by_db["vault_state"]
         workflow_runs_target = target_by_db["workflow_runs"]
-        self.soft_assert(chat_target.backup_path is not None, "Existing chat DB should be backed up")
-        self.soft_assert(summary_target.backup_path is None, "New summary DB should not create an empty backup")
-        self.soft_assert(goal_target.backup_path is None, "New goal_ops DB should not create an empty backup")
-        self.soft_assert(vault_target.backup_path is None, "New vault-state DB should not create an empty backup")
+        self.soft_assert(
+            chat_target.backup_path is not None, "Existing chat DB should be backed up"
+        )
+        self.soft_assert(
+            summary_target.backup_path is None,
+            "New summary DB should not create an empty backup",
+        )
+        self.soft_assert(
+            goal_target.backup_path is None,
+            "New goal_ops DB should not create an empty backup",
+        )
+        self.soft_assert(
+            vault_target.backup_path is None,
+            "New vault-state DB should not create an empty backup",
+        )
         self.soft_assert(
             workflow_runs_target.backup_path is None,
             "New workflow-runs DB should not create an empty backup",
         )
         if chat_target.backup_path:
-            self.soft_assert(Path(chat_target.backup_path).exists(), "Chat DB backup should exist")
+            self.soft_assert(
+                Path(chat_target.backup_path).exists(), "Chat DB backup should exist"
+            )
 
         with sqlite3.connect(chat_db) as conn:
             self.soft_assert(
@@ -98,7 +113,9 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             )
 
         second = run_system_migrations(system_root, backup=True)
-        self.soft_assert_equal(second.pending_count, 0, "Second run should remain fully applied")
+        self.soft_assert_equal(
+            second.pending_count, 0, "Second run should remain fully applied"
+        )
         self.soft_assert(
             all(target.backup_path is None for target in second.targets),
             "Second run should not create backups when no migrations are pending",

@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import keyword
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic_monty import Monty, run_monty_async
 
-from core.authoring.helper_catalog import create_builtin_registry
 from core.authoring.contracts import (
-    AuthoringFinishSignal,
     AuthoringExecutionContext,
+    AuthoringFinishSignal,
     AuthoringHost,
     AuthoringToolCallError,
     ScriptToolResult,
 )
+from core.authoring.helper_catalog import create_builtin_registry
 from core.authoring.helpers.runtime_common import (
     coerce_tool_return_value_text,
     invoke_bound_tool,
@@ -27,7 +27,6 @@ from core.authoring.registry import AuthoringCapabilityRegistry
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.logger import UnifiedLogger
 from core.settings.store import get_enabled_tools_config
-
 
 logger = UnifiedLogger(tag="authoring-monty")
 
@@ -103,7 +102,9 @@ async def run_authoring_monty(
             script_name=script_name,
             inputs=sorted(effective_inputs) if effective_inputs else None,
             type_check=type_check,
-            type_check_stubs=_build_type_check_stubs(direct_tool_stubs) if type_check else None,
+            type_check_stubs=(
+                _build_type_check_stubs(direct_tool_stubs) if type_check else None
+            ),
         )
         for dataclass_type in host.get_monty_dataclasses():
             runner.register_dataclass(dataclass_type)
@@ -216,12 +217,16 @@ def _build_direct_tool_functions(
                     session_buffers=host.session_buffers,
                     session_id=getattr(host, "session_key", None),
                     chat_session_id=getattr(host, "chat_session_id", None),
-                    vault_name=str(context.workflow_id).split("/", 1)[0]
-                    if "/" in str(context.workflow_id)
-                    else None,
+                    vault_name=(
+                        str(context.workflow_id).split("/", 1)[0]
+                        if "/" in str(context.workflow_id)
+                        else None
+                    ),
                     authoring_workflow_id=str(context.workflow_id),
                     message_history=getattr(host, "message_history", None),
-                    prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
+                    prefer_message_history=bool(
+                        getattr(host, "prefer_message_history", False)
+                    ),
                 )
                 tool_result = normalize_tool_result(
                     _spec.name,
@@ -264,7 +269,9 @@ def _build_direct_tool_functions(
         _direct_tool_function.__name__ = function_name
         _direct_tool_function.__doc__ = f"Direct Monty wrapper for tool '{spec.name}'."
         external_functions[function_name] = _direct_tool_function
-        stub_lines.append(f"async def {function_name}(**kwargs: Any) -> ScriptToolResult: ...")
+        stub_lines.append(
+            f"async def {function_name}(**kwargs: Any) -> ScriptToolResult: ..."
+        )
 
     return external_functions, "\n".join(stub_lines)
 

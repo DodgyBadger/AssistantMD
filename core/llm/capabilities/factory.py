@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
 from core.llm.capabilities.chat_context import build_chat_context_capability

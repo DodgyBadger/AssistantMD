@@ -20,7 +20,9 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
         vault = self.create_vault("FileOpsExtensionlessTextMutationsVault")
         self.create_file(vault, "notes/edit-target.md", "first\nreplace me\nlast\n")
         self.create_file(vault, "notes/no-extension", "alpha\n")
-        self.create_file(vault, "notes/crlf-target.md", "first\r\nreplace me\r\nlast\r\n")
+        self.create_file(
+            vault, "notes/crlf-target.md", "first\r\nreplace me\r\nlast\r\n"
+        )
 
         await self.start_system()
 

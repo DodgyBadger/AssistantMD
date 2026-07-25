@@ -32,6 +32,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
         await self.start_system()
 
         from core.authoring.runtime import WorkflowAuthoringHost, run_authoring_monty
+
         session_id = "context_assembly_session"
         workflow_id = f"{vault.name}/chat/{session_id}"
         now = datetime(2026, 4, 7, 12, 0, 0)
@@ -119,7 +120,15 @@ class AuthoringContextAssemblyScenario(BaseScenario):
         )
         self.soft_assert_equal(
             output["roles"],
-            ["system", "user", "assistant", "tool_exchange", "user", "assistant", "user"],
+            [
+                "system",
+                "user",
+                "assistant",
+                "tool_exchange",
+                "user",
+                "assistant",
+                "user",
+            ],
             "Expected assembled context ordering to preserve instructions and history",
         )
         self.soft_assert_equal(

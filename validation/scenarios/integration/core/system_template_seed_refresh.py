@@ -45,8 +45,12 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
 
         seed = Path("core/authoring/seed_templates/context/default.md")
         expected = seed.read_text(encoding="utf-8")
-        workflow_seed = Path("core/authoring/seed_templates/workflows/nightly-session-summarization.md")
-        expected_workflow = workflow_seed.read_text(encoding="utf-8").replace("enabled: false", "enabled: true", 1)
+        workflow_seed = Path(
+            "core/authoring/seed_templates/workflows/nightly-session-summarization.md"
+        )
+        expected_workflow = workflow_seed.read_text(encoding="utf-8").replace(
+            "enabled: false", "enabled: true", 1
+        )
 
         await self.start_system()
 
@@ -72,10 +76,19 @@ class SystemTemplateSeedRefreshScenario(BaseScenario):
             "Settings update should allow existing OpenRouter provider without routing block",
         )
         status_response = self.call_api("/api/status")
-        self.soft_assert_equal(status_response.status_code, 200, "Status should load after metadata removal")
-        status_issues = status_response.json().get("configuration_status", {}).get("issues", [])
+        self.soft_assert_equal(
+            status_response.status_code,
+            200,
+            "Status should load after metadata removal",
+        )
+        status_issues = (
+            status_response.json().get("configuration_status", {}).get("issues", [])
+        )
         self.soft_assert(
-            any(issue.get("name") == "settings:missing_metadata" for issue in status_issues),
+            any(
+                issue.get("name") == "settings:missing_metadata"
+                for issue in status_issues
+            ),
             "Status should warn when existing settings are missing template metadata",
         )
 

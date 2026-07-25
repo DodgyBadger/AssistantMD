@@ -18,13 +18,14 @@ The original configuration was stored in `docker/pyproject.toml` and was not
 discovered by root tool invocations. After moving it to the repository root,
 the canonical `uv run ...` baseline is:
 
-- `uv run ruff check api core validation`: 1,351 findings, of which 1,202 have
-  safe automatic fixes.
-- `uv run black --check api core validation`: 209 files would be reformatted
-  and 88 already pass.
-- `uv run mypy api core`: 658 errors in 80 of 192 production source files after
-  adding maintained PyYAML and python-dateutil stubs (down from 668 errors in
-  82 files).
+- `uv run ruff check api core validation`: passes after resolving 1,351
+  discovered findings.
+- `uv run black --check api core validation`: passes across all 297 files after
+  normalizing 202 files.
+- `uv run mypy api core`: 663 errors in 80 of 192 production source files after
+  lint and annotation modernization. The tooling-only stub stage briefly
+  reduced the pre-normalization baseline from 668 to 658; modernized
+  annotations then exposed five additional mismatches.
 - The largest production mypy categories are `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
   (29), `no-any-return` (27), `union-attr` (24), and missing/untyped imports
@@ -71,7 +72,7 @@ ADR 0025 (durable vault activities).
    - Add maintained typing stubs where they remove import noise without changing
      runtime dependencies.
    - Document the exact narrow commands agents may run.
-2. **Mechanical lint and format baseline**
+2. **Mechanical lint and format baseline** — implemented, pending commit
    - Apply Ruff's safe automatic fixes, then review and correct the remaining
      findings.
    - Apply Black in a dedicated, behavior-neutral commit so later semantic
@@ -112,12 +113,11 @@ The final handoff requests maintainer execution of
 
 ## Next Steps
 
-1. Commit the root configuration/tooling baseline separately.
-2. Apply Ruff's safe fixes, review the remaining findings, and apply Black.
-3. Commit the behavior-neutral lint/format normalization.
-4. Recount mypy errors after imports and modern annotations are normalized.
-5. Begin production typing fixes by shared foundation rather than raw file
-   count.
+1. Commit the behavior-neutral lint/format normalization.
+2. Categorize the post-normalization mypy baseline by shared foundation.
+3. Fix missing annotations and optional-value parsing before persistence and
+   external protocol mismatches.
+4. Run focused scenarios for any correction that changes executable behavior.
 
 ## Next Phase
 

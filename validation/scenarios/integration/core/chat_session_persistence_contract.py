@@ -23,18 +23,21 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
         await self.start_system()
 
+        from pydantic_ai.models.test import TestModel
+
         import core.chat.executor as chat_executor
         from core.authoring.runtime import WorkflowAuthoringHost, run_authoring_monty
         from core.constants import ASSISTANTMD_ROOT_DIR, CHAT_SESSIONS_DIR
         from core.runtime.state import get_runtime_context
-        from pydantic_ai.models.test import TestModel
 
         session_id = "chat_session_persistence_contract_session"
 
         async def session_probe() -> str:
             return "SESSION_PROBE_RESULT"
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, vault_path, tools, model, thinking
             return (
                 "You must call the session_probe tool before responding.",
@@ -55,14 +58,18 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert response["start_response"].status_code == 200, (
-                "Chat task should start for persistence contract coverage"
-            )
-            assert response["terminal_event"].get("event") == "done", (
-                "Chat execution should succeed for persistence contract coverage"
-            )
+            assert (
+                response["start_response"].status_code == 200
+            ), "Chat task should start for persistence contract coverage"
+            assert (
+                response["terminal_event"].get("event") == "done"
+            ), "Chat execution should succeed for persistence contract coverage"
 
-            self.soft_assert_equal(response["session_id"], session_id, "Expected stable explicit session id")
+            self.soft_assert_equal(
+                response["session_id"],
+                session_id,
+                "Expected stable explicit session id",
+            )
             self.soft_assert(
                 "SESSION_PROBE_RESULT" in response["text"],
                 "Expected assistant response to reflect the tool result",
@@ -101,7 +108,9 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
             runtime = get_runtime_context()
             chat_sessions_db = Path(runtime.config.system_root) / "chat_sessions.db"
-            assert chat_sessions_db.exists(), "Chat session persistence DB should be created"
+            assert (
+                chat_sessions_db.exists()
+            ), "Chat session persistence DB should be created"
 
             with sqlite3.connect(chat_sessions_db) as conn:
                 session_row = conn.execute(
@@ -144,17 +153,23 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "Canonical chat history should store the first active user prompt exactly once",
                 )
                 first_prompt_rows = [
-                    row for row in message_rows
+                    row
+                    for row in message_rows
                     if row[0] == "user"
                     and row[1] == "Use the session_probe tool and then answer briefly."
                 ]
-                first_prompt_json = str(first_prompt_rows[0][2] if first_prompt_rows else "")
+                first_prompt_json = str(
+                    first_prompt_rows[0][2] if first_prompt_rows else ""
+                )
                 self.soft_assert(
                     '"run_id"' in first_prompt_json,
                     "Persisted active user prompt should come from provider-native new_messages()",
                 )
                 self.soft_assert(
-                    any("SESSION_PROBE_RESULT" in str(row[1] or "") for row in message_rows),
+                    any(
+                        "SESSION_PROBE_RESULT" in str(row[1] or "")
+                        for row in message_rows
+                    ),
                     "Persisted chat messages should include the resulting assistant/tool content",
                 )
 
@@ -202,21 +217,27 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 method="PATCH",
                 data={"vault_name": vault.name, "title": "Session Probe Title"},
             )
-            assert title_response.status_code == 200, "Setting the session title should succeed"
+            assert (
+                title_response.status_code == 200
+            ), "Setting the session title should succeed"
 
             workspace_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/workspace",
                 method="PATCH",
                 data={"vault_name": vault.name, "path": "Projects/ForkProbe"},
             )
-            assert workspace_response.status_code == 200, "Setting the session workspace should succeed"
+            assert (
+                workspace_response.status_code == 200
+            ), "Setting the session workspace should succeed"
 
             export_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/export",
                 method="POST",
                 data={"vault_name": vault.name},
             )
-            assert export_response.status_code == 200, "Transcript export should succeed on demand"
+            assert (
+                export_response.status_code == 200
+            ), "Transcript export should succeed on demand"
             export_payload = export_response.json()
             self.soft_assert_equal(
                 export_payload["filename"],
@@ -225,14 +246,17 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             )
 
             titled_transcript = transcript_dir / export_payload["filename"]
-            assert titled_transcript.exists(), "Export should create the transcript file"
+            assert (
+                titled_transcript.exists()
+            ), "Export should create the transcript file"
             transcript_text = titled_transcript.read_text(encoding="utf-8")
             self.soft_assert(
                 "**User:**" in transcript_text and "**Assistant:**" in transcript_text,
                 "Transcript should contain exported user and assistant sections",
             )
             self.soft_assert(
-                "Use the session_probe tool and then answer briefly." in transcript_text,
+                "Use the session_probe tool and then answer briefly."
+                in transcript_text,
                 "Transcript export should include the persisted user prompt",
             )
             self.soft_assert(
@@ -249,17 +273,21 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert follow_up["start_response"].status_code == 200, "Follow-up chat task should start"
-            assert follow_up["terminal_event"].get("event") == "done", (
-                "Follow-up chat execution should succeed"
-            )
+            assert (
+                follow_up["start_response"].status_code == 200
+            ), "Follow-up chat task should start"
+            assert (
+                follow_up["terminal_event"].get("event") == "done"
+            ), "Follow-up chat execution should succeed"
 
             second_export_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/export",
                 method="POST",
                 data={"vault_name": vault.name},
             )
-            assert second_export_response.status_code == 200, "Repeated transcript export should succeed"
+            assert (
+                second_export_response.status_code == 200
+            ), "Repeated transcript export should succeed"
             second_export_payload = second_export_response.json()
             self.soft_assert_equal(
                 second_export_payload["filename"],
@@ -269,7 +297,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
             transcript_text = titled_transcript.read_text(encoding="utf-8")
             self.soft_assert(
-                "Call the session_probe tool again and answer with the result only." in transcript_text,
+                "Call the session_probe tool again and answer with the result only."
+                in transcript_text,
                 "Repeated export should overwrite the transcript with newly added session messages",
             )
             with sqlite3.connect(chat_sessions_db) as conn:
@@ -307,7 +336,9 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             first_assistant_sequence = _first_visible_assistant_sequence_index(
                 message_rows_after_follow_up,
             )
-            assert first_assistant_sequence is not None, "First visible assistant sequence should be persisted"
+            assert (
+                first_assistant_sequence is not None
+            ), "First visible assistant sequence should be persisted"
             fork_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/fork",
                 method="POST",
@@ -316,7 +347,9 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "through_sequence_index": first_assistant_sequence,
                 },
             )
-            assert fork_response.status_code == 200, "Session fork endpoint should succeed"
+            assert (
+                fork_response.status_code == 200
+            ), "Session fork endpoint should succeed"
             fork_payload = fork_response.json()
             fork_session_id = fork_payload["session"]["session_id"]
             self.soft_assert(
@@ -337,11 +370,16 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             fork_detail = self.call_api(
                 f"/api/chat/sessions/{fork_session_id}?vault_name={vault.name}",
             )
-            assert fork_detail.status_code == 200, "Forked session detail endpoint should succeed"
+            assert (
+                fork_detail.status_code == 200
+            ), "Forked session detail endpoint should succeed"
             fork_messages = fork_detail.json()["messages"]
-            fork_message_text = "\n".join(message["content"] for message in fork_messages)
+            fork_message_text = "\n".join(
+                message["content"] for message in fork_messages
+            )
             self.soft_assert(
-                "Use the session_probe tool and then answer briefly." in fork_message_text,
+                "Use the session_probe tool and then answer briefly."
+                in fork_message_text,
                 "Fork should retain messages before the selected fork point",
             )
             self.soft_assert(
@@ -364,18 +402,21 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert fork_follow_up["start_response"].status_code == 200, (
-                "Continuing the fork should start"
-            )
-            assert fork_follow_up["terminal_event"].get("event") == "done", (
-                "Continuing the fork should succeed"
-            )
+            assert (
+                fork_follow_up["start_response"].status_code == 200
+            ), "Continuing the fork should start"
+            assert (
+                fork_follow_up["terminal_event"].get("event") == "done"
+            ), "Continuing the fork should succeed"
             source_detail_after_fork = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
             )
-            assert source_detail_after_fork.status_code == 200, "Source session detail should still load"
+            assert (
+                source_detail_after_fork.status_code == 200
+            ), "Source session detail should still load"
             source_message_text = "\n".join(
-                message["content"] for message in source_detail_after_fork.json()["messages"]
+                message["content"]
+                for message in source_detail_after_fork.json()["messages"]
             )
             self.soft_assert(
                 "Continue only in the forked session." not in source_message_text,
@@ -410,7 +451,9 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
                 method="GET",
             )
-            assert detail_after_orphan.status_code == 200, "Session detail should load persisted chat state"
+            assert (
+                detail_after_orphan.status_code == 200
+            ), "Session detail should load persisted chat state"
             detail_tool_event_ids = {
                 event["tool_call_id"]
                 for event in detail_after_orphan.json().get("tool_events", [])
@@ -494,11 +537,17 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
 
 def _count_user_prompt_rows(rows, prompt: str) -> int:
-    return sum(1 for role, content, _message_json in rows if role == "user" and content == prompt)
+    return sum(
+        1
+        for role, content, _message_json in rows
+        if role == "user" and content == prompt
+    )
 
 
 def _strip_sequence_column(rows):
-    return [(role, content, message_json) for _sequence, role, content, message_json in rows]
+    return [
+        (role, content, message_json) for _sequence, role, content, message_json in rows
+    ]
 
 
 def _prompt_sequence_index(rows, prompt: str) -> int | None:

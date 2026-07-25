@@ -7,7 +7,6 @@ from pathlib import Path
 from core.ingestion.models import RawDocument, SourceKind
 from core.ingestion.registry import importer_registry
 
-
 _EXT_TO_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

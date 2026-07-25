@@ -29,12 +29,16 @@ class ImportPipelineSchedulerScenario(BaseScenario):
             method="POST",
             data={"vault": vault.name, "queue_only": True},
         )
-        self.soft_assert_equal(response.status_code, 200, "Queued import scan should succeed")
+        self.soft_assert_equal(
+            response.status_code, 200, "Queued import scan should succeed"
+        )
         jobs = response.json().get("jobs_created") or []
         self.soft_assert_equal(len(jobs), 1, "One queued import job should be created")
         job = jobs[0]
         job_id = job.get("id")
-        self.soft_assert_equal(job.get("status"), "queued", "Import job should remain queued")
+        self.soft_assert_equal(
+            job.get("status"), "queued", "Import job should remain queued"
+        )
 
         await get_runtime_context().ingestion_worker.run_once()
 
@@ -46,7 +50,9 @@ class ImportPipelineSchedulerScenario(BaseScenario):
                 break
             await asyncio.sleep(0.02)
 
-        self.soft_assert(output_path is not None, "Scheduled import should create markdown output")
+        self.soft_assert(
+            output_path is not None, "Scheduled import should create markdown output"
+        )
         if output_path is not None:
             content = output_path.read_text(encoding="utf-8")
             self.soft_assert(
@@ -58,13 +64,14 @@ class ImportPipelineSchedulerScenario(BaseScenario):
             "Scheduled import should remove the source file after processing",
         )
 
-        tasks = await get_runtime_context().task_coordinator.list_tasks(kind="ingestion")
+        tasks = await get_runtime_context().task_coordinator.list_tasks(
+            kind="ingestion"
+        )
         matching_task = next(
             (
                 task
                 for task in tasks
-                if task.metadata.get("job_id") == job_id
-                and task.source == "scheduler"
+                if task.metadata.get("job_id") == job_id and task.source == "scheduler"
             ),
             None,
         )

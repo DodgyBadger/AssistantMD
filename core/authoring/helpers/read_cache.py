@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts
 from core.authoring.contracts import (
     AuthoringCapabilityCall,
     AuthoringCapabilityDefinition,
@@ -9,9 +10,7 @@ from core.authoring.contracts import (
     RetrievedItem,
 )
 from core.authoring.helpers.common import build_capability
-from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts
 from core.logger import UnifiedLogger
-
 
 logger = UnifiedLogger(tag="authoring-host")
 

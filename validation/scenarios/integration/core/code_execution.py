@@ -26,10 +26,11 @@ class CodeExecutionScenario(BaseScenario):
 
         await self.start_system()
 
-        from core.authoring.cache import upsert_cache_artifact
+        from pydantic_ai.models.test import TestModel
 
         import core.chat.executor as chat_executor
-        from pydantic_ai.models.test import TestModel
+        from core.authoring.cache import upsert_cache_artifact
+
         current_case = {"name": "allow_memory_read"}
 
         class _DeterministicToolModel(TestModel):
@@ -45,7 +46,7 @@ class CodeExecutionScenario(BaseScenario):
                     return {
                         "code": (
                             'history = await retrieve_history(scope="session", limit=1)\n'
-                            'str(history.item_count)'
+                            "str(history.item_count)"
                         )
                     }
                 if case_name == "discovery":
@@ -61,7 +62,7 @@ class CodeExecutionScenario(BaseScenario):
                     return {
                         "code": (
                             'doc = await file_read(operation="read", path="notes/blocked.md")\n'
-                            'doc.return_value'
+                            "doc.return_value"
                         )
                     }
                 if case_name == "dynamic_attribute_helpers":
@@ -88,12 +89,12 @@ class CodeExecutionScenario(BaseScenario):
                 if case_name == "allow_image_input":
                     return {
                         "code": (
-                            'draft = await delegate(\n'
+                            "draft = await delegate(\n"
                             '    prompt="Read images/test_image.jpg and reply with IMAGE_OK.",\n'
                             '    tools=["file_read"],\n'
                             '    model="test",\n'
-                            ')\n'
-                            'draft.return_value'
+                            ")\n"
+                            "draft.return_value"
                         )
                     }
                 if case_name == "full_surface":
@@ -101,28 +102,28 @@ class CodeExecutionScenario(BaseScenario):
                         "code": (
                             'cached = await read_cache(ref="tool/web_extract/call_seeded_full_surface")\n'
                             'await file_read(operation="read", path="notes/structured.md")\n'
-                            f'parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n'
+                            f"parsed = await parse_markdown(value={STRUCTURED_NOTE!r})\n"
                             'listed = await file_read(operation="list", path="tasks")\n'
-                            'pending = await pending_files(\n'
+                            "pending = await pending_files(\n"
                             '    operation="get",\n'
-                            '    items=listed,\n'
-                            ')\n'
+                            "    items=listed,\n"
+                            ")\n"
                             'await pending_files(operation="complete", items=(pending.items[0],))\n'
                             'history = await retrieve_history(scope="session", limit=1)\n'
-                            'assembled = await assemble_context(\n'
-                            '    history=history.items,\n'
+                            "assembled = await assemble_context(\n"
+                            "    history=history.items,\n"
                             '    instructions="Keep the output concise.",\n'
-                            ')\n'
-                            'draft = await delegate(\n'
-                            '    prompt=(\n'
+                            ")\n"
+                            "draft = await delegate(\n"
+                            "    prompt=(\n"
                             '        f"heading={parsed.sections[1].heading}; "\n'
                             '        f"cached={cached.content}; "\n'
                             '        f"messages={len(assembled.messages)}; "\n'
-                            '        f"listed={listed.metadata.get(\'file_count\')}"\n'
-                            '    ),\n'
+                            "        f\"listed={listed.metadata.get('file_count')}\"\n"
+                            "    ),\n"
                             '    instructions="Return one short deterministic line.",\n'
                             '    model="test",\n'
-                            ')\n'
+                            ")\n"
                             'await file_write(operation="write", path="notes/full-surface.md", content=draft.return_value)\n'
                             'await finish(status="completed", reason="full-surface-ok")\n'
                             '"UNREACHABLE"'
@@ -130,7 +131,9 @@ class CodeExecutionScenario(BaseScenario):
                     }
                 raise AssertionError(f"Unexpected scenario case: {case_name}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, vault_path, tools, model, thinking
             from core.authoring.shared.tool_binding import resolve_tool_binding
 
@@ -182,8 +185,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_read["start_response"].status_code == 200, "Memory read task should start"
-            assert allow_read["terminal_event"].get("event") == "done", "Memory read should succeed"
+            assert (
+                allow_read["start_response"].status_code == 200
+            ), "Memory read task should start"
+            assert (
+                allow_read["terminal_event"].get("event") == "done"
+            ), "Memory read should succeed"
             allow_text = allow_read["text"]
             self.soft_assert(
                 "failed:" not in allow_text.lower(),
@@ -204,8 +211,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_cache_read["start_response"].status_code == 200, "Cache read task should start"
-            assert allow_cache_read["terminal_event"].get("event") == "done", "Cache read should succeed"
+            assert (
+                allow_cache_read["start_response"].status_code == 200
+            ), "Cache read task should start"
+            assert (
+                allow_cache_read["terminal_event"].get("event") == "done"
+            ), "Cache read should succeed"
             allow_cache_read_text = allow_cache_read["text"]
             self.soft_assert(
                 "SEEDED_CACHE_CONTENT" in allow_cache_read_text,
@@ -222,10 +233,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert discovery["start_response"].status_code == 200, "No-arg code_execution task should start"
-            assert discovery["terminal_event"].get("event") == "done", (
-                "No-arg code_execution discovery should succeed"
-            )
+            assert (
+                discovery["start_response"].status_code == 200
+            ), "No-arg code_execution task should start"
+            assert (
+                discovery["terminal_event"].get("event") == "done"
+            ), "No-arg code_execution discovery should succeed"
             discovery_text = discovery["text"]
             self.soft_assert(
                 bool(discovery_text.strip()),
@@ -242,8 +255,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_file_read["start_response"].status_code == 200, "Vault file read task should start"
-            assert allow_file_read["terminal_event"].get("event") == "done", "Vault file read should succeed"
+            assert (
+                allow_file_read["start_response"].status_code == 200
+            ), "Vault file read task should start"
+            assert (
+                allow_file_read["terminal_event"].get("event") == "done"
+            ), "Vault file read should succeed"
             allow_file_read_text = allow_file_read["text"]
             self.soft_assert(
                 "BLOCKED_CONTENT" in allow_file_read_text,
@@ -260,12 +277,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert dynamic_attribute_helpers["start_response"].status_code == 200, (
-                "Dynamic attribute helper task should start"
-            )
-            assert dynamic_attribute_helpers["terminal_event"].get("event") == "done", (
-                "Dynamic attribute helper run should complete"
-            )
+            assert (
+                dynamic_attribute_helpers["start_response"].status_code == 200
+            ), "Dynamic attribute helper task should start"
+            assert (
+                dynamic_attribute_helpers["terminal_event"].get("event") == "done"
+            ), "Dynamic attribute helper run should complete"
             dynamic_attribute_helpers_text = dynamic_attribute_helpers["text"]
             self.soft_assert(
                 "true" in dynamic_attribute_helpers_text.lower(),
@@ -282,12 +299,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert streaming_detail["start_response"].status_code == 200, (
-                "Streaming detail task should start"
-            )
-            assert streaming_detail["terminal_event"].get("event") == "done", (
-                "Streaming detail run should succeed"
-            )
+            assert (
+                streaming_detail["start_response"].status_code == 200
+            ), "Streaming detail task should start"
+            assert (
+                streaming_detail["terminal_event"].get("event") == "done"
+            ), "Streaming detail run should succeed"
             streaming_events = streaming_detail["events"]
             self.soft_assert(
                 any(
@@ -318,8 +335,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_write["start_response"].status_code == 200, "Allowed cache write task should start"
-            assert allow_write["terminal_event"].get("event") == "done", "Allowed cache write should succeed"
+            assert (
+                allow_write["start_response"].status_code == 200
+            ), "Allowed cache write task should start"
+            assert (
+                allow_write["terminal_event"].get("event") == "done"
+            ), "Allowed cache write should succeed"
             write_text = allow_write["text"]
             self.soft_assert(
                 "WRITE_OK" in write_text,
@@ -337,12 +358,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert allow_image_input["start_response"].status_code == 200, (
-                "Image input composition task should start"
-            )
-            assert allow_image_input["terminal_event"].get("event") == "done", (
-                "Image input composition should succeed"
-            )
+            assert (
+                allow_image_input["start_response"].status_code == 200
+            ), "Image input composition task should start"
+            assert (
+                allow_image_input["terminal_event"].get("event") == "done"
+            ), "Image input composition should succeed"
             allow_image_input_text = allow_image_input["text"]
             self.soft_assert(
                 "failed:" not in allow_image_input_text.lower(),
@@ -369,12 +390,12 @@ class CodeExecutionScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert full_surface["start_response"].status_code == 200, (
-                "Full helper-surface task should start"
-            )
-            assert full_surface["terminal_event"].get("event") == "done", (
-                "Full helper-surface run should succeed"
-            )
+            assert (
+                full_surface["start_response"].status_code == 200
+            ), "Full helper-surface task should start"
+            assert (
+                full_surface["terminal_event"].get("event") == "done"
+            ), "Full helper-surface run should succeed"
             full_surface_text = full_surface["text"]
             self.soft_assert(
                 "failed:" not in full_surface_text.lower(),
@@ -469,7 +490,9 @@ class CodeExecutionScenario(BaseScenario):
                 "Derived file should preserve the written content",
             )
             full_surface_path = vault / "notes" / "full-surface.md"
-            assert full_surface_path.exists(), "Full helper-surface run should write a file"
+            assert (
+                full_surface_path.exists()
+            ), "Full helper-surface run should write a file"
             self.soft_assert(
                 bool(full_surface_path.read_text(encoding="utf-8").strip()),
                 "Full helper-surface run should write non-empty delegated output",

@@ -32,16 +32,18 @@ class _CodeExecutionFailingAgent:
         result = await tool.function(
             ctx,
             code=(
-                'await file_write(\n'
+                "await file_write(\n"
                 '    operation="write",\n'
                 '    path="notes/code-execution-write.md",\n'
                 '    content="created inside code_execution\\n",\n'
-                ')\n'
+                ")\n"
                 '"CODE_EXECUTION_WRITE_OK"\n'
             ),
         )
         if "CODE_EXECUTION_WRITE_OK" not in result:
-            raise RuntimeError(f"code_execution mutation failed before parent failure: {result}")
+            raise RuntimeError(
+                f"code_execution mutation failed before parent failure: {result}"
+            )
         raise RuntimeError("forced parent chat failure after code_execution mutation")
 
     async def run_stream_events(self, *args, **kwargs):

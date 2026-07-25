@@ -43,7 +43,9 @@ class FailureClassification:
         return payload
 
 
-def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> FailureClassification:
+def classify_exception(
+    exc: Exception, *, phase: str = "tool_execution"
+) -> FailureClassification:
     """Classify common network/API/tool exceptions into a stable failure envelope."""
     if isinstance(exc, UsageLimitExceeded):
         return FailureClassification(
@@ -196,7 +198,10 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
                 "Retry with backoff; use another model/provider if capacity pressure continues."
             ),
         )
-    if any(token in lowered for token in ("timeout", "temporarily", "rate limit", "too many requests")):
+    if any(
+        token in lowered
+        for token in ("timeout", "temporarily", "rate limit", "too many requests")
+    ):
         return FailureClassification(
             error_type=type(exc).__name__,
             failure_kind="transient_provider",

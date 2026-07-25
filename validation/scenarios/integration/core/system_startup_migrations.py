@@ -31,7 +31,11 @@ class SystemStartupMigrationsScenario(BaseScenario):
         await self.start_system()
 
         after = get_system_migration_status(system_root)
-        self.soft_assert_equal(after.pending_count, 0, "Startup should apply all system database migrations")
+        self.soft_assert_equal(
+            after.pending_count,
+            0,
+            "Startup should apply all system database migrations",
+        )
 
         with sqlite3.connect(system_root / "chat_sessions.db") as conn:
             self.soft_assert(
@@ -46,8 +50,14 @@ class SystemStartupMigrationsScenario(BaseScenario):
 
         with sqlite3.connect(system_root / "session_summaries.db") as conn:
             summary_columns = self._table_columns(conn, "session_summaries")
-            self.soft_assert("source_summary" in summary_columns, "Startup should migrate summary source text")
-            self.soft_assert("workspace_path" in summary_columns, "Startup should migrate summary workspace paths")
+            self.soft_assert(
+                "source_summary" in summary_columns,
+                "Startup should migrate summary source text",
+            )
+            self.soft_assert(
+                "workspace_path" in summary_columns,
+                "Startup should migrate summary workspace paths",
+            )
             self.soft_assert(
                 self._table_exists(conn, "session_summaries_fts"),
                 "Startup should ensure summary FTS storage",
@@ -60,11 +70,25 @@ class SystemStartupMigrationsScenario(BaseScenario):
 
         with sqlite3.connect(system_root / "goal_ops.db") as conn:
             goal_columns = self._table_columns(conn, "goals")
-            self.soft_assert("source_type" in goal_columns, "Startup should migrate goal source provenance")
-            self.soft_assert("source_id" in goal_columns, "Startup should migrate goal source ids")
-            self.soft_assert("source_task_id" in goal_columns, "Startup should migrate goal source task ids")
-            self.soft_assert("source_label" in goal_columns, "Startup should migrate goal source labels")
-            self.soft_assert("plan_json" in goal_columns, "Startup should migrate goal plan snapshots")
+            self.soft_assert(
+                "source_type" in goal_columns,
+                "Startup should migrate goal source provenance",
+            )
+            self.soft_assert(
+                "source_id" in goal_columns, "Startup should migrate goal source ids"
+            )
+            self.soft_assert(
+                "source_task_id" in goal_columns,
+                "Startup should migrate goal source task ids",
+            )
+            self.soft_assert(
+                "source_label" in goal_columns,
+                "Startup should migrate goal source labels",
+            )
+            self.soft_assert(
+                "plan_json" in goal_columns,
+                "Startup should migrate goal plan snapshots",
+            )
             self.soft_assert_equal(
                 self._migration_versions(conn, "goal_ops"),
                 [1, 2, 3],
@@ -200,4 +224,7 @@ class SystemStartupMigrationsScenario(BaseScenario):
 
     @staticmethod
     def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-        return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        return {
+            str(row[1])
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }

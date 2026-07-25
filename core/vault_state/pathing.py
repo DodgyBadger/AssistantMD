@@ -63,7 +63,9 @@ def resolve_vault_relative_path(
     if path.startswith("/"):
         raise ValueError("Absolute paths not allowed")
     if markdown_only and "." in os.path.basename(path) and not path.endswith(".md"):
-        raise ValueError("Only .md files are allowed. Please use '.md' extension for all files.")
+        raise ValueError(
+            "Only .md files are allowed. Please use '.md' extension for all files."
+        )
 
     vault_root = Path(vault_path).resolve()
     candidate = (vault_root / path).resolve()

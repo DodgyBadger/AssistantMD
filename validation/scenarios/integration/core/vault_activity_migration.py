@@ -25,7 +25,9 @@ class VaultActivityMigrationScenario(BaseScenario):
 
         pending_status = get_system_migration_status(system_root)
         pending_target = next(
-            target for target in pending_status.targets if target.db_name == "vault_state"
+            target
+            for target in pending_status.targets
+            if target.db_name == "vault_state"
         )
         self.soft_assert_equal(
             pending_target.pending_versions,
@@ -45,21 +47,27 @@ class VaultActivityMigrationScenario(BaseScenario):
 
         service = VaultStateService()
         groups = service.list_activities(vault_name=vault.name, include_expired=True)
-        self.soft_assert_equal(len(groups), 1, "Legacy task rows should become one activity")
+        self.soft_assert_equal(
+            len(groups), 1, "Legacy task rows should become one activity"
+        )
         if groups:
             group = groups[0]
-            self.soft_assert_equal(group.task_id, "legacy-task", "Task provenance should be retained")
-            self.soft_assert_equal(group.status, "recorded", "Historical outcome should remain explicit")
-            self.soft_assert_equal(group.mutation_count, 3, "All legacy path rows should be retained")
+            self.soft_assert_equal(
+                group.task_id, "legacy-task", "Task provenance should be retained"
+            )
+            self.soft_assert_equal(
+                group.status, "recorded", "Historical outcome should remain explicit"
+            )
+            self.soft_assert_equal(
+                group.mutation_count, 3, "All legacy path rows should be retained"
+            )
             self.soft_assert_equal(
                 group.operation_count,
                 2,
                 "Reciprocal move rows should count as one logical operation",
             )
             move_operation_ids = {
-                row.operation_id
-                for row in group.mutations
-                if row.operation == "move"
+                row.operation_id for row in group.mutations if row.operation == "move"
             }
             self.soft_assert_equal(
                 len(move_operation_ids),
@@ -89,7 +97,8 @@ class VaultActivityMigrationScenario(BaseScenario):
                 "Service initialization should read the centrally migrated ledger",
             )
             mutation_columns = {
-                str(row[1]) for row in conn.execute("PRAGMA table_info(vault_mutations)")
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(vault_mutations)")
             }
             self.soft_assert(
                 "legacy_task_mutation_id" not in mutation_columns,
@@ -111,7 +120,10 @@ class VaultActivityMigrationScenario(BaseScenario):
                 str(row[1]): int(row[3])
                 for row in conn.execute("PRAGMA table_info(snapshot_sets)")
             }
-            self.soft_assert("activity_id" in snapshot_columns, "Snapshot sets should support activity ownership")
+            self.soft_assert(
+                "activity_id" in snapshot_columns,
+                "Snapshot sets should support activity ownership",
+            )
             self.soft_assert_equal(
                 snapshot_columns.get("task_id"),
                 0,
@@ -134,7 +146,9 @@ class VaultActivityMigrationScenario(BaseScenario):
 
         applied_status = get_system_migration_status(system_root)
         applied_target = next(
-            target for target in applied_status.targets if target.db_name == "vault_state"
+            target
+            for target in applied_status.targets
+            if target.db_name == "vault_state"
         )
         self.soft_assert_equal(
             applied_target.pending_versions,

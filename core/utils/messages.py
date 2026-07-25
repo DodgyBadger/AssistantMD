@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List
-
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -25,8 +23,8 @@ def _model_request_has_user_prompt(message: ModelRequest) -> bool:
     return False
 
 
-def run_slice(msgs: List[ModelMessage], runs_to_take: int) -> List[ModelMessage]:
-    run_ids: List[str] = []
+def run_slice(msgs: list[ModelMessage], runs_to_take: int) -> list[ModelMessage]:
+    run_ids: list[str] = []
     for m in msgs:
         rid = getattr(m, "run_id", None)
         if rid:
@@ -71,9 +69,9 @@ def extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
     parts = getattr(msg, "parts", None)
     if parts:
         has_system_part = False
-        rendered_parts: List[str] = []
+        rendered_parts: list[str] = []
         for part in parts:
-            if isinstance(part, (UserPromptPart, TextPart)):
+            if isinstance(part, UserPromptPart | TextPart):
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
@@ -82,13 +80,21 @@ def extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
-            elif isinstance(part, (ToolReturnPart, NativeToolReturnPart)):
-                tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+            elif isinstance(part, ToolReturnPart | NativeToolReturnPart):
+                tool_name = (
+                    getattr(part, "tool_name", None)
+                    or getattr(part, "tool_call_id", None)
+                    or "tool"
+                )
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(f"[{tool_name}] {part_content}")
             elif isinstance(part, ToolCallPart):
-                tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+                tool_name = (
+                    getattr(part, "tool_name", None)
+                    or getattr(part, "tool_call_id", None)
+                    or "tool"
+                )
                 rendered_parts.append(f"[{tool_name}] (tool call)")
         if rendered_parts:
             if has_system_part and role == "user":

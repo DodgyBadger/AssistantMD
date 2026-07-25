@@ -27,7 +27,10 @@ from pydantic_ai.messages import (
 from core.chat import executor as chat_executor
 from core.chat.deferred_reviews import get_deferred_review
 from core.chat.executor import PreparedChatExecution
-from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER, start_queued_chat_stream_task
+from core.chat.task_execution import (
+    CHAT_TASK_EVENT_BUFFER,
+    start_queued_chat_stream_task,
+)
 from core.constants import INLINE_EDIT_DENIAL_MESSAGE
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
@@ -132,7 +135,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
         await self.start_system()
 
         original_prepare = chat_executor._prepare_chat_execution
-        original_prepare_resume = chat_executor._prepare_deferred_review_resume_execution
+        original_prepare_resume = (
+            chat_executor._prepare_deferred_review_resume_execution
+        )
         resume_capture: dict = {}
 
         async def fake_prepare_chat_execution(
@@ -151,9 +156,17 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             message_history_override=None,
             display_prompt=None,
         ):
-            del vault_path, image_paths, image_uploads, thinking, message_history_override
+            del (
+                vault_path,
+                image_paths,
+                image_uploads,
+                thinking,
+                message_history_override,
+            )
             del display_prompt
-            history = chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            history = (
+                chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            )
             return PreparedChatExecution(
                 agent=_DeferredReviewAgent(),
                 message_history=list(history),
@@ -216,7 +229,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 chat_mode="inline_edit",
             )
             task = await self._wait_for_task_terminal(started.task.task_id)
-            assert task is not None, "Deferred review task should complete current stream"
+            assert (
+                task is not None
+            ), "Deferred review task should complete current stream"
             assert task.status == "completed", "Deferred review task should be terminal"
 
             events = await CHAT_TASK_EVENT_BUFFER.events_after(started.task.task_id)
@@ -229,9 +244,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert (
                 review_event["artifact_kind"] == "deferred_tool_review"
             ), "Review event should identify deferred review artifacts"
-            assert review_event["review_count"] == 2, (
-                "Independent write calls should share one review artifact"
-            )
+            assert (
+                review_event["review_count"] == 2
+            ), "Independent write calls should share one review artifact"
             assert (
                 events[-1].data["choices"][0]["finish_reason"] == "tool_review_required"
             ), "Done event should identify review-required finish reason"
@@ -245,32 +260,33 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert review.status == "pending", "Deferred review should start pending"
             assert review.originating_task_id == started.task.task_id
             assert review.review_count == 2
-            assert len(review.resume_messages) == 2, "Resume history should be persisted"
+            assert (
+                len(review.resume_messages) == 2
+            ), "Resume history should be persisted"
             assert review.resume_config.get("model") == "test"
             assert review.resume_config.get("tools") == []
             assert review.resume_config.get("thinking") == "low"
             assert review.resume_config.get("chat_mode") == "inline_edit"
 
             session_detail = self.call_api(
-                "/api/chat/sessions/deferred-review-session"
-                f"?vault_name={vault.name}"
+                "/api/chat/sessions/deferred-review-session" f"?vault_name={vault.name}"
             )
             assert session_detail.status_code == 200
             session_payload = session_detail.json()
-            assert session_payload.get("chat_mode") == "inline_edit", (
-                "Session detail should preserve the selected chat mode"
-            )
+            assert (
+                session_payload.get("chat_mode") == "inline_edit"
+            ), "Session detail should preserve the selected chat mode"
             assert session_payload.get("pending_review", {}).get("artifact_ref") == (
                 review_event["artifact_ref"]
             ), "Session reload should expose the active pending review"
 
             api_response = self.call_api(
-                (
-                    f"/api/vaults/{vault.name}/chat/deferred-review-session/"
-                    f"deferred-reviews/{review_event['artifact_ref']}"
-                )
+                f"/api/vaults/{vault.name}/chat/deferred-review-session/"
+                f"deferred-reviews/{review_event['artifact_ref']}"
             )
-            assert api_response.status_code == 200, "Deferred review API should return artifact"
+            assert (
+                api_response.status_code == 200
+            ), "Deferred review API should return artifact"
             api_payload = api_response.json()
             assert api_payload.get("artifact_kind") == "deferred_tool_review"
             assert api_payload.get("status") == "pending"
@@ -290,14 +306,17 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 model="test",
                 chat_mode="inline_edit",
             )
-            blocked_task = await self._wait_for_task_terminal(blocked_start.task.task_id)
+            blocked_task = await self._wait_for_task_terminal(
+                blocked_start.task.task_id
+            )
             assert blocked_task is not None and blocked_task.status == "failed"
             blocked_events = await CHAT_TASK_EVENT_BUFFER.events_after(
                 blocked_start.task.task_id
             )
             assert blocked_events[-1].event == "error"
             assert "Review pending" in str(
-                blocked_events[-1].data.get("choices", [{}])[0]
+                blocked_events[-1]
+                .data.get("choices", [{}])[0]
                 .get("delta", {})
                 .get("content", "")
             )
@@ -316,14 +335,16 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                     ],
                 },
             )
-            assert duplicate_response.status_code == 400, (
-                "A tool call must receive exactly one unambiguous review result"
-            )
+            assert (
+                duplicate_response.status_code == 400
+            ), "A tool call must receive exactly one unambiguous review result"
             assert duplicate_response.json().get("details", {}).get(
                 "duplicate_tool_call_ids"
             ) == ["review-call-1"]
 
-            (vault / "Draft.md").write_text("Changed while review was pending\n", encoding="utf-8")
+            (vault / "Draft.md").write_text(
+                "Changed while review was pending\n", encoding="utf-8"
+            )
             stale_target_response = self.call_api(
                 (
                     f"/api/vaults/{vault.name}/chat/deferred-review-session/"
@@ -338,7 +359,10 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 },
             )
             assert stale_target_response.status_code == 409
-            assert stale_target_response.json().get("error") == "DeferredReviewTargetConflict"
+            assert (
+                stale_target_response.json().get("error")
+                == "DeferredReviewTargetConflict"
+            )
             (vault / "Draft.md").write_text("Original draft\n", encoding="utf-8")
 
             submit_response = self.call_api(
@@ -364,7 +388,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                     ],
                 },
             )
-            assert submit_response.status_code == 200, "Submit should start a resume task"
+            assert (
+                submit_response.status_code == 200
+            ), "Submit should start a resume task"
             submit_payload = submit_response.json()
             assert submit_payload.get("status") in {"resuming", "completed"}
             resumed_task_id = submit_payload.get("task", {}).get("task_id")
@@ -377,7 +403,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 "delta",
                 "done",
             ], "Resumed task should stream normal completion events"
-            assert resume_capture["prompt"] is None, "Resume should not send a new prompt"
+            assert (
+                resume_capture["prompt"] is None
+            ), "Resume should not send a new prompt"
             result = resume_capture["deferred_tool_results"]
             assert result is not None, "Resume should receive DeferredToolResults"
             assert resume_capture["prepared_model"] == "test"
@@ -404,12 +432,11 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             assert submitted_review.status == "completed"
             assert submitted_review.resumed_task_id == resumed_task_id
             completed_detail = self.call_api(
-                "/api/chat/sessions/deferred-review-session"
-                f"?vault_name={vault.name}"
+                "/api/chat/sessions/deferred-review-session" f"?vault_name={vault.name}"
             ).json()
-            assert completed_detail.get("pending_review") is None, (
-                "Resolved reviews should not be reconstructed on session reload"
-            )
+            assert (
+                completed_detail.get("pending_review") is None
+            ), "Resolved reviews should not be reconstructed on session reload"
             mode_update = self.call_api(
                 "/api/chat/sessions/deferred-review-session/mode",
                 method="PATCH",
@@ -417,12 +444,15 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             )
             assert mode_update.status_code == 200
             assert mode_update.json().get("chat_mode") == "normal"
-            assert self.call_api(
-                "/api/chat/sessions/deferred-review-session"
-                f"?vault_name={vault.name}"
-            ).json().get("chat_mode") == "normal", (
-                "Explicit session mode changes should persist without sending a prompt"
-            )
+            assert (
+                self.call_api(
+                    "/api/chat/sessions/deferred-review-session"
+                    f"?vault_name={vault.name}"
+                )
+                .json()
+                .get("chat_mode")
+                == "normal"
+            ), "Explicit session mode changes should persist without sending a prompt"
 
             stale_response = self.call_api(
                 (
@@ -439,7 +469,9 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                     ],
                 },
             )
-            assert stale_response.status_code == 409, "Repeated submit should be rejected"
+            assert (
+                stale_response.status_code == 409
+            ), "Repeated submit should be rejected"
 
             denied_start = await start_queued_chat_stream_task(
                 vault_name=vault.name,
@@ -477,31 +509,44 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 ],
             }
             concurrent_responses = await asyncio.gather(
-                asyncio.to_thread(self.call_api, deny_path, method="POST", data=deny_data),
-                asyncio.to_thread(self.call_api, deny_path, method="POST", data=deny_data),
+                asyncio.to_thread(
+                    self.call_api, deny_path, method="POST", data=deny_data
+                ),
+                asyncio.to_thread(
+                    self.call_api, deny_path, method="POST", data=deny_data
+                ),
             )
-            assert sorted(response.status_code for response in concurrent_responses) == [200, 409], (
-                "A pending review must be claimed atomically before any resume task starts"
-            )
+            assert sorted(
+                response.status_code for response in concurrent_responses
+            ) == [
+                200,
+                409,
+            ], "A pending review must be claimed atomically before any resume task starts"
             deny_response = next(
-                response for response in concurrent_responses if response.status_code == 200
+                response
+                for response in concurrent_responses
+                if response.status_code == 200
             )
             denied_resume_task_id = deny_response.json().get("task", {}).get("task_id")
             assert denied_resume_task_id
-            denied_resume_task = await self._wait_for_task_terminal(denied_resume_task_id)
+            denied_resume_task = await self._wait_for_task_terminal(
+                denied_resume_task_id
+            )
             assert denied_resume_task is not None
             denied_result = resume_capture["deferred_tool_results"]
             denial = denied_result.approvals["review-call-1"]
-            assert denial.message == INLINE_EDIT_DENIAL_MESSAGE, (
-                "An empty optional comment must not hide the denial from the resumed model"
-            )
+            assert (
+                denial.message == INLINE_EDIT_DENIAL_MESSAGE
+            ), "An empty optional comment must not hide the denial from the resumed model"
             assert (
                 denied_result.approvals["review-call-2"].message
                 == f"{INLINE_EDIT_DENIAL_MESSAGE} User reason: Do not create either file."
             )
         finally:
             chat_executor._prepare_chat_execution = original_prepare
-            chat_executor._prepare_deferred_review_resume_execution = original_prepare_resume
+            chat_executor._prepare_deferred_review_resume_execution = (
+                original_prepare_resume
+            )
             await self.stop_system()
 
     async def _wait_for_task_terminal(self, task_id: str):

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import tempfile
 import time
-from typing import Mapping
+from collections.abc import Mapping
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from core.web.models import WebFetchResult
@@ -15,7 +15,6 @@ from core.web.security import (
     sanitize_url_for_log,
     sanitize_urls_in_text_for_log,
 )
-
 
 _MAX_REDIRECTS = 5
 

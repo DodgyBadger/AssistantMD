@@ -48,7 +48,9 @@ class VaultStateCleanupScenario(BaseScenario):
         response = self.call_api("/api/vault-state/cleanup", method="POST")
         events = self.events_since(checkpoint)
 
-        self.soft_assert_equal(response.status_code, 200, "Cleanup endpoint should respond")
+        self.soft_assert_equal(
+            response.status_code, 200, "Cleanup endpoint should respond"
+        )
         payload = response.json()
         self.soft_assert_equal(payload.get("success"), True, "Cleanup should succeed")
         self.soft_assert_equal(

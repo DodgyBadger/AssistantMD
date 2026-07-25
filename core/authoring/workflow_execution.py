@@ -46,7 +46,8 @@ def format_workflow_load_errors(loader: Any, global_id: str) -> str:
     matches = [
         error
         for error in loader.get_configuration_errors()
-        if error.vault == vault and (error.workflow_name == name or error.workflow_name is None)
+        if error.vault == vault
+        and (error.workflow_name == name or error.workflow_name is None)
     ]
     if not matches:
         return ""
@@ -79,12 +80,16 @@ async def execute_workflow_by_id(
 ) -> WorkflowExecutionResult:
     """Resolve and execute one workflow by global id."""
     if "/" not in global_id:
-        raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
+        raise ValueError(
+            f"Invalid global_id format. Expected 'vault/name', got: {global_id}"
+        )
 
     runtime = get_runtime_context()
     loader = runtime.workflow_loader
     try:
-        loaded = await loader.load_workflows(force_reload=True, target_global_id=global_id)
+        loaded = await loader.load_workflows(
+            force_reload=True, target_global_id=global_id
+        )
     except Exception as exc:
         if include_load_errors:
             load_errors = format_workflow_load_errors(loader, global_id)
@@ -108,9 +113,11 @@ async def execute_workflow_by_id(
         expect_failure=expect_failure,
     )
     elapsed = perf_counter() - started
-    terminal_status = str(
-        getattr(execution_result, "status", "completed") or "completed"
-    ).strip().lower()
+    terminal_status = (
+        str(getattr(execution_result, "status", "completed") or "completed")
+        .strip()
+        .lower()
+    )
     terminal_reason = str(getattr(execution_result, "reason", "") or "")
     succeeded = terminal_status in {"completed", "skipped"}
 

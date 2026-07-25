@@ -17,7 +17,6 @@ from core.vault_state.models import (
 )
 from core.vault_state.service import VaultStateService
 
-
 logger = UnifiedLogger(tag="vault-state-cleanup")
 
 
@@ -132,7 +131,9 @@ def _is_expired(value: object, now: datetime) -> bool:
     return expires_at <= comparison_now
 
 
-def _delete_snapshot_root(*, snapshot_root: Path, snapshot_base: Path) -> tuple[int, int]:
+def _delete_snapshot_root(
+    *, snapshot_root: Path, snapshot_base: Path
+) -> tuple[int, int]:
     """Delete one snapshot root only when it lives under the managed snapshot base."""
     resolved_root = snapshot_root.resolve()
     try:

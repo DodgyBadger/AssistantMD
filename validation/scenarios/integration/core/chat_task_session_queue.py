@@ -31,7 +31,9 @@ class _FakeStreamResult:
 
 
 class _BlockingStreamAgent:
-    def __init__(self, release: asyncio.Event, *, delta: str, prompt: str, response: str) -> None:
+    def __init__(
+        self, release: asyncio.Event, *, delta: str, prompt: str, response: str
+    ) -> None:
         self._release = release
         self._delta = delta
         self._prompt = prompt
@@ -90,7 +92,9 @@ class ChatTaskSessionQueueScenario(BaseScenario):
             if prompt == "slow preflight prompt":
                 slow_preflight_started.set()
                 await asyncio.Event().wait()
-            history = chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            history = (
+                chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            )
             prepare_history_counts[prompt] = len(history)
             if prompt == "first prompt":
                 agent = _BlockingStreamAgent(
@@ -131,7 +135,9 @@ class ChatTaskSessionQueueScenario(BaseScenario):
                 tools=[],
                 model="test",
             )
-            first_running = await self._wait_for_task_status(first.task.task_id, "running")
+            first_running = await self._wait_for_task_status(
+                first.task.task_id, "running"
+            )
             self.soft_assert_equal(
                 first_running.status if first_running else None,
                 "running",
@@ -148,7 +154,9 @@ class ChatTaskSessionQueueScenario(BaseScenario):
                 tools=[],
                 model="test",
             )
-            second_queued = await self._wait_for_task_status(second.task.task_id, "queued")
+            second_queued = await self._wait_for_task_status(
+                second.task.task_id, "queued"
+            )
             self.soft_assert_equal(
                 second_queued.status if second_queued else None,
                 "queued",
@@ -308,7 +316,9 @@ class ChatTaskSessionQueueScenario(BaseScenario):
     async def _collect_stream_until_terminal(self, task_id: str) -> str:
         async def _collect() -> str:
             chunks = []
-            async for chunk in stream_chat_task_sse(task_id=task_id, keepalive_seconds=0.05):
+            async for chunk in stream_chat_task_sse(
+                task_id=task_id, keepalive_seconds=0.05
+            ):
                 chunks.append(chunk)
             return "".join(chunks)
 

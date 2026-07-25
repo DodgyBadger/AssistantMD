@@ -135,7 +135,10 @@ def _contains_item_id(items: list[dict[str, object]]) -> bool:
 
 
 def _contains_call_id(items: list[dict[str, object]], call_id: str) -> bool:
-    return any(item.get("type") == "function_call" and item.get("call_id") == call_id for item in items)
+    return any(
+        item.get("type") == "function_call" and item.get("call_id") == call_id
+        for item in items
+    )
 
 
 def _contains_output_for_call(items: list[dict[str, object]], call_id: str) -> bool:

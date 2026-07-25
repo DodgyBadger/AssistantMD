@@ -4,10 +4,9 @@ Render extracted chunks to markdown artifacts.
 
 import base64
 import binascii
-import re
-from typing import List
-from datetime import datetime
 import os
+import re
+from datetime import datetime
 from pathlib import Path
 
 from core.ingestion.models import ExtractedDocument, RenderOptions
@@ -15,7 +14,7 @@ from core.ingestion.output_paths import resolve_import_output_paths
 from core.runtime.paths import get_data_root
 
 
-def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> List[dict]:
+def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dict]:
     """
     Render a single markdown artifact for the extracted document.
     """
@@ -37,7 +36,9 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> List[dic
                 vault_root = (data_root / options.vault).resolve()
                 if str(source_path).startswith(str(vault_root)):
                     display_source_path = str(source_path.relative_to(vault_root))
-            if display_source_path is None and str(source_path).startswith(str(data_root)):
+            if display_source_path is None and str(source_path).startswith(
+                str(data_root)
+            ):
                 display_source_path = str(source_path.relative_to(data_root))
         except Exception:
             display_source_path = options.source_filename
@@ -118,7 +119,9 @@ def _render_ocr_image_artifacts(
             continue
 
         page_number = _as_positive_int(item.get("page_number"), fallback=1)
-        image_index = _as_positive_int(item.get("image_index"), fallback=image_count + 1)
+        image_index = _as_positive_int(
+            item.get("image_index"), fallback=image_count + 1
+        )
         media_type = str(item.get("media_type") or "image/png").lower()
         ext = _extension_for_media_type(media_type)
         source_name = item.get("source_name")
@@ -215,7 +218,9 @@ def _rewrite_ocr_image_links(markdown: str, link_map: dict[str, str]) -> str:
         destination = match.group(2)
         suffix = match.group(3) or ""
         normalized_destination = destination.strip()
-        replacement = link_map.get(normalized_destination) or link_map.get(os.path.basename(normalized_destination))
+        replacement = link_map.get(normalized_destination) or link_map.get(
+            os.path.basename(normalized_destination)
+        )
         if not replacement:
             return match.group(0)
         return f"![{alt_text}]({replacement}{suffix})"

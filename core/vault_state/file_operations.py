@@ -6,11 +6,11 @@ write/delete/move recording still belongs to ``core.vault_state.file_mutations``
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import glob
 import os
-from pathlib import Path
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -30,8 +30,8 @@ from core.settings import (
     get_file_list_max_results,
     get_file_search_timeout_seconds,
 )
-from core.utils.image_inputs import build_image_tool_payload
 from core.utils.hash import hash_file_bytes, hash_file_content
+from core.utils.image_inputs import build_image_tool_payload
 from core.vault_state.file_mutations import (
     DirectoryCleanupResult,
     DirectoryMoveResult,
@@ -48,7 +48,10 @@ from core.vault_state.file_mutations import (
     vault_file_mutation_lock,
     write_vault_file,
 )
-from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
+from core.vault_state.pathing import (
+    normalize_vault_relative_path,
+    resolve_vault_relative_path,
+)
 
 
 class VaultFileOperationRejected(Exception):
@@ -163,7 +166,9 @@ def read_vault_file_operation(
 ) -> VaultFileOperationResult:
     """Read a vault text or image file, optionally returning a text line slice."""
     if _virtual_mount_key(path):
-        return _read_virtual_file_operation(path=path, start_line=start_line, line_count=line_count)
+        return _read_virtual_file_operation(
+            path=path, start_line=start_line, line_count=line_count
+        )
     target = resolve_text_target(
         vault_path=vault_path,
         path=path,
@@ -223,21 +228,24 @@ def frontmatter_vault_files_operation(
     items: list[dict[str, Any]] = []
     for match in sorted(glob.glob(str(vault_root / pattern_path), recursive=False)):
         full_path = Path(match).resolve()
-        if full_path.suffix.lower() not in {".md", ".markdown"} or not full_path.is_file():
+        if (
+            full_path.suffix.lower() not in {".md", ".markdown"}
+            or not full_path.is_file()
+        ):
             continue
         _ensure_within_root(vault_root, full_path)
         relative_path = _relative_to_root(vault_root, full_path)
         if any(part.startswith(".") for part in Path(relative_path).parts):
             continue
         try:
-            frontmatter = _parse_markdown_frontmatter(full_path.read_text(encoding="utf-8"))
+            frontmatter = _parse_markdown_frontmatter(
+                full_path.read_text(encoding="utf-8")
+            )
         except (OSError, UnicodeError, yaml.YAMLError):
             frontmatter = {}
         if filter_keys:
             frontmatter = {
-                key: frontmatter[key]
-                for key in filter_keys
-                if key in frontmatter
+                key: frontmatter[key] for key in filter_keys if key in frontmatter
             }
         items.append({"path": relative_path, "frontmatter": frontmatter})
 
@@ -247,8 +255,7 @@ def frontmatter_vault_files_operation(
         lines = []
         for item in items:
             values = ", ".join(
-                f"{key}: {value}"
-                for key, value in item["frontmatter"].items()
+                f"{key}: {value}" for key, value in item["frontmatter"].items()
             )
             lines.append(f"  {item['path']}: {{{values}}}")
         message = f"Frontmatter ({len(items)} files):\n" + "\n".join(lines)
@@ -273,7 +280,9 @@ def list_vault_paths_operation(
         return _list_virtual_paths_operation(
             path=path,
             recursive=recursive,
-            max_results=_default_list_max_results() if max_results is None else max_results,
+            max_results=(
+                _default_list_max_results() if max_results is None else max_results
+            ),
         )
     vault_root = Path(vault_path).resolve()
     max_count = _default_list_max_results() if max_results is None else max_results
@@ -327,7 +336,9 @@ def list_vault_paths_operation(
                 + "\n".join(f"  {file_path}" for file_path in files)
             )
         if truncated:
-            parts.append(f"... truncated to {max_count} results. Narrow your path or disable recursion.")
+            parts.append(
+                f"... truncated to {max_count} results. Narrow your path or disable recursion."
+            )
         message = "\n\n".join(parts)
 
     return _operation_result(
@@ -373,7 +384,9 @@ def search_vault_files_operation(
         mount_key = _virtual_mount_key(search_path)
         if mount_key:
             result_root = _virtual_mount_root(mount_key)
-            relative_scope = search_path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+            relative_scope = (
+                search_path.strip().lstrip("./")[len(mount_key) :].lstrip("/")
+            )
             if ".." in relative_scope.split("/"):
                 return _operation_result(
                     "Path cannot contain '..' for virtual mounts.",
@@ -459,7 +472,9 @@ def search_vault_files_operation(
             error_type="search_failed",
         )
 
-    matches = _format_rg_matches(completed.stdout, result_root, result_prefix=result_prefix)
+    matches = _format_rg_matches(
+        completed.stdout, result_root, result_prefix=result_prefix
+    )
     if not matches:
         return _operation_result(
             f"No matches found for '{query}' in text files",
@@ -488,7 +503,9 @@ def write_vault_file_operation(
 ) -> VaultFileOperationResult:
     """Create a markdown file, or replace full content when overwrite is true."""
     if overwrite:
-        return overwrite_vault_file_operation(vault_path=vault_path, path=path, content=content)
+        return overwrite_vault_file_operation(
+            vault_path=vault_path, path=path, content=content
+        )
     try:
         mutation = write_vault_file(
             vault_path=vault_path,
@@ -741,9 +758,8 @@ def _edit_vault_line_locked(
 
     line_ending = "\r\n" if original_line.endswith("\r\n") else "\n"
     if "\n" in new_text:
-        lines[line_number - 1:line_number] = [
-            line + line_ending
-            for line in new_text.split("\n")
+        lines[line_number - 1 : line_number] = [
+            line + line_ending for line in new_text.split("\n")
         ]
     else:
         lines[line_number - 1] = new_text + line_ending
@@ -886,7 +902,9 @@ def delete_vault_path_operation(
             metadata=target.requested_path_metadata,
         )
     if target.full_path.is_dir():
-        return _delete_empty_directory_operation(vault_path=vault_path, path=target.path)
+        return _delete_empty_directory_operation(
+            vault_path=vault_path, path=target.path
+        )
     try:
         mutation = delete_vault_file(vault_path=vault_path, path=target.path)
     except VaultMutationRejected as exc:
@@ -981,7 +999,9 @@ def resolve_text_target(
     )
 
 
-def resolve_markdown_text_target(*, vault_path: str | Path, path: str) -> VaultTextTarget:
+def resolve_markdown_text_target(
+    *, vault_path: str | Path, path: str
+) -> VaultTextTarget:
     """Resolve a markdown text mutation target with extensionless .md preference."""
     return resolve_text_target(
         vault_path=vault_path,
@@ -1043,9 +1063,15 @@ def _replace_text_locked(
         raise VaultFileOperationRejected(
             "invalid_count",
             f"Invalid count {count} - must be >= 1",
-            details={"count": count, "path": target.path, **target.requested_path_metadata},
+            details={
+                "count": count,
+                "path": target.path,
+                **target.requested_path_metadata,
+            },
         )
-    _check_expected_sha256(target=target, current=current, expected_sha256=expected_sha256)
+    _check_expected_sha256(
+        target=target, current=current, expected_sha256=expected_sha256
+    )
 
     match_count = current.count(old_text)
     if match_count == 0:
@@ -1152,7 +1178,9 @@ def prepare_text_replacements_once(
         markdown_only=markdown_only,
     )
     current = _read_existing_text_file(target)
-    _check_expected_sha256(target=target, current=current, expected_sha256=expected_sha256)
+    _check_expected_sha256(
+        target=target, current=current, expected_sha256=expected_sha256
+    )
 
     updated = current
     for replacement in replacements:
@@ -1226,7 +1254,9 @@ def replace_full_text_content(
         markdown_only=markdown_only,
     )
     current = _read_existing_text_file(target)
-    _check_expected_sha256(target=target, current=current, expected_sha256=expected_sha256)
+    _check_expected_sha256(
+        target=target, current=current, expected_sha256=expected_sha256
+    )
     mutation = replace_vault_file_content(
         vault_path=vault_path,
         path=target.path,
@@ -1386,7 +1416,11 @@ def _read_existing_vault_file_operation(
         )
 
     extension = target.full_path.suffix.lower()
-    if start_line <= 0 and line_count <= 0 and SUPPORTED_READ_FILE_TYPES.get(extension) == "image":
+    if (
+        start_line <= 0
+        and line_count <= 0
+        and SUPPORTED_READ_FILE_TYPES.get(extension) == "image"
+    ):
         binary_content = BinaryContent.from_path(target.full_path)
         image_size_bytes = len(binary_content.data)
         if get_chunking_max_image_bytes_per_image() > 0 and (
@@ -1469,7 +1503,7 @@ def _slice_text_read_result(
     lines = content.splitlines()
     start = max(start_line, 1) if start_line else 1
     count = line_count if line_count > 0 else max(len(lines) - start + 1, 0)
-    selected = lines[start - 1:start - 1 + count]
+    selected = lines[start - 1 : start - 1 + count]
     media_mode = (
         "markdown"
         if SUPPORTED_READ_FILE_TYPES.get(target.full_path.suffix.lower()) == "markdown"
@@ -1593,7 +1627,11 @@ def _parse_markdown_frontmatter(content: str) -> dict[str, Any]:
     if not lines or lines[0].strip() != "---":
         return {}
     closing_index = next(
-        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.strip() == "---"
+        ),
         None,
     )
     if closing_index is None:
@@ -1717,7 +1755,9 @@ def _operation_result(
         payload["error_type"] = error_type
     if metadata:
         payload.update(metadata)
-    return VaultFileOperationResult(return_value=return_value, content=content, metadata=payload)
+    return VaultFileOperationResult(
+        return_value=return_value, content=content, metadata=payload
+    )
 
 
 def _default_list_max_results() -> int:
@@ -1818,8 +1858,7 @@ def _directory_cleanup_result(
     if skipped:
         message = (
             f"Removed {len(removed)} empty directories under '{path}'. "
-            f"Skipped {len(skipped)} non-empty directories: "
-            + ", ".join(skipped)
+            f"Skipped {len(skipped)} non-empty directories: " + ", ".join(skipped)
         )
         status = "partial"
     elif removed:
@@ -1922,7 +1961,10 @@ def _empty_directory_candidates(
     ]
     selected: list[str] = []
     for candidate in sorted(empty_paths, key=lambda item: (item.count("/"), item)):
-        if any(candidate == parent or candidate.startswith(f"{parent}/") for parent in selected):
+        if any(
+            candidate == parent or candidate.startswith(f"{parent}/")
+            for parent in selected
+        ):
             continue
         selected.append(candidate)
     return sorted(selected)
@@ -1946,7 +1988,7 @@ def _read_virtual_file_operation(
 ) -> VaultFileOperationResult:
     mount_key = _virtual_mount_key(path) or ""
     root = _virtual_mount_root(mount_key)
-    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+    rel = path.strip().lstrip("./")[len(mount_key) :].lstrip("/")
     if not rel:
         return _operation_result(
             f"Cannot read '{path}' - this is a directory, not a file.",
@@ -2000,7 +2042,7 @@ def _read_virtual_file_operation(
     if start_line > 0 or line_count > 0:
         start = max(start_line, 1) if start_line else 1
         count = line_count if line_count > 0 else len(lines) - start + 1
-        selected = lines[start - 1:start - 1 + count]
+        selected = lines[start - 1 : start - 1 + count]
         return_value = "\n".join(selected)
         metadata.update(
             {
@@ -2028,7 +2070,7 @@ def _list_virtual_paths_operation(
 ) -> VaultFileOperationResult:
     mount_key = _virtual_mount_key(path) or ""
     root = _virtual_mount_root(mount_key)
-    rel = path.strip().lstrip("./")[len(mount_key):].lstrip("/")
+    rel = path.strip().lstrip("./")[len(mount_key) :].lstrip("/")
     if ".." in rel.split("/"):
         raise VaultFileOperationRejected(
             "invalid_path",
@@ -2067,7 +2109,9 @@ def _list_virtual_paths_operation(
                 + "\n".join(f"  {file_path}" for file_path in prefixed_files)
             )
         if truncated:
-            parts.append(f"... truncated to {max_results} results. Narrow your path or disable recursion.")
+            parts.append(
+                f"... truncated to {max_results} results. Narrow your path or disable recursion."
+            )
         message = "\n\n".join(parts)
     return _operation_result(
         message,
@@ -2111,7 +2155,9 @@ def _resolve_search_roots(root: Path, scope: str) -> list[Path]:
     return sorted(dict.fromkeys(matches))
 
 
-def _format_rg_matches(output: str, vault_root: Path, *, result_prefix: str = "") -> list[str]:
+def _format_rg_matches(
+    output: str, vault_root: Path, *, result_prefix: str = ""
+) -> list[str]:
     matches: list[str] = []
     for line in output.splitlines():
         parts = line.split(":", 2)

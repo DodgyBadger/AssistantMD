@@ -12,7 +12,6 @@ from uuid import uuid4
 from core.database import connect_sqlite_from_system_db
 from core.workflow_runs.schema import DB_NAME, ensure_workflow_run_schema
 
-
 ACTIVE_WORKFLOW_RUN_STATUSES = {"queued", "running"}
 TERMINAL_WORKFLOW_RUN_STATUSES = {
     "completed",
@@ -169,7 +168,9 @@ class WorkflowRunStore:
             if cursor.rowcount == 0:
                 existing = self._require_run(conn, clean_run_id)
                 if existing.status not in TERMINAL_WORKFLOW_RUN_STATUSES:
-                    raise RuntimeError(f"Workflow run could not be finalized: {clean_run_id}")
+                    raise RuntimeError(
+                        f"Workflow run could not be finalized: {clean_run_id}"
+                    )
                 return existing
             self._prune_in_conn(conn, now=completed_at)
             conn.commit()
@@ -253,7 +254,9 @@ class WorkflowRunStore:
             ).fetchone()
             return _record_from_row(row) if row is not None else None
 
-    def list_runs(self, workflow_id: str, *, limit: int = 50) -> list[WorkflowRunRecord]:
+    def list_runs(
+        self, workflow_id: str, *, limit: int = 50
+    ) -> list[WorkflowRunRecord]:
         """Return recent attempts for one workflow in reverse chronology."""
         clean_limit = max(1, min(int(limit), 500))
         with self._connect() as conn:
@@ -320,7 +323,9 @@ class WorkflowRunStore:
 
     @staticmethod
     def _prune_in_conn(conn: sqlite3.Connection, *, now: datetime | None) -> None:
-        cutoff = (now or datetime.now(UTC)) - timedelta(days=WORKFLOW_RUN_RETENTION_DAYS)
+        cutoff = (now or datetime.now(UTC)) - timedelta(
+            days=WORKFLOW_RUN_RETENTION_DAYS
+        )
         conn.execute(
             """
             DELETE FROM workflow_runs
@@ -354,7 +359,9 @@ class WorkflowRunStore:
 
 def _record_from_row(row: sqlite3.Row) -> WorkflowRunRecord:
     failure = json.loads(row["failure_json"]) if row["failure_json"] else None
-    outputs = tuple(str(value) for value in json.loads(row["output_files_json"] or "[]"))
+    outputs = tuple(
+        str(value) for value in json.loads(row["output_files_json"] or "[]")
+    )
     return WorkflowRunRecord(
         run_id=str(row["run_id"]),
         workflow_id=str(row["workflow_id"]),
@@ -409,14 +416,18 @@ def _bounded_json(value: dict[str, Any] | None, max_length: int) -> str | None:
 
 
 def _output_files(values: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
-    return tuple(str(value)[:MAX_TEXT_LENGTH] for value in (values or ())[:MAX_OUTPUT_FILES])
+    return tuple(
+        str(value)[:MAX_TEXT_LENGTH] for value in (values or ())[:MAX_OUTPUT_FILES]
+    )
 
 
 def _terminal_status(value: str) -> str:
     clean = _required_text(value, "status").lower()
     if clean not in TERMINAL_WORKFLOW_RUN_STATUSES:
         allowed = ", ".join(sorted(TERMINAL_WORKFLOW_RUN_STATUSES))
-        raise ValueError(f"Unsupported workflow run terminal status '{clean}'. Expected: {allowed}")
+        raise ValueError(
+            f"Unsupported workflow run terminal status '{clean}'. Expected: {allowed}"
+        )
     return clean
 
 

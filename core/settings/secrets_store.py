@@ -10,15 +10,13 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
-from collections import OrderedDict
 
 import yaml
 
 from core.runtime.paths import get_system_root
-
 
 SECRETS_PATH_ENV = "SECRETS_PATH"
 SECRETS_TEMPLATE = Path(__file__).parent / "secrets.template.yaml"
@@ -68,7 +66,7 @@ def _ensure_file(path: Path) -> None:
             path.write_text("", encoding="utf-8")
 
 
-def _read_raw(path: Path, include_empty: bool = False) -> "OrderedDict[str, Optional[str]]":
+def _read_raw(path: Path, include_empty: bool = False) -> OrderedDict[str, str | None]:
     """Read raw secrets mapping from disk."""
     _ensure_file(path)
     raw_text = path.read_text(encoding="utf-8")
@@ -79,7 +77,7 @@ def _read_raw(path: Path, include_empty: bool = False) -> "OrderedDict[str, Opti
     if not isinstance(data, dict):
         raise ValueError("Secrets file must contain a mapping of key/value pairs.")
 
-    normalized: "OrderedDict[str, Optional[str]]" = OrderedDict()
+    normalized: OrderedDict[str, str | None] = OrderedDict()
     for key, value in data.items():
         if not isinstance(key, str):
             raise ValueError("Secret names must be strings.")
@@ -93,7 +91,7 @@ def _read_raw(path: Path, include_empty: bool = False) -> "OrderedDict[str, Opti
     return normalized
 
 
-def _write_raw(path: Path, data: Dict[str, Optional[str]]) -> None:
+def _write_raw(path: Path, data: dict[str, str | None]) -> None:
     """Persist secrets mapping to disk using an atomic write."""
     _ensure_file(path)
     tmp_path = path.with_suffix(".tmp")
@@ -113,7 +111,7 @@ def _write_raw(path: Path, data: Dict[str, Optional[str]]) -> None:
     os.replace(tmp_path, path)
 
 
-def load_secrets(include_empty: bool = False) -> Dict[str, str]:
+def load_secrets(include_empty: bool = False) -> dict[str, str]:
     """
     Load all secrets from disk.
 
@@ -130,17 +128,17 @@ def load_secrets(include_empty: bool = False) -> Dict[str, str]:
     return {name: value for name, value in data.items() if value}
 
 
-def list_secret_entries() -> List[SecretEntry]:
+def list_secret_entries() -> list[SecretEntry]:
     """Return metadata for all stored secrets."""
     path = _resolve_secrets_path()
     data = _read_raw(path, include_empty=True)
-    entries: List[SecretEntry] = []
+    entries: list[SecretEntry] = []
     for name, value in data.items():
         entries.append(SecretEntry(name=name, has_value=bool(value), is_overlay=True))
     return entries
 
 
-def get_secret_value(name: str) -> Optional[str]:
+def get_secret_value(name: str) -> str | None:
     """Return the stored value for a secret, if set."""
     if not name:
         return None
@@ -154,7 +152,7 @@ def get_secret_value(name: str) -> Optional[str]:
     return stripped or None
 
 
-def set_secret_value(name: str, value: Optional[str]) -> None:
+def set_secret_value(name: str, value: str | None) -> None:
     """Create or update a secret value."""
     if not name:
         raise ValueError("Secret name cannot be empty.")

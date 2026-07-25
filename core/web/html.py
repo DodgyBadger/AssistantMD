@@ -9,7 +9,6 @@ from markdownify import markdownify
 
 from core.web.errors import WebExtractionError
 
-
 _SCRIPT_STYLE_RE = re.compile(
     r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
 )

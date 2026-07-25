@@ -21,7 +21,6 @@ from core.memory.session_summary import SessionSummaryStore
 from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
-
 MODEL_ALIAS = "gpt-mini"
 INPUT_PATH = Path("/app/tmp/ashley_ncc_chat_sessions.json")
 FIELD_SIMILARITY_FIELDS = ("domain", "work_product", "user_intent", "summary")
@@ -34,7 +33,12 @@ COMPOUND_POLICIES = {
             "Prefer category overlap, then intent support. Treat compound scores "
             ">= 0.7 as automatic recommendations and 0.55-0.7 as possible related work."
         ),
-        "weights": {"domain": 0.45, "work_product": 0.35, "user_intent": 0.20, "summary": 0.0},
+        "weights": {
+            "domain": 0.45,
+            "work_product": 0.35,
+            "user_intent": 0.20,
+            "summary": 0.0,
+        },
         "field_min_score": 0.40,
         "min_fields": 1,
         "automatic_threshold": 0.70,
@@ -46,7 +50,12 @@ COMPOUND_POLICIES = {
             "Require high domain similarity plus high work-product or user-intent "
             "similarity before showing a candidate."
         ),
-        "weights": {"domain": 0.45, "work_product": 0.35, "user_intent": 0.20, "summary": 0.0},
+        "weights": {
+            "domain": 0.45,
+            "work_product": 0.35,
+            "user_intent": 0.20,
+            "summary": 0.0,
+        },
         "field_min_score": 0.40,
         "min_fields": 2,
         "automatic_threshold": 0.60,
@@ -96,7 +105,9 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
     async def test_scenario(self):
         controller = self._get_system_controller()
         data = json.loads(INPUT_PATH.read_text(encoding="utf-8"))
-        sessions_by_id = {session["session_id"]: session for session in data["sessions"]}
+        sessions_by_id = {
+            session["session_id"]: session for session in data["sessions"]
+        }
         selected_sessions = [sessions_by_id[session_id] for session_id in SESSION_IDS]
         store = SessionSummaryStore(system_root=str(controller._system_root))
         vector_service = VectorService()
@@ -116,11 +127,15 @@ class AshleyNccTwoStepExtractionProbeScenario(BaseScenario):
                 f"{index}/{len(selected_sessions)}: {session['session_id']} "
                 f"({session['message_count']} messages)"
             )
-            first_pass = await generate_response(summary_agent, _build_first_pass_prompt(session))
+            first_pass = await generate_response(
+                summary_agent, _build_first_pass_prompt(session)
+            )
             summary_intent = first_pass.model_dump()
             second_pass = await generate_response(
                 classification_agent,
-                _build_second_pass_prompt(session=session, summary_intent=summary_intent),
+                _build_second_pass_prompt(
+                    session=session, summary_intent=summary_intent
+                ),
             )
             classification = second_pass.model_dump()
             extraction = {
@@ -440,7 +455,10 @@ async def _run_compound_similarity_probes(
                     for candidate in candidates.values()
                     if _candidate_passes_policy(candidate=candidate, policy=policy)
                 ),
-                key=lambda candidate: (candidate["score"], candidate["matched_field_count"]),
+                key=lambda candidate: (
+                    candidate["score"],
+                    candidate["matched_field_count"],
+                ),
                 reverse=True,
             )[:COMPOUND_SIMILARITY_LIMIT]
             for candidate in ranked_matches:
@@ -554,7 +572,9 @@ def _write_compound_similarity_reports(
             encoding="utf-8",
         )
         automatic_count = sum(
-            1 for match in probe["matches"] if match["band"] == "automatic recommendation"
+            1
+            for match in probe["matches"]
+            if match["band"] == "automatic recommendation"
         )
         possible_count = sum(
             1 for match in probe["matches"] if match["band"] == "possible related work"
@@ -611,7 +631,9 @@ def _render_field_similarity_report(probe: dict) -> str:
             f"{_cell(session_summary.get('user_intent'))} |"
         )
     if not probe["matches"]:
-        lines.append("|  |  |  |  | No other session summaries above threshold |  |  |  |")
+        lines.append(
+            "|  |  |  |  | No other session summaries above threshold |  |  |  |"
+        )
     return "\n".join(lines)
 
 

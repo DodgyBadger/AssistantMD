@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any, Dict
+from typing import Any
 
 import requests
 
@@ -24,7 +24,7 @@ def _setting_bool(settings: Any, key: str, default: bool) -> bool:
             return True
         if normalized in {"0", "false", "no", "off"}:
             return False
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return default
 
@@ -47,7 +47,9 @@ def _extract_base64_and_media(value: Any) -> tuple[str | None, str | None]:
     return raw, None
 
 
-def _collect_page_images(page: dict[str, Any], page_number: int) -> list[dict[str, Any]]:
+def _collect_page_images(
+    page: dict[str, Any], page_number: int
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     image_index = 1
 
@@ -56,7 +58,9 @@ def _collect_page_images(page: dict[str, Any], page_number: int) -> list[dict[st
         for image in raw_images:
             if isinstance(image, dict):
                 base64_value, inferred_media = _extract_base64_and_media(
-                    image.get("image_base64") or image.get("base64") or image.get("data")
+                    image.get("image_base64")
+                    or image.get("base64")
+                    or image.get("data")
                 )
                 source_name = (
                     image.get("name")
@@ -88,7 +92,9 @@ def _collect_page_images(page: dict[str, Any], page_number: int) -> list[dict[st
             )
             image_index += 1
 
-    single_base64_value, single_media = _extract_base64_and_media(page.get("image_base64"))
+    single_base64_value, single_media = _extract_base64_and_media(
+        page.get("image_base64")
+    )
     if single_base64_value:
         items.append(
             {
@@ -109,7 +115,7 @@ def get_mistral_ocr_config(
     endpoint_fallback_setting_keys: list[str] | None = None,
     default_model: str = "mistral-ocr-latest",
     default_endpoint: str = "https://api.mistral.ai/v1/ocr",
-) -> Dict[str, str]:
+) -> dict[str, str]:
     settings = get_general_settings()
     try:
         model = str(settings.get(model_setting_key).value)
@@ -168,8 +174,14 @@ def extract_with_mistral_ocr(
         else _setting_bool(settings, "ingestion_ocr_capture_images", False)
     )
 
-    payload_bytes = raw.payload if isinstance(raw.payload, (bytes, bytearray)) else raw.payload.encode("utf-8")
-    data_url = f"data:{data_url_mime};base64,{base64.b64encode(payload_bytes).decode('utf-8')}"
+    payload_bytes = (
+        raw.payload
+        if isinstance(raw.payload, bytes | bytearray)
+        else raw.payload.encode("utf-8")
+    )
+    data_url = (
+        f"data:{data_url_mime};base64,{base64.b64encode(payload_bytes).decode('utf-8')}"
+    )
 
     request_payload = {
         "model": model,
@@ -184,12 +196,14 @@ def extract_with_mistral_ocr(
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(endpoint, headers=headers, data=json.dumps(request_payload), timeout=60)
+    resp = requests.post(
+        endpoint, headers=headers, data=json.dumps(request_payload), timeout=60
+    )
     if resp.status_code >= 400:
         raise RuntimeError(f"OCR request failed ({resp.status_code}): {resp.text}")
 
     try:
-        body: Dict[str, Any] = resp.json()
+        body: dict[str, Any] = resp.json()
     except ValueError as exc:
         raise RuntimeError("OCR response was not valid JSON") from exc
 

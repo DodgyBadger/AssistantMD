@@ -30,7 +30,9 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
 
         await self.start_system()
 
-        from core.authoring.context_manager import build_context_manager_history_processor
+        from core.authoring.context_manager import (
+            build_context_manager_history_processor,
+        )
 
         session_id = "context_tool_passthrough_session"
         processor = build_context_manager_history_processor(
@@ -42,7 +44,9 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
         )
 
         original_messages = [
-            ModelRequest(parts=[UserPromptPart(content="Review these images.")], run_id="run-1"),
+            ModelRequest(
+                parts=[UserPromptPart(content="Review these images.")], run_id="run-1"
+            ),
             ModelResponse(
                 parts=[
                     ToolCallPart(

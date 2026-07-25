@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 
 from core.settings import get_default_api_timeout
+from core.web.errors import WebStrategyConfigurationError
 from core.web.fetchers import fetch_url_with_curl
 from core.web.html import extract_html_title, html_to_markdown
-from core.web.errors import WebStrategyConfigurationError
 from core.web.models import (
     WebExtractionItem,
     WebExtractionResult,

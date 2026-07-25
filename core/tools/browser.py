@@ -31,8 +31,6 @@ from core.settings import (
     get_browser_selector_timeout_seconds,
     get_default_api_timeout,
 )
-from .base import BaseTool
-from .failures import classify_exception, tool_failure_return
 from core.web.errors import WebUrlPolicyError
 from core.web.security import (
     resolve_public_url,
@@ -40,6 +38,8 @@ from core.web.security import (
     sanitize_urls_in_text_for_log,
 )
 
+from .base import BaseTool
+from .failures import classify_exception, tool_failure_return
 
 logger = UnifiedLogger(tag="browser-tool")
 

@@ -4,13 +4,10 @@ Basic URL importer for web-based sources.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from core.ingestion.models import RawDocument, SourceKind
 from core.ingestion.registry import importer_registry
-from core.web.html import extract_html_title
 from core.web.fetchers import fetch_url_with_curl
-
+from core.web.html import extract_html_title
 
 _DEFAULT_READ_TIMEOUT = 10
 _DEFAULT_CONNECT_TIMEOUT = 10
@@ -22,9 +19,9 @@ _DEFAULT_HEADERS: dict[str, str] = {}
 def load_url(
     source_uri: str,
     *,
-    timeout: Optional[int] = None,
-    connect_timeout: Optional[int] = None,
-    strategy: Optional[str] = None,
+    timeout: int | None = None,
+    connect_timeout: int | None = None,
+    strategy: str | None = None,
     max_bytes: int = _MAX_BYTES,
 ) -> RawDocument:
     """

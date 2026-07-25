@@ -62,12 +62,19 @@ class CacheManualPurgeScenario(BaseScenario):
                 week_start_day=0,
                 system_root=system_root,
             )
-            self.soft_assert(before_active is not None, "Expected active cache artifact before purge")
+            self.soft_assert(
+                before_active is not None, "Expected active cache artifact before purge"
+            )
 
             response = self.call_api("/api/system/cache/purge-expired", method="POST")
-            assert response.status_code == 200, "Manual cache purge endpoint should succeed"
+            assert (
+                response.status_code == 200
+            ), "Manual cache purge endpoint should succeed"
             payload = response.json()
-            self.soft_assert(payload.get("success") is True, "Manual cache purge should report success")
+            self.soft_assert(
+                payload.get("success") is True,
+                "Manual cache purge should report success",
+            )
             self.soft_assert_equal(
                 payload.get("purged_count"),
                 1,
@@ -91,8 +98,14 @@ class CacheManualPurgeScenario(BaseScenario):
                 system_root=system_root,
             )
 
-            self.soft_assert(expired_after is None, "Expired cache artifact should be removed by manual purge")
-            self.soft_assert(active_after is not None, "Unexpired cache artifact should remain after manual purge")
+            self.soft_assert(
+                expired_after is None,
+                "Expired cache artifact should be removed by manual purge",
+            )
+            self.soft_assert(
+                active_after is not None,
+                "Unexpired cache artifact should remain after manual purge",
+            )
         finally:
             await self.stop_system()
             self.teardown_scenario()

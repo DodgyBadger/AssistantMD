@@ -11,7 +11,6 @@ from core.logger import UnifiedLogger
 from core.tools.failures import classify_exception, tool_failure_return
 from core.web.security import sanitize_url_for_log, sanitize_urls_in_text_for_log
 
-
 logger = UnifiedLogger(tag="web-capabilities")
 validation_logger = UnifiedLogger(
     tag="web-capabilities-validation",

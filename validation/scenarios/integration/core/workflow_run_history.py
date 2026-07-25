@@ -16,11 +16,11 @@ import core.runtime.workflow_governor as governor_module
 import core.scheduling.job_history as job_history_module
 from api.services import _project_latest_workflow_runs, collect_scheduler_status
 from core.authoring.workflow_execution import WorkflowExecutionResult
+from core.runtime import state as runtime_state
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
-from core.runtime import state as runtime_state
 from core.workflow_runs import WorkflowRunStore
 from validation.core.base_scenario import BaseScenario
 
@@ -119,8 +119,12 @@ class WorkflowRunHistoryScenario(BaseScenario):
                 retval=None,
             )
             scheduler = _FakeScheduler("Workflow: HistoryVault/nightly_cleanup")
-            job_history_module.record_scheduler_job_event(missed_event, scheduler=scheduler)
-            job_history_module.record_scheduler_job_event(missed_event, scheduler=scheduler)
+            job_history_module.record_scheduler_job_event(
+                missed_event, scheduler=scheduler
+            )
+            job_history_module.record_scheduler_job_event(
+                missed_event, scheduler=scheduler
+            )
             after_miss = reloaded_store.list_runs("HistoryVault/nightly_cleanup")
             runtime_state.set_runtime_context(
                 SimpleNamespace(
@@ -188,7 +192,9 @@ class WorkflowRunHistoryScenario(BaseScenario):
             governor_module.get_max_concurrent_workflows = original_limit
             job_history_module._get_workflow_run_store = original_store_resolver
 
-        self.soft_assert_equal(result.status, "failed", "Probe should return a domain failure")
+        self.soft_assert_equal(
+            result.status, "failed", "Probe should return a domain failure"
+        )
         self.soft_assert_equal(
             latest.status if latest else None,
             "failed",
@@ -204,7 +210,9 @@ class WorkflowRunHistoryScenario(BaseScenario):
             ("output.md",),
             "Durable outcome should retain bounded output paths",
         )
-        self.soft_assert_equal(len(runs), 1, "One governor attempt should create one run")
+        self.soft_assert_equal(
+            len(runs), 1, "One governor attempt should create one run"
+        )
         self.soft_assert_equal(
             len(raised_runs),
             1,
@@ -255,7 +263,11 @@ class WorkflowRunHistoryScenario(BaseScenario):
             "System template rows should project the latest cross-vault outcome",
         )
         self.soft_assert_equal(
-            projected_template_run.get("vault_name") if projected_template_run else None,
+            (
+                projected_template_run.get("vault_name")
+                if projected_template_run
+                else None
+            ),
             "SecondVault",
             "System template latest outcomes should retain their target vault",
         )

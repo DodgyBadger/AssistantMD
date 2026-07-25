@@ -1,41 +1,47 @@
 """
 BaseScenario class with high-level assertion API and boundary enforcement.
 
-This module provides the foundation for V2 validation scenarios that focus on 
+This module provides the foundation for V2 validation scenarios that focus on
 real user workflows with readable, high-level operations.
 """
 
 import asyncio
+import inspect
 import json
 import sys
-import inspect
-from pathlib import Path
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import yaml
+
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
-import yaml
-from .vault_manager import VaultManager
+
+from .api_client import APIClient, APIResponse
 from .system_controller import SystemController
 from .time_controller import TimeController
-from .api_client import APIClient
-from .api_client import APIResponse
+from .vault_manager import VaultManager
 
-
-# Type definitions  
+# Type definitions
 VaultPath = Path  # Simple alias for now
 
 
 class WorkflowResult:
     """Result from assistant workflow execution."""
-    def __init__(self, status: str, created_files: List[str] = None, 
-                 error_message: str = None, logs: List[str] = None):
+
+    def __init__(
+        self,
+        status: str,
+        created_files: list[str] = None,
+        error_message: str = None,
+        logs: list[str] = None,
+    ):
         self.status = status
         self.created_files = created_files or []
         self.error_message = error_message
@@ -45,65 +51,75 @@ class WorkflowResult:
 class BaseScenario(ABC):
     """
     Base class for V2 validation scenarios with boundary enforcement.
-    
-    This class provides high-level operations that prevent scenarios from 
+
+    This class provides high-level operations that prevent scenarios from
     drifting into unit testing patterns. All methods focus on user-level
     actions and outcomes.
     """
-    
+
     def __init__(self):
         """Initialize scenario with evidence collection and control systems."""
-        self.scenario_name = self.__class__.__name__.replace("Test", "").replace("Scenario", "")
+        self.scenario_name = self.__class__.__name__.replace("Test", "").replace(
+            "Scenario", ""
+        )
         self.logger = UnifiedLogger(
             tag=f"scenario-v2-{self.scenario_name.lower()}",
             default_sinks=["validation", "logfire"],
         )
-        
+
         # Create run directory for this scenario
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_path = Path(f"/app/validation/runs/{timestamp}_{self.scenario_name.lower()}")
+        self.run_path = Path(
+            f"/app/validation/runs/{timestamp}_{self.scenario_name.lower()}"
+        )
         self.run_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize artifact collection
         self.artifacts_dir = self.run_path / "artifacts"
         self.artifacts_dir.mkdir(exist_ok=True)
-        
+
         self.timeline_file = self.artifacts_dir / "timeline.md"
         self.system_interactions_file = self.artifacts_dir / "system_interactions.log"
         # Initialize timeline
         self._init_timeline()
-        
+
         # Initialize control systems (lazy loaded)
         self._vault_manager = None
         self._system_controller = None
         self._time_controller = None
         self._api_client = None
-        self._soft_failures: List[Dict[str, str]] = []
+        self._soft_failures: list[dict[str, str]] = []
         self._teardown_completed = False
-    
+
     # === ABSTRACT METHOD ===
-    
+
     @abstractmethod
     async def test_scenario(self):
         """
         Main test method - implement scenario logic here.
-        
+
         This method should read like a user story using the high-level
         assertion and control methods provided by this base class.
-        
+
         Note: This is async to support real workflow execution.
         """
         pass
-    
+
     # === VAULT SETUP ===
-    
+
     def create_vault(self, name: str) -> VaultPath:
         """Create clean vault for testing."""
         self._log_timeline(f"Creating vault: {name}")
         vault_path = self._get_vault_manager().create_vault(name)
         return vault_path  # Already a Path object
-    
-    def copy_files(self, source_path: str, vault: VaultPath, dest_dir: str = "", dest_filename: str = None):
+
+    def copy_files(
+        self,
+        source_path: str,
+        vault: VaultPath,
+        dest_dir: str = "",
+        dest_filename: str = None,
+    ):
         """Copy files/directories from source to vault.
 
         Args:
@@ -113,14 +129,18 @@ class BaseScenario(ABC):
             dest_filename: Optional filename to rename single file (allows overwriting)
         """
         rename_info = f" as {dest_filename}" if dest_filename else ""
-        self._log_timeline(f"Copying files: {source_path} → {vault.name}/{dest_dir or 'root'}{rename_info}")
-        self._get_vault_manager().copy_files(source_path, vault, dest_dir, dest_filename)
-    
+        self._log_timeline(
+            f"Copying files: {source_path} → {vault.name}/{dest_dir or 'root'}{rename_info}"
+        )
+        self._get_vault_manager().copy_files(
+            source_path, vault, dest_dir, dest_filename
+        )
+
     def create_file(self, vault: VaultPath, file_path: str, content: str):
         """Create single file with content in vault.
-        
+
         Args:
-            vault: Target vault  
+            vault: Target vault
             file_path: Path within vault
             content: File content (can be large block of text)
         """
@@ -132,31 +152,33 @@ class BaseScenario(ABC):
         try:
             import fitz  # PyMuPDF
         except ImportError as exc:
-            raise RuntimeError("PyMuPDF (fitz) is required to generate test PDFs") from exc
+            raise RuntimeError(
+                "PyMuPDF (fitz) is required to generate test PDFs"
+            ) from exc
 
         doc = fitz.open()
         page = doc.new_page()
         page.insert_text((72, 72), text)
         return doc.tobytes()
-    
+
     # === TIME & SYSTEM CONTROL ===
-    
+
     def set_date(self, date: str):
         """Set system date for testing (@run-on, time patterns)."""
         self._log_timeline(f"Setting system date: {date}")
         time_controller = self._get_time_controller()
         time_controller.set_date(date)
-        
+
         # Also apply datetime monkey patch for scheduled jobs (same pattern as path isolation)
-        if hasattr(self, '_system_controller') and self._system_controller:
+        if hasattr(self, "_system_controller") and self._system_controller:
             self._system_controller.set_test_date(time_controller.current_test_date)
-    
+
     def advance_time(self, hours: int = 1, minutes: int = 0):
         """Advance the reference date used for time patterns (does not poke scheduler)."""
         self._log_timeline(f"Advancing time: +{hours}h {minutes}m")
         self._get_time_controller().advance_time(hours=hours, minutes=minutes)
 
-    def set_context_manager_now(self, value: Optional[datetime]):
+    def set_context_manager_now(self, value: datetime | None):
         """Override context manager cache clock (validation only)."""
         if value is None:
             label = "clearing override"
@@ -164,7 +186,7 @@ class BaseScenario(ABC):
             label = value.isoformat()
         self._log_timeline(f"Setting context manager cache time: {label}")
         self._get_system_controller().set_context_manager_now(value)
-    
+
     async def start_system(self):
         """Start the AssistantMD system."""
         self._log_timeline("Starting AssistantMD system")
@@ -173,19 +195,19 @@ class BaseScenario(ABC):
         if time_controller and time_controller.current_test_date is not None:
             controller.set_test_date(time_controller.current_test_date)
         await controller.start_system()
-    
+
     async def stop_system(self):
         """Stop the system gracefully."""
         self._log_timeline("Stopping AssistantMD system")
         await self._get_system_controller().stop_system()
-    
+
     async def restart_system(self):
         """Full system restart cycle."""
         self._log_timeline("Restarting AssistantMD system")
         await self._get_system_controller().restart_system()
-    
+
     # === WORKFLOW EXECUTION ===
-    
+
     async def run_workflow(
         self,
         vault: VaultPath,
@@ -207,11 +229,13 @@ class BaseScenario(ABC):
 
         files_before = self._collect_vault_files(vault)
         try:
-            execution_result = await get_runtime_context().workflow_governor.execute_workflow(
-                global_id=f"{vault.name}/{workflow_name}",
-                source=ExecutionTaskSource.API,
-                step_name=step_name,
-                expect_failure=expect_failure,
+            execution_result = (
+                await get_runtime_context().workflow_governor.execute_workflow(
+                    global_id=f"{vault.name}/{workflow_name}",
+                    source=ExecutionTaskSource.API,
+                    step_name=step_name,
+                    expect_failure=expect_failure,
+                )
             )
         except Exception as exc:
             error_message = str(exc) or "Workflow execution failed"
@@ -251,7 +275,7 @@ class BaseScenario(ABC):
         task_id: str,
         *,
         timeout_seconds: float = 60.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Poll the public task endpoint until a workflow task reaches a terminal state."""
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         terminal_statuses = {"completed", "failed", "cancelled", "timed_out", "skipped"}
@@ -264,7 +288,9 @@ class BaseScenario(ABC):
             if task.get("status") in terminal_statuses:
                 return task
             if asyncio.get_running_loop().time() >= deadline:
-                raise AssertionError(f"Execution task did not finish within {timeout_seconds:g}s: {task_id}")
+                raise AssertionError(
+                    f"Execution task did not finish within {timeout_seconds:g}s: {task_id}"
+                )
             await asyncio.sleep(0.25)
 
     async def trigger_job(
@@ -277,22 +303,22 @@ class BaseScenario(ABC):
         """Trigger a scheduled job and wait for completion."""
         global_id = f"{vault.name}/{assistant_name}"
         self._log_timeline(f"Triggering job: {global_id}")
-        
+
         # Trigger the job
         self._get_system_controller().trigger_job_manually(global_id)
-        
+
         # Wait for completion; most scenarios keep production-like unbounded waits.
         self._log_timeline(f"Waiting for job completion: {global_id}")
         success = await self._get_system_controller().wait_for_scheduled_run(
             global_id,
             timeout_seconds=timeout_seconds,
         )
-        
+
         if success:
             self._log_timeline(f"✅ Job completed successfully: {global_id}")
         else:
             self._log_timeline(f"❌ Job execution timeout: {global_id}")
-        
+
         return success
 
     async def trigger_vault_rescan(self):
@@ -302,10 +328,10 @@ class BaseScenario(ABC):
 
     # === VALIDATION EVENT HELPERS ===
 
-    def validation_events(self) -> List[Dict[str, Any]]:
+    def validation_events(self) -> list[dict[str, Any]]:
         """Load validation events from artifact files."""
         events_dir = self.run_path / "artifacts" / "validation_events"
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         if not events_dir.exists():
             return events
 
@@ -318,19 +344,19 @@ class BaseScenario(ABC):
         """Return the current count of validation events."""
         return len(self.validation_events())
 
-    def events_since(self, checkpoint: int) -> List[Dict[str, Any]]:
+    def events_since(self, checkpoint: int) -> list[dict[str, Any]]:
         """Return events emitted after the provided checkpoint."""
         events = self.validation_events()
         return events[checkpoint:]
 
     def find_events(
         self,
-        events: Optional[List[Dict[str, Any]]] = None,
+        events: list[dict[str, Any]] | None = None,
         *,
-        name: Optional[str] = None,
-        data: Optional[Dict[str, Any]] = None,
+        name: str | None = None,
+        data: dict[str, Any] | None = None,
         **data_subset: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Find events by name and partial data match."""
         if events is None:
             events = self.validation_events()
@@ -342,30 +368,32 @@ class BaseScenario(ABC):
         for event in events:
             if name and event.get("name") != name:
                 continue
-            if expected and not self._event_data_matches(event.get("data", {}), expected):
+            if expected and not self._event_data_matches(
+                event.get("data", {}), expected
+            ):
                 continue
             matches.append(event)
         return matches
 
     def latest_event(
         self,
-        events: Optional[List[Dict[str, Any]]] = None,
+        events: list[dict[str, Any]] | None = None,
         *,
-        name: Optional[str] = None,
-        data: Optional[Dict[str, Any]] = None,
+        name: str | None = None,
+        data: dict[str, Any] | None = None,
         **data_subset: Any,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Return the most recent matching event."""
         matches = self.find_events(events, name=name, data=data, **data_subset)
         return matches[-1] if matches else None
 
     def assert_event_contains(
         self,
-        events: Optional[List[Dict[str, Any]]] = None,
+        events: list[dict[str, Any]] | None = None,
         *,
         name: str,
-        expected: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        expected: dict[str, Any],
+    ) -> dict[str, Any]:
         """Assert a matching event exists and return it."""
         matches = self.find_events(events, name=name, data=expected)
         if not matches:
@@ -406,11 +434,11 @@ class BaseScenario(ABC):
 
     def soft_assert_event_contains(
         self,
-        events: Optional[List[Dict[str, Any]]] = None,
+        events: list[dict[str, Any]] | None = None,
         *,
         name: str,
-        expected: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        expected: dict[str, Any],
+    ) -> dict[str, Any] | None:
         """Soft variant of assert_event_contains; returns event when found."""
         try:
             return self.assert_event_contains(events, name=name, expected=expected)
@@ -431,13 +459,22 @@ class BaseScenario(ABC):
             else:
                 lines.append(f"{idx}. {message}")
         raise AssertionError("\n".join(lines))
-    
+
     # === API ENDPOINT TESTING ===
-    
-    def call_api(self, endpoint: str, method: str = "GET", data: dict = None, params: dict = None, headers: dict = None) -> APIResponse:
+
+    def call_api(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        data: dict = None,
+        params: dict = None,
+        headers: dict = None,
+    ) -> APIResponse:
         """Call AssistantMD API endpoint."""
         self._log_timeline(f"API call: {method} {endpoint}")
-        response = self._get_api_client().call_api(endpoint, method, data, params=params, headers=headers)
+        response = self._get_api_client().call_api(
+            endpoint, method, data, params=params, headers=headers
+        )
         self._log_timeline(f"   -> Status {response.status_code}")
         return response
 
@@ -446,10 +483,10 @@ class BaseScenario(ABC):
         data: dict,
         *,
         timeout_seconds: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Start a task-owned chat turn and collect its buffered events."""
         start_response = self.call_api("/api/chat/tasks", method="POST", data=data)
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "start_response": start_response,
             "session_id": None,
             "task_id": None,
@@ -511,9 +548,9 @@ class BaseScenario(ABC):
             ) from exc
         return result
 
-    def _parse_sse_events(self, text: str) -> List[Dict[str, Any]]:
+    def _parse_sse_events(self, text: str) -> list[dict[str, Any]]:
         """Parse JSON payloads from an SSE response body."""
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         for block in text.split("\n\n"):
             data_lines = [
                 line.removeprefix("data: ").strip()
@@ -530,11 +567,9 @@ class BaseScenario(ABC):
             if isinstance(payload, dict):
                 events.append(payload)
         return events
-    
-
 
     # === ARTIFACT COLLECTION ===
-    
+
     def teardown_scenario(self):
         """Clean up after scenario execution."""
         if self._teardown_completed:
@@ -553,12 +588,12 @@ class BaseScenario(ABC):
             self._log_timeline(f"=== SCENARIO {normalized}: {details} ===")
         else:
             self._log_timeline(f"=== SCENARIO {normalized} ===")
-    
+
     # === INTERNAL HELPER METHODS ===
-    
+
     def _init_timeline(self):
         """Initialize the timeline file."""
-        with open(self.timeline_file, 'w') as f:
+        with open(self.timeline_file, "w") as f:
             f.write(f"# {self.scenario_name} Execution Timeline\n\n")
             f.write(f"**Started**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
@@ -570,13 +605,13 @@ class BaseScenario(ABC):
                 if file_path.is_file():
                     vault_files.add(str(file_path.relative_to(vault)))
         return vault_files
-    
+
     def _log_timeline(self, message: str):
         """Log action to timeline."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        with open(self.timeline_file, 'a') as f:
+        with open(self.timeline_file, "a") as f:
             f.write(f"**{timestamp}**: {message}\n")
-    
+
     def _save_system_interactions(self):
         """Save system interaction logs."""
         if self._api_client:
@@ -584,7 +619,7 @@ class BaseScenario(ABC):
 
     def load_yaml(self, path: Path):
         """Load YAML content from a file."""
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return yaml.safe_load(handle)
 
     def _event_data_matches(self, actual: Any, expected: Any) -> bool:
@@ -603,14 +638,17 @@ class BaseScenario(ABC):
             if not isinstance(actual, list):
                 return False
             for item in expected:
-                if not any(self._event_data_matches(actual_item, item) for actual_item in actual):
+                if not any(
+                    self._event_data_matches(actual_item, item)
+                    for actual_item in actual
+                ):
                     return False
             return True
 
         return actual == expected
-    
+
     # === LAZY LOADING OF CONTROL SYSTEMS ===
-    
+
     def _get_vault_manager(self):
         """Lazy load vault manager."""
         if not self._vault_manager:
@@ -635,5 +673,7 @@ class BaseScenario(ABC):
             test_vault_root = self.run_path / "test_vaults"
             test_vault_root.mkdir(parents=True, exist_ok=True)
             controller = self._get_system_controller()
-            self._api_client = APIClient(test_vault_root, controller.get_api_test_client())
+            self._api_client = APIClient(
+                test_vault_root, controller.get_api_test_client()
+            )
         return self._api_client

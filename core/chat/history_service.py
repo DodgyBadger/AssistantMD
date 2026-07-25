@@ -12,7 +12,6 @@ from pydantic_ai.messages import ModelMessage
 from core.chat.chat_store import ChatStore
 from core.utils.messages import extract_role_and_text, run_slice
 
-
 _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
 
 
@@ -27,7 +26,7 @@ class ChatHistoryContext:
     prefer_message_history: bool = False
 
     @classmethod
-    def from_deps(cls, deps: Any) -> "ChatHistoryContext":
+    def from_deps(cls, deps: Any) -> ChatHistoryContext:
         """Build chat-history context from a run deps object."""
         if deps is None:
             return cls()
@@ -159,7 +158,11 @@ class InMemoryConversationHistoryProvider:
         normalized_filter = _normalize_message_filter(message_filter)
 
         requested_session_id = (session_id or "").strip() or self.active_session_id
-        if session_id and self.active_session_id and session_id != self.active_session_id:
+        if (
+            session_id
+            and self.active_session_id
+            and session_id != self.active_session_id
+        ):
             raise ValueError(
                 "The current chat-history provider only exposes the active in-memory chat session"
             )
@@ -171,7 +174,8 @@ class InMemoryConversationHistoryProvider:
         selected = _filter_messages(selected, normalized_filter)
 
         items = tuple(
-            _normalize_message(message, session_id=requested_session_id) for message in selected
+            _normalize_message(message, session_id=requested_session_id)
+            for message in selected
         )
         return ConversationHistoryResult(
             source=self.source_name,
@@ -179,7 +183,10 @@ class InMemoryConversationHistoryProvider:
             session_id=requested_session_id,
             item_count=len(items),
             items=items,
-            metadata={"canonical_source": "message_history", "message_filter": normalized_filter},
+            metadata={
+                "canonical_source": "message_history",
+                "message_filter": normalized_filter,
+            },
         )
 
     def get_tool_events(
@@ -230,10 +237,15 @@ class SQLiteConversationHistoryProvider:
                 session_id=None,
                 item_count=0,
                 items=(),
-                metadata={"canonical_source": "chat_messages", "message_filter": normalized_filter},
+                metadata={
+                    "canonical_source": "chat_messages",
+                    "message_filter": normalized_filter,
+                },
             )
 
-        stored_messages = self.store.get_stored_messages(requested_session_id, self.vault_name)
+        stored_messages = self.store.get_stored_messages(
+            requested_session_id, self.vault_name
+        )
         stored_messages = _filter_stored_messages(stored_messages, normalized_filter)
         if limit != "all":
             stored_messages = stored_messages[-limit:]
@@ -248,7 +260,10 @@ class SQLiteConversationHistoryProvider:
             session_id=requested_session_id,
             item_count=len(items),
             items=items,
-            metadata={"canonical_source": "chat_messages", "message_filter": normalized_filter},
+            metadata={
+                "canonical_source": "chat_messages",
+                "message_filter": normalized_filter,
+            },
         )
 
     def get_tool_events(
@@ -349,7 +364,12 @@ class ChatHistoryService:
                 active_session_id=requested_session_id,
             )
         if requested_session_id and context.vault_name:
-            if self.chat_store.get_message_count(requested_session_id, context.vault_name) > 0:
+            if (
+                self.chat_store.get_message_count(
+                    requested_session_id, context.vault_name
+                )
+                > 0
+            ):
                 return SQLiteConversationHistoryProvider(
                     store=self.chat_store,
                     vault_name=context.vault_name,
@@ -410,7 +430,9 @@ def _normalize_message(
     )
 
 
-def _normalize_stored_message(message, *, session_id: str | None) -> ConversationHistoryItem:
+def _normalize_stored_message(
+    message, *, session_id: str | None
+) -> ConversationHistoryItem:
     run_id = getattr(message.message, "run_id", None)
     return ConversationHistoryItem(
         role=message.role,
@@ -435,11 +457,15 @@ def _normalize_stored_message(message, *, session_id: str | None) -> Conversatio
 def _normalize_message_filter(message_filter: str) -> str:
     normalized = (message_filter or "").strip().lower() or "all"
     if normalized not in {"all", "exclude_tools", "only_tools"}:
-        raise ValueError("message_filter must be one of: all, exclude_tools, only_tools")
+        raise ValueError(
+            "message_filter must be one of: all, exclude_tools, only_tools"
+        )
     return normalized
 
 
-def _filter_messages(messages: list[ModelMessage], message_filter: str) -> list[ModelMessage]:
+def _filter_messages(
+    messages: list[ModelMessage], message_filter: str
+) -> list[ModelMessage]:
     if message_filter == "all":
         return list(messages)
     if message_filter == "exclude_tools":
@@ -451,7 +477,11 @@ def _filter_stored_messages(messages: list[Any], message_filter: str) -> list[An
     if message_filter == "all":
         return list(messages)
     if message_filter == "exclude_tools":
-        return [message for message in messages if not _message_has_tool_parts(message.message)]
+        return [
+            message
+            for message in messages
+            if not _message_has_tool_parts(message.message)
+        ]
     return [message for message in messages if _message_has_tool_parts(message.message)]
 
 

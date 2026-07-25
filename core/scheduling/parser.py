@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from dateutil import parser as dateutil_parser
 from apscheduler.triggers.cron import CronTrigger
+from dateutil import parser as dateutil_parser
 
 from core.logger import UnifiedLogger
 
@@ -46,8 +46,10 @@ APSCHEDULER_3_WEEKDAY_NAMES = {
 ## Exception Classes
 #######################################################################
 
+
 class ScheduleParsingError(Exception):
     """Raised when schedule syntax cannot be parsed."""
+
     pass
 
 
@@ -55,27 +57,30 @@ class ScheduleParsingError(Exception):
 ## Data Classes
 #######################################################################
 
+
 @dataclass
 class ParsedSchedule:
     """Result of parsing a schedule string.
 
     Contains the schedule type and parameters needed for trigger creation.
     """
-    schedule_type: str              # 'cron' or 'date'
-    parameters: dict[str, Any]      # Parameters for trigger creation
+
+    schedule_type: str  # 'cron' or 'date'
+    parameters: dict[str, Any]  # Parameters for trigger creation
 
     def is_cron(self) -> bool:
         """Check if this is a cron-based schedule."""
-        return self.schedule_type == 'cron'
+        return self.schedule_type == "cron"
 
     def is_date(self) -> bool:
         """Check if this is a one-time date schedule."""
-        return self.schedule_type == 'date'
+        return self.schedule_type == "date"
 
 
 #######################################################################
 ## Core Parsing Functions
 #######################################################################
+
 
 def parse_schedule_syntax(schedule_input: str) -> ParsedSchedule:
     """Parse schedule string with explicit type prefixes.
@@ -99,12 +104,12 @@ def parse_schedule_syntax(schedule_input: str) -> ParsedSchedule:
     schedule_text = schedule_input.strip()
 
     # Check for cron schedule prefix
-    if schedule_text.lower().startswith('cron:'):
+    if schedule_text.lower().startswith("cron:"):
         cron_expr = schedule_text[5:].strip()
         return parse_cron_schedule(cron_expr)
 
     # Check for one-time schedule prefix
-    elif schedule_text.lower().startswith('once:'):
+    elif schedule_text.lower().startswith("once:"):
         datetime_str = schedule_text[5:].strip()
         return parse_once_schedule(datetime_str)
 
@@ -133,10 +138,7 @@ def parse_cron_schedule(cron_expr: str) -> ParsedSchedule:
         # Use APScheduler's built-in crontab parser
         trigger = CronTrigger.from_crontab(cron_expr)
 
-        return ParsedSchedule(
-            schedule_type='cron',
-            parameters={'trigger': trigger}
-        )
+        return ParsedSchedule(schedule_type="cron", parameters={"trigger": trigger})
     except (ValueError, TypeError) as e:
         raise ScheduleParsingError(
             f"Invalid crontab expression: '{cron_expr}'\n"
@@ -144,7 +146,7 @@ def parse_cron_schedule(cron_expr: str) -> ParsedSchedule:
             f"Example: '0 8 * * *' (daily at 8am)\n"
             f"Error: {str(e)}\n"
             f"See https://crontab.guru for help"
-        )
+        ) from e
 
 
 def standard_cron_to_apscheduler_safe_cron(cron_expr: str) -> str:
@@ -198,15 +200,13 @@ def parse_once_schedule(datetime_str: str) -> ParsedSchedule:
             f"resolves to {run_date.isoformat()}"
         )
 
-    return ParsedSchedule(
-        schedule_type='date',
-        parameters={'run_date': run_date}
-    )
+    return ParsedSchedule(schedule_type="date", parameters={"run_date": run_date})
 
 
 #######################################################################
 ## Helper Functions
 #######################################################################
+
 
 def _parse_explicit_datetime(datetime_str: str) -> datetime:
     """Parse explicit datetime string using dateutil.
@@ -236,11 +236,11 @@ def _parse_explicit_datetime(datetime_str: str) -> datetime:
 
         return dt
 
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise ScheduleParsingError(
             f"Could not parse datetime: '{datetime_str}'\n"
             f"Use explicit formats like '2025-12-25 10:00' or 'December 25, 2025 at 10am'"
-        )
+        ) from exc
 
 
 def _convert_cron_weekday_numbers(
@@ -264,8 +264,7 @@ def _convert_weekday_field_numbers(
         return field
 
     return ",".join(
-        _convert_weekday_part(part, weekday_name_by_number)
-        for part in field.split(",")
+        _convert_weekday_part(part, weekday_name_by_number) for part in field.split(",")
     )
 
 
@@ -329,7 +328,7 @@ def _contains_time(s: str) -> bool:
     Returns:
         True if string contains time indicators
     """
-    time_indicators = [':', 'am', 'pm', 'AM', 'PM']
+    time_indicators = [":", "am", "pm", "AM", "PM"]
     return any(indicator in s for indicator in time_indicators)
 
 
@@ -343,10 +342,15 @@ def _contains_relative_terms(s: str) -> bool:
         True if string contains relative terms that make no sense in config files
     """
     relative_terms = [
-        'tomorrow', 'today', 'yesterday',
-        'next', 'last', 'this',
-        'in ', ' ago',
-        'now'
+        "tomorrow",
+        "today",
+        "yesterday",
+        "next",
+        "last",
+        "this",
+        "in ",
+        " ago",
+        "now",
     ]
     s_lower = s.lower()
     return any(term in s_lower for term in relative_terms)

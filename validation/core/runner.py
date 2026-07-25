@@ -5,22 +5,23 @@ Discovers and executes scenarios while preserving evidence collection
 and error classification from V1.
 """
 
-import sys
 import asyncio
 import importlib
 import inspect
 import shutil
+import sys
 import traceback
+
 # Removed pytest dependency - using direct scenario execution
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.logger import UnifiedLogger
 from dataclasses import dataclass
+
+from core.logger import UnifiedLogger
 
 
 @dataclass
@@ -28,9 +29,9 @@ class ScenarioResult:
     scenario_name: str
     status: str
     execution_time: float
-    error_message: Optional[str] = None
-    error_classification: Optional[str] = None
-    evidence_path: Optional[str] = None
+    error_message: str | None = None
+    error_classification: str | None = None
+    evidence_path: str | None = None
 
 
 @dataclass
@@ -51,14 +52,14 @@ logger = UnifiedLogger(tag="validation-runner", default_sinks=["validation", "lo
 
 class ValidationRunner:
     """Validation execution engine with scenario-based testing."""
-    
+
     def __init__(self, validation_root: str = "/app/validation"):
         self.validation_root = Path(validation_root)
         self.scenarios_dir = self.validation_root / "scenarios"
         self.runs_dir = self.validation_root / "runs"
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-    
-    def discover_scenarios(self) -> List[str]:
+
+    def discover_scenarios(self) -> list[str]:
         """
         Discover V2 validation scenarios by finding BaseScenario subclasses.
 
@@ -91,10 +92,12 @@ class ValidationRunner:
                 module = importlib.import_module(module_name)
 
                 # Find BaseScenario subclasses
-                for name, obj in inspect.getmembers(module, inspect.isclass):
-                    if (obj.__module__ == module_name and
-                        hasattr(obj, 'test_scenario') and
-                        obj.__name__ != 'BaseScenario'):
+                for _name, obj in inspect.getmembers(module, inspect.isclass):
+                    if (
+                        obj.__module__ == module_name
+                        and hasattr(obj, "test_scenario")
+                        and obj.__name__ != "BaseScenario"
+                    ):
 
                         scenarios.append(scenario_name)
                         break  # Only take first valid scenario class per file
@@ -103,7 +106,7 @@ class ValidationRunner:
                 continue
 
         return sorted(scenarios)
-    
+
     def execute_scenario(self, scenario_name: str) -> ScenarioResult:
         """
         Execute a single scenario directly.
@@ -128,10 +131,12 @@ class ValidationRunner:
 
             # Look for BaseScenario subclass
             scenario_class = None
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                if (obj.__module__ == module_name and
-                    hasattr(obj, 'test_scenario') and
-                    obj.__name__ != 'BaseScenario'):
+            for _name, obj in inspect.getmembers(module, inspect.isclass):
+                if (
+                    obj.__module__ == module_name
+                    and hasattr(obj, "test_scenario")
+                    and obj.__name__ != "BaseScenario"
+                ):
                     scenario_class = obj
                     break
 
@@ -171,7 +176,9 @@ class ValidationRunner:
             # Reuse V1 error classification
             error_classification = self._classify_error(e, scenario_name)
             evidence_path = str(self.runs_dir)
-            if "scenario_instance" in locals() and hasattr(scenario_instance, "run_path"):
+            if "scenario_instance" in locals() and hasattr(
+                scenario_instance, "run_path"
+            ):
                 evidence_path = str(scenario_instance.run_path)
                 if hasattr(scenario_instance, "mark_scenario_outcome"):
                     scenario_instance.mark_scenario_outcome("failed", error_msg)
@@ -184,10 +191,10 @@ class ValidationRunner:
 
             scenario_result = ScenarioResult(
                 scenario_name=scenario_name,
-                status=error_classification['status'],
+                status=error_classification["status"],
                 execution_time=execution_time,
                 evidence_path=evidence_path,
-                error_message=error_msg
+                error_message=error_msg,
             )
 
             scenario_result.error_classification = error_classification
@@ -241,18 +248,20 @@ class ValidationRunner:
             lines.append(tail)
 
         return "\n".join(lines)
-    
-    def _classify_error(self, exception: Exception, scenario_name: str) -> Dict[str, str]:
+
+    def _classify_error(
+        self, exception: Exception, scenario_name: str
+    ) -> dict[str, str]:
         """Classify errors using V1 logic."""
         exception_type = type(exception).__name__
-        
+
         if exception_type in ["AssertionError"]:
             return {
                 "type": "SCENARIO FAILURE",
                 "status": "failed",
                 "severity": "low",
                 "recommendation": "Review scenario assertions and expected outputs",
-                "emoji": "❌"
+                "emoji": "❌",
             }
         if exception_type in ["FileNotFoundError", "PermissionError", "OSError"]:
             return {
@@ -260,23 +269,28 @@ class ValidationRunner:
                 "status": "framework_error",
                 "severity": "medium",
                 "recommendation": "Check test setup - file paths, permissions, or test environment",
-                "emoji": "💥"
+                "emoji": "💥",
             }
         elif exception_type in ["ImportError", "ModuleNotFoundError"]:
             return {
                 "type": "FRAMEWORK ERROR",
-                "status": "framework_error", 
+                "status": "framework_error",
                 "severity": "medium",
                 "recommendation": "Check test imports and dependencies",
-                "emoji": "💥"
+                "emoji": "💥",
             }
-        elif exception_type in ["ValueError", "TypeError", "AttributeError", "KeyError"]:
+        elif exception_type in [
+            "ValueError",
+            "TypeError",
+            "AttributeError",
+            "KeyError",
+        ]:
             return {
                 "type": "SYSTEM ERROR",
                 "status": "system_bug",
-                "severity": "high", 
+                "severity": "high",
                 "recommendation": "Review stack trace to identify system code that needs error handling",
-                "emoji": "🚨"
+                "emoji": "🚨",
             }
         else:
             return {
@@ -284,23 +298,25 @@ class ValidationRunner:
                 "status": "error",
                 "severity": "medium",
                 "recommendation": f"Investigate {exception_type} in system code",
-                "emoji": "❓"
+                "emoji": "❓",
             }
-    
+
     def _cleanup_old_runs(self, keep_count: int = 10):
         """Clean up old validation runs, keeping only the most recent ones based on timestamp in directory name."""
         try:
             # Get all run directories that match the timestamp pattern
             run_dirs = []
             for d in self.runs_dir.iterdir():
-                if d.is_dir() and not d.name.startswith('.'):
+                if d.is_dir() and not d.name.startswith("."):
                     # Extract timestamp from directory name (format: YYYYMMDD_HHMMSS_scenarioname)
-                    parts = d.name.split('_')
+                    parts = d.name.split("_")
                     if len(parts) >= 2:
                         try:
                             # Try to parse the timestamp from the first two parts
                             timestamp_str = f"{parts[0]}_{parts[1]}"
-                            timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                            timestamp = datetime.strptime(
+                                timestamp_str, "%Y%m%d_%H%M%S"
+                            )
                             run_dirs.append((d, timestamp))
                         except ValueError:
                             # Skip directories that don't match the expected format
@@ -325,12 +341,14 @@ class ValidationRunner:
                     logger.warning(f"Failed to remove old run {old_dir.name}: {e}")
 
             if removed_count > 0:
-                logger.info(f"Cleaned up {removed_count} old validation runs (keeping latest {keep_count}, total will be {keep_count + 1})")
+                logger.info(
+                    f"Cleaned up {removed_count} old validation runs (keeping latest {keep_count}, total will be {keep_count + 1})"
+                )
 
         except Exception as e:
             logger.warning(f"Failed to cleanup old validation runs: {e}")
 
-    def run_scenarios(self, scenario_names: Optional[List[str]] = None) -> ValidationRun:
+    def run_scenarios(self, scenario_names: list[str] | None = None) -> ValidationRun:
         """Run V2 validation scenarios."""
         run_start = datetime.now()
         run_id = run_start.strftime("%Y%m%d_%H%M%S")
@@ -341,24 +359,28 @@ class ValidationRunner:
         # Discover scenarios if not specified
         if scenario_names is None:
             scenario_names = self.discover_scenarios()
-        
+
         if not scenario_names:
             logger.warning("No scenarios found to execute")
-        
+
         # Execute scenarios sequentially
         scenario_results = []
         for scenario_name in scenario_names:
             logger.info(f"Executing scenario: {scenario_name}")
             result = self.execute_scenario(scenario_name)
             scenario_results.append(result)
-        
+
         # Calculate statistics
         run_end = datetime.now()
         passed = sum(1 for r in scenario_results if r.status == "passed")
         failed = sum(1 for r in scenario_results if r.status == "failed")
-        errors = sum(1 for r in scenario_results if r.status in ["error", "system_bug", "framework_error"])
+        errors = sum(
+            1
+            for r in scenario_results
+            if r.status in ["error", "system_bug", "framework_error"]
+        )
         success_rate = (passed / len(scenario_results)) * 100 if scenario_results else 0
-        
+
         validation_run = ValidationRun(
             run_id=run_id,
             start_time=run_start,
@@ -368,7 +390,7 @@ class ValidationRunner:
             failed_scenarios=failed,
             error_scenarios=errors,
             success_rate=success_rate,
-            scenario_results=scenario_results
+            scenario_results=scenario_results,
         )
-        
+
         return validation_run

@@ -39,9 +39,12 @@ class FileReadRecursiveListScenario(BaseScenario):
             "Recursive root listing should include deeply nested files",
         )
         self.soft_assert(
-            {"projects", "projects/alpha", "projects/beta", "projects/beta/nested"}.issubset(
-                root_directories
-            ),
+            {
+                "projects",
+                "projects/alpha",
+                "projects/beta",
+                "projects/beta/nested",
+            }.issubset(root_directories),
             "Recursive root listing should include nested directories",
         )
 

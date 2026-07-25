@@ -23,11 +23,17 @@ class ImportPipelineLiveUrlScenario(BaseScenario):
         url_response = self.call_api(
             "/api/import/url",
             method="POST",
-            data={"vault": vault.name, "url": "https://example.com", "clean_html": True},
+            data={
+                "vault": vault.name,
+                "url": "https://example.com",
+                "clean_html": True,
+            },
         )
         assert url_response.status_code == 200, "URL ingest should return 200"
         url_payload = url_response.json()
-        assert url_payload.get("status") == "completed", "URL ingest job should complete"
+        assert (
+            url_payload.get("status") == "completed"
+        ), "URL ingest job should complete"
         url_outputs = url_payload.get("outputs") or []
         assert len(url_outputs) > 0, "URL ingest should return at least one output path"
 

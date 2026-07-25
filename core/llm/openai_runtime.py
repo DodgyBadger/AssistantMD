@@ -19,8 +19,8 @@ from core.llm.openai_auth import (
     resolve_openai_auth,
 )
 from core.llm.openai_oauth import (
-    get_openai_oauth_status,
     ensure_fresh_openai_oauth_token,
+    get_openai_oauth_status,
     load_openai_oauth_token_state,
 )
 from core.settings.secrets_store import get_secret_value, secret_has_value

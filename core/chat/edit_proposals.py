@@ -13,7 +13,9 @@ from core.database import connect_sqlite_from_system_db
 class EditProposalError(ValueError):
     """Raised when a historical edit proposal cannot be read."""
 
-    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None):
+    def __init__(
+        self, code: str, message: str, *, details: dict[str, Any] | None = None
+    ):
         super().__init__(message)
         self.code = code
         self.details = details or {}

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,11 +33,15 @@ def export_chat_transcript(
     """Write one markdown transcript for a persisted session, overwriting any prior export."""
     session = store.get_session(session_id=session_id, vault_name=vault_name)
     if session is None:
-        raise ValueError(f"Chat session '{session_id}' was not found in vault '{vault_name}'.")
+        raise ValueError(
+            f"Chat session '{session_id}' was not found in vault '{vault_name}'."
+        )
 
     sessions_dir = _resolve_sessions_dir(vault_path=vault_path)
     history_file = _build_history_file(sessions_dir=sessions_dir, session=session)
-    _remove_prior_transcript_variants(sessions_dir=sessions_dir, session_id=session.session_id)
+    _remove_prior_transcript_variants(
+        sessions_dir=sessions_dir, session_id=session.session_id
+    )
 
     messages = store.get_stored_messages(session_id=session_id, vault_name=vault_name)
     lines = [
@@ -58,7 +62,9 @@ def remove_chat_transcript_exports(*, vault_path: str, session_ids: list[str]) -
     """Delete transcript exports for one or more session IDs."""
     sessions_dir = _resolve_sessions_dir(vault_path=vault_path)
     for session_id in session_ids:
-        _remove_prior_transcript_variants(sessions_dir=sessions_dir, session_id=session_id)
+        _remove_prior_transcript_variants(
+            sessions_dir=sessions_dir, session_id=session_id
+        )
 
 
 def _render_message_block(message: StoredChatMessage) -> list[str]:
@@ -82,20 +88,36 @@ def _extract_transcript_role_and_text(message: StoredChatMessage) -> tuple[str, 
 
     if isinstance(message.message, ModelRequest):
         for part in parts:
-            if isinstance(part, UserPromptPart) and isinstance(getattr(part, "content", None), str):
+            if isinstance(part, UserPromptPart) and isinstance(
+                getattr(part, "content", None), str
+            ):
                 visible_parts.append(part.content)
-        return "user", "\n".join(part.rstrip() for part in visible_parts if part and part.rstrip()).strip()
+        return (
+            "user",
+            "\n".join(
+                part.rstrip() for part in visible_parts if part and part.rstrip()
+            ).strip(),
+        )
 
     if isinstance(message.message, ModelResponse):
         for part in parts:
-            if isinstance(part, TextPart) and isinstance(getattr(part, "content", None), str):
+            if isinstance(part, TextPart) and isinstance(
+                getattr(part, "content", None), str
+            ):
                 visible_parts.append(part.content)
-        return "assistant", "\n".join(part.rstrip() for part in visible_parts if part and part.rstrip()).strip()
+        return (
+            "assistant",
+            "\n".join(
+                part.rstrip() for part in visible_parts if part and part.rstrip()
+            ).strip(),
+        )
 
     return "", ""
 
 
-def _build_frontmatter(*, session: StoredChatSession, session_summary: str | None) -> list[str]:
+def _build_frontmatter(
+    *, session: StoredChatSession, session_summary: str | None
+) -> list[str]:
     title = (session.title or "").strip()
     summary = (session_summary or "").strip()
     if not title and not summary:
@@ -124,7 +146,9 @@ def _build_history_file(*, sessions_dir: Path, session: StoredChatSession) -> Pa
     resolved_history = history_file.resolve()
     resolved_sessions = sessions_dir.resolve()
     if resolved_sessions not in resolved_history.parents:
-        raise ValueError("Resolved chat history path is outside the chat sessions directory.")
+        raise ValueError(
+            "Resolved chat history path is outside the chat sessions directory."
+        )
     return history_file
 
 

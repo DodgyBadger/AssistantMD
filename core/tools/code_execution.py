@@ -21,7 +21,6 @@ from core.logger import UnifiedLogger
 
 from .base import BaseTool
 
-
 logger = UnifiedLogger(tag="code-execution-tool")
 
 
@@ -50,7 +49,9 @@ class CodeExecution(BaseTool):
                 deps = getattr(ctx, "deps", None)
                 session_id = str(getattr(deps, "session_id", "") or "").strip()
                 vault_name = str(getattr(deps, "vault_name", "") or "").strip()
-                reference_date = getattr(deps, "context_manager_now", None) or datetime.today()
+                reference_date = (
+                    getattr(deps, "context_manager_now", None) or datetime.today()
+                )
                 if not session_id or not vault_name:
                     return (
                         "code_execution requires chat session context with both "
@@ -104,7 +105,9 @@ Full documentation:
 
         if value is not None:
             try:
-                rendered = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+                rendered = json.dumps(
+                    value, ensure_ascii=False, indent=2, sort_keys=True
+                )
             except (TypeError, ValueError):
                 rendered = str(value)
             if prints:

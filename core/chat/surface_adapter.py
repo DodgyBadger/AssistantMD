@@ -19,7 +19,6 @@ from core.runtime.execution_tasks import ExecutionTaskCancellationResult
 from core.runtime.state import get_runtime_context
 from core.vault_state.pathing import resolve_configured_vault_root
 
-
 _CHAT_STORE = ChatStore()
 
 
@@ -84,7 +83,8 @@ async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTask
         },
     )
     return ChatStreamTaskStart(
-        task=await runtime.task_coordinator.get_task(started.task.task_id) or started.task,
+        task=await runtime.task_coordinator.get_task(started.task.task_id)
+        or started.task,
         session_id=started.session_id,
     )
 
@@ -123,4 +123,6 @@ def _validate_surface_request(request: ChatSurfaceRequest) -> None:
     }
     missing = [name for name, value in required.items() if not value.strip()]
     if missing:
-        raise ValueError(f"Missing required chat surface field(s): {', '.join(missing)}")
+        raise ValueError(
+            f"Missing required chat surface field(s): {', '.join(missing)}"
+        )

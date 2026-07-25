@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
-
 DB_NAME = "session_summaries"
 MIGRATION_NAMESPACE = "session_summaries"
 
@@ -103,7 +102,11 @@ def ensure_session_summary_schema(
         _create_session_summaries_fts(conn)
         conn.commit()
         if apply_migrations:
-            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=SESSION_SUMMARY_MIGRATIONS)
+            apply_sqlite_migrations(
+                conn,
+                namespace=MIGRATION_NAMESPACE,
+                migrations=SESSION_SUMMARY_MIGRATIONS,
+            )
         _backfill_session_summaries_fts(conn)
         conn.commit()
     finally:

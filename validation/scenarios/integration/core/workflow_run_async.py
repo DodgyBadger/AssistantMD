@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.tools.workflow_run import WorkflowRun
 from core.runtime.state import get_runtime_context
+from core.tools.workflow_run import WorkflowRun
 from validation.core.base_scenario import BaseScenario
 
 
@@ -32,7 +32,9 @@ class WorkflowRunAsyncScenario(BaseScenario):
         start_out = await tool.function(operation="start", workflow_name="async_probe")
         start_data = self._parse_kv_response(start_out)
         task_id = start_data.get("task_id", "")
-        self.soft_assert_equal(start_data.get("success"), "True", "workflow_run start should succeed")
+        self.soft_assert_equal(
+            start_data.get("success"), "True", "workflow_run start should succeed"
+        )
         self.soft_assert(bool(task_id), "workflow_run start should return a task id")
 
         created_path = Path(vault) / "notes/workflow-run-async-write.md"
@@ -41,12 +43,21 @@ class WorkflowRunAsyncScenario(BaseScenario):
                 break
             await asyncio.sleep(0.05)
 
-        self.soft_assert(created_path.exists(), "Started workflow should write a file before cancellation")
+        self.soft_assert(
+            created_path.exists(),
+            "Started workflow should write a file before cancellation",
+        )
 
         status_out = await tool.function(operation="status", task_id=task_id)
         status_data = self._parse_kv_response(status_out)
-        self.soft_assert_equal(status_data.get("success"), "True", "workflow_run status should succeed")
-        self.soft_assert_equal(status_data.get("task_id"), task_id, "workflow_run status should report the same task")
+        self.soft_assert_equal(
+            status_data.get("success"), "True", "workflow_run status should succeed"
+        )
+        self.soft_assert_equal(
+            status_data.get("task_id"),
+            task_id,
+            "workflow_run status should report the same task",
+        )
         self.soft_assert_equal(
             status_data.get("heartbeat_status"),
             "workflow_running",
@@ -84,11 +95,21 @@ class WorkflowRunAsyncScenario(BaseScenario):
         checkpoint = self.event_checkpoint()
         cancel_out = await tool.function(operation="cancel", task_id=task_id)
         cancel_data = self._parse_kv_response(cancel_out)
-        self.soft_assert_equal(cancel_data.get("success"), "True", "workflow_run cancel should be effective")
-        self.soft_assert_equal(cancel_data.get("task_id"), task_id, "workflow_run cancel should report the same task")
+        self.soft_assert_equal(
+            cancel_data.get("success"),
+            "True",
+            "workflow_run cancel should be effective",
+        )
+        self.soft_assert_equal(
+            cancel_data.get("task_id"),
+            task_id,
+            "workflow_run cancel should report the same task",
+        )
 
         task = await self._wait_for_execution_task(task_id)
-        self.soft_assert_equal(task.get("status"), "cancelled", "Workflow task should be cancelled")
+        self.soft_assert_equal(
+            task.get("status"), "cancelled", "Workflow task should be cancelled"
+        )
         self.soft_assert(
             not created_path.exists(),
             "Cancelled workflow_run task should rollback files created before cancellation",

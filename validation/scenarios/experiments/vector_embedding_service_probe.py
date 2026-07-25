@@ -58,7 +58,9 @@ class VectorEmbeddingServiceProbeScenario(BaseScenario):
             }
         )
 
-        query = await service.embed_query("riparian restoration", model_alias="embeddings")
+        query = await service.embed_query(
+            "riparian restoration", model_alias="embeddings"
+        )
         documents = await service.embed_documents(
             ["topic: wetlands", "topic: watershed protection"],
             model_alias="embeddings",
@@ -138,7 +140,10 @@ class VectorEmbeddingServiceProbeScenario(BaseScenario):
             "Vector store should search only within the query embedding space",
         )
         self.soft_assert(
-            all(result.embedding_space_id == query.embedding_space_id for result in results),
+            all(
+                result.embedding_space_id == query.embedding_space_id
+                for result in results
+            ),
             "Vector search results should all share query embedding space",
         )
 

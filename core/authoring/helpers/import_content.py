@@ -29,4 +29,6 @@ async def execute(
     context: AuthoringExecutionContext,
 ) -> Any:
     del call, context
-    raise NotImplementedError("import_content is not implemented for the Monty MVP host")
+    raise NotImplementedError(
+        "import_content is not implemented for the Monty MVP host"
+    )

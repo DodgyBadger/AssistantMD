@@ -13,7 +13,6 @@ from core.authoring.helpers.common import build_capability
 from core.authoring.shared.markdown_parse import parse_markdown_content
 from core.logger import UnifiedLogger
 
-
 logger = UnifiedLogger(tag="authoring-host")
 
 
@@ -75,7 +74,7 @@ def _contract() -> dict[str, object]:
         "signature": "parse_markdown(*, value: RetrievedItem | str)",
         "summary": (
             "Parse markdown content into a stable structured object. Accepts either a "
-            "RetrievedItem from retrieve(type=\"file\", ...) or a raw markdown string."
+            'RetrievedItem from retrieve(type="file", ...) or a raw markdown string.'
         ),
         "arguments": {
             "value": {

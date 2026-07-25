@@ -7,9 +7,10 @@ and core/context/manager.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
+from typing import Any
 
 from pydantic import TypeAdapter
 from pydantic_ai import RunContext
@@ -22,6 +23,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from core.authoring.cache import add_context_summary, upsert_session
 from core.authoring.contracts import (
     AssembleContextResult,
     ContextMessage,
@@ -30,10 +32,14 @@ from core.authoring.contracts import (
     ToolExchange,
     ToolExchangeBatch,
 )
+from core.authoring.runtime import (
+    AuthoringMontyExecutionError,
+    WorkflowAuthoringHost,
+    Workspace,
+    run_authoring_monty,
+)
 from core.authoring.template_discovery import load_template
 from core.authoring.template_loader import parse_authoring_template_text
-from core.authoring.runtime import AuthoringMontyExecutionError, WorkflowAuthoringHost, Workspace, run_authoring_monty
-from core.authoring.cache import add_context_summary, upsert_session
 from core.constants import VALID_WEEK_DAYS
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context, has_runtime_context
@@ -48,6 +54,7 @@ _MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
 # ContextTemplateError
 # ---------------------------------------------------------------------------
 
+
 class ContextTemplateError(ValueError):
     """Template-facing context manager error with section/pointer metadata."""
 
@@ -56,8 +63,8 @@ class ContextTemplateError(ValueError):
         message: str,
         *,
         template_pointer: str,
-        section_name: Optional[str] = None,
-        phase: Optional[str] = None,
+        section_name: str | None = None,
+        phase: str | None = None,
     ):
         super().__init__(message)
         self.template_pointer = template_pointer
@@ -86,17 +93,22 @@ class ContextTemplateExecutionError(RuntimeError):
 # Helper utilities
 # ---------------------------------------------------------------------------
 
-def normalize_input_file_lists(input_file_data: Any) -> List[List[Dict[str, Any]]]:
+
+def normalize_input_file_lists(input_file_data: Any) -> list[list[dict[str, Any]]]:
     if not input_file_data:
         return []
-    if isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
+    if (
+        isinstance(input_file_data, list)
+        and input_file_data
+        and isinstance(input_file_data[0], dict)
+    ):
         return [input_file_data]
     if isinstance(input_file_data, list):
         return input_file_data
     return []
 
 
-def count_input_files(input_file_data: Any) -> Dict[str, int]:
+def count_input_files(input_file_data: Any) -> dict[str, int]:
     file_lists = normalize_input_file_lists(input_file_data)
     if not file_lists:
         return {"total": 0, "refs_only": 0, "missing": 0}
@@ -117,11 +129,13 @@ def count_input_files(input_file_data: Any) -> Dict[str, int]:
     return {"total": total, "refs_only": refs_only, "missing": missing}
 
 
-def summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> List[Dict[str, Any]]:
+def summarize_input_files(
+    input_file_data: Any, preview_limit: int = 200
+) -> list[dict[str, Any]]:
     file_lists = normalize_input_file_lists(input_file_data)
     if not file_lists:
         return []
-    summaries: List[Dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
     for file_list in file_lists:
         for file_data in file_list:
             if not isinstance(file_data, dict):
@@ -148,7 +162,7 @@ def summarize_input_files(input_file_data: Any, preview_limit: int = 200) -> Lis
     return summaries
 
 
-def hash_output(value: Optional[str]) -> Optional[str]:
+def hash_output(value: str | None) -> str | None:
     if not value:
         return None
     return hash_file_content(value, length=12)
@@ -156,7 +170,9 @@ def hash_output(value: Optional[str]) -> Optional[str]:
 
 def resolve_cache_now(run_context: RunContext[Any]) -> datetime:
     deps = getattr(run_context, "deps", None)
-    now_override = getattr(deps, "context_manager_now", None) if deps is not None else None
+    now_override = (
+        getattr(deps, "context_manager_now", None) if deps is not None else None
+    )
     if isinstance(now_override, datetime):
         return now_override
     if isinstance(now_override, str):
@@ -177,11 +193,11 @@ def resolve_cache_now(run_context: RunContext[Any]) -> datetime:
                 "Failed to read context_manager_now from runtime config; using current time",
                 data={"error": str(exc)},
             )
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _frontmatter_value_with_alias(
-    frontmatter: Optional[Dict[str, Any]],
+    frontmatter: dict[str, Any] | None,
     canonical_key: str,
     alias_key: str,
 ) -> Any:
@@ -212,7 +228,7 @@ def _frontmatter_value_with_alias(
     return None
 
 
-def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
+def resolve_week_start_day(frontmatter: dict[str, Any] | None) -> int:
     """
     Resolve week_start_day from template frontmatter.
 
@@ -220,7 +236,9 @@ def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
     """
     if not frontmatter:
         return 0
-    raw_value = _frontmatter_value_with_alias(frontmatter, "week_start_day", "week-start-day")
+    raw_value = _frontmatter_value_with_alias(
+        frontmatter, "week_start_day", "week-start-day"
+    )
     if raw_value is None:
         return 0
     if isinstance(raw_value, int) and 0 <= raw_value <= 6:
@@ -236,7 +254,7 @@ def resolve_week_start_day(frontmatter: Optional[Dict[str, Any]]) -> int:
     return 0
 
 
-def find_last_user_idx(msgs: List[ModelMessage]) -> Optional[int]:
+def find_last_user_idx(msgs: list[ModelMessage]) -> int | None:
     for idx in range(len(msgs) - 1, -1, -1):
         m = msgs[idx]
         role = getattr(m, "role", None)
@@ -270,7 +288,7 @@ def _deserialize_model_message(payload: dict[str, Any]) -> ModelMessage | None:
         message = _MODEL_MESSAGE_ADAPTER.validate_python(payload)
     except Exception:
         return None
-    return message if isinstance(message, (ModelRequest, ModelResponse)) else None
+    return message if isinstance(message, ModelRequest | ModelResponse) else None
 
 
 def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
@@ -290,14 +308,18 @@ def _history_item_to_model_messages(item: Any) -> list[ModelMessage]:
                 )
             )
         ]
-    if isinstance(item, (ToolExchange, ToolExchangeBatch)):
+    if isinstance(item, ToolExchange | ToolExchangeBatch):
         restored: list[ModelMessage] = []
         for payload in (item.request_message, item.response_message):
             message = _deserialize_model_message(payload)
             if message is None:
                 return [
                     _context_message_to_model_message(
-                        ContextMessage(role="system", content=item.text or "", metadata=item.metadata)
+                        ContextMessage(
+                            role="system",
+                            content=item.text or "",
+                            metadata=item.metadata,
+                        )
                     )
                 ]
             restored.append(message)
@@ -324,10 +346,14 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
         messages = value.get("messages", ())
         instructions = value.get("instructions", ())
         normalized_messages: list[Any] = []
-        if not isinstance(messages, (list, tuple)):
-            raise ValueError("assemble_context result must expose 'messages' as a list or tuple")
+        if not isinstance(messages, list | tuple):
+            raise ValueError(
+                "assemble_context result must expose 'messages' as a list or tuple"
+            )
         for item in messages:
-            if isinstance(item, (ContextMessage, HistoryMessage, ToolExchange, ToolExchangeBatch)):
+            if isinstance(
+                item, ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch
+            ):
                 normalized_messages.append(item)
                 continue
             if isinstance(item, dict):
@@ -339,13 +365,21 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                         elif isinstance(exchange, dict):
                             exchanges.append(
                                 ToolExchange(
-                                    tool_call_id=str(exchange.get("tool_call_id") or ""),
+                                    tool_call_id=str(
+                                        exchange.get("tool_call_id") or ""
+                                    ),
                                     tool_name=str(exchange.get("tool_name") or ""),
-                                    request_message=dict(exchange.get("request_message") or {}),
-                                    response_message=dict(exchange.get("response_message") or {}),
+                                    request_message=dict(
+                                        exchange.get("request_message") or {}
+                                    ),
+                                    response_message=dict(
+                                        exchange.get("response_message") or {}
+                                    ),
                                     call_arguments=(
                                         dict(exchange.get("call_arguments"))
-                                        if isinstance(exchange.get("call_arguments"), dict)
+                                        if isinstance(
+                                            exchange.get("call_arguments"), dict
+                                        )
                                         else None
                                     ),
                                     result_text=(
@@ -377,7 +411,11 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                                 if isinstance(item.get("call_arguments"), dict)
                                 else None
                             ),
-                            result_text=None if item.get("result_text") is None else str(item.get("result_text")),
+                            result_text=(
+                                None
+                                if item.get("result_text") is None
+                                else str(item.get("result_text"))
+                            ),
                             metadata=dict(item.get("metadata") or {}),
                         )
                     )
@@ -387,7 +425,11 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                         HistoryMessage(
                             role=str(item.get("role") or "system"),
                             content=str(item.get("content") or ""),
-                            message=dict(item.get("message") or {}) if isinstance(item.get("message"), dict) else None,
+                            message=(
+                                dict(item.get("message") or {})
+                                if isinstance(item.get("message"), dict)
+                                else None
+                            ),
                             metadata=dict(item.get("metadata") or {}),
                         )
                     )
@@ -400,9 +442,11 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
                     )
                 )
                 continue
-            raise ValueError("assemble_context result messages must contain context/history values or dictionaries")
+            raise ValueError(
+                "assemble_context result messages must contain context/history values or dictionaries"
+            )
         normalized_instructions: list[str] = []
-        if isinstance(instructions, (list, tuple)):
+        if isinstance(instructions, list | tuple):
             for item in instructions:
                 text = str(item).strip()
                 if text:
@@ -411,7 +455,9 @@ def _normalize_authoring_context_result(value: Any) -> AssembleContextResult:
             messages=tuple(normalized_messages),
             instructions=tuple(normalized_instructions),
         )
-    raise ValueError("Authoring context template must return AssembleContextResult or an equivalent dictionary")
+    raise ValueError(
+        "Authoring context template must return AssembleContextResult or an equivalent dictionary"
+    )
 
 
 def _combined_context_text(messages: Sequence[Any]) -> str:
@@ -422,7 +468,7 @@ def _combined_context_text(messages: Sequence[Any]) -> str:
     ).strip()
 
 
-def _latest_turn_messages(messages: Sequence[ModelMessage]) -> List[ModelMessage]:
+def _latest_turn_messages(messages: Sequence[ModelMessage]) -> list[ModelMessage]:
     """Return the active turn suffix starting at the latest real user prompt."""
     last_user_idx = find_last_user_idx(list(messages))
     if last_user_idx is None:
@@ -448,7 +494,9 @@ def _split_active_prompt(
     if not messages:
         return [], None
     last_message = messages[-1]
-    if isinstance(last_message, ModelRequest) and _model_request_has_user_prompt(last_message):
+    if isinstance(last_message, ModelRequest) and _model_request_has_user_prompt(
+        last_message
+    ):
         return list(messages[:-1]), last_message
     return list(messages), None
 
@@ -470,14 +518,14 @@ def _latest_message_from_model_message(message: ModelMessage | None) -> LatestMe
 async def _build_authoring_context_history(
     *,
     run_context: RunContext[Any],
-    messages: List[ModelMessage],
+    messages: list[ModelMessage],
     session_id: str,
     vault_name: str,
     vault_path: str,
     workspace_path: str = "",
     template,
     source,
-) -> List[ModelMessage]:
+) -> list[ModelMessage]:
     if not messages:
         return []
 
@@ -583,7 +631,7 @@ async def _build_authoring_context_history(
             template_name=template.name,
             phase="authoring_run",
             template_pointer=source.docstring_summary or "```python``` block",
-        )
+        ) from exc
 
     try:
         assembled = _normalize_authoring_context_result(result.value)
@@ -610,7 +658,8 @@ async def _build_authoring_context_history(
                 "error": str(exc),
                 "template_name": template.name,
                 "phase": "result_shape",
-                "template_pointer": source.docstring_summary or "assemble_context(...) result",
+                "template_pointer": source.docstring_summary
+                or "assemble_context(...) result",
             },
         )
         raise ContextTemplateExecutionError(
@@ -678,7 +727,9 @@ async def _build_authoring_context_history(
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to persist authoring context summary", data={"error": str(exc)})
+            logger.warning(
+                "Failed to persist authoring context summary", data={"error": str(exc)}
+            )
 
     curated_history = []
     for message in assembled.messages:
@@ -715,7 +766,11 @@ async def _build_authoring_context_history(
             "total_messages": len(curated_history),
             "summary_section_count": 1 if summary_text else 0,
             "summary_sections": [section_name] if summary_text else [],
-            "active_prompt_source": "history_processor_input" if active_prompt_message is not None else "absent",
+            "active_prompt_source": (
+                "history_processor_input"
+                if active_prompt_message is not None
+                else "absent"
+            ),
         },
     )
     return curated_history
@@ -725,6 +780,7 @@ async def _build_authoring_context_history(
 # Public factory
 # ---------------------------------------------------------------------------
 
+
 def build_context_manager_history_processor(
     *,
     session_id: str,
@@ -733,7 +789,7 @@ def build_context_manager_history_processor(
     model_alias: str,
     template_name: str,
     workspace_path: str = "",
-) -> Callable[[RunContext[Any], List[ModelMessage]], Awaitable[List[ModelMessage]]]:
+) -> Callable[[RunContext[Any], list[ModelMessage]], Awaitable[list[ModelMessage]]]:
     """
     Factory for a history processor that runs a Monty authoring template and
     injects the assembled context ahead of the recent turns.
@@ -778,7 +834,9 @@ def build_context_manager_history_processor(
         },
     )
 
-    async def processor(run_context: RunContext[Any], messages: List[ModelMessage]) -> List[ModelMessage]:
+    async def processor(
+        run_context: RunContext[Any], messages: list[ModelMessage]
+    ) -> list[ModelMessage]:
         return await _build_authoring_context_history(
             run_context=run_context,
             messages=messages,

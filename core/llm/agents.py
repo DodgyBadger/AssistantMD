@@ -1,15 +1,17 @@
 import json
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncIterator, Optional, List, Sequence
+from typing import Any
 
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessage, UserContent
 from pydantic_ai.usage import UsageLimits
+
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
-from core.llm.thinking import ThinkingValue
 from core.llm.model_selection import ModelExecutionSpec
+from core.llm.thinking import ThinkingValue
 from core.settings import get_default_model_thinking
 from core.settings.store import get_general_settings
 
@@ -25,13 +27,14 @@ class CollectedAgentRun:
     output: Any
     messages: list[ModelMessage]
 
+
 async def create_agent(
     model=None,
-    tools: Optional[List] = None,
-    retries: Optional[int] = None,
-    output_type: Optional[Any] = None,
-    history_processors: Optional[List] = None,
-    capabilities: Optional[List[Any]] = None,
+    tools: list | None = None,
+    retries: int | None = None,
+    output_type: Any | None = None,
+    history_processors: list | None = None,
+    capabilities: list[Any] | None = None,
     thinking: ThinkingValue | object = _THINKING_UNSET,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
@@ -49,7 +52,7 @@ async def create_agent(
     Returns:
         Configured Pydantic AI Agent ready for use
     """
-    
+
     # Handle default model if none provided
     if model is None:
         general_settings = get_general_settings()
@@ -63,9 +66,7 @@ async def create_agent(
         default_model_name = str(default_model_value).lower().strip()
 
         resolved_thinking = (
-            get_default_model_thinking()
-            if thinking is _THINKING_UNSET
-            else thinking
+            get_default_model_thinking() if thinking is _THINKING_UNSET else thinking
         )
         model = build_model_instance(default_model_name, thinking=resolved_thinking)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
@@ -73,24 +74,26 @@ async def create_agent(
                 "default_model cannot use skip mode ('none'). "
                 "Set a concrete LLM alias in system/settings.yaml."
             )
-    
+
     # Pure composition - assemble the pre-configured pieces
     agent_kwargs = {
-        'model': model,
-        'retries': retries if retries is not None else DEFAULT_TOOL_RETRIES
+        "model": model,
+        "retries": retries if retries is not None else DEFAULT_TOOL_RETRIES,
     }
     if history_processors:
-        agent_kwargs['history_processors'] = history_processors
+        agent_kwargs["history_processors"] = history_processors
     if tools:
-        agent_kwargs['tools'] = tools
+        agent_kwargs["tools"] = tools
     if output_type is not None:
-        agent_kwargs['output_type'] = output_type
+        agent_kwargs["output_type"] = output_type
     if capabilities:
-        agent_kwargs['capabilities'] = capabilities
+        agent_kwargs["capabilities"] = capabilities
 
     agent = Agent(**agent_kwargs)
 
-    agent.instructions(lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}.")
+    agent.instructions(
+        lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}."
+    )
 
     return agent
 
@@ -101,28 +104,25 @@ async def generate_stream(
     message_history,
 ) -> AsyncIterator[str]:
     try:
-        async with agent.run_stream(
-            prompt,
-            message_history=message_history
-        ) as result:
+        async with agent.run_stream(prompt, message_history=message_history) as result:
             full_response = ""
             async for text in result.stream_text():
-                delta_text = text[len(full_response):]
+                delta_text = text[len(full_response) :]
                 full_response = text
-                
+
                 chunk = {
-                    "choices": [{
-                        "delta": {
-                            "content": delta_text
-                        },
-                        "index": 0,
-                        "finish_reason": None
-                    }]
+                    "choices": [
+                        {
+                            "delta": {"content": delta_text},
+                            "index": 0,
+                            "finish_reason": None,
+                        }
+                    ]
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
-            
+
             yield f"data: {json.dumps({'choices': [{'delta': {}, 'index': 0, 'finish_reason': 'stop'}]})}\n\n"
-            
+
     except Exception:
         raise
 

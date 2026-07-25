@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
-
 DB_NAME = "chat_sessions"
 MIGRATION_NAMESPACE = "chat_sessions"
 
@@ -176,7 +175,9 @@ def ensure_chat_sessions_schema(
         _migrate_compaction_checkpoints(conn)
         conn.commit()
         if apply_migrations:
-            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)
+            apply_sqlite_migrations(
+                conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS
+            )
             conn.commit()
     finally:
         conn.close()
@@ -280,8 +281,12 @@ def _deduplicate_session_ids(conn) -> None:
             )
 
 
-def _deduplicated_session_id(conn, *, session_id: str, vault_name: str, index: int) -> str:
-    vault_part = vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+def _deduplicated_session_id(
+    conn, *, session_id: str, vault_name: str, index: int
+) -> str:
+    vault_part = (
+        vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    )
     base = f"{session_id}__{vault_part or 'vault'}"
     candidate = base if index == 1 else f"{base}_{index}"
     suffix = index

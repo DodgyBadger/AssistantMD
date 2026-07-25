@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from validation.core.base_scenario import BaseScenario
 from core.vault_state.identity import resolve_or_create_vault_identity
+from validation.core.base_scenario import BaseScenario
 
 
 class VaultStateManifestScenario(BaseScenario):
@@ -18,7 +18,9 @@ class VaultStateManifestScenario(BaseScenario):
         vault = self.create_vault("VaultStateManifestVault")
         self.create_file(vault, "notes/alpha.md", "Alpha v1\n")
         self.create_file(vault, "notes/beta.md", "Beta v1\n")
-        self.create_file(vault, "AssistantMD/Chat_Sessions/export.md", "Derived transcript\n")
+        self.create_file(
+            vault, "AssistantMD/Chat_Sessions/export.md", "Derived transcript\n"
+        )
 
         await self.start_system()
 
@@ -31,7 +33,9 @@ class VaultStateManifestScenario(BaseScenario):
         with ThreadPoolExecutor(max_workers=8) as executor:
             identities = list(
                 executor.map(
-                    lambda _: resolve_or_create_vault_identity(concurrent_vault).vault_id,
+                    lambda _: resolve_or_create_vault_identity(
+                        concurrent_vault
+                    ).vault_id,
                     range(16),
                 )
             )
@@ -45,9 +49,16 @@ class VaultStateManifestScenario(BaseScenario):
         first = service.refresh_vault(vault)
         first_events = self.events_since(checkpoint)
 
-        self.soft_assert((vault / "AssistantMD" / "vault.yaml").exists(), "vault.yaml should be created")
-        self.soft_assert(first.files_seen >= 3, "Initial refresh should see included files")
-        self.soft_assert_equal(first.files_excluded, 1, "Initial refresh should count excluded files")
+        self.soft_assert(
+            (vault / "AssistantMD" / "vault.yaml").exists(),
+            "vault.yaml should be created",
+        )
+        self.soft_assert(
+            first.files_seen >= 3, "Initial refresh should see included files"
+        )
+        self.soft_assert_equal(
+            first.files_excluded, 1, "Initial refresh should count excluded files"
+        )
         self.assert_event_contains(
             first_events,
             name="vault_state_refresh_completed",
@@ -102,10 +113,18 @@ class VaultStateManifestScenario(BaseScenario):
             first.vault_id,
             "Renamed vault folder should keep the same vault_id",
         )
-        self.soft_assert_equal(second.vault_name, renamed_vault.name, "Current alias should update")
-        self.soft_assert_equal(second.files_changed, 1, "Second refresh should detect one changed file")
-        self.soft_assert_equal(second.files_created, 1, "Second refresh should detect one new file")
-        self.soft_assert_equal(second.files_deleted, 1, "Second refresh should detect one deleted file")
+        self.soft_assert_equal(
+            second.vault_name, renamed_vault.name, "Current alias should update"
+        )
+        self.soft_assert_equal(
+            second.files_changed, 1, "Second refresh should detect one changed file"
+        )
+        self.soft_assert_equal(
+            second.files_created, 1, "Second refresh should detect one new file"
+        )
+        self.soft_assert_equal(
+            second.files_deleted, 1, "Second refresh should detect one deleted file"
+        )
         self.assert_event_contains(
             second_events,
             name="vault_state_refresh_completed",

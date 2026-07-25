@@ -276,7 +276,9 @@ class GoalOpsStore:
                 params.append(workspace)
         if source_type:
             clauses.append("source_type = ?")
-            params.append(_validate_status(source_type, GOAL_SOURCE_TYPES, "goal source_type"))
+            params.append(
+                _validate_status(source_type, GOAL_SOURCE_TYPES, "goal source_type")
+            )
         if source_id:
             clauses.append("source_id = ?")
             params.append(_required_text(source_id, "source_id"))
@@ -396,7 +398,9 @@ class GoalOpsStore:
         if older_than_days is not None:
             if older_than_days < 0:
                 raise ValueError("older_than_days must be zero or greater")
-            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=older_than_days)
+            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(
+                days=older_than_days
+            )
             clauses.append("updated_at < ?")
             params.append(cutoff.isoformat())
 
@@ -419,7 +423,9 @@ class GoalOpsStore:
         conn: sqlite3.Connection,
         goal_id: str,
     ) -> dict[str, Any]:
-        row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
         payload = self._goal_from_row(row).to_dict()
@@ -454,7 +460,9 @@ class GoalOpsStore:
                 now,
             ),
         )
-        row = conn.execute("SELECT * FROM goal_events WHERE event_id = ?", (event_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goal_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
         return self._event_from_row(row)
 
     def _latest_checkpoint_in_conn(
@@ -475,13 +483,17 @@ class GoalOpsStore:
         return self._checkpoint_from_row(row) if row else None
 
     def _require_goal(self, conn: sqlite3.Connection, goal_id: str) -> sqlite3.Row:
-        row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
         return row
 
     def _touch_goal(self, conn: sqlite3.Connection, goal_id: str, now: str) -> None:
-        conn.execute("UPDATE goals SET updated_at = ? WHERE goal_id = ?", (now, goal_id))
+        conn.execute(
+            "UPDATE goals SET updated_at = ? WHERE goal_id = ?", (now, goal_id)
+        )
 
     @staticmethod
     def _goal_from_row(row: sqlite3.Row) -> GoalRecord:
@@ -497,7 +509,9 @@ class GoalOpsStore:
             objective=str(row["objective"]),
             status=str(row["status"]),
             plan=_load_json(row["plan_json"], default=None),
-            success_criteria=tuple(_load_json(row["success_criteria_json"], default=[])),
+            success_criteria=tuple(
+                _load_json(row["success_criteria_json"], default=[])
+            ),
             metadata=_clean_dict(_load_json(row["metadata_json"], default={})),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
@@ -521,8 +535,12 @@ class GoalOpsStore:
             goal_id=str(row["goal_id"]),
             summary=str(row["summary"]),
             current_state=row["current_state"],
-            next_actions=tuple(_clean_string_list(_load_json(row["next_actions_json"], default=[]))),
-            open_questions=tuple(_clean_string_list(_load_json(row["open_questions_json"], default=[]))),
+            next_actions=tuple(
+                _clean_string_list(_load_json(row["next_actions_json"], default=[]))
+            ),
+            open_questions=tuple(
+                _clean_string_list(_load_json(row["open_questions_json"], default=[]))
+            ),
             risks=tuple(_clean_string_list(_load_json(row["risks_json"], default=[]))),
             metadata=_clean_dict(_load_json(row["metadata_json"], default={})),
             created_at=str(row["created_at"]),
@@ -598,7 +616,9 @@ def _load_json(value: Any, *, default: Any) -> Any:
 def _validate_status(value: str, allowed: set[str], label: str) -> str:
     status = _required_text(value, label).lower()
     if status not in allowed:
-        raise ValueError(f"Invalid {label}: {status}. Expected one of: {', '.join(sorted(allowed))}")
+        raise ValueError(
+            f"Invalid {label}: {status}. Expected one of: {', '.join(sorted(allowed))}"
+        )
     return status
 
 

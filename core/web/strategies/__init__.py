@@ -8,11 +8,11 @@ from core.web.registry import (
     WebStrategyRegistry,
     web_strategy_registry,
 )
+from core.web.strategies.crawl_tavily import crawl_with_tavily
 from core.web.strategies.extract_curl import extract_with_curl
 from core.web.strategies.extract_tavily import extract_with_tavily
 from core.web.strategies.search_duckduckgo import search_with_duckduckgo
 from core.web.strategies.search_tavily import search_with_tavily
-from core.web.strategies.crawl_tavily import crawl_with_tavily
 
 
 def register_builtin_web_strategies(

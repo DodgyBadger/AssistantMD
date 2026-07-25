@@ -2,45 +2,51 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
+import inspect
 import json
 import logging
 import os
-import inspect
-import fcntl
 import time
+from collections.abc import Iterable
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 import logfire
-from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Decision, Sampler, SamplingResult
-from logfire.sampling import SamplingOptions
 import yaml
-from core.settings.secrets_store import get_secret_value
-from core.settings.store import get_general_settings
+from logfire.sampling import SamplingOptions
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_ON,
+    Decision,
+    Sampler,
+    SamplingResult,
+)
+
 from core.activity_log import (
     DEFAULT_MAX_TOTAL_BYTES,
     DEFAULT_RETENTION_DAYS,
     prune_activity_segments,
 )
-from core.runtime.paths import get_system_root
 from core.runtime import state as runtime_state
+from core.runtime.paths import get_system_root
+from core.settings.secrets_store import get_secret_value
+from core.settings.store import get_general_settings
 
-
-_activity_logger: Optional[logging.Logger] = None
-_activity_log_path: Optional[Path] = None
+_activity_logger: logging.Logger | None = None
+_activity_log_path: Path | None = None
 _activity_logger_lock = Lock()
 _validation_log_lock = Lock()
 _warning_dedupe_lock = Lock()
 _validation_event_counter = 0
-_validation_boot_id: Optional[int] = None
-_warning_dedupe_boot_id: Optional[int] = None
-_warning_dedupe_keys: set[tuple[str, str, Optional[str]]] = set()
-_logfire_config_state: Optional[Tuple[bool, Optional[str]]] = None
+_validation_boot_id: int | None = None
+_warning_dedupe_boot_id: int | None = None
+_warning_dedupe_keys: set[tuple[str, str, str | None]] = set()
+_logfire_config_state: tuple[bool, str | None] | None = None
 _logfire_instrumented = False
 _logger_internal = logging.getLogger(__name__)
 _NOISY_LOGFIRE_MESSAGES = frozenset(
@@ -83,7 +89,10 @@ class _BoundedTimedActivityHandler(TimedRotatingFileHandler):
             active_stat = active_path.stat()
         except (OSError, ValueError):
             return
-        if (stream_stat.st_dev, stream_stat.st_ino) == (active_stat.st_dev, active_stat.st_ino):
+        if (stream_stat.st_dev, stream_stat.st_ino) == (
+            active_stat.st_dev,
+            active_stat.st_ino,
+        ):
             return
         self.stream.close()
         self.stream = self._open()
@@ -156,7 +165,7 @@ class _LogfireNoiseFilteringSampler(Sampler):
         return "LogfireNoiseFilteringSampler"
 
 
-def _token_fingerprint(token: Optional[str]) -> Optional[str]:
+def _token_fingerprint(token: str | None) -> str | None:
     """Create a stable fingerprint for secret comparison without storing raw values."""
     if not token:
         return None
@@ -268,7 +277,7 @@ def _resolve_activity_log_path() -> Path:
         return Path("/app/system") / "activity.log"
 
 
-def _validation_features() -> Dict[str, Any]:
+def _validation_features() -> dict[str, Any]:
     """Return validation feature flags from the runtime context, if available."""
     if not runtime_state.has_runtime_context():
         return {}
@@ -290,7 +299,7 @@ def _warnings_deduped() -> bool:
     return features.get("dedupe_warnings", True)
 
 
-def _resolve_validation_artifact_dir() -> Optional[Path]:
+def _resolve_validation_artifact_dir() -> Path | None:
     """Resolve the validation artifact directory for validation-only logging."""
     if not _validation_enabled():
         return None
@@ -311,7 +320,7 @@ def _resolve_validation_artifact_dir() -> Optional[Path]:
         return None
 
 
-def _write_validation_record(record: Dict[str, Any]) -> None:
+def _write_validation_record(record: dict[str, Any]) -> None:
     """Write a validation artifact record to a YAML file."""
     directory = _resolve_validation_artifact_dir()
     if directory is None:
@@ -343,12 +352,14 @@ def _write_validation_record(record: Dict[str, Any]) -> None:
 
 def _sanitize_validation_name(value: str) -> str:
     """Normalize names for validation artifact filenames."""
-    normalized = "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in value)
+    normalized = "".join(
+        char if char.isalnum() or char in ("-", "_") else "_" for char in value
+    )
     normalized = normalized.strip("_")
     return normalized or "event"
 
 
-def _get_validation_caller() -> Dict[str, Any]:
+def _get_validation_caller() -> dict[str, Any]:
     """Capture caller metadata for validation events."""
     frame = inspect.currentframe()
     if frame is None:
@@ -369,7 +380,7 @@ def _get_validation_caller() -> Dict[str, Any]:
     }
 
 
-def _get_runtime_boot_id() -> Optional[int]:
+def _get_runtime_boot_id() -> int | None:
     """Return the runtime boot sequence number if available."""
     if not runtime_state.has_runtime_context():
         return None
@@ -380,7 +391,7 @@ def _get_runtime_boot_id() -> Optional[int]:
     return getattr(runtime, "boot_id", None)
 
 
-def _emit_activity_record(record: Dict[str, Any]) -> None:
+def _emit_activity_record(record: dict[str, Any]) -> None:
     """Write a record to the activity log."""
     payload = {
         "timestamp": record["timestamp"],
@@ -397,7 +408,9 @@ def _emit_activity_record(record: Dict[str, Any]) -> None:
     activity_logger.info(json.dumps(payload, ensure_ascii=False))
 
 
-def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, Any]) -> None:
+def _emit_validation_record(
+    tag: str, message: str, level: str, data: dict[str, Any]
+) -> None:
     """Write a validation artifact record when validation is enabled."""
     if not _validation_enabled():
         return
@@ -405,7 +418,7 @@ def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, 
     event_name = data.get("event") if isinstance(data, dict) else None
     boot_id = _get_runtime_boot_id()
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
         "type": "validation_event",
         "tag": tag,
         "name": event_name or message,
@@ -421,7 +434,9 @@ def _emit_validation_record(tag: str, message: str, level: str, data: Dict[str, 
     _write_validation_record(record)
 
 
-def _emit_logfire_record(logfire_client, level: str, message: str, tag: str, data: Dict[str, Any]) -> None:
+def _emit_logfire_record(
+    logfire_client, level: str, message: str, tag: str, data: dict[str, Any]
+) -> None:
     """Mirror a record to Logfire if configured."""
     log_method = getattr(logfire_client, level, None)
     payload = {"tag": tag}
@@ -443,8 +458,8 @@ class UnifiedLogger:
     def __init__(
         self,
         tag: str,
-        vault_context: Optional[str] = None,
-        default_sinks: Optional[Iterable[str]] = None,
+        vault_context: str | None = None,
+        default_sinks: Iterable[str] | None = None,
     ):
         """
         Initialize unified logger for a module or component.
@@ -456,10 +471,14 @@ class UnifiedLogger:
         """
         self.tag = tag
         self.vault_context = vault_context
-        self.default_sinks = list(default_sinks) if default_sinks is not None else [
-            "activity",
-            "logfire",
-        ]
+        self.default_sinks = (
+            list(default_sinks)
+            if default_sinks is not None
+            else [
+                "activity",
+                "logfire",
+            ]
+        )
         self._logfire_instance = None  # Lazy initialization
 
     @property
@@ -483,33 +502,41 @@ class UnifiedLogger:
             # logfire.instrument_sqlalchemy()
             _logfire_instrumented = True
         return logfire
-    
+
     # Sink-Based Logging
 
-    def add_sink(self, *sinks: str) -> "OneShotLogger":
+    def add_sink(self, *sinks: str) -> OneShotLogger:
         """Return a one-shot logger that appends sinks for the next log call."""
         return OneShotLogger(self, list(sinks), mode="append")
 
-    def set_sinks(self, sinks: Iterable[str]) -> "OneShotLogger":
+    def set_sinks(self, sinks: Iterable[str]) -> OneShotLogger:
         """Return a one-shot logger that replaces sinks for the next log call."""
         return OneShotLogger(self, list(sinks), mode="replace")
 
-    def info(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+    def info(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
         """Info logging routed to configured sinks."""
         self._log("info", message, data=data, **fields)
 
-    def warning(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+    def warning(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
         """Warning logging routed to configured sinks."""
         self._log("warning", message, data=data, **fields)
 
-    def error(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+    def error(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
         """Error logging routed to configured sinks."""
         self._log("error", message, data=data, **fields)
 
-    def debug(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
+    def debug(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
         """Debug logging routed to configured sinks."""
         self._log("debug", message, data=data, **fields)
-    
+
     @contextmanager
     def span(self, operation: str, **span_data: Any):
         """
@@ -535,19 +562,18 @@ class UnifiedLogger:
         """
         async with self._logfire.span(f"{self.tag}:{operation}", **span_data):
             yield
-    
-    
+
     def _log(
         self,
         level: str,
         message: str,
         *,
-        data: Optional[Dict[str, Any]] = None,
-        sinks: Optional[Iterable[str]] = None,
+        data: dict[str, Any] | None = None,
+        sinks: Iterable[str] | None = None,
         sink_mode: str = "append",
         **fields: Any,
     ) -> None:
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         if data:
             payload.update(data)
         if fields:
@@ -562,7 +588,7 @@ class UnifiedLogger:
                     if sink not in resolved_sinks:
                         resolved_sinks.append(sink)
 
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        timestamp = datetime.now(UTC).isoformat(timespec="milliseconds")
         boot_id = _get_runtime_boot_id()
         record = {
             "timestamp": timestamp,
@@ -582,7 +608,10 @@ class UnifiedLogger:
             with _warning_dedupe_lock:
                 global _warning_dedupe_boot_id
                 global _warning_dedupe_keys
-                if record.get("boot_id") is not None and record["boot_id"] != _warning_dedupe_boot_id:
+                if (
+                    record.get("boot_id") is not None
+                    and record["boot_id"] != _warning_dedupe_boot_id
+                ):
                     _warning_dedupe_keys.clear()
                     _warning_dedupe_boot_id = record["boot_id"]
                 if dedupe_key in _warning_dedupe_keys:
@@ -597,9 +626,9 @@ class UnifiedLogger:
 
         if "logfire" in resolved_sinks:
             _emit_logfire_record(self._logfire, level, message, self.tag, payload)
-    
+
     # Instrumentation Setup
-    
+
     def setup_instrumentation(self, app=None) -> None:
         """
         Set up additional automatic instrumentation for the application.
@@ -624,7 +653,7 @@ class UnifiedLogger:
             # Capture Python logging for third-party libraries (like APScheduler)
             logging.basicConfig(
                 handlers=[self._logfire.LogfireLoggingHandler()],
-                level=logging.DEBUG  # Set to DEBUG to capture detailed APScheduler information
+                level=logging.DEBUG,  # Set to DEBUG to capture detailed APScheduler information
             )
 
         except ImportError as e:
@@ -639,19 +668,55 @@ class UnifiedLogger:
 class OneShotLogger:
     """One-shot logger proxy to override sinks for a single call."""
 
-    def __init__(self, base: UnifiedLogger, sinks: List[str], mode: str):
+    def __init__(self, base: UnifiedLogger, sinks: list[str], mode: str):
         self._base = base
         self._sinks = sinks
         self._mode = mode
 
-    def info(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
-        self._base._log("info", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
+    def info(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
+        self._base._log(
+            "info",
+            message,
+            data=data,
+            sinks=self._sinks,
+            sink_mode=self._mode,
+            **fields,
+        )
 
-    def warning(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
-        self._base._log("warning", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
+    def warning(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
+        self._base._log(
+            "warning",
+            message,
+            data=data,
+            sinks=self._sinks,
+            sink_mode=self._mode,
+            **fields,
+        )
 
-    def error(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
-        self._base._log("error", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
+    def error(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
+        self._base._log(
+            "error",
+            message,
+            data=data,
+            sinks=self._sinks,
+            sink_mode=self._mode,
+            **fields,
+        )
 
-    def debug(self, message: str, *, data: Optional[Dict[str, Any]] = None, **fields: Any) -> None:
-        self._base._log("debug", message, data=data, sinks=self._sinks, sink_mode=self._mode, **fields)
+    def debug(
+        self, message: str, *, data: dict[str, Any] | None = None, **fields: Any
+    ) -> None:
+        self._base._log(
+            "debug",
+            message,
+            data=data,
+            sinks=self._sinks,
+            sink_mode=self._mode,
+            **fields,
+        )

@@ -38,7 +38,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             except Exception as exc:
                 assert getattr(exc, "error_type", "") == "InvalidVaultName"
             else:
-                raise AssertionError(f"Invalid vault name should be rejected: {invalid_vault_name}")
+                raise AssertionError(
+                    f"Invalid vault name should be rejected: {invalid_vault_name}"
+                )
 
         escaping_vault = vault.parent / "EscapingVault"
         escaping_vault.symlink_to(self.run_path / "artifacts", target_is_directory=True)
@@ -47,7 +49,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         except Exception as exc:
             assert getattr(exc, "error_type", "") == "VaultRootEscapesDataRoot"
         else:
-            raise AssertionError("A symlinked vault root must not escape the configured data root")
+            raise AssertionError(
+                "A symlinked vault root must not escape the configured data root"
+            )
 
         refs = self.call_api(
             f"/api/vaults/{vault.name}/file-refs",
@@ -56,8 +60,12 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert refs.status_code == 200, "File reference listing should succeed"
         refs_payload = refs.json()
         paths = {item["path"] for item in refs_payload.get("items", [])}
-        assert "Projects/Alpha" in paths, "Workspace listing should include project folders"
-        assert ".hidden/secret.md" not in paths, "Workspace listing should not expose hidden paths"
+        assert (
+            "Projects/Alpha" in paths
+        ), "Workspace listing should include project folders"
+        assert (
+            ".hidden/secret.md" not in paths
+        ), "Workspace listing should not expose hidden paths"
 
         first_page = self.call_api(
             f"/api/vaults/{vault.name}/file-refs",
@@ -88,10 +96,16 @@ class VaultFileReferenceApiScenario(BaseScenario):
                 "limit": 20,
             },
         )
-        assert search.status_code == 200, "Vault-wide file reference search should succeed"
+        assert (
+            search.status_code == 200
+        ), "Vault-wide file reference search should succeed"
         search_paths = {item["path"] for item in search.json().get("items", [])}
-        assert "Projects/Alpha/README.md" in search_paths, "Search should find markdown files"
-        assert ".hidden/secret.md" not in search_paths, "Search should not expose hidden files"
+        assert (
+            "Projects/Alpha/README.md" in search_paths
+        ), "Search should find markdown files"
+        assert (
+            ".hidden/secret.md" not in search_paths
+        ), "Search should not expose hidden files"
 
         resolved = self.call_api(
             f"/api/vaults/{vault.name}/file-refs/resolve",
@@ -124,12 +138,14 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert resolutions["root-note.md"]["source"] == "vault"
         assert resolutions["Projects/Alpha/README.md"]["source"] == "vault"
         assert resolutions["Projects/Alpha"]["kind"] == "directory"
-        assert resolutions["Nested/plan.md"]["kind"] == "missing", (
-            "Slash-containing references must not fall back to workspace-relative paths"
-        )
+        assert (
+            resolutions["Nested/plan.md"]["kind"] == "missing"
+        ), "Slash-containing references must not fall back to workspace-relative paths"
         assert resolutions["missing.md"]["kind"] == "missing"
         assert resolutions[".hidden/secret.md"]["kind"] == "missing"
-        assert len(resolutions) == 7, "Duplicate normalized candidates should resolve once"
+        assert (
+            len(resolutions) == 7
+        ), "Duplicate normalized candidates should resolve once"
 
         invalid_resolution = self.call_api(
             f"/api/vaults/{vault.name}/file-refs/resolve",
@@ -145,7 +161,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert read.status_code == 200, "Vault file read should succeed"
         read_payload = read.json()
-        assert read_payload["content"] == "# Alpha\n\nStart here.\n", "Read returns exact content"
+        assert (
+            read_payload["content"] == "# Alpha\n\nStart here.\n"
+        ), "Read returns exact content"
         assert read_payload["sha256"], "Read returns a content hash"
 
         source_read = self.call_api(
@@ -159,7 +177,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             f"/api/vaults/{vault.name}/files",
             params={"path": "binary.docx"},
         )
-        assert binary_read.status_code == 415, "Binary files should not open in the text editor"
+        assert (
+            binary_read.status_code == 415
+        ), "Binary files should not open in the text editor"
         assert binary_read.json().get("error") == "VaultFileNotText"
 
         traversal = self.call_api(
@@ -167,9 +187,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             params={"path": "../outside.md"},
         )
         assert traversal.status_code == 400, "Traversal path should be rejected"
-        assert traversal.json().get("error") == "InvalidVaultFilePath", (
-            "Traversal rejection should use stable API error type"
-        )
+        assert (
+            traversal.json().get("error") == "InvalidVaultFilePath"
+        ), "Traversal rejection should use stable API error type"
 
         stale = self.call_api(
             f"/api/vaults/{vault.name}/files",
@@ -178,9 +198,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             data={"content": "# Changed\n", "expected_sha256": "stale"},
         )
         assert stale.status_code == 409, "Stale hash should reject save"
-        assert stale.json().get("error") == "VaultFileConflict", (
-            "Stale hash should use conflict error type"
-        )
+        assert (
+            stale.json().get("error") == "VaultFileConflict"
+        ), "Stale hash should use conflict error type"
         assert (vault / "Projects/Alpha/README.md").read_text(encoding="utf-8") == (
             "# Alpha\n\nStart here.\n"
         ), "Stale save must not modify the file"
@@ -197,7 +217,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert update.status_code == 200, "Hash-matched save should succeed"
         update_hash = update.json()["sha256"]
-        assert update_hash != read_payload["sha256"], "Save should return the new content hash"
+        assert (
+            update_hash != read_payload["sha256"]
+        ), "Save should return the new content hash"
         assert (vault / "Projects/Alpha/README.md").read_text(encoding="utf-8") == (
             "# Alpha\n\nUpdated.\n"
         ), "Hash-matched save should update the file"
@@ -231,7 +253,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert revisions.status_code == 200, "File revision history should respond"
         revision_rows = revisions.json().get("revisions") or []
-        assert len(revision_rows) == 1, "Explorer save should retain one pre-edit revision"
+        assert (
+            len(revision_rows) == 1
+        ), "Explorer save should retain one pre-edit revision"
         revision = revision_rows[0]
         assert revision["activity_kind"] == "explorer"
         assert revision["operation"] == "update_vault_file"
@@ -240,9 +264,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             f"/api/vault-state/snapshots/{revision['snapshot_id']}/content"
         )
         assert snapshot.status_code == 200
-        assert snapshot.text == "# Alpha\n\nStart here.\n", (
-            "Explorer revision should preserve the exact pre-edit content"
-        )
+        assert (
+            snapshot.text == "# Alpha\n\nStart here.\n"
+        ), "Explorer revision should preserve the exact pre-edit content"
 
         restore_read = self.call_api(
             f"/api/vaults/{vault.name}/files",
@@ -284,9 +308,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         displaced_snapshot = self.call_api(
             f"/api/vault-state/snapshots/{restored_history[0]['snapshot_id']}/content"
         )
-        assert displaced_snapshot.text == "second revision\n", (
-            "Restore should retain the displaced current state as another revision"
-        )
+        assert (
+            displaced_snapshot.text == "second revision\n"
+        ), "Restore should retain the displaced current state as another revision"
         stale_restore = self.call_api(
             f"/api/vaults/{vault.name}/files/revisions/{restore_snapshot_id}/restore",
             method="POST",
@@ -299,10 +323,12 @@ class VaultFileReferenceApiScenario(BaseScenario):
             f"/api/vaults/{vault.name}/files",
             params={"path": "Projects/README.md"},
         )
-        assert missing.status_code == 404, "Missing referenced file should report not found"
-        assert missing.json().get("error") == "VaultFileNotFound", (
-            "Missing referenced file should use stable not-found error"
-        )
+        assert (
+            missing.status_code == 404
+        ), "Missing referenced file should report not found"
+        assert (
+            missing.json().get("error") == "VaultFileNotFound"
+        ), "Missing referenced file should use stable not-found error"
 
         create = self.call_api(
             f"/api/vaults/{vault.name}/files",
@@ -314,9 +340,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
             },
         )
         assert create.status_code == 200, "Create-if-missing save should succeed"
-        assert create.json()["content"] == "# Projects\n\nWorkspace landing page.\n", (
-            "Create response should return the created content"
-        )
+        assert (
+            create.json()["content"] == "# Projects\n\nWorkspace landing page.\n"
+        ), "Create response should return the created content"
         assert (vault / "Projects/README.md").read_text(encoding="utf-8") == (
             "# Projects\n\nWorkspace landing page.\n"
         ), "Create-if-missing should write the new vault file"
@@ -336,19 +362,20 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert restore_absent.status_code == 200
         assert restore_absent.json()["exists"] is False
-        assert not (vault / "Projects/README.md").exists(), (
-            "Restoring a pre-create revision should restore file absence"
-        )
+        assert not (
+            vault / "Projects/README.md"
+        ).exists(), "Restoring a pre-create revision should restore file absence"
 
         vault_events = self._vault_file_events()
         event_hashes = {row["path"]: row["content_hash"] for row in vault_events}
-        assert event_hashes.get("Projects/Alpha/README.md") == update_hash, (
-            "Inline file edit should refresh vault-state with the edited content hash"
-        )
+        assert (
+            event_hashes.get("Projects/Alpha/README.md") == update_hash
+        ), "Inline file edit should refresh vault-state with the edited content hash"
         event_pairs = {(row["event_type"], row["path"]) for row in vault_events}
-        assert ("created", "Projects/README.md") in event_pairs, (
-            "Create-if-missing should refresh vault-state creation events"
-        )
+        assert (
+            "created",
+            "Projects/README.md",
+        ) in event_pairs, "Create-if-missing should refresh vault-state creation events"
 
         create_directory = self.call_api(
             f"/api/vaults/{vault.name}/paths/mutate",
@@ -429,7 +456,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         assert move_directory_payload["metadata"]["descendant_directory_count"] == 1
         assert not (vault / "Explorer").exists()
         assert (vault / "MovedExplorer/renamed.md").is_file()
-        assert (vault / "MovedExplorer/Nested/child.txt").read_text(encoding="utf-8") == "nested\n"
+        assert (vault / "MovedExplorer/Nested/child.txt").read_text(
+            encoding="utf-8"
+        ) == "nested\n"
         self.assert_event_contains(
             self.events_since(move_directory_checkpoint),
             name="vault_directory_move_completed",
@@ -443,8 +472,7 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         activity = self.call_api(f"/api/vaults/{vault.name}/activity")
         assert all(
-            group.get("operation_count", 0) > 0
-            for group in activity.json()["groups"]
+            group.get("operation_count", 0) > 0 for group in activity.json()["groups"]
         ), "Rejected Explorer commands should not create empty activity rows"
         directory_activity = next(
             group
@@ -493,9 +521,9 @@ class VaultFileReferenceApiScenario(BaseScenario):
         )
         assert deleted_revisions.status_code == 200
         deleted_revision_rows = deleted_revisions.json()["revisions"]
-        assert len(deleted_revision_rows) == 1, (
-            "Revision history should stay exact-path and not follow the directory move"
-        )
+        assert (
+            len(deleted_revision_rows) == 1
+        ), "Revision history should stay exact-path and not follow the directory move"
         deleted_snapshot = self.call_api(
             f"/api/vault-state/snapshots/{deleted_revision_rows[0]['snapshot_id']}/content"
         )

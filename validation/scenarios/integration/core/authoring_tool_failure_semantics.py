@@ -83,7 +83,9 @@ class AuthoringToolFailureSemanticsScenario(BaseScenario):
         except Exception as exc:  # noqa: BLE001
             session_failure = exc
         finally:
-            session_ops_module._preflight_session_summary_embeddings = original_preflight
+            session_ops_module._preflight_session_summary_embeddings = (
+                original_preflight
+            )
             session_ops_module._summarize_session = original_summarize
 
         caught_run = runtime.workflow_run_store.get_latest_run(

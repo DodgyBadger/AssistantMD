@@ -162,7 +162,9 @@ class ChatStore:
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
-            next_index = self._next_sequence_index(conn, session_id=session_id, vault_name=vault_name)
+            next_index = self._next_sequence_index(
+                conn, session_id=session_id, vault_name=vault_name
+            )
             persist_reasoning = get_persist_model_reasoning_parts()
             for offset, message in enumerate(messages):
                 message = _message_for_persistence(
@@ -170,7 +172,11 @@ class ChatStore:
                     persist_reasoning_parts=persist_reasoning,
                 )
                 role, content_text = _extract_role_and_text(message)
-                direction = "response" if type(message).__name__ == "ModelResponse" else "request"
+                direction = (
+                    "response"
+                    if type(message).__name__ == "ModelResponse"
+                    else "request"
+                )
                 conn.execute(
                     """
                     INSERT INTO chat_messages (
@@ -252,7 +258,11 @@ class ChatStore:
                     persist_reasoning_parts=persist_reasoning,
                 )
                 role, content_text = _extract_role_and_text(message)
-                direction = "response" if type(message).__name__ == "ModelResponse" else "request"
+                direction = (
+                    "response"
+                    if type(message).__name__ == "ModelResponse"
+                    else "request"
+                )
                 conn.execute(
                     """
                     INSERT INTO chat_messages (
@@ -442,7 +452,9 @@ class ChatStore:
         finally:
             conn.close()
 
-    def set_session_title(self, session_id: str, vault_name: str, title: str | None) -> None:
+    def set_session_title(
+        self, session_id: str, vault_name: str, title: str | None
+    ) -> None:
         """Set or clear the user-defined title for a session."""
         conn = self._connect()
         try:
@@ -577,7 +589,11 @@ class ChatStore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "Message predicate raised in get_recent_matching",
-                    data={"session_id": session_id, "vault_name": vault_name, "error": str(exc)},
+                    data={
+                        "session_id": session_id,
+                        "vault_name": vault_name,
+                        "error": str(exc),
+                    },
                 )
                 continue
         matched.reverse()
@@ -621,9 +637,19 @@ class ChatStore:
                     tool_call_id,
                     tool_name,
                     event_type,
-                    None if args is None else json.dumps(args, ensure_ascii=False, sort_keys=True),
+                    (
+                        None
+                        if args is None
+                        else json.dumps(args, ensure_ascii=False, sort_keys=True)
+                    ),
                     result_text,
-                    None if result_metadata is None else json.dumps(result_metadata, ensure_ascii=False, sort_keys=True),
+                    (
+                        None
+                        if result_metadata is None
+                        else json.dumps(
+                            result_metadata, ensure_ascii=False, sort_keys=True
+                        )
+                    ),
                     artifact_ref,
                 ),
             )
@@ -667,8 +693,7 @@ class ChatStore:
                 ).fetchall()
                 if committed_tool_call_ids is not None:
                     rows = [
-                        row for row in rows
-                        if str(row[0]) in committed_tool_call_ids
+                        row for row in rows if str(row[0]) in committed_tool_call_ids
                     ]
                 if limit is not None:
                     rows = rows[-limit:]
@@ -698,7 +723,9 @@ class ChatStore:
                 created_at=str(created_at or ""),
                 args_json=None if args_json is None else str(args_json),
                 result_text=None if result_text is None else str(result_text),
-                result_metadata_json=None if result_metadata_json is None else str(result_metadata_json),
+                result_metadata_json=(
+                    None if result_metadata_json is None else str(result_metadata_json)
+                ),
                 artifact_ref=None if artifact_ref is None else str(artifact_ref),
             )
             for (
@@ -734,7 +761,9 @@ class ChatStore:
             ids.update(_tool_call_ids_from_json(str(message_json)))
         return ids
 
-    def list_sessions(self, vault_name: str, *, limit: int | None = None) -> list[StoredChatSession]:
+    def list_sessions(
+        self, vault_name: str, *, limit: int | None = None
+    ) -> list[StoredChatSession]:
         """Return chat sessions for one vault ordered by latest activity descending."""
         conn = self._connect()
         try:
@@ -790,7 +819,14 @@ class ChatStore:
             conn.close()
         if row is None:
             return None
-        session_id_value, session_vault_name, created_at, last_activity_at, title, metadata_json = row
+        (
+            session_id_value,
+            session_vault_name,
+            created_at,
+            last_activity_at,
+            title,
+            metadata_json,
+        ) = row
         return StoredChatSession(
             session_id=str(session_id_value),
             vault_name=str(session_vault_name),
@@ -816,7 +852,14 @@ class ChatStore:
             conn.close()
         if row is None:
             return None
-        session_id_value, session_vault_name, created_at, last_activity_at, title, metadata_json = row
+        (
+            session_id_value,
+            session_vault_name,
+            created_at,
+            last_activity_at,
+            title,
+            metadata_json,
+        ) = row
         return StoredChatSession(
             session_id=str(session_id_value),
             vault_name=str(session_vault_name),
@@ -929,7 +972,11 @@ class ChatStore:
         self, *, session_id: str, vault_name: str, chat_mode: str
     ) -> None:
         """Persist the selected chat mode in session metadata."""
-        normalized = "inline_edit" if str(chat_mode).strip().lower() == "inline_edit" else "normal"
+        normalized = (
+            "inline_edit"
+            if str(chat_mode).strip().lower() == "inline_edit"
+            else "normal"
+        )
         self.update_session_metadata(
             session_id=session_id,
             vault_name=vault_name,
@@ -938,12 +985,17 @@ class ChatStore:
 
     def get_session_chat_mode(self, session_id: str, vault_name: str) -> str:
         """Return the selected chat mode for one session."""
-        value = str(self.get_session_metadata(session_id, vault_name).get("chat_mode") or "normal")
+        value = str(
+            self.get_session_metadata(session_id, vault_name).get("chat_mode")
+            or "normal"
+        )
         return "inline_edit" if value.strip().lower() == "inline_edit" else "normal"
 
     def get_session_history_revision(self, session_id: str, vault_name: str) -> int:
         """Return the monotonic effective-history revision for one session."""
-        return _metadata_history_revision(self.get_session_metadata(session_id, vault_name))
+        return _metadata_history_revision(
+            self.get_session_metadata(session_id, vault_name)
+        )
 
     def get_latest_compaction_checkpoint(
         self,
@@ -962,7 +1014,9 @@ class ChatStore:
             conn.close()
         return checkpoint
 
-    def get_highest_message_sequence_index(self, session_id: str, vault_name: str) -> int:
+    def get_highest_message_sequence_index(
+        self, session_id: str, vault_name: str
+    ) -> int:
         """Return the current raw message high-water mark for one session."""
         conn = self._connect()
         try:
@@ -1027,8 +1081,14 @@ class ChatStore:
                     message_count_before,
                     last_message_sequence_index,
                     _MODEL_MESSAGE_ADAPTER.dump_json(summary_message).decode("utf-8"),
-                    _MODEL_MESSAGE_LIST_ADAPTER.dump_json(replacement_history).decode("utf-8"),
-                    None if metadata is None else json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    _MODEL_MESSAGE_LIST_ADAPTER.dump_json(replacement_history).decode(
+                        "utf-8"
+                    ),
+                    (
+                        None
+                        if metadata is None
+                        else json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                    ),
                 ),
             )
             self._touch_session(
@@ -1162,7 +1222,9 @@ class ChatStore:
         vault_name: str,
     ) -> list[StoredChatMessage]:
         try:
-            messages = _MODEL_MESSAGE_LIST_ADAPTER.validate_json(checkpoint.replacement_history_json)
+            messages = _MODEL_MESSAGE_LIST_ADAPTER.validate_json(
+                checkpoint.replacement_history_json
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to deserialize compaction checkpoint replacement history",
@@ -1179,7 +1241,9 @@ class ChatStore:
         stored_messages: list[StoredChatMessage] = []
         for sequence_index, message in enumerate(messages):
             role, content_text = _extract_role_and_text(message)
-            direction = "response" if type(message).__name__ == "ModelResponse" else "request"
+            direction = (
+                "response" if type(message).__name__ == "ModelResponse" else "request"
+            )
             stored_messages.append(
                 StoredChatMessage(
                     sequence_index=sequence_index,
@@ -1189,7 +1253,9 @@ class ChatStore:
                     role=role,
                     content_text=content_text,
                     created_at=checkpoint.created_at,
-                    message_json=_MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
+                    message_json=_MODEL_MESSAGE_ADAPTER.dump_json(message).decode(
+                        "utf-8"
+                    ),
                     message=message,
                 )
             )
@@ -1204,7 +1270,15 @@ class ChatStore:
     ) -> list[StoredChatMessage]:
         messages: list[StoredChatMessage] = []
         for row in rows:
-            sequence_index, direction, message_type, role, content_text, created_at, message_json = row
+            (
+                sequence_index,
+                direction,
+                message_type,
+                role,
+                content_text,
+                created_at,
+                message_json,
+            ) = row
             try:
                 message = _MODEL_MESSAGE_ADAPTER.validate_json(message_json)
             except Exception as exc:  # noqa: BLE001
@@ -1283,7 +1357,9 @@ class ChatStore:
         )
 
     @staticmethod
-    def _highest_message_sequence_index(conn, *, session_id: str, vault_name: str) -> int:
+    def _highest_message_sequence_index(
+        conn, *, session_id: str, vault_name: str
+    ) -> int:
         row = conn.execute(
             """
             SELECT COALESCE(MAX(sequence_index), -1)
@@ -1337,7 +1413,11 @@ class ChatStore:
                 SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
                 WHERE session_id = ? AND vault_name = ?
                 """,
-                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), session_id, vault_name),
+                (
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    session_id,
+                    vault_name,
+                ),
             )
             return
         conn.execute(
@@ -1502,12 +1582,20 @@ def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
                 if isinstance(part_content, str):
                     rendered_parts.append(part_content)
             elif isinstance(part, ToolReturnPart | NativeToolReturnPart):
-                tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+                tool_name = (
+                    getattr(part, "tool_name", None)
+                    or getattr(part, "tool_call_id", None)
+                    or "tool"
+                )
                 part_content = getattr(part, "content", None)
                 if isinstance(part_content, str):
                     rendered_parts.append(f"[{tool_name}] {part_content}")
             elif isinstance(part, ToolCallPart):
-                tool_name = getattr(part, "tool_name", None) or getattr(part, "tool_call_id", None) or "tool"
+                tool_name = (
+                    getattr(part, "tool_name", None)
+                    or getattr(part, "tool_call_id", None)
+                    or "tool"
+                )
                 rendered_parts.append(f"[{tool_name}] (tool call)")
         if rendered_parts:
             if has_system_part and role == "user":
@@ -1528,7 +1616,10 @@ def _fork_prefix_messages(
     copied: list[StoredChatMessage] = []
     pending_tool_call_ids: set[str] = set()
     for message in messages:
-        if message.sequence_index > through_sequence_index and not pending_tool_call_ids:
+        if (
+            message.sequence_index > through_sequence_index
+            and not pending_tool_call_ids
+        ):
             break
         copied.append(message)
         pending_tool_call_ids.update(message.tool_call_ids)

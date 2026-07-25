@@ -14,10 +14,9 @@ from core.authoring.contracts import (
     ToolExchangeBatch,
 )
 from core.authoring.helpers.common import build_capability
-from core.chat.tool_history import analyze_tool_history_payloads
 from core.chat.history_service import ChatHistoryContext, ChatHistoryService
+from core.chat.tool_history import analyze_tool_history_payloads
 from core.logger import UnifiedLogger
-
 
 _CHAT_HISTORY_SERVICE = ChatHistoryService()
 logger = UnifiedLogger(tag="authoring-host")
@@ -46,21 +45,23 @@ async def execute(
         data={
             "workflow_id": context.workflow_id,
             "scope": scope,
-            "session_id": session_id or getattr(host, "chat_session_id", None) or getattr(host, "session_key", None),
+            "session_id": session_id
+            or getattr(host, "chat_session_id", None)
+            or getattr(host, "session_key", None),
             "limit": limit,
             "message_filter": message_filter,
         },
     )
     host_message_history = getattr(host, "message_history", None)
     workflow_id = str(context.workflow_id)
-    prefer_host_history = (
-        host_message_history is not None
-        and bool(getattr(host, "prefer_message_history", False))
+    prefer_host_history = host_message_history is not None and bool(
+        getattr(host, "prefer_message_history", False)
     )
     result = _CHAT_HISTORY_SERVICE.get_conversation_history(
         context=ChatHistoryContext(
             message_history=tuple(host_message_history or ()),
-            session_id=getattr(host, "chat_session_id", None) or getattr(host, "session_key", None),
+            session_id=getattr(host, "chat_session_id", None)
+            or getattr(host, "session_key", None),
             vault_name=workflow_id.split("/", 1)[0] if "/" in workflow_id else None,
             prefer_message_history=prefer_host_history,
         ),
@@ -115,12 +116,16 @@ async def execute(
     return response
 
 
-def _parse_call(call: AuthoringCapabilityCall) -> tuple[str, str | None, int | str, str]:
+def _parse_call(
+    call: AuthoringCapabilityCall,
+) -> tuple[str, str | None, int | str, str]:
     if call.args:
         raise ValueError("retrieve_history only supports keyword arguments")
     scope = str(call.kwargs.get("scope") or "session").strip() or "session"
     raw_session_id = call.kwargs.get("session_id")
-    session_id = str(raw_session_id).strip() if raw_session_id not in (None, "") else None
+    session_id = (
+        str(raw_session_id).strip() if raw_session_id not in (None, "") else None
+    )
     limit = call.kwargs.get("limit", "all")
     parsed_limit = _parse_limit(limit)
     message_filter = str(call.kwargs.get("message_filter") or "all").strip() or "all"
@@ -143,13 +148,19 @@ def _parse_limit(value: int | str) -> int | str:
     raise ValueError("limit must be a positive integer or 'all'")
 
 
-def _build_safe_history_items(items: tuple[Any, ...]) -> list[HistoryMessage | ToolExchange | ToolExchangeBatch]:
+def _build_safe_history_items(
+    items: tuple[Any, ...],
+) -> list[HistoryMessage | ToolExchange | ToolExchangeBatch]:
     safe_items: list[HistoryMessage | ToolExchange | ToolExchangeBatch] = []
     index = 0
     item_list = list(items)
     while index < len(item_list):
         current = item_list[index]
-        current_message = current.message if isinstance(getattr(current, "message", None), dict) else None
+        current_message = (
+            current.message
+            if isinstance(getattr(current, "message", None), dict)
+            else None
+        )
         if current_message is not None:
             exchange, consumed = _consume_tool_exchange(item_list, index)
             if exchange is not None:
@@ -173,12 +184,19 @@ def _consume_tool_exchange(
     start_index: int,
 ) -> tuple[ToolExchange | ToolExchangeBatch | None, int]:
     first = items[start_index]
-    first_message = first.message if isinstance(getattr(first, "message", None), dict) else None
-    if first_message is None or str(getattr(first, "message_type", "") or "") != "ModelResponse":
+    first_message = (
+        first.message if isinstance(getattr(first, "message", None), dict) else None
+    )
+    if (
+        first_message is None
+        or str(getattr(first, "message_type", "") or "") != "ModelResponse"
+    ):
         return None, 1
 
     first_parts = list(first_message.get("parts") or ())
-    tool_call_parts = [part for part in first_parts if part.get("part_kind") == "tool-call"]
+    tool_call_parts = [
+        part for part in first_parts if part.get("part_kind") == "tool-call"
+    ]
     if not tool_call_parts:
         return None, 1
 
@@ -193,12 +211,19 @@ def _consume_tool_exchange(
     if start_index + 1 >= len(items):
         return None, 1
     second = items[start_index + 1]
-    second_message = second.message if isinstance(getattr(second, "message", None), dict) else None
-    if second_message is None or str(getattr(second, "message_type", "") or "") != "ModelRequest":
+    second_message = (
+        second.message if isinstance(getattr(second, "message", None), dict) else None
+    )
+    if (
+        second_message is None
+        or str(getattr(second, "message_type", "") or "") != "ModelRequest"
+    ):
         return None, 1
 
     second_parts = list(second_message.get("parts") or ())
-    tool_return_parts = [part for part in second_parts if part.get("part_kind") == "tool-return"]
+    tool_return_parts = [
+        part for part in second_parts if part.get("part_kind") == "tool-return"
+    ]
     if not tool_return_parts:
         return None, 1
 

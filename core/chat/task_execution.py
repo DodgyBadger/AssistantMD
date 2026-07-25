@@ -50,10 +50,13 @@ from core.runtime.execution_tasks import (
     chat_task_label,
 )
 from core.runtime.state import get_runtime_context
-from core.runtime.task_runner import ExecutionGatePolicy, ExecutionTaskHooks, ExecutionTaskSpec
+from core.runtime.task_runner import (
+    ExecutionGatePolicy,
+    ExecutionTaskHooks,
+    ExecutionTaskSpec,
+)
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
-
 
 _CHAT_STORE = ChatStore()
 
@@ -131,7 +134,9 @@ async def start_chat_turn_retry_task(
     try:
         accepted_sequence_index = int(accepted_sequence_index)
     except (TypeError, ValueError) as exc:
-        raise ValueError("The unfinished turn marker does not identify an accepted user message.") from exc
+        raise ValueError(
+            "The unfinished turn marker does not identify an accepted user message."
+        ) from exc
 
     stored_messages = _CHAT_STORE.get_stored_messages(
         session_id,
@@ -147,14 +152,20 @@ async def start_chat_turn_retry_task(
         None,
     )
     if accepted_message is None:
-        raise ValueError("The accepted user message for the unfinished turn was not found.")
+        raise ValueError(
+            "The accepted user message for the unfinished turn was not found."
+        )
     prompt = chat_executor._user_prompt_text(accepted_message.message)
     if not prompt:
-        raise ValueError("The accepted user message for the unfinished turn is not retryable.")
+        raise ValueError(
+            "The accepted user message for the unfinished turn is not retryable."
+        )
 
     model = str(marker.get("model") or "").strip()
     if not model:
-        raise ValueError("The unfinished turn marker does not include a model to retry.")
+        raise ValueError(
+            "The unfinished turn marker does not include a model to retry."
+        )
     tools = [str(tool) for tool in marker.get("tools") or ()]
     chat_mode = chat_executor.normalize_chat_mode(marker.get("chat_mode"))
     message_history = [
@@ -315,7 +326,9 @@ async def start_deferred_review_resume_task(
         ),
         _run,
         hooks=ExecutionTaskHooks(
-            on_cancelled=lambda task_id: _mark_review_cancelled(buffer, task_id, _mark_terminal),
+            on_cancelled=lambda task_id: _mark_review_cancelled(
+                buffer, task_id, _mark_terminal
+            ),
             on_failed=lambda _task_id, exc: _mark_terminal("failed", exc),
         ),
         start_immediately=False,
@@ -354,7 +367,9 @@ async def start_chat_stream_task(
         session_id=session_id,
         chat_mode=chat_mode,
     )
-    display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
+    display_prompt_kwargs = (
+        {"display_prompt": display_prompt} if display_prompt is not None else {}
+    )
     prepared = await chat_executor._prepare_chat_execution(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -401,14 +416,20 @@ async def start_queued_chat_stream_task(
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
             try:
-                if has_pending_deferred_review(vault_name=vault_name, session_id=session_id):
+                if has_pending_deferred_review(
+                    vault_name=vault_name, session_id=session_id
+                ):
                     raise chat_executor.ChatReviewPendingError(session_id=session_id)
                 chat_executor.persist_chat_session_mode(
                     vault_name=vault_name,
                     session_id=session_id,
                     chat_mode=chat_mode,
                 )
-                display_prompt_kwargs = {"display_prompt": display_prompt} if display_prompt is not None else {}
+                display_prompt_kwargs = (
+                    {"display_prompt": display_prompt}
+                    if display_prompt is not None
+                    else {}
+                )
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,
                     vault_path=vault_path,
@@ -425,7 +446,9 @@ async def start_queued_chat_stream_task(
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
                 await _publish_deferred_preflight_failure(
                     task_id=tracked_task.task_id,
                     exc=exc,
@@ -501,11 +524,13 @@ async def _append_cancelled_if_open(
             "cancelled",
             {
                 "event": "cancelled",
-                "choices": [{
-                    "delta": {},
-                    "index": 0,
-                    "finish_reason": "cancelled",
-                }],
+                "choices": [
+                    {
+                        "delta": {},
+                        "index": 0,
+                        "finish_reason": "cancelled",
+                    }
+                ],
             },
         )
     except RuntimeError:
@@ -551,7 +576,9 @@ async def _publish_deferred_preflight_failure(
     )
     payload = _preflight_error_event_data(exc)
     await event_buffer.append(task_id, "error", payload)
-    await runtime.task_coordinator.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+    await runtime.task_coordinator.mark_failed(
+        task_id, reason=f"{type(exc).__name__}: {exc}"
+    )
 
 
 def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
@@ -564,10 +591,7 @@ def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
         return _error_event_data(f"\n\nReview pending: {str(exc)}", exc.details)
     if isinstance(
         exc,
-        (
-            chat_executor.ChatToolCallLimitError,
-            chat_executor.ChatModelRequestLimitError,
-        ),
+        chat_executor.ChatToolCallLimitError | chat_executor.ChatModelRequestLimitError,
     ):
         return _error_event_data(
             f"\n\n{chat_executor._usage_limit_display_label(exc)} reached: {str(exc)}",
@@ -643,7 +667,9 @@ async def _run_prepared_chat_stream_task(
         if should_mark_started:
             await runtime.task_coordinator.mark_started(task.task_id)
         if persist_user_request:
-            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+            async with chat_session_history_lock(
+                session_id=session_id, vault_name=vault_name
+            ):
                 _CHAT_STORE.add_messages(
                     session_id,
                     vault_name,
@@ -664,7 +690,9 @@ async def _run_prepared_chat_stream_task(
             workspace_path=prepared.workspace_path,
             extra={
                 "history_message_count": len(prepared.message_history or []),
-                "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+                "prompt_for_history_tokens": estimate_token_count(
+                    prepared.prompt_for_history
+                ),
                 "task_id": task.task_id,
                 "retry": not persist_user_request,
             },
@@ -809,15 +837,17 @@ async def _run_prepared_chat_stream_task(
                 "done",
                 {
                     "event": "done",
-                    "choices": [{
-                        "delta": {},
-                        "index": 0,
-                        "finish_reason": (
-                            "tool_review_required"
-                            if deferred_review is not None
-                            else "stop"
-                        ),
-                    }],
+                    "choices": [
+                        {
+                            "delta": {},
+                            "index": 0,
+                            "finish_reason": (
+                                "tool_review_required"
+                                if deferred_review is not None
+                                else "stop"
+                            ),
+                        }
+                    ],
                     "tool_summary": tool_activity,
                 },
             )
@@ -843,16 +873,20 @@ async def _run_prepared_chat_stream_task(
                 "cancelled",
                 {
                     "event": "cancelled",
-                    "choices": [{
-                        "delta": {},
-                        "index": 0,
-                        "finish_reason": "cancelled",
-                    }],
+                    "choices": [
+                        {
+                            "delta": {},
+                            "index": 0,
+                            "finish_reason": "cancelled",
+                        }
+                    ],
                 },
             )
             raise
         except chat_executor.ChatCapabilityError as exc:
-            chat_executor.logger.warning("Streaming capability mismatch", data=exc.details)
+            chat_executor.logger.warning(
+                "Streaming capability mismatch", data=exc.details
+            )
             chat_executor._record_latest_turn_failure(
                 session_id=session_id,
                 vault_name=vault_name,
@@ -898,7 +932,9 @@ async def _run_prepared_chat_stream_task(
             )
             raise
         except chat_executor.ChatContextTemplateError as exc:
-            chat_executor.logger.warning("Streaming context template failure", data=exc.details)
+            chat_executor.logger.warning(
+                "Streaming context template failure", data=exc.details
+            )
             chat_executor._record_latest_turn_failure(
                 session_id=session_id,
                 vault_name=vault_name,
@@ -1045,11 +1081,13 @@ async def stream_chat_task_sse(
 def _delta_event_data(delta_text: str) -> dict[str, Any]:
     return {
         "event": "delta",
-        "choices": [{
-            "delta": {"content": delta_text},
-            "index": 0,
-            "finish_reason": None,
-        }],
+        "choices": [
+            {
+                "delta": {"content": delta_text},
+                "index": 0,
+                "finish_reason": None,
+            }
+        ],
     }
 
 
@@ -1063,11 +1101,13 @@ def _thinking_delta_event_data(delta_text: str) -> dict[str, Any]:
 def _error_event_data(message: str, details: dict[str, Any]) -> dict[str, Any]:
     return {
         "event": "error",
-        "choices": [{
-            "delta": {"content": message},
-            "index": 0,
-            "finish_reason": "error",
-        }],
+        "choices": [
+            {
+                "delta": {"content": message},
+                "index": 0,
+                "finish_reason": "error",
+            }
+        ],
         "details": details,
     }
 
@@ -1193,7 +1233,9 @@ async def _publish_tool_call_finished(
             "tool_call_id": tool_id,
             "tool_name": tool_name,
             "result_length": len(result_text),
-            "result_token_estimate": estimate_token_count(result_text) if result_text else 0,
+            "result_token_estimate": (
+                estimate_token_count(result_text) if result_text else 0
+            ),
             "memory_rss_bytes": chat_executor._get_process_rss_bytes(),
         },
     )

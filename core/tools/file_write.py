@@ -22,7 +22,6 @@ from core.vault_state.file_operations import (
 
 from .base import BaseTool
 
-
 logger = UnifiedLogger(tag="file-write-tool")
 
 
@@ -65,7 +64,11 @@ class FileWrite(BaseTool):
                     data={
                         "tool": "file_write",
                         "operation": operation,
-                        "vault": vault_path.rstrip("/").split("/")[-1] if vault_path else None,
+                        "vault": (
+                            vault_path.rstrip("/").split("/")[-1]
+                            if vault_path
+                            else None
+                        ),
                     },
                 )
                 if not vault_path:
@@ -144,7 +147,9 @@ def _execute_write_operation(
             overwrite=overwrite,
         )
     if normalized == "append":
-        return append_vault_file_operation(vault_path=vault_path, path=path, content=content)
+        return append_vault_file_operation(
+            vault_path=vault_path, path=path, content=content
+        )
     if normalized == "edit_line":
         return edit_vault_line_operation(
             vault_path=vault_path,

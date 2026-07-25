@@ -64,50 +64,56 @@ class ModelFailureClassificationScenario(BaseScenario):
                     "model": "gpt-mini",
                 }
             )
-            assert result["start_response"].status_code == 200, "Provider failure chat task should start"
+            assert (
+                result["start_response"].status_code == 200
+            ), "Provider failure chat task should start"
             error_event = result["terminal_event"]
-            assert error_event.get("event") == "error", "Streaming should emit an error event"
-            assert error_event.get("details", {}).get("failure_kind") == "billing", (
-                "Streaming error details should classify provider billing failures"
-            )
-            assert error_event.get("details", {}).get("retryable") is False, (
-                "Billing failures should be non-retryable without user action"
-            )
-            assert error_event.get("details", {}).get("http_status") == 400, (
-                "Streaming error details should expose provider HTTP status"
-            )
+            assert (
+                error_event.get("event") == "error"
+            ), "Streaming should emit an error event"
+            assert (
+                error_event.get("details", {}).get("failure_kind") == "billing"
+            ), "Streaming error details should classify provider billing failures"
+            assert (
+                error_event.get("details", {}).get("retryable") is False
+            ), "Billing failures should be non-retryable without user action"
+            assert (
+                error_event.get("details", {}).get("http_status") == 400
+            ), "Streaming error details should expose provider HTTP status"
 
             detail = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
             )
-            assert detail.status_code == 200, "Failed chat session detail should be available"
+            assert (
+                detail.status_code == 200
+            ), "Failed chat session detail should be available"
             latest_failure = detail.json().get("latest_failure")
             assert latest_failure is not None, "Failure marker should be exposed"
-            assert latest_failure.get("error_type") == "ModelHTTPError", (
-                "Failure marker should preserve model error type"
-            )
-            assert latest_failure.get("failure_kind") == "billing", (
-                "Failure marker should classify provider billing failures"
-            )
-            assert latest_failure.get("retryable") is False, (
-                "Failure marker should mark billing failures non-retryable"
-            )
-            assert latest_failure.get("http_status") == 400, (
-                "Failure marker should include provider HTTP status"
-            )
-            assert "billing" in latest_failure.get("suggested_action", "").lower(), (
-                "Failure marker should tell the agent/user to check billing"
-            )
+            assert (
+                latest_failure.get("error_type") == "ModelHTTPError"
+            ), "Failure marker should preserve model error type"
+            assert (
+                latest_failure.get("failure_kind") == "billing"
+            ), "Failure marker should classify provider billing failures"
+            assert (
+                latest_failure.get("retryable") is False
+            ), "Failure marker should mark billing failures non-retryable"
+            assert (
+                latest_failure.get("http_status") == 400
+            ), "Failure marker should include provider HTTP status"
+            assert (
+                "billing" in latest_failure.get("suggested_action", "").lower()
+            ), "Failure marker should tell the agent/user to check billing"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
             content = json.dumps(activity_log.json()["entries"])
-            assert '"failure_kind": "billing"' in content, (
-                "Activity log should include model failure classification"
-            )
-            assert '"retryable": false' in content, (
-                "Activity log should include model retryability"
-            )
+            assert (
+                '"failure_kind": "billing"' in content
+            ), "Activity log should include model failure classification"
+            assert (
+                '"retryable": false' in content
+            ), "Activity log should include model retryability"
         finally:
             chat_executor._prepare_chat_execution = original_prepare_chat_execution
             await self.stop_system()

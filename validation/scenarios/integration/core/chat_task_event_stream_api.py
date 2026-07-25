@@ -44,7 +44,9 @@ class _FakeStreamResult:
 class _CompletingStreamAgent:
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=ThinkingPart("thinking start "))
-        yield PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="thinking delta"))
+        yield PartDeltaEvent(
+            index=0, delta=ThinkingPartDelta(content_delta="thinking delta")
+        )
         yield PartStartEvent(index=1, part=TextPart("api "))
         yield PartDeltaEvent(index=1, delta=TextPartDelta("delta"))
         yield AgentRunResultEvent(
@@ -119,13 +121,14 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
         )
         self.soft_assert(
             '"event": "thinking_delta"' not in replay_after_delta.text
-            and
-            '"event": "delta"' not in replay_after_delta.text
+            and '"event": "delta"' not in replay_after_delta.text
             and '"event": "done"' in replay_after_delta.text,
             "Cursor replay should skip events at or before after_sequence",
         )
 
-        original_terminal_limit = CHAT_TASK_EVENT_BUFFER._max_terminal_tasks  # noqa: SLF001
+        original_terminal_limit = (
+            CHAT_TASK_EVENT_BUFFER._max_terminal_tasks
+        )  # noqa: SLF001
         CHAT_TASK_EVENT_BUFFER._max_terminal_tasks = 1  # noqa: SLF001
         try:
             pruner = await start_prepared_chat_stream_task(
@@ -149,7 +152,9 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
                 "Pruner chat task should complete before expired replay check",
             )
 
-            expired_replay = self.call_api(f"/api/chat/tasks/{completed.task.task_id}/events")
+            expired_replay = self.call_api(
+                f"/api/chat/tasks/{completed.task.task_id}/events"
+            )
             self.soft_assert_equal(
                 expired_replay.status_code,
                 410,
@@ -160,7 +165,9 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
                 "Expired terminal chat task event response should identify the retention miss",
             )
         finally:
-            CHAT_TASK_EVENT_BUFFER._max_terminal_tasks = original_terminal_limit  # noqa: SLF001
+            CHAT_TASK_EVENT_BUFFER._max_terminal_tasks = (
+                original_terminal_limit  # noqa: SLF001
+            )
 
         running = await start_prepared_chat_stream_task(
             prepared=PreparedChatExecution(

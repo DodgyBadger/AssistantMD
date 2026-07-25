@@ -36,14 +36,13 @@ from core.llm.model_selection import ModelExecutionSpec
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
 from core.settings import (
-    get_delegate_model_requests_limit,
     get_default_model_thinking,
+    get_delegate_model_requests_limit,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
 )
 from core.tools.base import BaseTool
 from core.tools.failures import FailureClassification, classify_exception
-
 
 logger = UnifiedLogger(tag="delegate-tool")
 
@@ -82,9 +81,13 @@ class DelegateTool(BaseTool):
 
             model_value = str(model).strip() if model else None
             tool_names = _parse_tool_names(tools)
-            requested_thinking, max_tool_calls, timeout_seconds = _parse_options(options or {})
+            requested_thinking, max_tool_calls, timeout_seconds = _parse_options(
+                options or {}
+            )
 
-            safe_tool_names = tuple(n for n in tool_names if n not in _FORBIDDEN_CHILD_TOOLS)
+            safe_tool_names = tuple(
+                n for n in tool_names if n not in _FORBIDDEN_CHILD_TOOLS
+            )
             stripped = tuple(sorted(set(tool_names) - set(safe_tool_names)))
 
             resolved_thinking, thinking_source = resolve_effective_thinking(
@@ -108,8 +111,13 @@ class DelegateTool(BaseTool):
 
             resolved_model = None
             if model_value:
-                resolved_model = build_model_instance(model_value, thinking=resolved_thinking)
-                if isinstance(resolved_model, ModelExecutionSpec) and resolved_model.mode == "skip":
+                resolved_model = build_model_instance(
+                    model_value, thinking=resolved_thinking
+                )
+                if (
+                    isinstance(resolved_model, ModelExecutionSpec)
+                    and resolved_model.mode == "skip"
+                ):
                     raise ValueError("delegate does not support skip model mode")
 
             tool_capabilities = None
@@ -151,7 +159,9 @@ class DelegateTool(BaseTool):
                 text = coerce_output_data(output)
                 audit = _build_child_run_audit(result.messages)
             except UsageLimitExceeded as exc:
-                limit_context = _delegate_usage_limit_context(exc, max_tool_calls=max_tool_calls)
+                limit_context = _delegate_usage_limit_context(
+                    exc, max_tool_calls=max_tool_calls
+                )
                 classification = classify_exception(exc, phase="delegate_child_run")
                 classification = FailureClassification(
                     error_type=classification.error_type,
@@ -180,7 +190,7 @@ class DelegateTool(BaseTool):
                     classification=classification,
                     message=limit_context["message"],
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 classification = FailureClassification(
                     error_type=type(exc).__name__,
                     failure_kind="delegate_timeout",
@@ -329,7 +339,9 @@ def _failed_delegate_return(
     return ToolReturn(return_value=message, content=None, metadata=metadata)
 
 
-def _delegate_usage_limit_context(exc: UsageLimitExceeded, *, max_tool_calls: int) -> dict[str, Any]:
+def _delegate_usage_limit_context(
+    exc: UsageLimitExceeded, *, max_tool_calls: int
+) -> dict[str, Any]:
     """Return model-visible details for a delegate child usage-limit failure."""
     error_text = str(exc)
     if "request_limit" in error_text:
@@ -488,7 +500,7 @@ def _looks_like_tool_error(text: str) -> bool:
 def _parse_tool_names(tools: Any) -> tuple[str, ...]:
     if tools is None:
         return ()
-    if isinstance(tools, (list, tuple)):
+    if isinstance(tools, list | tuple):
         result: list[str] = []
         for item in tools:
             if not isinstance(item, str):

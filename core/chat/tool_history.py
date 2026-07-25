@@ -155,7 +155,9 @@ def analyze_tool_history(messages: Sequence[ModelMessage]) -> ToolHistoryIntegri
     )
 
 
-def analyze_tool_history_payloads(payloads: Sequence[dict[str, Any]]) -> ToolHistoryIntegrity:
+def analyze_tool_history_payloads(
+    payloads: Sequence[dict[str, Any]],
+) -> ToolHistoryIntegrity:
     """Analyze JSON/dict message payloads for tool-call/return integrity."""
     messages: list[ModelMessage] = []
     issues: list[ToolHistoryIssue] = []

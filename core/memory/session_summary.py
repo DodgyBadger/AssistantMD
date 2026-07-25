@@ -13,7 +13,6 @@ from core.database import connect_sqlite_from_system_db
 from core.memory.schema import DB_NAME, ensure_session_summary_schema
 from core.vector import SQLitePythonVectorStore, VectorService, VectorStore
 
-
 SESSION_SUMMARY_TEXT_FIELDS = (
     "summary",
     "domain",
@@ -327,7 +326,9 @@ class SessionSummaryStore:
         session_id: str,
     ) -> dict[str, Any]:
         """Return vector index coverage for one session summary."""
-        session_summary = self.get_session_summary(vault_name=vault_name, session_id=session_id)
+        session_summary = self.get_session_summary(
+            vault_name=vault_name, session_id=session_id
+        )
         expected_fields = tuple(
             field_type
             for field_type in VECTOR_FIELD_TYPES
@@ -341,7 +342,9 @@ class SessionSummaryStore:
                 "missing_field_types": list(expected_fields),
             }
 
-        item_ids = tuple(f"{vault_name}:{session_id}:{field_type}" for field_type in expected_fields)
+        item_ids = tuple(
+            f"{vault_name}:{session_id}:{field_type}" for field_type in expected_fields
+        )
         store = self._field_vector_store()
         indexed_field_types: set[str] = set()
         with store._connect() as conn:
@@ -366,7 +369,9 @@ class SessionSummaryStore:
             "expected_fields": len(expected_fields),
             "indexed_field_types": sorted(indexed_field_types),
             "missing_field_types": [
-                field_type for field_type in expected_fields if field_type not in indexed_field_types
+                field_type
+                for field_type in expected_fields
+                if field_type not in indexed_field_types
             ],
         }
 
@@ -461,7 +466,9 @@ class SessionSummaryStore:
     ) -> None:
         """Upsert vault artifacts for one session summary."""
         with self._connect() as conn:
-            if not self._session_summary_exists(conn, vault_name=vault_name, session_id=session_id):
+            if not self._session_summary_exists(
+                conn, vault_name=vault_name, session_id=session_id
+            ):
                 raise ValueError(f"Unknown session summary: {session_id}")
             now = _utc_now()
             for artifact in artifacts:
@@ -623,14 +630,17 @@ class SessionSummaryStore:
         model_alias: str = "embeddings",
     ) -> int:
         """Embed vector-searchable direct fields for one session summary."""
-        session_summary = self.get_session_summary(vault_name=vault_name, session_id=session_id)
+        session_summary = self.get_session_summary(
+            vault_name=vault_name, session_id=session_id
+        )
         if session_summary is None:
             raise ValueError(f"Unknown session summary: {session_id}")
         store = vector_store or self._field_vector_store()
         fields = tuple(
             field_type
             for field_type in SESSION_SUMMARY_TEXT_FIELDS
-            if field_type in VECTOR_FIELD_TYPES and session_summary.field_value(field_type)
+            if field_type in VECTOR_FIELD_TYPES
+            and session_summary.field_value(field_type)
         )
         if not fields:
             return 0
@@ -645,7 +655,9 @@ class SessionSummaryStore:
             )
             for field_type in fields
         ]
-        embedding_result = await vector_service.embed_documents(inputs, model_alias=model_alias)
+        embedding_result = await vector_service.embed_documents(
+            inputs, model_alias=model_alias
+        )
         self._delete_field_vectors(
             vault_name=vault_name,
             session_id=session_id,
@@ -909,7 +921,9 @@ def _domain_search_values(value: str | None) -> tuple[str, ...]:
 def _validate_field_type(field_type: str) -> None:
     if field_type not in SESSION_SUMMARY_TEXT_FIELDS:
         allowed = ", ".join(SESSION_SUMMARY_TEXT_FIELDS)
-        raise ValueError(f"Unsupported session summary field_type '{field_type}'. Allowed: {allowed}")
+        raise ValueError(
+            f"Unsupported session summary field_type '{field_type}'. Allowed: {allowed}"
+        )
 
 
 def _direct_match_type(field_type: str) -> str:

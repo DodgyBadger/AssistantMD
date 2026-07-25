@@ -16,7 +16,7 @@ def validate_workflow_definition(
 ) -> None:
     """Validate workflow structure by parsing the Python block at load time."""
     del sections, validated_config, workflow_id
-    with open(file_path, "r", encoding="utf-8") as handle:
+    with open(file_path, encoding="utf-8") as handle:
         content = handle.read()
     parse_authoring_template_text(content)
 
@@ -28,7 +28,9 @@ async def run_workflow(job_args: dict, **kwargs) -> object:
     expect_failure = bool(kwargs.get("expected_failure", False))
 
     if "/" not in global_id:
-        raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
+        raise ValueError(
+            f"Invalid global_id format. Expected 'vault/name', got: {global_id}"
+        )
 
     runtime = get_runtime_context()
     return await runtime.workflow_governor.execute_workflow(

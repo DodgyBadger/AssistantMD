@@ -19,7 +19,6 @@ from core.vault_state.file_operations import (
 
 from .base import BaseTool
 
-
 logger = UnifiedLogger(tag="file-read-tool")
 
 
@@ -56,7 +55,11 @@ class FileRead(BaseTool):
                     data={
                         "tool": "file_read",
                         "operation": operation,
-                        "vault": vault_path.rstrip("/").split("/")[-1] if vault_path else None,
+                        "vault": (
+                            vault_path.rstrip("/").split("/")[-1]
+                            if vault_path
+                            else None
+                        ),
                     },
                 )
                 if not vault_path:

@@ -56,9 +56,9 @@ class VaultDirectoryMutationConcurrencyScenario(BaseScenario):
                 )
             )
             await asyncio.sleep(0.05)
-            assert not edit_task.done(), (
-                "A child-file mutation must wait for an active directory move"
-            )
+            assert (
+                not edit_task.done()
+            ), "A child-file mutation must wait for an active directory move"
 
             allow_move.set()
             await move_task

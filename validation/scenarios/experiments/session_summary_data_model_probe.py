@@ -5,12 +5,13 @@ Experiment scenario for session summary field storage and semantic search.
 import json
 import sqlite3
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from pydantic_ai.embeddings import EmbedInputType, EmbeddingModel, EmbeddingResult
+from pydantic_ai.embeddings import EmbeddingModel, EmbeddingResult, EmbedInputType
 from pydantic_ai.usage import RequestUsage
 
 from core.memory.session_summary import (
@@ -34,7 +35,10 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             vault_name=vault_name,
             session_id="legacy-session",
         )
-        self.soft_assert(migrated_summary is not None, "Legacy summary row should survive schema migration")
+        self.soft_assert(
+            migrated_summary is not None,
+            "Legacy summary row should survive schema migration",
+        )
         self.soft_assert(
             migrated_summary is not None and migrated_summary.source_summary is None,
             "Legacy summary row should have empty source_summary after migration",
@@ -49,7 +53,10 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             query="zirconium provenance notes",
         )
         self.soft_assert(
-            not any(result.session_summary.session_id == "legacy-session" for result in migrated_source_matches),
+            not any(
+                result.session_summary.session_id == "legacy-session"
+                for result in migrated_source_matches
+            ),
             "source_summary should be stored as provenance, not indexed for FTS retrieval",
         )
 
@@ -86,7 +93,9 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
         report = {
             "vault_name": vault_name,
             "session_ids": session_ids,
-            "migrated_source_matches": [result.to_dict() for result in migrated_source_matches],
+            "migrated_source_matches": [
+                result.to_dict() for result in migrated_source_matches
+            ],
             "substring_riparian": [memory.to_dict() for memory in substring_riparian],
             "semantic_riparian": [result.to_dict() for result in semantic_riparian],
             "substring_donor": [memory.to_dict() for memory in substring_donor],
@@ -102,7 +111,10 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             "Riparian query should find substring user-intent matches in seeded sessions",
         )
         self.soft_assert(
-            any(memory.session_id == "session-riparian-proposal" for memory in substring_riparian),
+            any(
+                memory.session_id == "session-riparian-proposal"
+                for memory in substring_riparian
+            ),
             "Substring search should retrieve the directly matching riparian proposal",
         )
         semantic_ids = [
@@ -121,11 +133,17 @@ class SessionSummaryDataModelProbeScenario(BaseScenario):
             "Field-aware semantic search should not pull unrelated forest topics",
         )
         self.soft_assert(
-            all(result.match_type in {"substring", "semantic"} for result in semantic_riparian),
+            all(
+                result.match_type in {"substring", "semantic"}
+                for result in semantic_riparian
+            ),
             "Search results should expose how each session summary matched",
         )
         self.soft_assert(
-            any(memory.session_id == "session-donor-wetlands" for memory in substring_donor),
+            any(
+                memory.session_id == "session-donor-wetlands"
+                for memory in substring_donor
+            ),
             "Substring field search should still retrieve direct field matches",
         )
         self.teardown_scenario()
@@ -198,7 +216,9 @@ def _seed_legacy_summary_db(system_root: Path) -> None:
         conn.close()
 
 
-def _seed_session_summaries(store: SessionSummaryStore, vault_name: str) -> tuple[str, ...]:
+def _seed_session_summaries(
+    store: SessionSummaryStore, vault_name: str
+) -> tuple[str, ...]:
     seeds = [
         {
             "session_id": "session-donor-wetlands",
@@ -310,12 +330,16 @@ class SemanticProbeEmbeddingModel(EmbeddingModel):
         input_list, merged_settings = self.prepare_embed(inputs, settings)
         dimensions = int(merged_settings.get("dimensions") or self._dimensions)
         return EmbeddingResult(
-            embeddings=[_semantic_probe_vector(text, dimensions) for text in input_list],
+            embeddings=[
+                _semantic_probe_vector(text, dimensions) for text in input_list
+            ],
             inputs=input_list,
             input_type=input_type,
             model_name=self.model_name,
             provider_name=self.system,
-            usage=RequestUsage(input_tokens=sum(len(text.split()) for text in input_list)),
+            usage=RequestUsage(
+                input_tokens=sum(len(text.split()) for text in input_list)
+            ),
         )
 
 

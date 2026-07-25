@@ -7,7 +7,7 @@ helpers to diagnose missing configuration required for runtime features.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -22,20 +22,26 @@ from core.llm.openai_auth import (
     resolve_openai_auth,
 )
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
+from core.settings.secrets_store import get_secret_value, load_secrets, secret_has_value
 from core.settings.store import (
+    SETTINGS_TEMPLATE,
     ModelConfig,
     ProviderConfig,
     ToolConfig,
-    SETTINGS_TEMPLATE,
-    get_enabled_tool_names as get_enabled_tool_names,
-    get_enabled_tools_config as get_enabled_tools_config,
-    get_disabled_tool_names as get_disabled_tool_names,
     get_general_settings,
     get_models_config,
     get_providers_config,
     get_tools_config,
 )
-from core.settings.secrets_store import get_secret_value, load_secrets, secret_has_value
+from core.settings.store import (
+    get_disabled_tool_names as get_disabled_tool_names,
+)
+from core.settings.store import (
+    get_enabled_tool_names as get_enabled_tool_names,
+)
+from core.settings.store import (
+    get_enabled_tools_config as get_enabled_tools_config,
+)
 
 
 class SettingsError(Exception):
@@ -53,17 +59,17 @@ class ConfigurationIssue(BaseModel):
 class ConfigurationStatus(BaseModel):
     """Aggregated configuration validation results."""
 
-    issues: List[ConfigurationIssue] = Field(default_factory=list)
-    tool_availability: Dict[str, bool] = Field(default_factory=dict)
-    model_availability: Dict[str, bool] = Field(default_factory=dict)
+    issues: list[ConfigurationIssue] = Field(default_factory=list)
+    tool_availability: dict[str, bool] = Field(default_factory=dict)
+    model_availability: dict[str, bool] = Field(default_factory=dict)
 
     @property
-    def errors(self) -> List[ConfigurationIssue]:
+    def errors(self) -> list[ConfigurationIssue]:
         """Return error-severity issues."""
         return [issue for issue in self.issues if issue.severity == "error"]
 
     @property
-    def warnings(self) -> List[ConfigurationIssue]:
+    def warnings(self) -> list[ConfigurationIssue]:
         """Return warning-severity issues."""
         return [issue for issue in self.issues if issue.severity == "warning"]
 
@@ -91,7 +97,7 @@ class AppSettings(BaseSettings):
         env_file=None, extra="ignore", case_sensitive=True
     )
 
-    vaults_root_path: Optional[Path] = Field(default=None, alias="VAULTS_ROOT_PATH")
+    vaults_root_path: Path | None = Field(default=None, alias="VAULTS_ROOT_PATH")
 
     _LLM_SECRET_KEYS = [
         "OPENAI_API_KEY",
@@ -112,7 +118,7 @@ class AppSettings(BaseSettings):
             return value.expanduser()
         return Path(value).expanduser()
 
-    def available_llm_keys(self) -> Dict[str, str]:
+    def available_llm_keys(self) -> dict[str, str]:
         """
         Return a mapping of LLM API key secret names to values.
         """
@@ -125,7 +131,7 @@ class AppSettings(BaseSettings):
         """Return True when at least one LLM API key is configured."""
         return any(secret_has_value(name) for name in self._LLM_SECRET_KEYS)
 
-    def required_env_keys(self) -> Dict[str, Optional[str]]:
+    def required_env_keys(self) -> dict[str, str | None]:
         """
         Return a mapping of required environment variable names to their values.
 
@@ -149,10 +155,10 @@ def refresh_app_settings_cache() -> None:
 
 
 def validate_settings(
-    settings: Optional[AppSettings] = None,
-    tools_config: Optional[Dict[str, ToolConfig]] = None,
-    models_config: Optional[Dict[str, ModelConfig]] = None,
-    providers_config: Optional[Dict[str, ProviderConfig]] = None,
+    settings: AppSettings | None = None,
+    tools_config: dict[str, ToolConfig] | None = None,
+    models_config: dict[str, ModelConfig] | None = None,
+    providers_config: dict[str, ProviderConfig] | None = None,
 ) -> ConfigurationStatus:
     """
     Validate core configuration requirements.
@@ -337,7 +343,7 @@ def validate_settings(
         )
 
     def _warn_extras(
-        section_name: str, items: Dict[str, Any], default_user_editable: bool
+        section_name: str, items: dict[str, Any], default_user_editable: bool
     ):
         template_keys = template_sections.get(section_name, set())
         for key, entry in items.items():
@@ -384,13 +390,13 @@ def _get_template_setting_positive_int(setting_key: str, fallback: int) -> int:
     return parsed if parsed > 0 else fallback
 
 
-def _load_template_sections() -> Dict[str, set]:
+def _load_template_sections() -> dict[str, set]:
     """Load template keys for each section to detect missing entries."""
     try:
         raw = yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
     except FileNotFoundError:
         return {}
-    sections: Dict[str, set] = {}
+    sections: dict[str, set] = {}
     for section in ("settings", "models", "providers", "tools"):
         section_data = raw.get(section)
         if isinstance(section_data, dict):
@@ -400,8 +406,8 @@ def _load_template_sections() -> Dict[str, set]:
 
 def _add_missing_template_issues(
     status: ConfigurationStatus,
-    template_sections: Dict[str, set],
-    active_sections: Dict[str, set],
+    template_sections: dict[str, set],
+    active_sections: dict[str, set],
 ) -> None:
     """
     Add warning issues for keys missing in active settings compared to the template.
@@ -420,7 +426,7 @@ def _add_missing_template_issues(
 
 def _add_missing_settings_metadata_issues(
     status: ConfigurationStatus,
-    active_settings: Dict[str, Any],
+    active_settings: dict[str, Any],
 ) -> None:
     """Warn when existing settings are missing metadata present in the template."""
     try:
@@ -631,7 +637,7 @@ def get_persist_model_reasoning_parts() -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return False
 
@@ -751,7 +757,7 @@ def get_debug_enabled() -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return False
 
@@ -764,7 +770,7 @@ def get_vault_state_enabled() -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return True
 
@@ -788,7 +794,7 @@ def get_task_rollback_enabled() -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return True
 
@@ -940,6 +946,6 @@ def get_chunking_allow_remote_images() -> bool:
         return value
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return False

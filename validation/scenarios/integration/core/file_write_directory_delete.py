@@ -123,7 +123,9 @@ class FileWriteDirectoryDeleteScenario(BaseScenario):
             }.issubset(skipped),
             "Partial cleanup should report non-empty directories for follow-up",
         )
-        remaining_contents = set(first_metadata.get("remaining_directory_contents") or [])
+        remaining_contents = set(
+            first_metadata.get("remaining_directory_contents") or []
+        )
         self.soft_assert(
             {
                 "cleanup/hidden-only/.keep",

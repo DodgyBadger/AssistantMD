@@ -39,14 +39,30 @@ class ChatToolReplayContractScenario(BaseScenario):
                 ModelRequest(parts=[UserPromptPart(content="Use both probe tools.")]),
                 ModelResponse(
                     parts=[
-                        ToolCallPart(tool_name="probe_alpha", args={"path": "A.md"}, tool_call_id="probe-a"),
-                        ToolCallPart(tool_name="probe_beta", args={"path": "B.md"}, tool_call_id="probe-b"),
+                        ToolCallPart(
+                            tool_name="probe_alpha",
+                            args={"path": "A.md"},
+                            tool_call_id="probe-a",
+                        ),
+                        ToolCallPart(
+                            tool_name="probe_beta",
+                            args={"path": "B.md"},
+                            tool_call_id="probe-b",
+                        ),
                     ],
                 ),
                 ModelRequest(
                     parts=[
-                        ToolReturnPart(tool_name="probe_alpha", content="alpha result", tool_call_id="probe-a"),
-                        ToolReturnPart(tool_name="probe_beta", content="beta result", tool_call_id="probe-b"),
+                        ToolReturnPart(
+                            tool_name="probe_alpha",
+                            content="alpha result",
+                            tool_call_id="probe-a",
+                        ),
+                        ToolReturnPart(
+                            tool_name="probe_beta",
+                            content="beta result",
+                            tool_call_id="probe-b",
+                        ),
                     ],
                 ),
                 ModelResponse(parts=[TextPart(content="Both probes completed.")]),
@@ -101,11 +117,13 @@ class ChatToolReplayContractScenario(BaseScenario):
 
         message_payloads = detail["messages"]
         tool_call_message = next(
-            message for message in message_payloads
+            message
+            for message in message_payloads
             if set(message["tool_call_ids"]) == {"probe-a", "probe-b"}
         )
         tool_return_message = next(
-            message for message in message_payloads
+            message
+            for message in message_payloads
             if set(message["tool_return_ids"]) == {"probe-a", "probe-b"}
         )
         self.soft_assert(

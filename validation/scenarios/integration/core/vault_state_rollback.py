@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.vault_state.rollback import rollback_task_file_mutations
 from core.vault_state.file_mutations import VaultMutationRejected
+from core.vault_state.rollback import rollback_task_file_mutations
 from validation.core.base_scenario import BaseScenario
 
 
@@ -19,7 +19,9 @@ class VaultStateRollbackScenario(BaseScenario):
         self.create_file(vault, "notes/preexisting-append.md", "Original append\n")
         self.create_file(vault, "notes/preexisting-delete.md", "Original delete\n")
         self.create_file(vault, "notes/move-source.md", "Original move source\n")
-        self.create_file(vault, "AssistantMD/Authoring/failing_probe.md", FAILING_PROBE_WORKFLOW)
+        self.create_file(
+            vault, "AssistantMD/Authoring/failing_probe.md", FAILING_PROBE_WORKFLOW
+        )
 
         await self.start_system()
 
@@ -27,7 +29,9 @@ class VaultStateRollbackScenario(BaseScenario):
         result = await self.run_workflow(vault, "failing_probe", expect_failure=True)
         events = self.events_since(checkpoint)
 
-        self.soft_assert_equal(result.status, "failed", "Workflow failure should be reported")
+        self.soft_assert_equal(
+            result.status, "failed", "Workflow failure should be reported"
+        )
         failed_event = self.assert_event_contains(
             events,
             name="workflow_task_failed",
@@ -40,8 +44,12 @@ class VaultStateRollbackScenario(BaseScenario):
         )
         task_id = failed_event["data"]["task_id"]
         task_detail = self.call_api(f"/api/tasks/{task_id}")
-        assert task_detail.status_code == 200, "Failed workflow task detail should be available"
-        workflow_failure = task_detail.json().get("metadata", {}).get("workflow_failure")
+        assert (
+            task_detail.status_code == 200
+        ), "Failed workflow task detail should be available"
+        workflow_failure = (
+            task_detail.json().get("metadata", {}).get("workflow_failure")
+        )
         self.soft_assert(
             isinstance(workflow_failure, dict),
             "Failed workflow task should expose structured recovery metadata",
@@ -114,7 +122,9 @@ class VaultStateRollbackScenario(BaseScenario):
         )
 
         snapshot_status = self._snapshot_status(task_id)
-        self.soft_assert_equal(snapshot_status, "rolled_back", "Task snapshot should be marked rolled back")
+        self.soft_assert_equal(
+            snapshot_status, "rolled_back", "Task snapshot should be marked rolled back"
+        )
         self.soft_assert_equal(
             self._activity_status(task_id),
             ("failed", "partial"),

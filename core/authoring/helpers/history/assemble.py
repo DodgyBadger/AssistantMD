@@ -22,7 +22,6 @@ from core.authoring.helpers.runtime_common import (
 )
 from core.logger import UnifiedLogger
 
-
 logger = UnifiedLogger(tag="authoring-host")
 
 
@@ -48,7 +47,9 @@ async def execute(
     if instructions:
         assembled_messages.append(ContextMessage(role="system", content=instructions))
     for item in context_messages:
-        assembled_messages.append(_normalize_history_context_item(item, default_role="system"))
+        assembled_messages.append(
+            _normalize_history_context_item(item, default_role="system")
+        )
     for item in history:
         assembled_messages.append(_normalize_history_context_item(item))
 
@@ -67,8 +68,12 @@ async def execute(
     )
 
 
-def _normalize_history_context_item(value: Any, *, default_role: str | None = None) -> Any:
-    if isinstance(value, (ContextMessage, HistoryMessage, ToolExchange, ToolExchangeBatch)):
+def _normalize_history_context_item(
+    value: Any, *, default_role: str | None = None
+) -> Any:
+    if isinstance(
+        value, ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch
+    ):
         return value
     return normalize_context_message(value, default_role=default_role)
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from core.database import connect_sqlite_from_system_db, get_system_database_path
 from core.logger import UnifiedLogger
@@ -68,7 +68,10 @@ def parse_db_timestamp(raw_value: str | None) -> datetime | None:
 def start_of_week(value: datetime, week_start_day: int) -> datetime:
     delta_days = (value.weekday() - week_start_day) % 7
     return (value - timedelta(days=delta_days)).replace(
-        hour=0, minute=0, second=0, microsecond=0,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
     )
 
 
@@ -84,9 +87,9 @@ def cache_entry_is_valid(
     if created_dt is None:
         return False
     if created_dt.tzinfo is None and now.tzinfo is not None:
-        created_dt = created_dt.replace(tzinfo=timezone.utc)
+        created_dt = created_dt.replace(tzinfo=UTC)
     elif created_dt.tzinfo is not None and now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     if cache_mode == "duration":
         if ttl_seconds is None:
             return False
@@ -94,7 +97,9 @@ def cache_entry_is_valid(
     if cache_mode == "daily":
         return created_dt.date() == now.date()
     if cache_mode == "weekly":
-        return start_of_week(created_dt, week_start_day) == start_of_week(now, week_start_day)
+        return start_of_week(created_dt, week_start_day) == start_of_week(
+            now, week_start_day
+        )
     if cache_mode == "session":
         return True
     return False
@@ -115,7 +120,10 @@ def compute_cache_expiration(
         return created_at + timedelta(seconds=ttl_seconds)
     if cache_mode == "daily":
         return (created_at + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         )
     if cache_mode == "weekly":
         return start_of_week(created_at, week_start_day) + timedelta(days=7)
@@ -126,14 +134,17 @@ def compute_cache_expiration(
 # Database helpers
 # ---------------------------------------------------------------------------
 
-def _get_db_path(system_root: Optional[Path] = None) -> str:
+
+def _get_db_path(system_root: Path | None = None) -> str:
     return get_system_database_path(DB_NAME, str(system_root) if system_root else None)
 
 
-def _ensure_db(system_root: Optional[Path] = None) -> str:
+def _ensure_db(system_root: Path | None = None) -> str:
     """Create database file and tables if missing."""
     db_path = _get_db_path(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         conn.execute(
             """
@@ -245,14 +256,17 @@ def _ensure_db(system_root: Optional[Path] = None) -> str:
 # Cache artifact store
 # ---------------------------------------------------------------------------
 
+
 def purge_expired_cache_artifacts(
     *,
     now: datetime,
-    system_root: Optional[Path] = None,
+    system_root: Path | None = None,
 ) -> int:
     """Delete cache artifacts whose expiration timestamp has passed."""
     _ensure_db(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         cursor = conn.execute(
             """
@@ -276,11 +290,11 @@ def upsert_cache_artifact(
     cache_mode: str,
     ttl_seconds: int | None,
     raw_content: str,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
     origin: str | None = None,
     now: datetime,
     week_start_day: int,
-    system_root: Optional[Path] = None,
+    system_root: Path | None = None,
 ) -> None:
     """Insert or replace one named cache artifact for an owner/ref pair."""
     _ensure_db(system_root)
@@ -291,7 +305,9 @@ def upsert_cache_artifact(
         week_start_day=week_start_day,
     )
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         conn.execute(
             "DELETE FROM cache_artifacts WHERE owner_id = ? AND artifact_ref = ?",
@@ -305,9 +321,16 @@ def upsert_cache_artifact(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                owner_id, session_key, artifact_ref, cache_mode, ttl_seconds,
-                raw_content, metadata_json, origin,
-                now.isoformat(sep=" "), now.isoformat(sep=" "),
+                owner_id,
+                session_key,
+                artifact_ref,
+                cache_mode,
+                ttl_seconds,
+                raw_content,
+                metadata_json,
+                origin,
+                now.isoformat(sep=" "),
+                now.isoformat(sep=" "),
                 None if expires_at is None else expires_at.isoformat(sep=" "),
             ),
         )
@@ -323,11 +346,13 @@ def get_cache_artifact(
     artifact_ref: str,
     now: datetime,
     week_start_day: int,
-    system_root: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
+    system_root: Path | None = None,
+) -> dict[str, Any] | None:
     """Fetch one cache artifact if it exists and is still valid."""
     _ensure_db(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         row = conn.execute(
             """
@@ -366,17 +391,24 @@ def get_cache_artifact(
     finally:
         conn.close()
 
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     try:
         metadata = json.loads(row[7]) if row[7] else {}
     except json.JSONDecodeError:
         metadata = {}
 
     return {
-        "owner_id": row[1], "session_key": row[2], "artifact_ref": row[3],
-        "cache_mode": cache_mode, "ttl_seconds": ttl_seconds,
-        "raw_content": row[6], "metadata": metadata, "origin": row[8],
-        "created_at": created_at, "last_accessed_at": row[10], "expires_at": row[11],
+        "owner_id": row[1],
+        "session_key": row[2],
+        "artifact_ref": row[3],
+        "cache_mode": cache_mode,
+        "ttl_seconds": ttl_seconds,
+        "raw_content": row[6],
+        "metadata": metadata,
+        "origin": row[8],
+        "created_at": created_at,
+        "last_accessed_at": row[10],
+        "expires_at": row[11],
     }
 
 
@@ -389,13 +421,15 @@ def upsert_cached_step_output(
     template_hash: str,
     section_key: str,
     cache_mode: str,
-    ttl_seconds: Optional[int],
+    ttl_seconds: int | None,
     raw_output: str,
-    system_root: Optional[Path] = None,
+    system_root: Path | None = None,
 ) -> None:
     """Insert or update a cached step output."""
     _ensure_db(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         if cache_mode == "session":
             conn.execute(
@@ -422,8 +456,17 @@ def upsert_cached_step_output(
                 section_key, cache_mode, ttl_seconds, raw_output
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, session_id, vault_name, template_name, template_hash,
-             section_key, cache_mode, ttl_seconds, raw_output),
+            (
+                run_id,
+                session_id,
+                vault_name,
+                template_name,
+                template_hash,
+                section_key,
+                cache_mode,
+                ttl_seconds,
+                raw_output,
+            ),
         )
         conn.commit()
     except Exception as exc:  # pragma: no cover - defensive
@@ -440,11 +483,13 @@ def get_cached_step_output(
     template_name: str,
     section_key: str,
     cache_mode: str,
-    system_root: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
+    system_root: Path | None = None,
+) -> dict[str, Any] | None:
     """Fetch the most recent cached step output for a key."""
     _ensure_db(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         if cache_mode == "session":
             rows = conn.execute(
@@ -480,9 +525,15 @@ def get_cached_step_output(
         return None
     row = rows[0]
     return {
-        "run_id": row[0], "session_id": row[1], "vault_name": row[2],
-        "template_name": row[3], "template_hash": row[4], "section_key": row[5],
-        "cache_mode": row[6], "ttl_seconds": row[7], "raw_output": row[8],
+        "run_id": row[0],
+        "session_id": row[1],
+        "vault_name": row[2],
+        "template_name": row[3],
+        "template_hash": row[4],
+        "section_key": row[5],
+        "cache_mode": row[6],
+        "ttl_seconds": row[7],
+        "raw_output": row[8],
         "created_at": row[9],
     }
 
@@ -490,13 +541,15 @@ def get_cached_step_output(
 def upsert_session(
     session_id: str,
     vault_name: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    system_root: Optional[Path] = None,
+    metadata: dict[str, Any] | None = None,
+    system_root: Path | None = None,
 ) -> None:
     """Insert session row if missing; ignore duplicates."""
     _ensure_db(system_root)
     meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         conn.execute(
             "INSERT OR IGNORE INTO sessions (session_id, vault_name, metadata) VALUES (?, ?, ?)",
@@ -513,22 +566,32 @@ def upsert_session(
 def add_context_summary(
     session_id: str,
     vault_name: str,
-    turn_index: Optional[int],
-    template: "TemplateRecord",
+    turn_index: int | None,
+    template: TemplateRecord,
     model_alias: str,
-    raw_output: Optional[str],
-    budget_used: Optional[int] = None,
-    sections_included: Optional[Dict[str, Any]] = None,
-    compiled_prompt: Optional[str] = None,
-    input_payload: Optional[Dict[str, Any]] = None,
-    system_root: Optional[Path] = None,
+    raw_output: str | None,
+    budget_used: int | None = None,
+    sections_included: dict[str, Any] | None = None,
+    compiled_prompt: str | None = None,
+    input_payload: dict[str, Any] | None = None,
+    system_root: Path | None = None,
 ) -> int:
     """Persist a compiled context summary and return its row id."""
     _ensure_db(system_root)
-    sections_str = json.dumps(sections_included, ensure_ascii=False) if sections_included is not None else None
-    payload_str = json.dumps(input_payload, ensure_ascii=False) if input_payload is not None else None
+    sections_str = (
+        json.dumps(sections_included, ensure_ascii=False)
+        if sections_included is not None
+        else None
+    )
+    payload_str = (
+        json.dumps(input_payload, ensure_ascii=False)
+        if input_payload is not None
+        else None
+    )
 
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         conn.execute(
             """
@@ -539,16 +602,26 @@ def add_context_summary(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                session_id, vault_name, turn_index,
-                template.name, template.source, template.sha256,
-                model_alias, raw_output, budget_used,
-                sections_str, compiled_prompt, payload_str,
+                session_id,
+                vault_name,
+                turn_index,
+                template.name,
+                template.source,
+                template.sha256,
+                model_alias,
+                raw_output,
+                budget_used,
+                sections_str,
+                compiled_prompt,
+                payload_str,
             ),
         )
         conn.commit()
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     except Exception as exc:  # pragma: no cover - defensive
-        logger.error(f"Failed to insert context summary for session {session_id}: {exc}")
+        logger.error(
+            f"Failed to insert context summary for session {session_id}: {exc}"
+        )
         raise
     finally:
         conn.close()
@@ -557,12 +630,14 @@ def add_context_summary(
 def get_recent_summaries(
     session_id: str,
     vault_name: str,
-    limit: Optional[int] = 5,
-    system_root: Optional[Path] = None,
-) -> list[Dict[str, Any]]:
+    limit: int | None = 5,
+    system_root: Path | None = None,
+) -> list[dict[str, Any]]:
     """Fetch recent compiled summaries for a session/vault."""
     _ensure_db(system_root)
-    conn = connect_sqlite_from_system_db(DB_NAME, str(system_root) if system_root else None)
+    conn = connect_sqlite_from_system_db(
+        DB_NAME, str(system_root) if system_root else None
+    )
     try:
         if limit is None:
             rows = conn.execute(
@@ -587,21 +662,30 @@ def get_recent_summaries(
                 (session_id, vault_name, limit),
             ).fetchall()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"Failed to fetch recent context summaries for session {session_id}: {exc}")
+        logger.warning(
+            f"Failed to fetch recent context summaries for session {session_id}: {exc}"
+        )
         return []
     finally:
         conn.close()
 
-    snapshots: list[Dict[str, Any]] = []
+    snapshots: list[dict[str, Any]] = []
     for row in rows:
         try:
             input_payload = json.loads(row[6]) if row[6] else None
         except Exception:
             input_payload = None
-        snapshots.append({
-            "turn_index": row[0], "template_name": row[1], "template_hash": row[2],
-            "model_alias": row[3], "raw_output": row[4], "compiled_prompt": row[5],
-            "input_payload": input_payload, "created_at": row[7],
-        })
+        snapshots.append(
+            {
+                "turn_index": row[0],
+                "template_name": row[1],
+                "template_hash": row[2],
+                "model_alias": row[3],
+                "raw_output": row[4],
+                "compiled_prompt": row[5],
+                "input_payload": input_payload,
+                "created_at": row[7],
+            }
+        )
 
     return snapshots

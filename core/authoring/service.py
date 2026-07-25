@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.authoring.template_loader import (
-    AuthoringTemplateSource,
-    load_authoring_template_file,
-    parse_authoring_template_text,
-)
 from core.authoring.runtime import (
     AuthoringMontyExecutionResult,
     WorkflowAuthoringHost,
     run_authoring_monty,
+)
+from core.authoring.template_loader import (
+    AuthoringTemplateSource,
+    load_authoring_template_file,
+    parse_authoring_template_text,
 )
 from core.constants import VALID_WEEK_DAYS
 from core.scheduling.parser import ScheduleParsingError, parse_schedule_syntax
@@ -152,9 +152,12 @@ async def _run_loaded_template(
     return await run_authoring_monty(
         workflow_id=workflow_id,
         code=source.code,
-        host=WorkflowAuthoringHost(workflow_id=workflow_id, week_start_day=week_start_day),
+        host=WorkflowAuthoringHost(
+            workflow_id=workflow_id, week_start_day=week_start_day
+        ),
         inputs=inputs or None,
     )
+
 
 def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
     """Split workflow_id into vault and workflow name for validation context."""
@@ -165,7 +168,9 @@ def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
     return workflow_id.split("/", 1)
 
 
-def _validate_monty_frontmatter(frontmatter: dict, vault_name: str, workflow_name: str) -> None:
+def _validate_monty_frontmatter(
+    frontmatter: dict, vault_name: str, workflow_name: str
+) -> None:
     """Validate Monty workflow frontmatter fields without DSL-schema dependencies."""
     schedule = str(frontmatter.get("schedule") or "").strip()
     if schedule:
@@ -195,7 +200,9 @@ def _validate_monty_frontmatter(frontmatter: dict, vault_name: str, workflow_nam
 
 def _resolve_week_start_day(frontmatter: dict[str, object]) -> int:
     """Resolve workflow week_start_day frontmatter to 0=Monday .. 6=Sunday."""
-    raw_value = frontmatter.get("week_start_day", frontmatter.get("week-start-day", "monday"))
+    raw_value = frontmatter.get(
+        "week_start_day", frontmatter.get("week-start-day", "monday")
+    )
     if isinstance(raw_value, int) and 0 <= raw_value <= 6:
         return raw_value
     if isinstance(raw_value, str):

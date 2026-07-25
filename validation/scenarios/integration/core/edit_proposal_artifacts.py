@@ -62,7 +62,9 @@ class EditProposalArtifactsScenario(BaseScenario):
         finally:
             conn.close()
 
-        endpoint = f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{artifact_ref}"
+        endpoint = (
+            f"/api/vaults/{vault.name}/chat/{session_id}/edit-proposals/{artifact_ref}"
+        )
         fetched = self.call_api(endpoint)
         assert fetched.status_code == 200, "Historical proposal should remain fetchable"
         payload = fetched.json()
@@ -72,9 +74,10 @@ class EditProposalArtifactsScenario(BaseScenario):
 
         for action in ("apply", "deny", "review"):
             response = self.call_api(f"{endpoint}/{action}", method="POST", data={})
-            assert response.status_code in {404, 405}, (
-                f"Historical proposal action {action} must not be executable"
-            )
+            assert response.status_code in {
+                404,
+                405,
+            }, f"Historical proposal action {action} must not be executable"
 
 
 if __name__ == "__main__":

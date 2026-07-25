@@ -7,15 +7,14 @@ that the validation runtime bootstraps.
 """
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi.testclient import TestClient
 
 from core.logger import UnifiedLogger
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -40,7 +39,7 @@ class APIClient:
         self._client = client
 
         # Track interactions for artifact logging
-        self.api_calls: list[Dict[str, Any]] = []
+        self.api_calls: list[dict[str, Any]] = []
 
     # === PUBLIC API ===
 
@@ -48,9 +47,9 @@ class APIClient:
         self,
         endpoint: str,
         method: str = "GET",
-        data: Optional[dict] = None,
-        params: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        data: dict | None = None,
+        params: dict | None = None,
+        headers: dict | None = None,
     ) -> APIResponse:
         """Call AssistantMD API endpoint through FastAPI TestClient."""
         method = method.upper()
@@ -75,7 +74,7 @@ class APIClient:
             # Even if request blows up we record the attempt
             self.api_calls.append(interaction)
 
-        payload: Optional[dict] = None
+        payload: dict | None = None
         text = ""
 
         if response is not None:
@@ -111,9 +110,13 @@ class APIClient:
                     status = call.get("status_code", "n/a")
                     handle.write(f"**{timestamp}**: {method} {endpoint} → {status}\n")
                     if call.get("params"):
-                        handle.write(f"  Params: {json.dumps(call['params'], indent=2)}\n")
+                        handle.write(
+                            f"  Params: {json.dumps(call['params'], indent=2)}\n"
+                        )
                     if call.get("data"):
-                        handle.write(f"  Payload: {json.dumps(call['data'], indent=2)}\n")
+                        handle.write(
+                            f"  Payload: {json.dumps(call['data'], indent=2)}\n"
+                        )
                     if call.get("response"):
                         handle.write(
                             f"  Response: {json.dumps(call['response'], indent=2)}\n"

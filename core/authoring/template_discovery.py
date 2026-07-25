@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from apscheduler.triggers.base import BaseTrigger
 
+import core.authoring.engine as _engine
 from core.constants import (
     ASSISTANTMD_ROOT_DIR,
     AUTHORING_DIR,
@@ -23,15 +25,13 @@ from core.constants import (
     VALID_WEEK_DAYS,
     VAULT_IGNORE_FILE,
 )
-
-import core.authoring.engine as _engine
+from core.logger import UnifiedLogger
 from core.runtime.paths import get_data_root, get_system_root
 from core.scheduling.parser import ScheduleParsingError, parse_schedule_syntax
 from core.scheduling.triggers import create_schedule_trigger
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
 from core.utils.hash import hash_file_content
 from core.utils.markdown import parse_markdown_sections
-from core.logger import UnifiedLogger
 
 logger = UnifiedLogger(tag="workflow-loader")
 
@@ -42,6 +42,7 @@ SEED_TEMPLATE_DIR = Path(__file__).parent / "seed_templates"
 # WorkflowDefinition
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WorkflowDefinition:
     """Workflow configuration with fully parsed and validated objects."""
@@ -49,8 +50,8 @@ class WorkflowDefinition:
     vault: str
     name: str
     file_path: str
-    trigger: Optional[BaseTrigger]      # APScheduler trigger; None for manual-only
-    schedule_string: Optional[str]      # Original schedule string (for display)
+    trigger: BaseTrigger | None  # APScheduler trigger; None for manual-only
+    schedule_string: str | None  # Original schedule string (for display)
     workflow_function: Callable
     run_type: str
     week_start_day: str
@@ -72,8 +73,13 @@ class WorkflowDefinition:
     @property
     def week_start_day_number(self) -> int:
         day_mapping = {
-            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-            "friday": 4, "saturday": 5, "sunday": 6,
+            "monday": 0,
+            "tuesday": 1,
+            "wednesday": 2,
+            "thursday": 3,
+            "friday": 4,
+            "saturday": 5,
+            "sunday": 6,
         }
         return day_mapping[self.week_start_day]
 
@@ -82,6 +88,7 @@ class WorkflowDefinition:
 # TemplateRecord
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TemplateRecord:
     """Resolved context template with source metadata."""
@@ -89,15 +96,16 @@ class TemplateRecord:
     name: str
     content: str
     source: str  # "vault" or "system"
-    path: Optional[Path]
+    path: Path | None
     sha256: str
-    schema_block: Optional[str] = None  # raw YAML/JSON block if present
-    frontmatter: Dict[str, Any] = field(default_factory=dict)
+    schema_block: str | None = None  # raw YAML/JSON block if present
+    frontmatter: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
 # Configuration error record
 # ---------------------------------------------------------------------------
+
 
 class ConfigurationError:
     """Represents a configuration error encountered during loading."""
@@ -105,7 +113,7 @@ class ConfigurationError:
     def __init__(
         self,
         vault: str,
-        workflow_name: Optional[str],
+        workflow_name: str | None,
         file_path: str,
         error_message: str,
         error_type: str,
@@ -123,7 +131,8 @@ class ConfigurationError:
 # File parsing helpers — shared
 # ---------------------------------------------------------------------------
 
-def _scan_md_files_one_level(directory: str) -> List[str]:
+
+def _scan_md_files_one_level(directory: str) -> list[str]:
     """Scan for .md files directly in a directory and one level of non-underscore subfolders."""
     files = []
     for item in os.listdir(directory):
@@ -139,7 +148,7 @@ def _scan_md_files_one_level(directory: str) -> List[str]:
     return files
 
 
-def _discover_template_files(template_dir: Path) -> List[Path]:
+def _discover_template_files(template_dir: Path) -> list[Path]:
     """
     Discover template files with one-level subfolder rules (Path-based variant).
     - Include *.md directly under the template root
@@ -149,7 +158,7 @@ def _discover_template_files(template_dir: Path) -> List[Path]:
     if not template_dir.exists() or not template_dir.is_dir():
         return []
 
-    template_files: List[Path] = []
+    template_files: list[Path] = []
     for item in sorted(template_dir.iterdir()):
         if item.is_file() and item.suffix.lower() == ".md":
             template_files.append(item)
@@ -166,17 +175,22 @@ def _discover_template_files(template_dir: Path) -> List[Path]:
 # Workflow file parsing helpers
 # ---------------------------------------------------------------------------
 
-def _parse_workflow_file(file_path: str) -> Dict[str, Any]:
+
+def _parse_workflow_file(file_path: str) -> dict[str, Any]:
     """Parse workflow file; return sections dict with __FRONTMATTER_CONFIG__ key."""
     with open(file_path, encoding="utf-8") as fh:
         content = fh.read()
-    frontmatter, remaining = parse_simple_frontmatter(content, require_frontmatter=False)
-    sections: Dict[str, Any] = parse_markdown_sections(remaining, "##")
+    frontmatter, remaining = parse_simple_frontmatter(
+        content, require_frontmatter=False
+    )
+    sections: dict[str, Any] = parse_markdown_sections(remaining, "##")
     sections["__FRONTMATTER_CONFIG__"] = frontmatter
     return sections
 
 
-def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str) -> Dict[str, Any]:
+def _validate_workflow_config(
+    raw_config: dict[str, Any], vault: str, name: str
+) -> dict[str, Any]:
     """Validate and normalise workflow frontmatter configuration."""
     run_type = str(raw_config.get("run_type") or "").strip().lower()
     if run_type != "workflow":
@@ -197,9 +211,15 @@ def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str)
 
     enabled = bool(raw_config.get("enabled", False))
 
-    week_start_day = str(
-        raw_config.get("week_start_day") or raw_config.get("week-start-day") or "monday"
-    ).strip().lower()
+    week_start_day = (
+        str(
+            raw_config.get("week_start_day")
+            or raw_config.get("week-start-day")
+            or "monday"
+        )
+        .strip()
+        .lower()
+    )
     if week_start_day not in VALID_WEEK_DAYS:
         raise ValueError(
             f"Invalid week_start_day '{week_start_day}' in {vault}/{name}. "
@@ -219,6 +239,7 @@ def _validate_workflow_config(raw_config: Dict[str, Any], vault: str, name: str)
 # Context template parsing helpers
 # ---------------------------------------------------------------------------
 
+
 def _ensure_md_suffix(name: str) -> str:
     """Normalize template names to include .md extension."""
     if not name.lower().endswith(".md"):
@@ -230,7 +251,7 @@ def _hash_content(content: str) -> str:
     return hash_file_content(content, length=None)
 
 
-def _resolve_template_path(template_dir: Path, normalized_name: str) -> Optional[Path]:
+def _resolve_template_path(template_dir: Path, normalized_name: str) -> Path | None:
     """Resolve a template path within one-level discovery scope."""
     normalized_key = normalized_name.replace("\\", "/")
     for path in _discover_template_files(template_dir):
@@ -240,14 +261,14 @@ def _resolve_template_path(template_dir: Path, normalized_name: str) -> Optional
     return None
 
 
-def _extract_schema_block(content: str) -> Optional[str]:
+def _extract_schema_block(content: str) -> str | None:
     """
     Extract first fenced block labeled yaml or json from the template.
     Returns raw block content or None.
     """
     lines = content.splitlines()
     in_block = False
-    block_lines: List[str] = []
+    block_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()
@@ -269,7 +290,6 @@ def _extract_schema_block(content: str) -> Optional[str]:
     return "\n".join(block_lines).strip()
 
 
-
 def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
     content = path.read_text(encoding="utf-8")
     frontmatter, _ = parse_simple_frontmatter(content)
@@ -288,7 +308,8 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
 # Vault / file discovery
 # ---------------------------------------------------------------------------
 
-def discover_vaults(data_root: str = None) -> List[str]:
+
+def discover_vaults(data_root: str = None) -> list[str]:
     """Return sorted list of vault names from first-level directories."""
     if data_root is None:
         data_root = str(get_data_root())
@@ -297,7 +318,9 @@ def discover_vaults(data_root: str = None) -> List[str]:
     vaults = []
     for item in os.listdir(data_root):
         item_path = os.path.join(data_root, item)
-        if os.path.isdir(item_path) and not os.path.exists(os.path.join(item_path, VAULT_IGNORE_FILE)):
+        if os.path.isdir(item_path) and not os.path.exists(
+            os.path.join(item_path, VAULT_IGNORE_FILE)
+        ):
             vaults.append(item)
     return sorted(vaults)
 
@@ -310,26 +333,30 @@ def ensure_vault_directories(vault_path: str) -> None:
     _seed_vault_skills(vault_path)
 
 
-def discover_workflow_files(vault_path: str) -> List[str]:
+def discover_workflow_files(vault_path: str) -> list[str]:
     """Return sorted workflow file paths from AssistantMD/Authoring."""
     ensure_vault_directories(vault_path)
     authoring_dir = os.path.join(vault_path, ASSISTANTMD_ROOT_DIR, AUTHORING_DIR)
     return sorted(_scan_md_files_one_level(authoring_dir))
 
 
-def list_system_workflow_templates(system_root: Optional[Path] = None) -> List[TemplateRecord]:
+def list_system_workflow_templates(
+    system_root: Path | None = None,
+) -> list[TemplateRecord]:
     """List workflow templates from system/Authoring without treating them as active workflows."""
     try:
         sys_root = system_root or get_system_root()
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(f"System root unavailable while listing workflow templates: {exc}")
+        logger.warning(
+            f"System root unavailable while listing workflow templates: {exc}"
+        )
         return []
 
     system_authoring_dir = Path(sys_root) / AUTHORING_DIR
     if not system_authoring_dir.exists():
         return []
 
-    records: List[TemplateRecord] = []
+    records: list[TemplateRecord] = []
     for path in _discover_template_files(system_authoring_dir):
         try:
             name = path.relative_to(system_authoring_dir).as_posix()
@@ -346,12 +373,13 @@ def list_system_workflow_templates(system_root: Optional[Path] = None) -> List[T
 # Workflow loading
 # ---------------------------------------------------------------------------
 
+
 def load_workflow_from_file(
     file_path: str,
     vault: str,
     name: str,
-    validated_config: Dict[str, Any],
-    sections: Dict[str, Any],
+    validated_config: dict[str, Any],
+    sections: dict[str, Any],
 ) -> WorkflowDefinition:
     """Load a WorkflowDefinition from a parsed configuration."""
     schedule_string = validated_config["schedule"]
@@ -381,7 +409,9 @@ def load_workflow_from_file(
     )
 
 
-def _workflow_name_from_vault_file_path(data_root: str, file_path: str) -> tuple[str, str] | None:
+def _workflow_name_from_vault_file_path(
+    data_root: str, file_path: str
+) -> tuple[str, str] | None:
     path_parts = file_path.replace(data_root, "").strip("/").split("/")
     if len(path_parts) < 4:
         return None
@@ -402,10 +432,11 @@ def _workflow_name_from_vault_file_path(data_root: str, file_path: str) -> tuple
 # Context template loading
 # ---------------------------------------------------------------------------
 
+
 def load_template(
-    name: Optional[str],
-    vault_path: Optional[Path],
-    system_root: Optional[Path] = None,
+    name: str | None,
+    vault_path: Path | None,
+    system_root: Path | None = None,
 ) -> TemplateRecord:
     """
     Resolve a context template by name with vault → system priority.
@@ -425,9 +456,13 @@ def load_template(
 
     if vault_path:
         vault_authoring_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
-        vault_authoring_template = _resolve_template_path(vault_authoring_dir, normalized)
+        vault_authoring_template = _resolve_template_path(
+            vault_authoring_dir, normalized
+        )
         if vault_authoring_template is not None:
-            record = _read_template(vault_authoring_template, normalized, source="vault")
+            record = _read_template(
+                vault_authoring_template, normalized, source="vault"
+            )
             if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
                 logger.info(f"Using vault template: {vault_authoring_template}")
                 return record
@@ -440,22 +475,28 @@ def load_template(
 
     if system_root:
         system_authoring_dir = Path(system_root) / AUTHORING_DIR
-        system_authoring_template = _resolve_template_path(system_authoring_dir, normalized)
+        system_authoring_template = _resolve_template_path(
+            system_authoring_dir, normalized
+        )
         if system_authoring_template is not None:
-            record = _read_template(system_authoring_template, normalized, source="system")
+            record = _read_template(
+                system_authoring_template, normalized, source="system"
+            )
             if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
                 logger.info(f"Using system template: {system_authoring_template}")
                 return record
 
-    raise FileNotFoundError(f"Template '{normalized}' not found in vault or system templates")
+    raise FileNotFoundError(
+        f"Template '{normalized}' not found in vault or system templates"
+    )
 
 
 def list_templates(
-    vault_path: Optional[Path],
-    system_root: Optional[Path] = None,
-) -> List[TemplateRecord]:
+    vault_path: Path | None,
+    system_root: Path | None = None,
+) -> list[TemplateRecord]:
     """List available context templates from vault and system locations."""
-    records: List[TemplateRecord] = []
+    records: list[TemplateRecord] = []
 
     if vault_path:
         vault_authoring_dir = Path(vault_path) / ASSISTANTMD_ROOT_DIR / AUTHORING_DIR
@@ -464,7 +505,9 @@ def list_templates(
                 try:
                     name = path.relative_to(vault_authoring_dir).as_posix()
                     record = _read_template(path, name, "vault")
-                    if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                    if (
+                        record.frontmatter.get("run_type") or ""
+                    ).strip().lower() == "context":
                         records.append(record)
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(f"Failed to read vault template {path}: {exc}")
@@ -482,7 +525,9 @@ def list_templates(
                 try:
                     name = path.relative_to(system_authoring_dir).as_posix()
                     record = _read_template(path, name, "system")
-                    if (record.frontmatter.get("run_type") or "").strip().lower() == "context":
+                    if (
+                        record.frontmatter.get("run_type") or ""
+                    ).strip().lower() == "context":
                         records.append(record)
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(f"Failed to read system template {path}: {exc}")
@@ -491,7 +536,7 @@ def list_templates(
 
 
 def seed_system_templates(
-    system_root: Optional[Path] = None,
+    system_root: Path | None = None,
     *,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -546,7 +591,9 @@ def seed_system_templates(
                         existing_content=target_path.read_text(encoding="utf-8"),
                     )
                 target_path.write_text(content, encoding="utf-8")
-                result["updated" if target_exists else "created"].append(str(target_path))
+                result["updated" if target_exists else "created"].append(
+                    str(target_path)
+                )
                 logger.info(f"Seeded template to {target_path}")
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(f"Failed to seed template {target_path}: {exc}")
@@ -558,7 +605,9 @@ def seed_system_templates(
 
 def _preserve_enabled_frontmatter(*, source_content: str, existing_content: str) -> str:
     """Carry a local workflow enabled flag forward when refreshing a seed template."""
-    existing_frontmatter, _existing_body = parse_simple_frontmatter(existing_content, require_frontmatter=False)
+    existing_frontmatter, _existing_body = parse_simple_frontmatter(
+        existing_content, require_frontmatter=False
+    )
     enabled = existing_frontmatter.get("enabled")
     if not isinstance(enabled, bool):
         return source_content
@@ -592,6 +641,7 @@ def _seed_vault_skills(vault_path: str) -> None:
 # WorkflowLoader
 # ---------------------------------------------------------------------------
 
+
 class WorkflowLoader:
     """
     Manages loading and validation of vault-based workflow configurations.
@@ -600,23 +650,25 @@ class WorkflowLoader:
     to ensure proper dependency injection and avoid multiple instances.
     """
 
-    def __init__(self, _data_root: str = None, *, _allow_direct_instantiation: bool = False):
+    def __init__(
+        self, _data_root: str = None, *, _allow_direct_instantiation: bool = False
+    ):
         if not _allow_direct_instantiation:
             raise RuntimeError(
                 "Direct WorkflowLoader instantiation is discouraged. "
                 "Use get_runtime_context().workflow_loader or bootstrap_runtime() instead."
             )
         self._data_root = _data_root or str(get_data_root())
-        self._workflows: List[WorkflowDefinition] = []
-        self._config_errors: List[ConfigurationError] = []
-        self._last_loaded: Optional[datetime] = None
-        self._vault_info: Dict[str, Dict[str, Any]] = {}
+        self._workflows: list[WorkflowDefinition] = []
+        self._config_errors: list[ConfigurationError] = []
+        self._last_loaded: datetime | None = None
+        self._vault_info: dict[str, dict[str, Any]] = {}
 
     async def load_workflows(
         self,
         force_reload: bool = False,
         target_global_id: str = None,
-    ) -> List[WorkflowDefinition]:
+    ) -> list[WorkflowDefinition]:
         """Load workflows from all vaults or a specific workflow."""
         target_vault = None
         target_name = None
@@ -642,9 +694,9 @@ class WorkflowLoader:
         if not target_global_id:
             self._config_errors = []
 
-        workflows: List[WorkflowDefinition] = []
+        workflows: list[WorkflowDefinition] = []
         global_ids: set = set()
-        vault_info: Dict[str, Any] = {}
+        vault_info: dict[str, Any] = {}
         system_workflow_templates = list_system_workflow_templates()
 
         for vault in vaults:
@@ -661,7 +713,9 @@ class WorkflowLoader:
             for file_path in workflow_files:
                 name = None
                 try:
-                    resolved_name = _workflow_name_from_vault_file_path(self._data_root, file_path)
+                    resolved_name = _workflow_name_from_vault_file_path(
+                        self._data_root, file_path
+                    )
                     if resolved_name is None:
                         continue
 
@@ -679,11 +733,17 @@ class WorkflowLoader:
                     if run_type == "context":
                         continue
 
-                    validated_config = _validate_workflow_config(raw_config, vault, name)
-                    workflow = load_workflow_from_file(file_path, vault, name, validated_config, sections)
+                    validated_config = _validate_workflow_config(
+                        raw_config, vault, name
+                    )
+                    workflow = load_workflow_from_file(
+                        file_path, vault, name, validated_config, sections
+                    )
 
                     if workflow.global_id in global_ids:
-                        raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
+                        raise ValueError(
+                            f"Duplicate workflow global ID: {workflow.global_id}"
+                        )
                     global_ids.add(workflow.global_id)
                     workflows.append(workflow)
                     loaded_names_for_vault.add(workflow.name)
@@ -711,7 +771,9 @@ class WorkflowLoader:
                         timestamp=datetime.now(),
                     )
                     self._config_errors.append(config_error)
-                    vault_identifier = f"{vault}/{name}" if "name" in locals() else vault
+                    vault_identifier = (
+                        f"{vault}/{name}" if "name" in locals() else vault
+                    )
                     logger.add_sink("validation").error(
                         f"Failed to load workflow file {file_path}: {e}",
                         data={
@@ -727,7 +789,9 @@ class WorkflowLoader:
                     continue
 
             for record in system_workflow_templates:
-                system_template_name = record.name[:-3] if record.name.endswith(".md") else record.name
+                system_template_name = (
+                    record.name[:-3] if record.name.endswith(".md") else record.name
+                )
                 name = f"system/{system_template_name}"
                 file_path = str(record.path or "")
                 if not file_path:
@@ -747,14 +811,20 @@ class WorkflowLoader:
                     if run_type == "context":
                         continue
 
-                    validated_config = _validate_workflow_config(raw_config, vault, name)
-                    workflow = load_workflow_from_file(file_path, vault, name, validated_config, sections)
+                    validated_config = _validate_workflow_config(
+                        raw_config, vault, name
+                    )
+                    workflow = load_workflow_from_file(
+                        file_path, vault, name, validated_config, sections
+                    )
 
                     if not workflow.enabled and not target_global_id:
                         continue
 
                     if workflow.global_id in global_ids:
-                        raise ValueError(f"Duplicate workflow global ID: {workflow.global_id}")
+                        raise ValueError(
+                            f"Duplicate workflow global ID: {workflow.global_id}"
+                        )
                     global_ids.add(workflow.global_id)
                     workflows.append(workflow)
 
@@ -798,7 +868,9 @@ class WorkflowLoader:
         if target_global_id:
             if not workflows:
                 raise ValueError(f"Target workflow '{target_global_id}' not found")
-            self._workflows = [w for w in self._workflows if w.global_id != target_global_id]
+            self._workflows = [
+                w for w in self._workflows if w.global_id != target_global_id
+            ]
             self._workflows.append(workflows[0])
             return workflows
         else:
@@ -807,16 +879,16 @@ class WorkflowLoader:
             self._last_loaded = datetime.now()
             return workflows
 
-    def get_enabled_workflows(self) -> List[WorkflowDefinition]:
+    def get_enabled_workflows(self) -> list[WorkflowDefinition]:
         return [w for w in self._workflows if w.enabled]
 
-    def get_configuration_errors(self) -> List[ConfigurationError]:
+    def get_configuration_errors(self) -> list[ConfigurationError]:
         return self._config_errors.copy()
 
-    def get_vault_info(self) -> Dict[str, Dict[str, Any]]:
+    def get_vault_info(self) -> dict[str, dict[str, Any]]:
         return self._vault_info.copy()
 
-    def get_workflow_by_global_id(self, global_id: str) -> Optional[WorkflowDefinition]:
+    def get_workflow_by_global_id(self, global_id: str) -> WorkflowDefinition | None:
         for w in self._workflows:
             if w.global_id == global_id:
                 return w

@@ -4,7 +4,7 @@ Orchestrates ingestion jobs through importer, extractor, renderer, and storage.
 
 from typing import Any
 
-from core.ingestion.models import RawDocument, ExtractedDocument, RenderOptions
+from core.ingestion.models import ExtractedDocument, RawDocument, RenderOptions
 
 
 def run_pipeline(

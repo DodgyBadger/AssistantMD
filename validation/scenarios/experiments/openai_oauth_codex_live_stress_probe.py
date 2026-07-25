@@ -28,18 +28,20 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
         await self.start_system()
 
         metadata_response = self.call_api("/api/metadata")
-        assert metadata_response.status_code == 200, "Metadata endpoint should be available"
+        assert (
+            metadata_response.status_code == 200
+        ), "Metadata endpoint should be available"
         metadata = metadata_response.json()
         model_metadata = _find_model_metadata(metadata, model)
-        assert model_metadata and model_metadata.get("available") is True, (
-            "Live OAuth stress probe model alias should be present and available"
-        )
+        assert (
+            model_metadata and model_metadata.get("available") is True
+        ), "Live OAuth stress probe model alias should be present and available"
 
         try:
             provider_response = self.call_api("/api/system/providers")
-            assert provider_response.status_code == 200, (
-                "Provider status endpoint should be available"
-            )
+            assert (
+                provider_response.status_code == 200
+            ), "Provider status endpoint should be available"
             openai_status = _find_openai_provider(provider_response.json())
             assert openai_status is not None, "OpenAI provider status should be present"
 
@@ -55,12 +57,13 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                 },
                 timeout_seconds=240.0,
             )
-            assert first["start_response"].status_code == 200, (
-                "First stress chat task should start"
-            )
-            assert first["terminal_event"] and first["terminal_event"].get("event") == "done", (
-                "First stress chat task should complete"
-            )
+            assert (
+                first["start_response"].status_code == 200
+            ), "First stress chat task should start"
+            assert (
+                first["terminal_event"]
+                and first["terminal_event"].get("event") == "done"
+            ), "First stress chat task should complete"
 
             second = await self.run_chat_task(
                 {
@@ -73,23 +76,25 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                 },
                 timeout_seconds=240.0,
             )
-            assert second["start_response"].status_code == 200, (
-                "Second stress chat task should start"
-            )
-            assert second["terminal_event"] and second["terminal_event"].get("event") == "done", (
-                "Second stress chat task should complete"
-            )
+            assert (
+                second["start_response"].status_code == 200
+            ), "Second stress chat task should start"
+            assert (
+                second["terminal_event"]
+                and second["terminal_event"].get("event") == "done"
+            ), "Second stress chat task should complete"
 
             detail_response = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}",
             )
-            assert detail_response.status_code == 200, (
-                "Session detail should load after stress turns"
-            )
+            assert (
+                detail_response.status_code == 200
+            ), "Session detail should load after stress turns"
             detail = detail_response.json()
             tool_events = detail.get("tool_events", [])
             tool_call_events = [
-                event for event in tool_events
+                event
+                for event in tool_events
                 if event.get("event_type") == "call"
                 and event.get("tool_name") == "file_read"
             ]
@@ -115,9 +120,11 @@ class OpenAIOAuthCodexLiveStressProbeScenario(BaseScenario):
                 "tool_event_count": len(tool_events),
                 "file_read_call_count": len(tool_call_events),
                 "result_file_exists": result_file.exists(),
-                "result_file_preview": result_file.read_text(encoding="utf-8")[:2000]
-                if result_file.exists()
-                else None,
+                "result_file_preview": (
+                    result_file.read_text(encoding="utf-8")[:2000]
+                    if result_file.exists()
+                    else None
+                ),
             }
             (self.artifacts_dir / "stress_summary.json").write_text(
                 json.dumps(summary, indent=2, sort_keys=True),
@@ -187,13 +194,13 @@ def _configure_live_openai_settings(scenario: BaseScenario) -> str:
     )
 
     model_config = live_models.get(model)
-    assert isinstance(model_config, dict) and model_config.get("provider") == "openai", (
-        "Live OAuth stress probe model alias must resolve to the openai provider"
-    )
+    assert (
+        isinstance(model_config, dict) and model_config.get("provider") == "openai"
+    ), "Live OAuth stress probe model alias must resolve to the openai provider"
     openai_provider = live_providers.get("openai")
-    assert isinstance(openai_provider, dict), (
-        "Live OAuth stress probe requires an openai provider entry in live settings"
-    )
+    assert isinstance(
+        openai_provider, dict
+    ), "Live OAuth stress probe requires an openai provider entry in live settings"
 
     controller = scenario._get_system_controller()  # noqa: SLF001
     isolated_settings_path = controller._system_root / "settings.yaml"  # noqa: SLF001
@@ -231,7 +238,9 @@ def _find_openai_provider(payload: object) -> dict[str, object] | None:
     return None
 
 
-def _find_model_metadata(payload: dict[str, object], model: str) -> dict[str, object] | None:
+def _find_model_metadata(
+    payload: dict[str, object], model: str
+) -> dict[str, object] | None:
     models = payload.get("models", [])
     if not isinstance(models, list):
         return None

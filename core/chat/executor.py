@@ -7,35 +7,43 @@ Persists canonical chat history in the structured chat store.
 
 import json
 import traceback
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import List, Optional, Any, Sequence
 from pathlib import Path
+from typing import Any
 
 from pydantic_ai import BinaryContent, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, UserPromptPart
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import UserContent
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    SystemPromptPart,
+    UserContent,
+    UserPromptPart,
+)
 from pydantic_ai.usage import UsageLimits
 
-from core.llm.agents import create_agent
+from core.authoring.context_manager import build_context_manager_history_processor
+from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.chat.chat_store import ChatStore
 from core.chat.compaction import (
     maybe_auto_compact_after_turn,
 )
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
+from core.llm.agents import create_agent
+from core.llm.capabilities.factory import build_chat_capabilities
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec, resolve_model_execution_spec
-from core.llm.thinking import ThinkingValue
-from core.llm.thinking import thinking_value_to_label
-from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.llm.model_utils import (
     get_model_capabilities,
     model_supports_capability,
     resolve_model,
 )
-from core.authoring.context_manager import build_context_manager_history_processor
-from core.llm.capabilities.factory import build_chat_capabilities
+from core.llm.thinking import ThinkingValue, thinking_value_to_label
+from core.logger import UnifiedLogger
+from core.runtime.buffers import BufferStore
+from core.runtime.state import get_runtime_context, has_runtime_context
 from core.settings import (
     get_chat_model_requests_limit,
     get_chat_tool_calls_limit,
@@ -43,11 +51,7 @@ from core.settings import (
     get_chunking_max_image_mb_per_image,
     get_default_model_thinking,
 )
-from core.logger import UnifiedLogger
-from core.runtime.state import get_runtime_context, has_runtime_context
-from core.runtime.buffers import BufferStore
 from core.tools.failures import classify_exception
-
 
 logger = UnifiedLogger(tag="chat-executor")
 
@@ -90,7 +94,9 @@ class ChatReviewPendingError(ValueError):
     """Raised when a session must resolve a deferred review before another turn."""
 
     def __init__(self, *, session_id: str):
-        super().__init__("Resolve the pending inline edit review before sending another message.")
+        super().__init__(
+            "Resolve the pending inline edit review before sending another message."
+        )
         self.details = {"session_id": session_id, "error_type": "DeferredReviewPending"}
 
 
@@ -117,14 +123,14 @@ class PreparedChatExecution:
     agent: Any
     # Completed prior turns only. The active prompt is passed separately to
     # Pydantic AI and becomes canonical history through result.new_messages().
-    message_history: Optional[List[ModelMessage]]
+    message_history: list[ModelMessage] | None
     prompt_for_history: str
     user_prompt: PromptInput
     attached_image_count: int
     model: str
-    tools: List[str]
+    tools: list[str]
     thinking: ThinkingValue | None = None
-    context_template: Optional[str] = None
+    context_template: str | None = None
     workspace_path: str = ""
     chat_mode: ChatMode = NORMAL_CHAT_MODE
     deferred_tool_results: DeferredToolResults | None = None
@@ -144,7 +150,11 @@ class PreparedChatExecution:
 def normalize_chat_mode(value: str | None) -> ChatMode:
     """Normalize chat mode values accepted by the API and persisted resume config."""
     normalized = str(value or NORMAL_CHAT_MODE).strip().lower()
-    return INLINE_EDIT_CHAT_MODE if normalized == INLINE_EDIT_CHAT_MODE else NORMAL_CHAT_MODE
+    return (
+        INLINE_EDIT_CHAT_MODE
+        if normalized == INLINE_EDIT_CHAT_MODE
+        else NORMAL_CHAT_MODE
+    )
 
 
 def approval_tools_for_chat_mode(chat_mode: ChatMode) -> set[str]:
@@ -154,7 +164,9 @@ def approval_tools_for_chat_mode(chat_mode: ChatMode) -> set[str]:
     return set()
 
 
-def persist_chat_session_mode(*, vault_name: str, session_id: str, chat_mode: ChatMode) -> None:
+def persist_chat_session_mode(
+    *, vault_name: str, session_id: str, chat_mode: ChatMode
+) -> None:
     """Persist the canonical mode selected for a chat session."""
     _CHAT_STORE.set_session_chat_mode(
         session_id=session_id,
@@ -191,7 +203,9 @@ def _retry_metadata_from_marker(marker: dict[str, Any]) -> dict[str, Any]:
     return {key: marker[key] for key in keys if key in marker}
 
 
-def _messages_after_accepted_user_request(messages: list[ModelMessage]) -> list[ModelMessage]:
+def _messages_after_accepted_user_request(
+    messages: list[ModelMessage],
+) -> list[ModelMessage]:
     """Drop the active user request that AssistantMD already persisted."""
     filtered: list[ModelMessage] = []
     skipped_accepted_user = False
@@ -206,7 +220,9 @@ def _messages_after_accepted_user_request(messages: list[ModelMessage]) -> list[
 def _is_user_prompt_request(message: ModelMessage) -> bool:
     if not isinstance(message, ModelRequest):
         return False
-    return any(isinstance(part, UserPromptPart) for part in getattr(message, "parts", ()))
+    return any(
+        isinstance(part, UserPromptPart) for part in getattr(message, "parts", ())
+    )
 
 
 def _serialize_exception(exc: Exception) -> dict[str, Any]:
@@ -277,11 +293,14 @@ def _record_latest_turn_failure(
         model=model,
         tools=tools,
         chat_mode=chat_mode,
-        sequence_index=_CHAT_STORE.get_highest_message_sequence_index(session_id, vault_name),
+        sequence_index=_CHAT_STORE.get_highest_message_sequence_index(
+            session_id, vault_name
+        ),
     )
     if (
         isinstance(existing, dict)
-        and existing.get("accepted_user_sequence_index") == marker["accepted_user_sequence_index"]
+        and existing.get("accepted_user_sequence_index")
+        == marker["accepted_user_sequence_index"]
     ):
         marker.update(_retry_metadata_from_marker(existing))
     _CHAT_STORE.update_session_metadata(
@@ -391,7 +410,9 @@ def _build_tool_call_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitEr
     )
 
 
-def _build_model_request_limit_error(exc: UsageLimitExceeded) -> ChatModelRequestLimitError:
+def _build_model_request_limit_error(
+    exc: UsageLimitExceeded,
+) -> ChatModelRequestLimitError:
     limit = get_chat_model_requests_limit()
     limit_label = f" of {limit}" if limit > 0 else ""
     return ChatModelRequestLimitError(
@@ -413,18 +434,32 @@ def _build_model_request_limit_error(exc: UsageLimitExceeded) -> ChatModelReques
     )
 
 
-def _build_chat_usage_limit_error(exc: UsageLimitExceeded) -> ChatToolCallLimitError | ChatModelRequestLimitError:
+def _build_chat_usage_limit_error(
+    exc: UsageLimitExceeded,
+) -> ChatToolCallLimitError | ChatModelRequestLimitError:
     if "request_limit" in str(exc):
         return _build_model_request_limit_error(exc)
     return _build_tool_call_limit_error(exc)
 
 
-def _usage_limit_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
-    return "model-request limit" if isinstance(error, ChatModelRequestLimitError) else "tool-call limit"
+def _usage_limit_label(
+    error: ChatToolCallLimitError | ChatModelRequestLimitError,
+) -> str:
+    return (
+        "model-request limit"
+        if isinstance(error, ChatModelRequestLimitError)
+        else "tool-call limit"
+    )
 
 
-def _usage_limit_display_label(error: ChatToolCallLimitError | ChatModelRequestLimitError) -> str:
-    return "Model-request limit" if isinstance(error, ChatModelRequestLimitError) else "Tool-call limit"
+def _usage_limit_display_label(
+    error: ChatToolCallLimitError | ChatModelRequestLimitError,
+) -> str:
+    return (
+        "Model-request limit"
+        if isinstance(error, ChatModelRequestLimitError)
+        else "Tool-call limit"
+    )
 
 
 def _chat_event_for_message(message: str) -> str | None:
@@ -453,7 +488,9 @@ def _chat_status_for_event(event: str | None) -> str | None:
     return None
 
 
-def _summarize_tool_activity(tool_activity: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _summarize_tool_activity(
+    tool_activity: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     """Build compact tool-call counts for activity logs."""
     by_tool: dict[str, int] = {}
     by_status: dict[str, int] = {}
@@ -475,14 +512,14 @@ def _log_chat_lifecycle(
     vault_name: str,
     session_id: str,
     model: str | None = None,
-    tools: Optional[List[str]] = None,
+    tools: list[str] | None = None,
     streaming: bool,
     phase: str,
     prompt_length: int | None = None,
     attached_image_count: int | None = None,
     context_template: str | None = None,
     workspace_path: str | None = None,
-    extra: Optional[dict[str, Any]] = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """Emit structured lifecycle logs for chat session execution."""
     event = _chat_event_for_message(message)
@@ -522,14 +559,14 @@ def _log_chat_failure(
     vault_name: str,
     session_id: str,
     model: str | None = None,
-    tools: Optional[List[str]] = None,
+    tools: list[str] | None = None,
     streaming: bool,
     phase: str,
     prompt_length: int | None = None,
     attached_image_count: int | None = None,
     context_template: str | None = None,
     workspace_path: str | None = None,
-    extra: Optional[dict[str, Any]] = None,
+    extra: dict[str, Any] | None = None,
     exc: Exception,
 ) -> None:
     """Emit structured failure logs for chat session execution."""
@@ -603,7 +640,7 @@ def _get_process_rss_bytes() -> int | None:
     return None
 
 
-def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
+def _truncate_preview(value: str | None, limit: int = 200) -> str | None:
     """
     Safely truncate long strings for streaming metadata.
 
@@ -616,7 +653,7 @@ def _truncate_preview(value: Optional[str], limit: int = 200) -> Optional[str]:
     return value[: limit - 1] + "…"
 
 
-def _normalize_tool_args(args: Any) -> Optional[str]:
+def _normalize_tool_args(args: Any) -> str | None:
     """
     Convert tool call arguments to a compact JSON/string representation.
     """
@@ -651,7 +688,7 @@ def _normalize_tool_detail(value: Any) -> Any:
         return str(value)
 
 
-def _normalize_tool_result(result: Any) -> Optional[str]:
+def _normalize_tool_result(result: Any) -> str | None:
     """
     Convert tool results into a readable preview string.
     """
@@ -670,8 +707,8 @@ def _build_model_capability_details(
     model_alias: str,
     requested_capability: str,
     *,
-    image_paths: Optional[List[str]] = None,
-    image_uploads: Optional[List[UploadedImageAttachment]] = None,
+    image_paths: list[str] | None = None,
+    image_uploads: list[UploadedImageAttachment] | None = None,
 ) -> dict[str, Any]:
     """Collect stable context describing a model capability mismatch."""
     execution = resolve_model_execution_spec(model_alias)
@@ -698,7 +735,9 @@ def _build_model_capability_details(
         "model_string": model_string,
         "requested_capability": requested_capability,
         "declared_capabilities": declared_capabilities,
-        "image_path_count": sum(1 for path in (image_paths or []) if (path or "").strip()),
+        "image_path_count": sum(
+            1 for path in (image_paths or []) if (path or "").strip()
+        ),
         "image_upload_count": len(image_uploads or []),
     }
 
@@ -706,23 +745,27 @@ def _build_model_capability_details(
 @dataclass
 class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
+
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
-    context_manager_now: Optional[datetime] = None
+    context_manager_now: datetime | None = None
     buffer_store: BufferStore = field(default_factory=BufferStore)
     buffer_store_registry: dict[str, BufferStore] = field(default_factory=dict)
     session_id: str = ""
     vault_name: str = ""
-    message_history: List[ModelMessage] = field(default_factory=list)
-    tools: List[str] = field(default_factory=list)
+    message_history: list[ModelMessage] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
 
 
-def _resolve_context_manager_now() -> Optional[datetime]:
+def _resolve_context_manager_now() -> datetime | None:
     if not has_runtime_context():
         return None
     try:
         runtime = get_runtime_context()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to get runtime context for context_manager_now", data={"error": str(exc)})
+        logger.warning(
+            "Failed to get runtime context for context_manager_now",
+            data={"error": str(exc)},
+        )
         return None
     features = runtime.config.features or {}
     raw_value = features.get("context_manager_now")
@@ -753,18 +796,20 @@ def _resolve_image_prompt(
     *,
     prompt_text: str,
     history_prompt_text: str | None = None,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
+    image_paths: list[str] | None,
+    image_uploads: list[UploadedImageAttachment] | None,
     vault_path: str,
 ) -> tuple[PromptInput, str, int]:
     """Build prompt payload and history-safe text from optional image attachments."""
-    history_text = history_prompt_text if history_prompt_text is not None else prompt_text
+    history_text = (
+        history_prompt_text if history_prompt_text is not None else prompt_text
+    )
     if not image_paths and not image_uploads:
         return prompt_text, history_text, 0
 
     vault_root = Path(vault_path).resolve()
-    prompt_content: List[UserContent] = [prompt_text]
-    history_lines: List[str] = []
+    prompt_content: list[UserContent] = [prompt_text]
+    history_lines: list[str] = []
     seen_paths: set[str] = set()
 
     for raw_path in image_paths or []:
@@ -791,7 +836,9 @@ def _resolve_image_prompt(
 
         file_content = BinaryContent.from_path(resolved_path)
         if not file_content.is_image:
-            raise ValueError(f"File is not an image and cannot be attached: {candidate}")
+            raise ValueError(
+                f"File is not an image and cannot be attached: {candidate}"
+            )
         _check_image_size(candidate, len(file_content.data))
 
         prompt_content.append(file_content)
@@ -825,8 +872,8 @@ def _resolve_image_prompt(
 
 def _validate_image_capability(
     model_alias: str,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
+    image_paths: list[str] | None,
+    image_uploads: list[UploadedImageAttachment] | None,
 ) -> None:
     """Fail fast if image attachments are requested for a non-vision model."""
     has_uploads = bool(image_uploads)
@@ -857,27 +904,29 @@ async def _prepare_chat_execution(
     vault_name: str,
     vault_path: str,
     prompt: str,
-    image_paths: Optional[List[str]],
-    image_uploads: Optional[List[UploadedImageAttachment]],
+    image_paths: list[str] | None,
+    image_uploads: list[UploadedImageAttachment] | None,
     session_id: str,
-    tools: List[str],
+    tools: list[str],
     model: str,
     thinking: ThinkingValue | None = None,
-    context_template: Optional[str] = None,
+    context_template: str | None = None,
     chat_mode: ChatMode = NORMAL_CHAT_MODE,
-    message_history_override: Optional[List[ModelMessage]] = None,
+    message_history_override: list[ModelMessage] | None = None,
     display_prompt: str | None = None,
 ) -> PreparedChatExecution:
     """Perform chat preflight before either sync or streaming execution begins."""
     _validate_image_capability(model, image_paths, image_uploads)
     workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
-    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name,
-        vault_path,
-        tools,
-        model,
-        thinking,
-        chat_mode=chat_mode,
+    base_instructions, tool_instructions, model_instance, tool_functions = (
+        _prepare_agent_config(
+            vault_name,
+            vault_path,
+            tools,
+            model,
+            thinking,
+            chat_mode=chat_mode,
+        )
     )
 
     capabilities = build_chat_capabilities(
@@ -940,23 +989,25 @@ async def _prepare_deferred_review_resume_execution(
     vault_name: str,
     vault_path: str,
     session_id: str,
-    tools: List[str],
+    tools: list[str],
     model: str,
-    message_history: List[ModelMessage],
+    message_history: list[ModelMessage],
     deferred_tool_results: DeferredToolResults,
     thinking: ThinkingValue | None = None,
-    context_template: Optional[str] = None,
+    context_template: str | None = None,
     chat_mode: ChatMode = NORMAL_CHAT_MODE,
 ) -> PreparedChatExecution:
     """Prepare a chat execution that resumes deferred tool review results."""
     workspace_path = _CHAT_STORE.get_session_workspace_path(session_id, vault_name)
-    base_instructions, tool_instructions, model_instance, tool_functions = _prepare_agent_config(
-        vault_name,
-        vault_path,
-        tools,
-        model,
-        thinking,
-        chat_mode=chat_mode,
+    base_instructions, tool_instructions, model_instance, tool_functions = (
+        _prepare_agent_config(
+            vault_name,
+            vault_path,
+            tools,
+            model,
+            thinking,
+            chat_mode=chat_mode,
+        )
     )
 
     capabilities = build_chat_capabilities(
@@ -1001,7 +1052,7 @@ async def _prepare_deferred_review_resume_execution(
 def _prepare_agent_config(
     vault_name: str,
     vault_path: str,
-    tools: List[str],
+    tools: list[str],
     model: str,
     thinking: ThinkingValue | None = None,
     chat_mode: ChatMode = NORMAL_CHAT_MODE,
@@ -1028,7 +1079,9 @@ def _prepare_agent_config(
         tool_functions = binding.tool_functions
         tool_instructions = binding.tool_instructions
 
-    resolved_thinking = thinking if thinking is not None else get_default_model_thinking()
+    resolved_thinking = (
+        thinking if thinking is not None else get_default_model_thinking()
+    )
     model_instance = build_model_instance(model, thinking=resolved_thinking)
     if isinstance(model_instance, ModelExecutionSpec) and model_instance.mode == "skip":
         raise ValueError(

@@ -7,7 +7,7 @@ Supports flat Obsidian-style key: value properties between --- delimiters.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Tuple
+from typing import Any
 
 
 def parse_simple_frontmatter(
@@ -15,7 +15,7 @@ def parse_simple_frontmatter(
     *,
     require_frontmatter: bool = False,
     missing_error: str = "File must start with YAML frontmatter (---)",
-) -> Tuple[Dict[str, Any], str]:
+) -> tuple[dict[str, Any], str]:
     """Parse flat key:value frontmatter and return (properties, remaining_content)."""
     normalized = (content or "").strip()
 
@@ -37,7 +37,7 @@ def parse_simple_frontmatter(
     if end_idx is None:
         raise ValueError("Frontmatter not properly closed with ---")
 
-    properties: Dict[str, Any] = {}
+    properties: dict[str, Any] = {}
     for line_num, line in enumerate(lines[1:end_idx], 2):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -52,7 +52,9 @@ def parse_simple_frontmatter(
             raise ValueError(f"Line {line_num}: Empty key not allowed")
 
         if len(value) >= 2:
-            if (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'"):
+            if (value[0] == '"' and value[-1] == '"') or (
+                value[0] == "'" and value[-1] == "'"
+            ):
                 value = value[1:-1]
 
         lowered = value.lower()
@@ -133,7 +135,9 @@ def upsert_frontmatter_key(content: str, *, key: str, value: str) -> str:
         break
 
     if not replaced:
-        newline = "\n" if frontmatter_lines and frontmatter_lines[-1].endswith("\n") else "\n"
+        newline = (
+            "\n" if frontmatter_lines and frontmatter_lines[-1].endswith("\n") else "\n"
+        )
         frontmatter_lines.append(f"{key}: {value}{newline}")
 
     return "".join(lines[:1] + frontmatter_lines + lines[closing_index:])

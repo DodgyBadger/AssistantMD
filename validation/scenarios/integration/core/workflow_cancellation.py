@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -40,18 +40,24 @@ class WorkflowCancellationScenario(BaseScenario):
                 break
             await asyncio.sleep(0.05)
 
-        self.soft_assert(created_path.exists(), "Workflow should write a file before cancellation")
+        self.soft_assert(
+            created_path.exists(), "Workflow should write a file before cancellation"
+        )
 
         checkpoint = self.event_checkpoint()
         cancel_response = self.call_api(f"/api/tasks/{task_id}/cancel", method="POST")
-        self.soft_assert_equal(cancel_response.status_code, 200, "Workflow task cancel should succeed")
+        self.soft_assert_equal(
+            cancel_response.status_code, 200, "Workflow task cancel should succeed"
+        )
         self.soft_assert(
             cancel_response.json().get("cancelled") is True,
             "Workflow task cancel should be effective",
         )
 
         task = await self._wait_for_execution_task(task_id)
-        self.soft_assert_equal(task.get("status"), "cancelled", "Workflow task should be cancelled")
+        self.soft_assert_equal(
+            task.get("status"), "cancelled", "Workflow task should be cancelled"
+        )
         self.soft_assert(
             not created_path.exists(),
             "Cancelled workflow should rollback files created before cancellation",

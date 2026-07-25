@@ -11,7 +11,6 @@ from core.authoring.contracts import (
 from core.authoring.helpers.common import build_capability
 from core.logger import UnifiedLogger
 
-
 logger = UnifiedLogger(tag="authoring-host")
 
 

@@ -1,16 +1,16 @@
 """Integration scenario for explicit atomic vault activity rollback."""
 
+import asyncio
 import json
 import sqlite3
 import sys
 import threading
-import asyncio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.vault_state.activity import VaultActivityContext, use_vault_activity
 import core.vault_state.activity_rollback as activity_rollback
+from core.vault_state.activity import VaultActivityContext, use_vault_activity
 from core.vault_state.activity_rollback import ActivityRollbackUnavailable
 from core.vault_state.file_mutations import (
     replace_vault_file_content,
@@ -106,9 +106,9 @@ class VaultActivityRollbackScenario(BaseScenario):
         ) == "final update\n"
 
         available_again = self._preview(vault.name, source_id)
-        assert available_again["can_rollback"] is True, (
-            "Restoring the later edit should re-enable the earlier activity rollback"
-        )
+        assert (
+            available_again["can_rollback"] is True
+        ), "Restoring the later edit should re-enable the earlier activity rollback"
         rollback_checkpoint = self.event_checkpoint()
         source_rollback = self._execute(vault.name, source_id, available_again)
         assert source_rollback.status_code == 200
@@ -240,9 +240,9 @@ class VaultActivityRollbackScenario(BaseScenario):
             assert await asyncio.to_thread(first_entered.wait, 1)
             second = asyncio.create_task(asyncio.to_thread(execute))
             await asyncio.sleep(0.05)
-            assert restore_calls == 1, (
-                "A second rollback submission must wait before restore execution"
-            )
+            assert (
+                restore_calls == 1
+            ), "A second rollback submission must wait before restore execution"
             allow_first.set()
             await first
             try:

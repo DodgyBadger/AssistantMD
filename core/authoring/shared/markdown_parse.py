@@ -15,8 +15,9 @@ from core.authoring.contracts import (
 )
 from core.utils.frontmatter import parse_simple_frontmatter
 
-
 _MARKDOWN_PARSER = MarkdownIt()
+
+
 def parse_markdown_content(value: str) -> ParsedMarkdown:
     """Parse markdown text into a small structured representation."""
     frontmatter, body = parse_simple_frontmatter(value or "")
@@ -72,8 +73,14 @@ def _extract_sections(
     sections: list[MarkdownSection] = []
     for index, heading in enumerate(headings):
         start_index = max(heading.line_start, 1)
-        next_heading_line = headings[index + 1].line_start if index + 1 < len(headings) else len(body_lines) + 1
-        content = "\n".join(body_lines[start_index: max(next_heading_line - 1, start_index)]).strip("\n")
+        next_heading_line = (
+            headings[index + 1].line_start
+            if index + 1 < len(headings)
+            else len(body_lines) + 1
+        )
+        content = "\n".join(
+            body_lines[start_index : max(next_heading_line - 1, start_index)]
+        ).strip("\n")
         sections.append(
             MarkdownSection(
                 heading=heading.text,

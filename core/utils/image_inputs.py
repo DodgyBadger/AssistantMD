@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from pydantic_ai import BinaryContent
 
@@ -45,12 +45,12 @@ def format_image_skipped_marker(reason: str, name: str) -> str:
 @dataclass(frozen=True)
 class ImageAttachmentDecision:
     marker: str
-    image_blob: Optional[BinaryContent]
+    image_blob: BinaryContent | None
     warnings: list[str]
     attached: bool
     size_bytes: int
     image_key: str
-    image_hash: Optional[str]
+    image_hash: str | None
 
 
 def evaluate_image_attachment(
@@ -58,7 +58,7 @@ def evaluate_image_attachment(
     image_path: Path,
     policy: ChunkingPolicy,
     images_policy: str,
-    supports_vision: Optional[bool],
+    supports_vision: bool | None,
     seen_images: set[str],
     seen_image_hashes: set[str],
     attached_count: int,
@@ -83,9 +83,7 @@ def evaluate_image_attachment(
         return ImageAttachmentDecision(
             marker=format_image_non_image_marker(image_path.as_posix()),
             image_blob=None,
-            warnings=[
-                f"Input image resolved to non-image '{image_path.as_posix()}'."
-            ],
+            warnings=[f"Input image resolved to non-image '{image_path.as_posix()}'."],
             attached=False,
             size_bytes=0,
             image_key=image_key,
@@ -181,9 +179,7 @@ def build_image_tool_payload(*, image_path: Path, vault_path: str) -> ImageToolP
     relative_path = image_path.resolve().relative_to(Path(vault_path).resolve())
     relative_display = relative_path.as_posix()
     image_blob = BinaryContent.from_path(image_path)
-    note = (
-        f"Attached image from '{relative_display}'. Use this image to answer the user's request."
-    )
+    note = f"Attached image from '{relative_display}'. Use this image to answer the user's request."
     metadata = {
         "filepath": relative_display,
         "media_type": image_blob.media_type,

@@ -197,9 +197,9 @@ def query_activity_log(
     return ActivityLogPage(
         entries=[entry for _, entry in selected],
         next_cursor=next_cursor,
-        earliest_retained_timestamp=earliest.isoformat(timespec="milliseconds")
-        if earliest
-        else None,
+        earliest_retained_timestamp=(
+            earliest.isoformat(timespec="milliseconds") if earliest else None
+        ),
         total_matching=total_matching,
         total_size_bytes=total_size,
         available_levels=sorted(available_levels),

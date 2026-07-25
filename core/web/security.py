@@ -9,7 +9,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 from core.web.errors import WebUrlPolicyError
 
-
 _HTTP_URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 

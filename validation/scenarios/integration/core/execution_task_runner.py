@@ -9,7 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.runtime.execution_tasks import ExecutionTaskKind, ExecutionTaskSource
-from core.runtime.task_runner import ExecutionGatePolicy, ExecutionTaskHooks, ExecutionTaskSpec
+from core.runtime.task_runner import (
+    ExecutionGatePolicy,
+    ExecutionTaskHooks,
+    ExecutionTaskSpec,
+)
 from validation.core.base_scenario import BaseScenario
 
 
@@ -78,11 +82,15 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             ),
             lambda task: _wait_until_cancelled(task, cancel_started),
             hooks=ExecutionTaskHooks(
-                on_cancelled=lambda task_id: _record_task_id(cancel_hook_task_ids, task_id),
+                on_cancelled=lambda task_id: _record_task_id(
+                    cancel_hook_task_ids, task_id
+                ),
             ),
         )
         await asyncio.wait_for(cancel_started.wait(), timeout=2.0)
-        await runtime.task_coordinator.cancel_task(cancelled_task.task_id, reason="validation_cancel")
+        await runtime.task_coordinator.cancel_task(
+            cancelled_task.task_id, reason="validation_cancel"
+        )
         cancelled = await self._wait_for_task_terminal(cancelled_task.task_id)
         self.soft_assert_equal(
             cancelled.status if cancelled else None,
@@ -106,7 +114,9 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             ),
             _fail_task,
             hooks=ExecutionTaskHooks(
-                on_failed=lambda task_id, exc: _record_failure(failure_hook, task_id, exc),
+                on_failed=lambda task_id, exc: _record_failure(
+                    failure_hook, task_id, exc
+                ),
             ),
         )
         failed = await self._wait_for_task_terminal(failed_task.task_id)
@@ -218,13 +228,21 @@ class ExecutionTaskRunnerScenario(BaseScenario):
             "Runner gate should record queue position for waiting tasks",
         )
         self.soft_assert_equal(
-            queued_second.metadata.get("waiting_for_task_id") if queued_second else None,
+            (
+                queued_second.metadata.get("waiting_for_task_id")
+                if queued_second
+                else None
+            ),
             first_gate_task.task_id,
             "Runner gate should identify the holder task while waiting",
         )
         release_gate.set()
-        first_gate_terminal = await self._wait_for_task_terminal(first_gate_task.task_id)
-        second_gate_terminal = await self._wait_for_task_terminal(second_gate_task.task_id)
+        first_gate_terminal = await self._wait_for_task_terminal(
+            first_gate_task.task_id
+        )
+        second_gate_terminal = await self._wait_for_task_terminal(
+            second_gate_task.task_id
+        )
         self.soft_assert_equal(
             first_gate_terminal.status if first_gate_terminal else None,
             "completed",
@@ -248,9 +266,11 @@ class ExecutionTaskRunnerScenario(BaseScenario):
         observed_task_id = ""
 
         runtime.task_coordinator._terminal_observers.append(  # noqa: SLF001
-            lambda task: observer_states.append(cleanup_finished.is_set())
-            if task.task_id == observed_task_id
-            else None
+            lambda task: (
+                observer_states.append(cleanup_finished.is_set())
+                if task.task_id == observed_task_id
+                else None
+            )
         )
         shutdown_task = await runtime.task_runner.start_background(
             ExecutionTaskSpec(
@@ -278,8 +298,12 @@ class ExecutionTaskRunnerScenario(BaseScenario):
         )
         cleanup_released.set()
         if runtime.background_tasks:
-            await asyncio.gather(*list(runtime.background_tasks), return_exceptions=True)
-        await runtime.task_coordinator.mark_unfinished_cancelled(reason="validation_shutdown")
+            await asyncio.gather(
+                *list(runtime.background_tasks), return_exceptions=True
+            )
+        await runtime.task_coordinator.mark_unfinished_cancelled(
+            reason="validation_shutdown"
+        )
         self.soft_assert_equal(
             observer_states,
             [True],

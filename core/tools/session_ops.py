@@ -13,35 +13,34 @@ from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.chat.chat_store import ChatStore, StoredChatSession
-from core.constants import (
-    SESSION_SUMMARY_CLASSIFICATION_PROMPT,
-    SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT,
-    SESSION_SUMMARY_INTENT_PROMPT,
-)
-from core.llm.agents import create_agent, generate_response
-from core.llm.model_factory import build_model_instance
-from core.logger import UnifiedLogger
 from core.chat.history_service import (
     ChatHistoryContext,
     ChatHistoryService,
     ConversationHistoryItem,
     ConversationToolEventItem,
 )
+from core.constants import (
+    SESSION_SUMMARY_CLASSIFICATION_PROMPT,
+    SESSION_SUMMARY_INTENT_PROMPT,
+    SESSION_SUMMARY_SOURCE_SUMMARY_PROMPT,
+)
+from core.llm.agents import create_agent, generate_response
+from core.llm.model_factory import build_model_instance
+from core.logger import UnifiedLogger
 from core.memory.session_summary import (
+    SESSION_SUMMARY_FIELD_UNSET,
     SUMMARY_VECTOR_MIN_SCORE,
     VECTOR_FIELD_TYPES,
-    SESSION_SUMMARY_FIELD_UNSET,
     SessionSummaryArtifact,
     SessionSummaryStore,
     build_fts_query,
 )
 from core.memory.session_summary_status import session_summary_status
-from core.vector import VectorService
 from core.vault_state.service import VaultStateService
+from core.vector import VectorService
 
 from .base import BaseTool
 from .failures import classify_exception, tool_failure_return
-
 
 logger = UnifiedLogger(tag="session-ops-tool")
 
@@ -130,12 +129,16 @@ class SessionOps(BaseTool):
                         active_session_id=active_session_id,
                     )
                 elif filter is not None:
-                    raise ModelRetry("session_ops filter is only supported for list_sessions and search_sessions.")
+                    raise ModelRetry(
+                        "session_ops filter is only supported for list_sessions and search_sessions."
+                    )
                 if op == "list_sessions":
                     _require(active_vault_name, "vault_name is required")
                     result = _list_sessions(
                         vault_name=active_vault_name,
-                        limit=_require_integer_limit(resolved_limit, operation="list_sessions"),
+                        limit=_require_integer_limit(
+                            resolved_limit, operation="list_sessions"
+                        ),
                         cursor=cursor,
                         summary_status=summary_status,
                         workspace_filter=workspace_filter,
@@ -164,12 +167,17 @@ class SessionOps(BaseTool):
                         domain=_summary_data_value(summary_data, "domain"),
                         work_product=_summary_data_value(summary_data, "work_product"),
                         user_intent=_summary_data_value(summary_data, "user_intent"),
-                        named_entities=_summary_data_value(summary_data, "named_entities"),
-                        source_summary=_summary_data_value(summary_data, "source_summary"),
+                        named_entities=_summary_data_value(
+                            summary_data, "named_entities"
+                        ),
+                        source_summary=_summary_data_value(
+                            summary_data, "source_summary"
+                        ),
                         workspace_path=ChatStore().get_session_workspace_path(
                             active_session_id,
                             active_vault_name,
-                        ) or None,
+                        )
+                        or None,
                         metadata=summary_metadata,
                     )
                     try:
@@ -233,7 +241,8 @@ class SessionOps(BaseTool):
                         workspace_path=ChatStore().get_session_workspace_path(
                             active_session_id,
                             active_vault_name,
-                        ) or None,
+                        )
+                        or None,
                         metadata={
                             "source": "chat_session_extraction",
                             "extraction_policy": "summary_intent_classification_source_summary",
@@ -291,9 +300,9 @@ class SessionOps(BaseTool):
                         "operation": op,
                         "vault_name": active_vault_name,
                         "session_id": active_session_id,
-                        "session_summary": session_summary.to_dict()
-                        if session_summary
-                        else None,
+                        "session_summary": (
+                            session_summary.to_dict() if session_summary else None
+                        ),
                     }
                 elif op == "search_sessions":
                     _require(active_vault_name, "vault_name is required")
@@ -303,7 +312,9 @@ class SessionOps(BaseTool):
                         query=query,
                         resolved_limit=resolved_limit,
                     )
-                    resolved_search_limit = resolved_limit if isinstance(resolved_limit, int) else 5
+                    resolved_search_limit = (
+                        resolved_limit if isinstance(resolved_limit, int) else 5
+                    )
                     result = await _search_sessions(
                         store=store,
                         vault_name=active_vault_name,
@@ -518,7 +529,9 @@ def _parse_session_filter(
     unknown_keys = sorted(set(value) - {"workspace"})
     if unknown_keys:
         joined = ", ".join(unknown_keys)
-        raise ModelRetry(f"Unsupported session_ops filter keys: {joined}. Supported key: workspace.")
+        raise ModelRetry(
+            f"Unsupported session_ops filter keys: {joined}. Supported key: workspace."
+        )
     workspace_value = value.get("workspace")
     if workspace_value is None or str(workspace_value).strip() == "":
         return None
@@ -527,10 +540,16 @@ def _parse_session_filter(
     normalized = workspace_value.strip()
     if normalized == "current":
         _require(vault_name, "vault_name is required")
-        _require(active_session_id, "session_id is required for filter.workspace='current'")
-        current_path = ChatStore().get_session_workspace_path(active_session_id or "", vault_name or "")
+        _require(
+            active_session_id, "session_id is required for filter.workspace='current'"
+        )
+        current_path = ChatStore().get_session_workspace_path(
+            active_session_id or "", vault_name or ""
+        )
         if not current_path:
-            raise ModelRetry("filter.workspace='current' requires the active session to have a workspace.")
+            raise ModelRetry(
+                "filter.workspace='current' requires the active session to have a workspace."
+            )
         return _WorkspaceFilter(value=current_path, match_type="exact")
     if "*" in normalized and not normalized.endswith("/*"):
         raise ModelRetry(
@@ -539,7 +558,9 @@ def _parse_session_filter(
     if normalized.endswith("/*"):
         path = _normalize_workspace_filter_path(normalized[:-2])
         return _WorkspaceFilter(value=path, match_type="prefix")
-    return _WorkspaceFilter(value=_normalize_workspace_filter_path(normalized), match_type="exact")
+    return _WorkspaceFilter(
+        value=_normalize_workspace_filter_path(normalized), match_type="exact"
+    )
 
 
 def _normalize_workspace_filter_path(value: str) -> str:
@@ -548,11 +569,15 @@ def _normalize_workspace_filter_path(value: str) -> str:
     if not parts:
         raise ModelRetry("filter.workspace must not be empty.")
     if any(part == ".." for part in parts):
-        raise ModelRetry("filter.workspace must be a vault-relative path and cannot contain '..'.")
+        raise ModelRetry(
+            "filter.workspace must be a vault-relative path and cannot contain '..'."
+        )
     return "/".join(parts)
 
 
-def _workspace_matches_filter(workspace_path: str | None, workspace_filter: _WorkspaceFilter | None) -> bool:
+def _workspace_matches_filter(
+    workspace_path: str | None, workspace_filter: _WorkspaceFilter | None
+) -> bool:
     if workspace_filter is None:
         return True
     candidate = str(workspace_path or "").strip("/")
@@ -562,10 +587,14 @@ def _workspace_matches_filter(workspace_path: str | None, workspace_filter: _Wor
         return candidate == workspace_filter.value
     if workspace_filter.match_type == "prefix":
         return candidate.startswith(f"{workspace_filter.value}/")
-    raise ValueError(f"Unsupported workspace filter match type: {workspace_filter.match_type}")
+    raise ValueError(
+        f"Unsupported workspace filter match type: {workspace_filter.match_type}"
+    )
 
 
-def _session_filter_to_dict(workspace_filter: _WorkspaceFilter | None) -> dict[str, Any] | None:
+def _session_filter_to_dict(
+    workspace_filter: _WorkspaceFilter | None,
+) -> dict[str, Any] | None:
     if workspace_filter is None:
         return None
     workspace = (
@@ -676,7 +705,9 @@ def _parse_cursor(value: str) -> int:
     if not normalized:
         return 0
     if not normalized.isdigit():
-        raise ModelRetry("list_sessions cursor must be the next_cursor value from a previous list_sessions result.")
+        raise ModelRetry(
+            "list_sessions cursor must be the next_cursor value from a previous list_sessions result."
+        )
     return int(normalized)
 
 
@@ -711,7 +742,9 @@ def _upsert_data(data: dict[str, Any] | None) -> dict[str, Any]:
     parsed = dict(data)
     if parsed.get("metadata") is not None and not isinstance(parsed["metadata"], dict):
         raise ValueError("data.metadata must be an object")
-    if parsed.get("artifacts") is not None and not isinstance(parsed["artifacts"], list):
+    if parsed.get("artifacts") is not None and not isinstance(
+        parsed["artifacts"], list
+    ):
         raise ValueError("data.artifacts must be a list")
     return parsed
 
@@ -806,7 +839,9 @@ async def _search_sessions(
             workspace_filter=workspace_filter,
         )
     if workspace_filter is None and active_workspace_path:
-        _apply_workspace_boost(memory_matches, active_workspace_path=active_workspace_path)
+        _apply_workspace_boost(
+            memory_matches, active_workspace_path=active_workspace_path
+        )
     for candidate in memory_matches.values():
         candidate["evidence"].sort(
             key=lambda item: float(item.get("weighted_score") or 0.0),
@@ -847,7 +882,11 @@ async def _search_session_summary_fields(
     workspace_filter: _WorkspaceFilter | None = None,
 ) -> dict[str, dict[str, Any]]:
     candidates: dict[str, dict[str, Any]] = {}
-    fetch_limit = _search_fetch_limit(limit) if workspace_filter is not None else max(limit * 4, limit)
+    fetch_limit = (
+        _search_fetch_limit(limit)
+        if workspace_filter is not None
+        else max(limit * 4, limit)
+    )
     lexical_matches = store.search_session_summaries_fts(
         vault_name=vault_name,
         query=query,
@@ -855,7 +894,9 @@ async def _search_session_summary_fields(
     )
     for match in lexical_matches:
         session_summary = match.session_summary
-        if not _workspace_matches_filter(session_summary.workspace_path, workspace_filter):
+        if not _workspace_matches_filter(
+            session_summary.workspace_path, workspace_filter
+        ):
             continue
         weighted_score = round(float(match.score or 0.0) * SESSION_LEXICAL_WEIGHT, 6)
         candidate = candidates.setdefault(
@@ -889,14 +930,18 @@ async def _search_session_summary_fields(
             field_type=current_field,
             value=query,
             vector_service=VectorService(),
-            limit=fetch_limit if workspace_filter is not None else max(limit * 3, limit),
+            limit=(
+                fetch_limit if workspace_filter is not None else max(limit * 3, limit)
+            ),
             min_score=SUMMARY_VECTOR_MIN_SCORE,
             include_direct=False,
         )
         field_weight = SESSION_SEARCH_FIELD_WEIGHTS.get(current_field, 0.5)
         for match in matches:
             session_summary = match.session_summary
-            if not _workspace_matches_filter(session_summary.workspace_path, workspace_filter):
+            if not _workspace_matches_filter(
+                session_summary.workspace_path, workspace_filter
+            ):
                 continue
             normalized_score = _normalize_vector_score(float(match.score or 0.0))
             weighted_score = round(normalized_score * field_weight, 6)
@@ -922,7 +967,9 @@ async def _search_session_summary_fields(
                     "score": match.score,
                     "normalized_score": normalized_score,
                     "weighted_score": weighted_score,
-                    "matched_value": _preview_text(session_summary.field_value(current_field)),
+                    "matched_value": _preview_text(
+                        session_summary.field_value(current_field)
+                    ),
                 }
             )
     for candidate in candidates.values():
@@ -1019,7 +1066,9 @@ def _merge_transcript_matches(
             {
                 "session_id": session_id,
                 "vault_name": session.vault_name,
-                "session_summary": session_summary.to_dict() if session_summary else None,
+                "session_summary": (
+                    session_summary.to_dict() if session_summary else None
+                ),
                 "chat_session": {
                     "session_id": session_id,
                     "vault_name": session.vault_name,
@@ -1096,7 +1145,9 @@ def _bm25_rank_score(rank: float) -> float:
 def _normalize_vector_score(score: float) -> float:
     if score <= SUMMARY_VECTOR_MIN_SCORE:
         return 0.0
-    return round((score - SUMMARY_VECTOR_MIN_SCORE) / (1.0 - SUMMARY_VECTOR_MIN_SCORE), 6)
+    return round(
+        (score - SUMMARY_VECTOR_MIN_SCORE) / (1.0 - SUMMARY_VECTOR_MIN_SCORE), 6
+    )
 
 
 async def _summarize_session(
@@ -1115,7 +1166,9 @@ async def _summarize_session(
         session_id=session_id,
         limit="all",
     )
-    tool_events = ChatHistoryService(chat_store=chat_store).get_conversation_tool_events(
+    tool_events = ChatHistoryService(
+        chat_store=chat_store
+    ).get_conversation_tool_events(
         context=ChatHistoryContext(session_id=session_id, vault_name=vault_name),
         scope="session",
         session_id=session_id,
@@ -1290,7 +1343,11 @@ def _extract_arg_paths(value: Any) -> list[str]:
                     paths.append(path)
                 continue
             if key in {"paths", "files"} and isinstance(nested, list):
-                paths.extend(str(item or "").strip() for item in nested if str(item or "").strip())
+                paths.extend(
+                    str(item or "").strip()
+                    for item in nested
+                    if str(item or "").strip()
+                )
     return paths
 
 
@@ -1401,7 +1458,9 @@ def _maybe_add_artifacts(
         parsed.append(
             SessionSummaryArtifact(
                 path=path,
-                artifact_role=str(raw.get("artifact_role") or raw.get("role") or "file_retrieved"),
+                artifact_role=str(
+                    raw.get("artifact_role") or raw.get("role") or "file_retrieved"
+                ),
                 vault_name=vault_name,
                 metadata=dict(raw.get("metadata") or {}),
             )
@@ -1466,7 +1525,9 @@ def _add_chat_mutation_artifacts(
             path=mutation.path,
             artifact_role=role,
             vault_name=vault_name,
-            metadata={key: value for key, value in metadata.items() if value is not None},
+            metadata={
+                key: value for key, value in metadata.items() if value is not None
+            },
         )
 
     artifacts = tuple(artifacts_by_key.values())

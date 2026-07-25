@@ -52,7 +52,9 @@ class ExecutionGatePolicy:
     queue_position_key: str | None = "queue_position"
     holder_task_id_key: str | None = "waiting_for_task_id"
     clear_metadata: dict[str, Any] = field(default_factory=dict)
-    on_queued: Callable[[ExecutionTaskSnapshot, ExecutionGateWait], Awaitable[None]] | None = None
+    on_queued: (
+        Callable[[ExecutionTaskSnapshot, ExecutionGateWait], Awaitable[None]] | None
+    ) = None
 
 
 class ExecutionTaskRunner:
@@ -90,7 +92,9 @@ class ExecutionTaskRunner:
 
         async def _run() -> None:
             try:
-                async with self._task_coordinator.track_existing_task(task.task_id) as tracked_task:
+                async with self._task_coordinator.track_existing_task(
+                    task.task_id
+                ) as tracked_task:
                     if start_immediately:
                         await self._task_coordinator.mark_started(tracked_task.task_id)
                     await self.run_with_timeout(
@@ -102,7 +106,9 @@ class ExecutionTaskRunner:
             except asyncio.CancelledError:
                 await self._call_cancelled_hook(hooks, task.task_id)
                 raise
-            except Exception as exc:  # noqa: BLE001 - task status is recorded by coordinator
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - task status is recorded by coordinator
                 if await self._task_has_cancelled(task.task_id):
                     await self._call_cancelled_hook(hooks, task.task_id)
                     return
@@ -153,7 +159,9 @@ class ExecutionTaskRunner:
             return await asyncio.wait_for(run(), timeout=timeout)
         except TimeoutError:
             reason = spec.timeout_reason or f"execution_task_timeout:{timeout:g}s"
-            result = await self._call_timed_out_hook(hooks, task.task_id, timeout, reason)
+            result = await self._call_timed_out_hook(
+                hooks, task.task_id, timeout, reason
+            )
             await self._task_coordinator.mark_timed_out(task.task_id, reason=reason)
             return result
 
@@ -186,7 +194,9 @@ class ExecutionTaskRunner:
             acquired = True
             await self._mark_gate_acquired(task.task_id, policy.key)
             if policy.clear_metadata:
-                await self._task_coordinator.update_metadata(task.task_id, policy.clear_metadata)
+                await self._task_coordinator.update_metadata(
+                    task.task_id, policy.clear_metadata
+                )
             return await run()
         finally:
             await self._unregister_gate_waiter(task.task_id, policy.key)
@@ -245,7 +255,9 @@ class ExecutionTaskRunner:
         lock.release()
 
     @staticmethod
-    async def _call_cancelled_hook(hooks: ExecutionTaskHooks | None, task_id: str) -> None:
+    async def _call_cancelled_hook(
+        hooks: ExecutionTaskHooks | None, task_id: str
+    ) -> None:
         if hooks is not None and hooks.on_cancelled is not None:
             await hooks.on_cancelled(task_id)
 

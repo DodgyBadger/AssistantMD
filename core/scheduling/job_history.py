@@ -12,7 +12,6 @@ from core.logger import UnifiedLogger
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.workflow_runs import WorkflowRunStore
 
-
 _job_history: dict[str, dict[str, Any]] = {}
 _lock = Lock()
 logger = UnifiedLogger(tag="scheduler-jobs")
@@ -38,7 +37,9 @@ def record_scheduler_job_event(event: Any, *, scheduler: Any | None = None) -> N
     status = (
         "missed"
         if missed
-        else str(getattr(result, "status", "") or ("error" if exception else "completed"))
+        else str(
+            getattr(result, "status", "") or ("error" if exception else "completed")
+        )
     )
     row = {
         "last_run_time": datetime.now(UTC),
@@ -92,17 +93,21 @@ def _log_scheduler_terminal_event(
         (
             "Scheduler job missed"
             if status == "missed"
-            else "Scheduler job completed"
-            if exception is None
-            else "Scheduler job failed"
+            else (
+                "Scheduler job completed"
+                if exception is None
+                else "Scheduler job failed"
+            )
         ),
         data={
             "event": (
                 "scheduler_job_missed"
                 if status == "missed"
-                else "scheduler_job_executed"
-                if exception is None
-                else "scheduler_job_error"
+                else (
+                    "scheduler_job_executed"
+                    if exception is None
+                    else "scheduler_job_error"
+                )
             ),
             "job_id": job_id,
             "job_name": job_name,
@@ -132,7 +137,9 @@ def _record_durable_scheduler_outcome(
         return
 
     scheduled_run_time = _scheduled_run_time(event)
-    event_key = f"{job_id}:{'missed' if missed else 'error'}:{scheduled_run_time or 'unknown'}"
+    event_key = (
+        f"{job_id}:{'missed' if missed else 'error'}:{scheduled_run_time or 'unknown'}"
+    )
     store = _get_workflow_run_store()
     if not missed:
         exception = getattr(event, "exception", None)
@@ -227,7 +234,9 @@ def _workflow_result_fields(result: Any) -> dict[str, Any]:
     return {
         "workflow_status": getattr(result, "status", None),
         "workflow_reason": getattr(result, "reason", None),
-        "workflow_execution_time_seconds": getattr(result, "execution_time_seconds", None),
+        "workflow_execution_time_seconds": getattr(
+            result, "execution_time_seconds", None
+        ),
         "workflow_output_files": getattr(result, "output_files", None),
         "workflow_message": getattr(result, "message", None),
     }

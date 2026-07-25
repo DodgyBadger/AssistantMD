@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-
 _WEB_TOOL_RENAMES = {
     "web_search_duckduckgo": "web_search",
     "web_search_tavily": "web_search",

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, AsyncIterator
+from typing import Any
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -20,6 +21,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
+from core.chat.tool_history import analyze_tool_history
 from core.constants import (
     CHAT_HISTORY_COMPACTION_INSTRUCTION,
     CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
@@ -38,11 +40,9 @@ from core.settings import (
     get_compaction_token_threshold,
     get_compaction_type,
 )
-from core.chat.tool_history import analyze_tool_history
 from core.tools.utils import estimate_token_count
 
 from .chat_store import ChatStore
-
 
 logger = UnifiedLogger(tag="chat-compaction")
 
@@ -94,7 +94,9 @@ class ChatHistoryCompactionResult:
 
 
 @asynccontextmanager
-async def chat_session_history_lock(*, session_id: str, vault_name: str) -> AsyncIterator[None]:
+async def chat_session_history_lock(
+    *, session_id: str, vault_name: str
+) -> AsyncIterator[None]:
     """Serialize canonical history mutation for one chat session."""
     lock = await _get_session_lock(session_id=session_id, vault_name=vault_name)
     async with lock:
@@ -149,7 +151,9 @@ async def compact_chat_history(
         },
     )
     try:
-        async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+        async with chat_session_history_lock(
+            session_id=session_id, vault_name=vault_name
+        ):
             messages = chat_store.get_history(session_id, vault_name) or []
             integrity = analyze_tool_history(messages)
             if not integrity.ok:
@@ -383,7 +387,9 @@ async def _get_session_lock(*, session_id: str, vault_name: str) -> asyncio.Lock
 
 
 def _shift_recent_start_for_tool_pairs(messages: list[ModelMessage], start: int) -> int:
-    while start > 0 and _boundary_splits_tool_pair(messages[start - 1], messages[start]):
+    while start > 0 and _boundary_splits_tool_pair(
+        messages[start - 1], messages[start]
+    ):
         start -= 1
     while start > 0 and _message_has_tool_return(messages[start]):
         start -= 1
@@ -453,7 +459,9 @@ def _build_summary_prompt(
         "prompt_contract_version": CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
         "base_instruction": CHAT_HISTORY_COMPACTION_INSTRUCTION,
         "user_focus": focus_text or None,
-        "older_history": [_message_to_compaction_source(message) for message in older_messages],
+        "older_history": [
+            _message_to_compaction_source(message) for message in older_messages
+        ],
         "retained_recent_history": [
             _message_to_compaction_source(message)
             for message in (recent_messages or [])
@@ -514,6 +522,6 @@ def _is_empty_tool_return_content(content: Any) -> bool:
         return True
     if isinstance(content, str):
         return not content.strip()
-    if isinstance(content, (list, tuple, dict, set)):
+    if isinstance(content, list | tuple | dict | set):
         return len(content) == 0
     return False

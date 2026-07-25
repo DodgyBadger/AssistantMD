@@ -15,19 +15,19 @@ from pydantic_ai.tools import Tool
 from core.authoring.contracts import AssembleContextResult, ContextMessage
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
+from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
+    TERMINAL_STATUS_VALUES,
     ExecutionTaskKind,
     ExecutionTaskSource,
-    TERMINAL_STATUS_VALUES,
     workflow_vault_scope,
 )
 from core.runtime.state import RuntimeStateError, get_runtime_context
-from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.utils.frontmatter import parse_simple_frontmatter, upsert_frontmatter_key
+
 from .base import BaseTool
 from .failures import FailureClassification, classify_exception, tool_failure_return
-
 
 logger = UnifiedLogger(tag="workflow-run-tool")
 WORKFLOW_HEARTBEAT_STALE_SECONDS = 60
@@ -65,7 +65,11 @@ def _workflow_run_failure(
 def _heartbeat_age_seconds(task) -> float | None:
     heartbeat_at = getattr(task, "last_heartbeat_at", None)
     if heartbeat_at is None:
-        raw = task.metadata.get("last_heartbeat_at") if isinstance(task.metadata, dict) else None
+        raw = (
+            task.metadata.get("last_heartbeat_at")
+            if isinstance(task.metadata, dict)
+            else None
+        )
         if isinstance(raw, str) and raw.strip():
             try:
                 heartbeat_at = datetime.fromisoformat(raw)
@@ -110,7 +114,9 @@ class WorkflowRun(BaseTool):
             try:
                 op = (operation or "").strip().lower()
                 runtime = get_runtime_context()
-                vault_name = cls._resolve_vault_name(vault_path, runtime.config.data_root)
+                vault_name = cls._resolve_vault_name(
+                    vault_path, runtime.config.data_root
+                )
 
                 logger.set_sinks(["validation"]).info(
                     "tool_invoked",
@@ -138,9 +144,11 @@ class WorkflowRun(BaseTool):
                             workflow_name=name,
                             step_name=single_step,
                         )
-                        if not result.get("success", False) or str(
-                            result.get("status") or ""
-                        ).strip().lower() == "failed":
+                        if (
+                            not result.get("success", False)
+                            or str(result.get("status") or "").strip().lower()
+                            == "failed"
+                        ):
                             return _workflow_run_failure(
                                 operation=op,
                                 message=cls._format_run_result(result),
@@ -228,7 +236,9 @@ class WorkflowRun(BaseTool):
                     )
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
-                    cancellation = await runtime.task_coordinator.cancel_task(normalized_task_id)
+                    cancellation = await runtime.task_coordinator.cancel_task(
+                        normalized_task_id
+                    )
                     if cancellation is None:
                         return _workflow_run_failure(
                             operation=op,
@@ -240,7 +250,9 @@ class WorkflowRun(BaseTool):
                     name, error = cls._resolve_valid_workflow_name(op, workflow_name)
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
-                    file_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=name)
+                    file_path = cls._resolve_workflow_file_path(
+                        vault_path=vault_path, workflow_name=name
+                    )
                     if file_path.exists():
                         run_type = cls._read_run_type(file_path)
                         if run_type == "context":
@@ -316,7 +328,9 @@ Full documentation:
             raise ValueError("vault_path must be inside configured data_root") from exc
 
         if not relative.parts:
-            raise ValueError("vault_path must point to a vault directory under data_root")
+            raise ValueError(
+                "vault_path must point to a vault directory under data_root"
+            )
 
         return relative.parts[0]
 
@@ -369,7 +383,7 @@ Full documentation:
         if "/app/data/" in normalized:
             return "", (
                 "Invalid workflow_name. Runtime filesystem roots are not allowed; "
-                "pass vault-internal workflow names from workflow_run(operation=\"list\")."
+                'pass vault-internal workflow names from workflow_run(operation="list").'
             )
         if cls._is_invalid_workflow_name(normalized):
             return "", (
@@ -390,27 +404,47 @@ Full documentation:
         lines = [f"Authored automations in vault '{vault_name}':"]
         artifacts = []
         for file_path in workflow_files:
-            artifact_name = WorkflowRun._workflow_name_from_file_path(vault_path=vault_path, file_path=file_path)
+            artifact_name = WorkflowRun._workflow_name_from_file_path(
+                vault_path=vault_path, file_path=file_path
+            )
             if not artifact_name:
                 continue
             path_obj = Path(file_path)
             try:
-                frontmatter, _ = parse_simple_frontmatter(path_obj.read_text(encoding="utf-8"), require_frontmatter=False)
+                frontmatter, _ = parse_simple_frontmatter(
+                    path_obj.read_text(encoding="utf-8"), require_frontmatter=False
+                )
                 run_type = WorkflowRun._normalize_run_type(frontmatter)
-                description = str(frontmatter.get("description") or "").strip() or "(no description)"
+                description = (
+                    str(frontmatter.get("description") or "").strip()
+                    or "(no description)"
+                )
                 enabled_display = (
-                    WorkflowRun._resolve_enabled_state_from_frontmatter(file_path=file_path, fallback=False)
+                    WorkflowRun._resolve_enabled_state_from_frontmatter(
+                        file_path=file_path, fallback=False
+                    )
                     if run_type == "workflow"
                     else "n/a"
                 )
-                artifacts.append((artifact_name, run_type, description, enabled_display))
+                artifacts.append(
+                    (artifact_name, run_type, description, enabled_display)
+                )
             except Exception as exc:  # pylint: disable=broad-except
-                artifacts.append((artifact_name, "invalid", f"Failed to parse frontmatter: {exc}", "n/a"))
+                artifacts.append(
+                    (
+                        artifact_name,
+                        "invalid",
+                        f"Failed to parse frontmatter: {exc}",
+                        "n/a",
+                    )
+                )
 
         if not artifacts:
             return f"No authored automations found for vault '{vault_name}'."
 
-        for artifact_name, run_type, description, enabled_display in sorted(artifacts, key=lambda item: item[0].lower()):
+        for artifact_name, run_type, description, enabled_display in sorted(
+            artifacts, key=lambda item: item[0].lower()
+        ):
             lines.append(
                 f"- workflow_name: {artifact_name} | workflow_id: {vault_name}/{artifact_name} | run_type: {run_type} | enabled: {enabled_display} | description: {description}"
             )
@@ -476,7 +510,13 @@ Full documentation:
         workflow_result = dict(task.metadata.get("workflow_result") or {})
         if workflow_result:
             lines.append("workflow_result:")
-            for key in ("success", "status", "reason", "message", "execution_time_seconds"):
+            for key in (
+                "success",
+                "status",
+                "reason",
+                "message",
+                "execution_time_seconds",
+            ):
                 if workflow_result.get(key) is not None:
                     lines.append(f"- {key}: {workflow_result.get(key)}")
         if task.status not in TERMINAL_STATUS_VALUES:
@@ -486,7 +526,9 @@ Full documentation:
                     "Poll again or consider cancellation if it remains stale."
                 )
             else:
-                lines.append("message: Workflow is still running. Poll later before using its result.")
+                lines.append(
+                    "message: Workflow is still running. Poll later before using its result."
+                )
         return "\n".join(lines)
 
     @staticmethod
@@ -540,7 +582,9 @@ Full documentation:
         workflow_name: str,
         step_name: str | None,
     ) -> dict[str, Any]:
-        file_path = cls._resolve_workflow_file_path(vault_path=vault_path, workflow_name=workflow_name)
+        file_path = cls._resolve_workflow_file_path(
+            vault_path=vault_path, workflow_name=workflow_name
+        )
         if not file_path.exists():
             raise ValueError(f"Workflow file not found: {file_path}")
         if not file_path.is_file():
@@ -622,7 +666,9 @@ Full documentation:
 
     @classmethod
     def _read_run_type(cls, file_path: Path) -> str:
-        frontmatter, _ = parse_simple_frontmatter(file_path.read_text(encoding="utf-8"), require_frontmatter=False)
+        frontmatter, _ = parse_simple_frontmatter(
+            file_path.read_text(encoding="utf-8"), require_frontmatter=False
+        )
         return cls._normalize_run_type(frontmatter)
 
     @staticmethod
@@ -649,10 +695,14 @@ Full documentation:
         if isinstance(value, dict):
             messages = value.get("messages", ())
             instructions = value.get("instructions", ())
-            if not isinstance(messages, (list, tuple)):
-                raise ValueError("Context template dry-run returned invalid 'messages' data")
-            if not isinstance(instructions, (list, tuple)):
-                raise ValueError("Context template dry-run returned invalid 'instructions' data")
+            if not isinstance(messages, list | tuple):
+                raise ValueError(
+                    "Context template dry-run returned invalid 'messages' data"
+                )
+            if not isinstance(instructions, list | tuple):
+                raise ValueError(
+                    "Context template dry-run returned invalid 'instructions' data"
+                )
             normalized_messages: list[ContextMessage] = []
             for item in messages:
                 if isinstance(item, ContextMessage):
@@ -667,13 +717,19 @@ Full documentation:
                         )
                     )
                     continue
-                raise ValueError("Context template dry-run returned an unsupported message item")
-            normalized_instructions = tuple(str(item).strip() for item in instructions if str(item).strip())
+                raise ValueError(
+                    "Context template dry-run returned an unsupported message item"
+                )
+            normalized_instructions = tuple(
+                str(item).strip() for item in instructions if str(item).strip()
+            )
             return AssembleContextResult(
                 messages=tuple(normalized_messages),
                 instructions=normalized_instructions,
             )
-        raise ValueError("Context template dry-run must return AssembleContextResult or equivalent dict")
+        raise ValueError(
+            "Context template dry-run must return AssembleContextResult or equivalent dict"
+        )
 
     @classmethod
     async def _set_workflow_enabled_state(
@@ -819,14 +875,16 @@ Full documentation:
         )
 
     @staticmethod
-    def _resolve_enabled_state_from_frontmatter(*, file_path: str, fallback: bool) -> bool:
+    def _resolve_enabled_state_from_frontmatter(
+        *, file_path: str, fallback: bool
+    ) -> bool:
         """Read explicit enabled state from frontmatter.
 
         Missing `enabled` is treated as disabled for lifecycle/list semantics.
         If parsing fails, fallback preserves current behavior.
         """
         try:
-            with open(file_path, "r", encoding="utf-8") as file:
+            with open(file_path, encoding="utf-8") as file:
                 content = file.read()
         except OSError:
             return fallback
@@ -866,7 +924,7 @@ Full documentation:
         if not target_real.startswith(assistantmd_root + os.sep):
             raise ValueError("Workflow file path escapes vault AssistantMD root")
 
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(file_path, encoding="utf-8") as file:
             content = file.read()
 
         updated_content = upsert_frontmatter_key(

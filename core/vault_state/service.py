@@ -11,36 +11,35 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
-from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.authoring.template_discovery import discover_vaults
+from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.database import (
     create_engine_from_system_db,
     create_session_factory,
     get_system_database_path,
 )
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import chat_session_scope
 from core.settings import (
     get_debug_enabled,
     get_vault_state_enabled,
     get_vault_state_excluded_patterns,
 )
-from core.vault_state.activity import VaultActivityContext
-from core.runtime.execution_tasks import chat_session_scope
 from core.utils.hash import hash_file_bytes
+from core.vault_state.activity import VaultActivityContext
 from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import (
     FileSnapshot,
-    VaultActivity,
-    VaultMutation,
     SnapshotSet,
+    VaultActivity,
     VaultFile,
     VaultFileEvent,
+    VaultMutation,
     VaultRecord,
 )
-from core.vault_state.snapshots import compute_task_mutation_expiration
 from core.vault_state.patterns import ExcludedPathMatcher
 from core.vault_state.schema import ensure_vault_state_schema
-
+from core.vault_state.snapshots import compute_task_mutation_expiration
 
 logger = UnifiedLogger(tag="vault-state")
 
@@ -623,18 +622,25 @@ class VaultStateService:
                     session.scalars(
                         select(VaultMutation)
                         .where(VaultMutation.activity_id == activity.activity_id)
-                        .order_by(VaultMutation.created_at.asc(), VaultMutation.id.asc())
+                        .order_by(
+                            VaultMutation.created_at.asc(), VaultMutation.id.asc()
+                        )
                     )
                 )
                 first_at = rows[0].created_at if rows else activity.created_at
                 last_at = rows[-1].created_at if rows else activity.updated_at
                 expires_values = [
                     value
-                    for value in [activity.expires_at, *(row.expires_at for row in rows)]
+                    for value in [
+                        activity.expires_at,
+                        *(row.expires_at for row in rows),
+                    ]
                     if value is not None
                 ]
                 groups.append(
-                    self._activity_group(activity, rows, first_at, last_at, expires_values)
+                    self._activity_group(
+                        activity, rows, first_at, last_at, expires_values
+                    )
                 )
         return groups
 
@@ -800,7 +806,9 @@ class VaultStateService:
             if snapshot_set is None or not file_snapshot.snapshot_ref:
                 return None
 
-            snapshot_path = (Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref).resolve()
+            snapshot_path = (
+                Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref
+            ).resolve()
             snapshot_base = _snapshot_base_root().resolve()
             try:
                 snapshot_path.relative_to(snapshot_base)
@@ -935,7 +943,9 @@ class VaultStateService:
         return "observed"
 
     @staticmethod
-    def _register_vault(session: Any, *, vault_id: str, vault_name: str, now: datetime) -> None:
+    def _register_vault(
+        session: Any, *, vault_id: str, vault_name: str, now: datetime
+    ) -> None:
         record = session.get(VaultRecord, vault_id)
         if record is None:
             session.add(
@@ -991,7 +1001,9 @@ class VaultStateService:
         sequence: int | None,
     ) -> None:
         event_name = (
-            "vault_state_file_deleted" if event_type == "deleted" else "vault_state_file_changed"
+            "vault_state_file_deleted"
+            if event_type == "deleted"
+            else "vault_state_file_changed"
         )
         data = {
             "event": event_name,
@@ -1017,7 +1029,7 @@ def _chat_session_id(kind: str, scope: str | None) -> str | None:
     prefix = "chat_session:"
     normalized_scope = scope or ""
     if kind == "chat" and normalized_scope.startswith(prefix):
-        return normalized_scope[len(prefix):]
+        return normalized_scope[len(prefix) :]
     return None
 
 

@@ -4,17 +4,17 @@ Shared embedded-image resolution and policy evaluation for markdown inputs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
 
 from core.constants import SUPPORTED_READ_FILE_TYPES
+from core.tools.utils import estimate_token_count
 from core.utils.image_inputs import (
     format_image_ref_marker,
     format_missing_image_marker,
     format_remote_image_ref_marker,
 )
-from core.tools.utils import estimate_token_count
 
 from .markdown import MarkdownChunk
 from .policy import ChunkingPolicy
@@ -23,8 +23,8 @@ from .policy import ChunkingPolicy
 @dataclass(frozen=True)
 class MarkdownImageDecision:
     attach_images: bool
-    reason: Optional[str] = None
-    normalized_text: Optional[str] = None
+    reason: str | None = None
+    normalized_text: str | None = None
 
 
 def resolve_local_image_path(
@@ -32,7 +32,7 @@ def resolve_local_image_path(
     image_ref: str,
     source_markdown_path: str,
     vault_path: str,
-) -> Optional[Path]:
+) -> Path | None:
     """Resolve local embedded image reference against a markdown source path."""
     ref = (image_ref or "").strip()
     if not ref:

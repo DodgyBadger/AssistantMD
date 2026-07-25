@@ -7,7 +7,6 @@ import sqlite3
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
-
 DB_NAME = "workflow_runs"
 MIGRATION_NAMESPACE = "workflow_runs"
 

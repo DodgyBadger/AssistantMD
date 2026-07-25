@@ -7,19 +7,19 @@ sections (tools, core providers).
 """
 
 import json
-from typing import Optional
 
 import yaml
 
 from core.settings.store import (
+    SETTINGS_TEMPLATE,
     ModelConfig,
     ProviderConfig,
-    SETTINGS_TEMPLATE,
     SettingsEntry,
     load_settings,
-    save_settings,
     refresh_settings_cache,
+    save_settings,
 )
+
 from . import SettingsError, refresh_configuration_status_cache
 
 
@@ -104,13 +104,15 @@ def _coerce_setting_value(raw_value: str, current_value):
     if current_value is None:
         return raw_value or None
 
-    if isinstance(current_value, (list, dict)):
+    if isinstance(current_value, list | dict):
         try:
             parsed = json.loads(raw_value)
         except json.JSONDecodeError as exc:
             raise SettingsError("Value must be valid JSON for this setting.") from exc
         if not isinstance(parsed, type(current_value)):
-            raise SettingsError("Updated value type does not match existing setting type.")
+            raise SettingsError(
+                "Updated value type does not match existing setting type."
+            )
         return parsed
 
     return raw_value
@@ -146,9 +148,9 @@ def upsert_model_mapping(
     name: str,
     provider: str,
     model_string: str,
-    capabilities: Optional[list[str]] = None,
-    dimensions: Optional[int] = None,
-    description: Optional[str] = None,
+    capabilities: list[str] | None = None,
+    dimensions: int | None = None,
+    description: str | None = None,
 ) -> ModelConfig:
     """
     Create or update a model mapping entry.
@@ -188,7 +190,11 @@ def upsert_model_mapping(
         provider=provider,
         model_string=model_string,
         capabilities=resolved_capabilities,
-        dimensions=dimensions if dimensions is not None else getattr(existing, "dimensions", None),
+        dimensions=(
+            dimensions
+            if dimensions is not None
+            else getattr(existing, "dimensions", None)
+        ),
         description=description,
         user_editable=user_editable,
     )
@@ -214,8 +220,8 @@ def delete_model_mapping(name: str) -> None:
 
 def upsert_provider_config(
     name: str,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
     auth_mode: str | None = None,
     oauth_api_key_fallback_enabled: bool | None = None,
 ) -> ProviderConfig:

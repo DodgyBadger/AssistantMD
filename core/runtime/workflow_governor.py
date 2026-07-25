@@ -293,16 +293,24 @@ class WorkflowGovernor:
                         ),
                         hooks=ExecutionTaskHooks(on_timed_out=_record_workflow_timeout),
                     )
-                    if str(result.status or "").strip().lower() == ExecutionTaskStatus.TIMED_OUT.value:
+                    if (
+                        str(result.status or "").strip().lower()
+                        == ExecutionTaskStatus.TIMED_OUT.value
+                    ):
                         return result
 
-                    result = replace(result, details=[*result.details, f"task_id: {active_task_id}"])
+                    result = replace(
+                        result, details=[*result.details, f"task_id: {active_task_id}"]
+                    )
                     await self._task_coordinator.update_metadata(
                         active_task_id,
                         {"workflow_result": result.to_dict()},
                     )
                     failure_metadata: dict[str, Any] | None = None
-                    if str(result.status or "").strip().lower() == ExecutionTaskStatus.FAILED.value:
+                    if (
+                        str(result.status or "").strip().lower()
+                        == ExecutionTaskStatus.FAILED.value
+                    ):
                         failure_metadata = _build_workflow_failure_metadata(
                             global_id=global_id,
                             vault_name=vault_name,
@@ -345,10 +353,14 @@ class WorkflowGovernor:
                         output_files=result.output_files,
                         message=result.message,
                         failure_kind=(
-                            failure_metadata.get("failure_kind") if failure_metadata else None
+                            failure_metadata.get("failure_kind")
+                            if failure_metadata
+                            else None
                         ),
                         retryable=(
-                            failure_metadata.get("retryable") if failure_metadata else None
+                            failure_metadata.get("retryable")
+                            if failure_metadata
+                            else None
                         ),
                     )
                     self._workflow_run_store.finalize_run(
@@ -579,7 +591,9 @@ class WorkflowGovernor:
                 "expect_failure": expect_failure,
                 "include_load_errors": include_load_errors,
                 "execution_time_seconds": execution_time_seconds,
-                "output_files": list(output_files) if output_files is not None else None,
+                "output_files": (
+                    list(output_files) if output_files is not None else None
+                ),
                 "message": message,
                 "failure_kind": failure_kind,
                 "retryable": retryable,
@@ -611,7 +625,9 @@ class WorkflowGovernor:
     @staticmethod
     def _split_workflow_identity(global_id: str) -> tuple[str, str]:
         if "/" not in global_id:
-            raise ValueError(f"Invalid global_id format. Expected 'vault/name', got: {global_id}")
+            raise ValueError(
+                f"Invalid global_id format. Expected 'vault/name', got: {global_id}"
+            )
         vault_name, workflow_name = global_id.split("/", 1)
         return vault_name, workflow_name
 
@@ -675,12 +691,16 @@ def _workflow_run_terminal_status(result: WorkflowExecutionResult) -> str:
     }
     if status in supported:
         return status
-    return ExecutionTaskStatus.COMPLETED.value if result.success else ExecutionTaskStatus.FAILED.value
+    return (
+        ExecutionTaskStatus.COMPLETED.value
+        if result.success
+        else ExecutionTaskStatus.FAILED.value
+    )
 
 
 def _attach_workflow_run_id(exc: BaseException, run_id: str) -> None:
     """Mark raised failures so the scheduler listener does not duplicate them."""
     try:
-        setattr(exc, "assistantmd_workflow_run_id", run_id)
+        exc.assistantmd_workflow_run_id = run_id
     except Exception:
         return

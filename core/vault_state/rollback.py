@@ -22,7 +22,6 @@ from core.vault_state.models import (
 )
 from core.vault_state.service import VaultStateService
 
-
 logger = UnifiedLogger(tag="vault-rollback")
 
 ROLLBACK_TRIGGER_STATUSES = frozenset({"failed", "cancelled", "timed_out"})
@@ -150,7 +149,9 @@ def rollback_task_file_mutations(
             )
             .all()
         )
-        if snapshot_sets and all(snapshot.status == "rolled_back" for snapshot in snapshot_sets):
+        if snapshot_sets and all(
+            snapshot.status == "rolled_back" for snapshot in snapshot_sets
+        ):
             result = _skipped_result(
                 task_id=task_id,
                 status=status,
@@ -324,7 +325,9 @@ def _vault_root(vault_name: str) -> Path:
     vault_info = runtime.workflow_loader.get_vault_info()
     vault_path = (vault_info.get(vault_name) or {}).get("path")
     if not vault_path:
-        raise RuntimeError(f"Cannot rollback task mutation: vault not found: {vault_name}")
+        raise RuntimeError(
+            f"Cannot rollback task mutation: vault not found: {vault_name}"
+        )
     return Path(vault_path)
 
 

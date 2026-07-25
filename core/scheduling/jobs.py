@@ -107,13 +107,17 @@ def create_job_args(global_id: str, data_root: str = None, file_path: str = None
         data_root = runtime.config.data_root
 
     return {
-        'global_id': global_id,
-        'file_path': file_path,
-        'config': {
-            'data_root': str(data_root),
-        }
+        "global_id": global_id,
+        "file_path": file_path,
+        "config": {
+            "data_root": str(data_root),
+        },
     }
-async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[str, Any]:
+
+
+async def setup_scheduler_jobs(
+    scheduler, manual_reload: bool = False
+) -> dict[str, Any]:
     """
     Set up or update scheduler jobs based on vault workflow configuration.
 
@@ -142,7 +146,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
     workflows = await workflow_loader.load_workflows(force_reload=manual_reload)
     enabled_workflows = workflow_loader.get_enabled_workflows()
 
-    vaults_discovered = len(set(workflow.vault for workflow in workflows))
+    vaults_discovered = len({workflow.vault for workflow in workflows})
     workflows_loaded = len(workflows)
     enabled_workflows_count = len(enabled_workflows)
     scheduler_jobs_synced = 0
@@ -185,7 +189,9 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                 if schedule_changed or workflow_changed:
                     scheduler.remove_job(existing_job.id)
 
-                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                    job_args = create_job_args(
+                        workflow.global_id, file_path=workflow.file_path
+                    )
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.add_job(
@@ -193,7 +199,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                         trigger=workflow.trigger,
                         args=[job_args],
                         id=workflow.scheduler_job_id,
-                        name=job_name
+                        name=job_name,
                     )
 
                     record = _workflow_schedule_record(
@@ -208,13 +214,13 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                         record,
                     )
                 else:
-                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                    job_args = create_job_args(
+                        workflow.global_id, file_path=workflow.file_path
+                    )
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.modify_job(
-                        job_id=workflow.scheduler_job_id,
-                        args=[job_args],
-                        name=job_name
+                        job_id=workflow.scheduler_job_id, args=[job_args], name=job_name
                     )
 
                     record = _workflow_schedule_record(
@@ -227,7 +233,9 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
 
                 scheduler_jobs_synced += 1
             else:
-                job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                job_args = create_job_args(
+                    workflow.global_id, file_path=workflow.file_path
+                )
                 job_name = f"Workflow: {workflow.global_id}"
 
                 scheduler.add_job(
@@ -235,7 +243,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                     trigger=workflow.trigger,
                     args=[job_args],
                     id=workflow.scheduler_job_id,
-                    name=job_name
+                    name=job_name,
                 )
 
                 record = _workflow_schedule_record(
@@ -250,9 +258,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                 scheduler_jobs_synced += 1
 
         all_scheduler_job_ids = {
-            job.id
-            for job in scheduler.get_jobs()
-            if job.id not in RESERVED_JOB_IDS
+            job.id for job in scheduler.get_jobs() if job.id not in RESERVED_JOB_IDS
         }
         enabled_job_ids = {
             workflow.scheduler_job_id
@@ -313,14 +319,14 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
 
     # Prepare results
     results = {
-        'vaults_discovered': vaults_discovered,
-        'workflows_loaded': workflows_loaded,
-        'enabled_workflows': enabled_workflows_count,
-        'scheduler_jobs_synced': scheduler_jobs_synced,
-        'scheduler_jobs_created': created_count,
-        'scheduler_jobs_replaced': replaced_count,
-        'scheduler_jobs_unchanged': unchanged_count,
-        'scheduler_jobs_removed': removed_count,
+        "vaults_discovered": vaults_discovered,
+        "workflows_loaded": workflows_loaded,
+        "enabled_workflows": enabled_workflows_count,
+        "scheduler_jobs_synced": scheduler_jobs_synced,
+        "scheduler_jobs_created": created_count,
+        "scheduler_jobs_replaced": replaced_count,
+        "scheduler_jobs_unchanged": unchanged_count,
+        "scheduler_jobs_removed": removed_count,
     }
 
     return results

@@ -8,20 +8,19 @@ of truth; otherwise, callers must set bootstrap roots explicitly.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from core.runtime.state import (
+    RuntimeStateError,
     get_runtime_context,
     has_runtime_context,
-    RuntimeStateError,
 )
 
 # Default roots for container environments
 DEFAULT_DATA_ROOT = Path("/app/data")
 DEFAULT_SYSTEM_ROOT = Path("/app/system")
 
-_bootstrap_data_root: Optional[Path] = None
-_bootstrap_system_root: Optional[Path] = None
+_bootstrap_data_root: Path | None = None
+_bootstrap_system_root: Path | None = None
 
 
 def set_bootstrap_roots(data_root: Path, system_root: Path) -> None:
@@ -54,7 +53,9 @@ def resolve_bootstrap_system_root() -> Path:
     return Path(os.getenv("CONTAINER_SYSTEM_ROOT", DEFAULT_SYSTEM_ROOT))
 
 
-def _require_root(name: str, context_root: Optional[Path], bootstrap_root: Optional[Path]) -> Path:
+def _require_root(
+    name: str, context_root: Path | None, bootstrap_root: Path | None
+) -> Path:
     """Return a resolved root, preferring runtime context then bootstrap root."""
     if context_root:
         return context_root
@@ -80,4 +81,3 @@ def get_system_root() -> Path:
     if has_runtime_context():
         context_root = Path(get_runtime_context().config.system_root)
     return _require_root("system_root", context_root, _bootstrap_system_root)
-

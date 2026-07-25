@@ -21,7 +21,6 @@ from core.vault_state.models import (
     VaultRecord,
 )
 
-
 DB_NAME = "vault_state"
 MIGRATION_NAMESPACE = "vault_state"
 
@@ -387,10 +386,13 @@ def _ensure_current_indexes(conn: sqlite3.Connection) -> None:
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table_name,),
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        is not None
+    )
 
 
 def _table_columns(

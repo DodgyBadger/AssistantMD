@@ -5,7 +5,7 @@ APScheduler-driven worker to drain ingestion job queue.
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from collections.abc import Callable
 
 from core.ingestion.jobs import get_job, list_jobs
 from core.ingestion.models import JobStatus
@@ -17,7 +17,11 @@ from core.runtime.execution_tasks import (
     ingestion_task_label,
     ingestion_vault_scope,
 )
-from core.runtime.task_runner import ExecutionTaskHooks, ExecutionTaskRunner, ExecutionTaskSpec
+from core.runtime.task_runner import (
+    ExecutionTaskHooks,
+    ExecutionTaskRunner,
+    ExecutionTaskSpec,
+)
 
 
 class IngestionWorker:
@@ -40,15 +44,9 @@ class IngestionWorker:
             return
 
         selected_jobs = queued[: self.max_concurrent]
-        tracked_tasks = [
-            await self._start_tracked_job(job.id)
-            for job in selected_jobs
-        ]
+        tracked_tasks = [await self._start_tracked_job(job.id) for job in selected_jobs]
         await asyncio.gather(
-            *(
-                self._wait_for_task_terminal(task.task_id)
-                for task in tracked_tasks
-            )
+            *(self._wait_for_task_terminal(task.task_id) for task in tracked_tasks)
         )
 
     async def _start_tracked_job(self, job_id: int):

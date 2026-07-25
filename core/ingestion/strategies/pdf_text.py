@@ -4,7 +4,6 @@ PyMuPDF-based text extractor for PDFs.
 
 from __future__ import annotations
 
-
 from core.ingestion.models import ExtractedDocument, RawDocument
 from core.ingestion.registry import extractor_registry
 

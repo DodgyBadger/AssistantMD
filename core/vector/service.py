@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal
 
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingModel
@@ -15,7 +16,6 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from core.settings.secrets_store import get_secret_value
 from core.settings.store import ModelConfig, get_models_config, get_providers_config
-
 
 EmbeddingInputType = Literal["query", "document"]
 
@@ -75,7 +75,9 @@ class VectorService:
         model_alias: str = "embeddings",
     ) -> EmbeddingRequestResult:
         """Embed one or more document strings."""
-        return await self._embed(list(texts), input_type="document", model_alias=model_alias)
+        return await self._embed(
+            list(texts), input_type="document", model_alias=model_alias
+        )
 
     async def _embed(
         self,
@@ -127,7 +129,9 @@ class VectorService:
             usage=_usage_to_dict(result.usage),
         )
 
-    def _build_embedding_model(self, config: "ResolvedEmbeddingModelConfig") -> EmbeddingModel:
+    def _build_embedding_model(
+        self, config: ResolvedEmbeddingModelConfig
+    ) -> EmbeddingModel:
         override = self.embedding_model_overrides.get(config.alias)
         if override is not None:
             return override
@@ -162,17 +166,25 @@ def resolve_embedding_model_config(model_alias: str) -> ResolvedEmbeddingModelCo
     model = models.get(alias)
     if model is None:
         available = ", ".join(sorted(models))
-        raise ValueError(f"Unknown embedding model alias '{model_alias}'. Available: {available}")
+        raise ValueError(
+            f"Unknown embedding model alias '{model_alias}'. Available: {available}"
+        )
 
     capabilities = set(_model_capabilities(model))
     if "embedding" not in capabilities:
-        raise ValueError(f"Model alias '{model_alias}' does not declare embedding capability")
+        raise ValueError(
+            f"Model alias '{model_alias}' does not declare embedding capability"
+        )
 
     dimensions = getattr(model, "dimensions", None)
     if dimensions is None:
-        raise ValueError(f"Embedding model alias '{model_alias}' must declare dimensions")
+        raise ValueError(
+            f"Embedding model alias '{model_alias}' must declare dimensions"
+        )
     if int(dimensions) <= 0:
-        raise ValueError(f"Embedding model alias '{model_alias}' dimensions must be positive")
+        raise ValueError(
+            f"Embedding model alias '{model_alias}' dimensions must be positive"
+        )
 
     providers = get_providers_config()
     provider_name = str(model.provider).strip()

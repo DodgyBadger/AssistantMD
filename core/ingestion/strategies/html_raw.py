@@ -30,7 +30,7 @@ def extract_html_markdownify(
     source = raw.payload
     if isinstance(source, str):
         html_source = source
-    elif isinstance(source, (bytes, bytearray)):
+    elif isinstance(source, bytes | bytearray):
         html_source = source.decode("utf-8", errors="replace")
     else:
         raise RuntimeError("Unsupported HTML payload")

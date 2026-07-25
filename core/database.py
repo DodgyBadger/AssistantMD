@@ -3,6 +3,7 @@
 import os
 import sqlite3
 from dataclasses import dataclass
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.schema import Table
@@ -16,6 +17,7 @@ logger = UnifiedLogger(tag="database")
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
+
     pass
 
 
@@ -82,7 +84,9 @@ def get_system_database_definition(db_name: str) -> SystemDatabaseDefinition:
     definition = SYSTEM_DATABASES.get(db_name)
     if definition is None:
         available = ", ".join(sorted(SYSTEM_DATABASES))
-        raise ValueError(f"Unknown system database '{db_name}'. Known databases: {available}")
+        raise ValueError(
+            f"Unknown system database '{db_name}'. Known databases: {available}"
+        )
     return definition
 
 
@@ -134,7 +138,9 @@ def create_engine_from_system_db(db_name: str, system_root: str = None):
     return create_engine(database_url)
 
 
-def connect_sqlite_from_system_db(db_name: str, system_root: str = None) -> sqlite3.Connection:
+def connect_sqlite_from_system_db(
+    db_name: str, system_root: str = None
+) -> sqlite3.Connection:
     """Open a raw sqlite3 connection for a declared system DB.
 
     Mirrors `create_engine_from_system_db(...)` by honoring the active runtime

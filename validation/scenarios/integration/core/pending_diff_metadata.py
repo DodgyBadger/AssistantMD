@@ -25,7 +25,9 @@ class PendingDiffMetadataScenario(BaseScenario):
         checkpoint = self.event_checkpoint()
         result = await self.run_workflow(vault, "pending_diff")
         events = self.events_since(checkpoint)
-        self.soft_assert_equal(result.status, "completed", "Initial run should complete")
+        self.soft_assert_equal(
+            result.status, "completed", "Initial run should complete"
+        )
         self.assert_event_contains(
             events,
             name="pending_files_snapshots_recorded",
@@ -60,13 +62,23 @@ class PendingDiffMetadataScenario(BaseScenario):
             },
         )
         diff_output = vault / "outputs" / "pending-diff.md"
-        self.soft_assert(diff_output.exists(), "Second run should write pending diff output")
+        self.soft_assert(
+            diff_output.exists(), "Second run should write pending diff output"
+        )
         if diff_output.exists():
             diff_text = diff_output.read_text(encoding="utf-8")
-            self.soft_assert("available=True" in diff_text, "Diff metadata should be available")
-            self.soft_assert("+- New action item" in diff_text, "Diff should include added note")
-            self.soft_assert("snapshot_set_id=" in diff_text, "Diff should identify snapshot set")
-            self.soft_assert("file_snapshot_id=" in diff_text, "Diff should identify file snapshot")
+            self.soft_assert(
+                "available=True" in diff_text, "Diff metadata should be available"
+            )
+            self.soft_assert(
+                "+- New action item" in diff_text, "Diff should include added note"
+            )
+            self.soft_assert(
+                "snapshot_set_id=" in diff_text, "Diff should identify snapshot set"
+            )
+            self.soft_assert(
+                "file_snapshot_id=" in diff_text, "Diff should identify file snapshot"
+            )
 
         checkpoint = self.event_checkpoint()
         result = await self.run_workflow(vault, "pending_diff")

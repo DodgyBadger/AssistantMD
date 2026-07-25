@@ -6,39 +6,38 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, List
 from pathlib import Path
+from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
-from core.ingestion.output_paths import resolve_import_output_paths
-from core.ingestion.registry import importer_registry, extractor_registry
-from core.ingestion.renderers import default_renderer
-from core.ingestion.storage import default_storage
+from core.ingestion.jobs import (
+    IngestionJob,
+    create_job,
+    get_job,
+    init_db,
+    list_jobs,
+    update_job_outputs,
+    update_job_status,
+)
 from core.ingestion.models import (
     JobStatus,
-    RenderOptions,
     RenderMode,
+    RenderOptions,
     SourceKind,
 )
+from core.ingestion.output_paths import resolve_import_output_paths
+from core.ingestion.registry import extractor_registry, importer_registry
+from core.ingestion.renderers import default_renderer
+from core.ingestion.storage import default_storage
+from core.logger import UnifiedLogger
+from core.runtime.paths import get_data_root
 from core.settings.secrets_store import secret_has_value
 from core.settings.store import get_general_settings
-from core.runtime.paths import get_data_root
 from core.vault_state.file_mutations import (
     delete_vault_file,
     write_vault_file,
     write_vault_file_bytes,
 )
-
-from core.ingestion.jobs import (
-    create_job,
-    init_db,
-    list_jobs,
-    update_job_status,
-    IngestionJob,
-    get_job,
-    update_job_outputs,
-)
-from core.logger import UnifiedLogger
 from core.web.security import sanitize_url_for_log
 
 
@@ -64,7 +63,7 @@ class IngestionService:
         opts = options or {}
         return create_job(source_uri, vault, source_type, mime_hint, opts)
 
-    def list_recent_jobs(self, limit: int = 50) -> List[IngestionJob]:
+    def list_recent_jobs(self, limit: int = 50) -> list[IngestionJob]:
         return list_jobs(limit)
 
     def get_job(self, job_id: int) -> IngestionJob | None:
@@ -370,7 +369,7 @@ class IngestionService:
 
         payload = (
             raw_doc.payload
-            if isinstance(raw_doc.payload, (bytes, bytearray))
+            if isinstance(raw_doc.payload, bytes | bytearray)
             else raw_doc.payload.encode("utf-8")
         )
         doc = fitz.open(stream=payload, filetype="pdf")
@@ -400,9 +399,11 @@ class IngestionService:
 
         manifest = {
             "source": {
-                "name": source_path.name
-                if source_path
-                else (raw_doc.suggested_title or "import.pdf"),
+                "name": (
+                    source_path.name
+                    if source_path
+                    else (raw_doc.suggested_title or "import.pdf")
+                ),
                 "path": str(source_path) if source_path else raw_doc.source_uri,
                 "mime": raw_doc.mime or "application/pdf",
                 "sha256": source_hash,
@@ -731,10 +732,10 @@ class IngestionService:
         Import built-in source/extractor modules so they register themselves.
         """
         # Imports are intentional for side effects (registry registration).
-        import core.ingestion.sources.pdf  # noqa: F401
         import core.ingestion.sources.image  # noqa: F401
+        import core.ingestion.sources.pdf  # noqa: F401
         import core.ingestion.sources.web  # noqa: F401
-        import core.ingestion.strategies.pdf_text  # noqa: F401
-        import core.ingestion.strategies.pdf_ocr  # noqa: F401
-        import core.ingestion.strategies.image_ocr  # noqa: F401
         import core.ingestion.strategies.html_raw  # noqa: F401
+        import core.ingestion.strategies.image_ocr  # noqa: F401
+        import core.ingestion.strategies.pdf_ocr  # noqa: F401
+        import core.ingestion.strategies.pdf_text  # noqa: F401

@@ -10,31 +10,37 @@ helpers or RuntimeConfig rather than adding env-derived values here.
 
 from __future__ import annotations
 
-
 # File to mark directories as excluded from vault discovery
-VAULT_IGNORE_FILE = '.vaultignore'
+VAULT_IGNORE_FILE = ".vaultignore"
 
 # Vault subdirectory structure
 ASSISTANTMD_ROOT_DIR = "AssistantMD"
-AUTHORING_DIR = "Authoring"        # Unified authoring directory (workflows + context templates)
-SKILLS_DIR = "Skills"              # User-defined skill files
+AUTHORING_DIR = (
+    "Authoring"  # Unified authoring directory (workflows + context templates)
+)
+SKILLS_DIR = "Skills"  # User-defined skill files
 CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
 IMPORT_DIR = "Import"
 IMPORT_ATTACHMENTS_DIR = "_attachments"
 
 # Assistant timeout validation bounds
-TIMEOUT_MIN = 30        # Minimum timeout in seconds
-TIMEOUT_MAX = 3600      # Maximum timeout in seconds (1 hour)
+TIMEOUT_MIN = 30  # Minimum timeout in seconds
+TIMEOUT_MAX = 3600  # Maximum timeout in seconds (1 hour)
 
 # Valid week start days for weekly pattern resolution
 VALID_WEEK_DAYS = [
-    'monday', 'tuesday', 'wednesday', 'thursday',
-    'friday', 'saturday', 'sunday'
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
 ]
 
 # Default schedule when none specified
-DEFAULT_SCHEDULE = 'cron: 0 6 * * *'
+DEFAULT_SCHEDULE = "cron: 0 6 * * *"
 
 # Default worker count for APScheduler
 DEFAULT_MAX_SCHEDULER_WORKERS = 1

@@ -10,13 +10,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+import core.runtime.workflow_governor as governor_module
 from core.authoring.workflow_execution import WorkflowExecutionResult
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.workflow_runs import WorkflowRunStore
-import core.runtime.workflow_governor as governor_module
 from validation.core.base_scenario import BaseScenario
 
 
@@ -83,7 +83,9 @@ class WorkflowGovernorQueueProbeScenario(BaseScenario):
         self.assert_no_failures()
 
 
-async def _run_probe(global_ids: tuple[str, str], *, system_root: Path) -> dict[str, Any]:
+async def _run_probe(
+    global_ids: tuple[str, str], *, system_root: Path
+) -> dict[str, Any]:
     active = 0
     max_active = 0
     timeline: list[str] = []
@@ -121,7 +123,9 @@ async def _run_probe(global_ids: tuple[str, str], *, system_root: Path) -> dict[
     coordinator = TaskCoordinator()
     task_runner = ExecutionTaskRunner(
         task_coordinator=coordinator,
-        background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+        background_spawner=RuntimeBackgroundSpawner(
+            background_loop=asyncio.get_running_loop()
+        ),
     )
     governor = WorkflowGovernor(
         task_coordinator=coordinator,

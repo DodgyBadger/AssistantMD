@@ -6,9 +6,9 @@ Provides command-line interface for running validation scenarios
 with enhanced evidence collection and user-focused reporting.
 """
 
-import sys
 import argparse
 import fnmatch
+import sys
 from pathlib import Path
 
 # Add project root to path FIRST
@@ -25,8 +25,8 @@ _BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
 _BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
 set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 
-from validation.core.runner import ValidationRunner  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
+from validation.core.runner import ValidationRunner  # noqa: E402
 
 logger = UnifiedLogger(tag="validation-cli", default_sinks=["validation", "logfire"])
 
@@ -51,7 +51,9 @@ def expand_scenario_paths(runner, scenario_specs, *, allow_unmatched: bool = Tru
             glob_matches = [s for s in all_scenarios if fnmatch.fnmatchcase(s, spec)]
             if glob_matches:
                 expanded.extend(sorted(glob_matches))
-                logger.info(f"Expanded pattern '{spec}' to {len(glob_matches)} scenarios")
+                logger.info(
+                    f"Expanded pattern '{spec}' to {len(glob_matches)} scenarios"
+                )
                 continue
             logger.warning(f"No scenarios found matching pattern '{spec}'")
             if allow_unmatched:
@@ -93,7 +95,7 @@ def run_scenarios(args):
     validation_run = runner.run_scenarios(
         scenario_names=scenario_names,
     )
-    
+
     # Print enhanced summary
     print("\n=== VALIDATION RUN COMPLETE ===")
     print(f"Run ID: {validation_run.run_id}")
@@ -102,7 +104,7 @@ def run_scenarios(args):
     print(f"Failed: {validation_run.failed_scenarios}")
     print(f"Errors: {validation_run.error_scenarios}")
     print(f"Success Rate: {validation_run.success_rate:.1f}%")
-    
+
     # Print scenario details with enhanced formatting
     print("\n=== SCENARIO RESULTS ===")
     for result in validation_run.scenario_results:
@@ -121,9 +123,11 @@ def run_scenarios(args):
         else:
             status_symbol = "❓"
             status_text = "ERROR"
-        
-        print(f"{status_symbol} {result.scenario_name} - {status_text} ({result.execution_time:.2f}s)")
-        
+
+        print(
+            f"{status_symbol} {result.scenario_name} - {status_text} ({result.execution_time:.2f}s)"
+        )
+
         if result.error_message:
             print(f"   Error: {result.error_message}")
         if getattr(result, "error_classification", None):
@@ -134,21 +138,27 @@ def run_scenarios(args):
                 print(f"   Classification: {error_type}")
             if recommendation:
                 print(f"   Recommendation: {recommendation}")
-        
+
         # scenarios manage their own evidence in runs directory
         print("   Evidence: Check /app/validation/runs/ for scenario artifacts")
-    
+
     # Additional V2-specific reporting
     if validation_run.error_scenarios > 0 or validation_run.failed_scenarios > 0:
         print("\n=== FOLLOW-UP ACTIONS ===")
         print("📋 Check individual scenario timelines in validation/runs/")
         print("🔍 Review vault snapshots for expected vs actual outputs")
-        
+
         if validation_run.error_scenarios > 0:
-            print(f"🚨 CRITICAL: {validation_run.error_scenarios} system errors require immediate attention")
-    
+            print(
+                f"🚨 CRITICAL: {validation_run.error_scenarios} system errors require immediate attention"
+            )
+
     # Exit with appropriate code
-    sys.exit(0 if validation_run.failed_scenarios == 0 and validation_run.error_scenarios == 0 else 1)
+    sys.exit(
+        0
+        if validation_run.failed_scenarios == 0 and validation_run.error_scenarios == 0
+        else 1
+    )
 
 
 def list_scenarios(args):
@@ -182,14 +192,20 @@ def list_scenarios(args):
             else:
                 print(f"\n📂 {folder}/")
 
-            for full_path, name in sorted(folders[folder], key=lambda x: x[1]):
+            for _full_path, name in sorted(folders[folder], key=lambda x: x[1]):
                 print(f"   • {name}")
 
         print(f"\n✨ Total: {len(scenarios)} scenarios available")
         print("\n💡 Usage:")
-        print("   python validation/run_validation.py run basic_haiku          # Run single scenario")
-        print("   python validation/run_validation.py run integration          # Run all scenarios in folder")
-        print("   python validation/run_validation.py run integration experimental  # Run multiple folders")
+        print(
+            "   python validation/run_validation.py run basic_haiku          # Run single scenario"
+        )
+        print(
+            "   python validation/run_validation.py run integration          # Run all scenarios in folder"
+        )
+        print(
+            "   python validation/run_validation.py run integration experimental  # Run multiple folders"
+        )
 
     else:
         print("No scenarios found")
@@ -214,40 +230,40 @@ Examples:
 
 Features:
   ✅ Real assistant files in scenario folders
-  ✅ High-level, readable scenario code  
+  ✅ High-level, readable scenario code
   ✅ Comprehensive evidence collection
   ✅ User workflow focus vs feature testing
-        """
+        """,
     )
-    
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
     # Run command
-    run_parser = subparsers.add_parser('run', help='Run validation scenarios')
+    run_parser = subparsers.add_parser("run", help="Run validation scenarios")
     run_parser.add_argument(
-        'scenarios',
-        nargs='+',
-        help='One or more scenario names to run',
+        "scenarios",
+        nargs="+",
+        help="One or more scenario names to run",
     )
-    
+
     # List command
-    list_parser = subparsers.add_parser('list', help='List available scenarios')
+    list_parser = subparsers.add_parser("list", help="List available scenarios")
     list_parser.add_argument(
-        'patterns',
-        nargs='*',
-        help='Optional glob patterns to filter scenarios',
+        "patterns",
+        nargs="*",
+        help="Optional glob patterns to filter scenarios",
     )
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     # Run the appropriate command
-    if args.command == 'run':
+    if args.command == "run":
         run_scenarios(args)
-    elif args.command == 'list':
+    elif args.command == "list":
         list_scenarios(args)
 
 

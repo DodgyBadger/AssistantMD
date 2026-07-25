@@ -14,10 +14,12 @@ from pydantic_ai.messages import ModelMessage, ToolCallPart
 from core.database import connect_sqlite_from_system_db
 from core.logger import UnifiedLogger
 from core.utils.hash import hash_file_bytes
-from core.vault_state.pathing import normalize_vault_relative_path, resolve_vault_relative_path
+from core.vault_state.pathing import (
+    normalize_vault_relative_path,
+    resolve_vault_relative_path,
+)
 
 from .schema import DB_NAME, ensure_chat_sessions_schema
-
 
 logger = UnifiedLogger(tag="chat-deferred-reviews")
 
@@ -29,7 +31,9 @@ _MODEL_MESSAGE_LIST_ADAPTER = TypeAdapter(list[ModelMessage])
 class DeferredReviewError(ValueError):
     """Raised when a deferred review cannot be used."""
 
-    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None):
+    def __init__(
+        self, code: str, message: str, *, details: dict[str, Any] | None = None
+    ):
         super().__init__(message)
         self.code = code
         self.details = details or {}
@@ -73,9 +77,13 @@ def create_deferred_review(
     """Persist one pending deferred review request and return it."""
     artifact_ref = f"deferred-review-{uuid.uuid4().hex}"
     requests_json = _DEFERRED_TOOL_REQUESTS_ADAPTER.dump_json(requests).decode("utf-8")
-    resume_messages_json = _MODEL_MESSAGE_LIST_ADAPTER.dump_json(resume_messages).decode("utf-8")
+    resume_messages_json = _MODEL_MESSAGE_LIST_ADAPTER.dump_json(
+        resume_messages
+    ).decode("utf-8")
     resume_config_json = json.dumps(resume_config, ensure_ascii=False, sort_keys=True)
-    review_context_json = json.dumps(review_context or {}, ensure_ascii=False, sort_keys=True)
+    review_context_json = json.dumps(
+        review_context or {}, ensure_ascii=False, sort_keys=True
+    )
 
     ensure_chat_sessions_schema()
     conn = connect_sqlite_from_system_db(DB_NAME)
@@ -225,7 +233,13 @@ def mark_deferred_review_submitted(
             WHERE artifact_ref = ? AND session_id = ? AND vault_name = ?
               AND status = 'pending'
             """,
-            (result_json, resumed_task_id or None, artifact_ref, session_id, vault_name),
+            (
+                result_json,
+                resumed_task_id or None,
+                artifact_ref,
+                session_id,
+                vault_name,
+            ),
         )
         if cursor.rowcount != 1:
             existing = conn.execute(
@@ -359,7 +373,11 @@ def capture_deferred_review_context(
     for call in requests.approvals:
         args = call.args_as_dict()
         operation = str(args.get("operation") or "").strip().lower()
-        if call.tool_name != "file_write" or operation not in {"write", "move", "delete"}:
+        if call.tool_name != "file_write" or operation not in {
+            "write",
+            "move",
+            "delete",
+        }:
             continue
         if operation == "write" and not bool(args.get("overwrite")):
             continue
@@ -374,7 +392,9 @@ def capture_deferred_review_context(
         snapshots[str(call.tool_call_id)] = {
             "path": path,
             "exists": full_path.is_file(),
-            "sha256": hash_file_bytes(full_path, length=None) if full_path.is_file() else None,
+            "sha256": (
+                hash_file_bytes(full_path, length=None) if full_path.is_file() else None
+            ),
         }
     return {"file_write_snapshots": snapshots}
 
@@ -397,7 +417,9 @@ def deferred_review_conflicts(
         )
         exists = full_path.is_file()
         actual_sha256 = hash_file_bytes(full_path, length=None) if exists else None
-        if exists != bool(snapshot.get("exists")) or actual_sha256 != snapshot.get("sha256"):
+        if exists != bool(snapshot.get("exists")) or actual_sha256 != snapshot.get(
+            "sha256"
+        ):
             conflicts.append(
                 {
                     "tool_call_id": tool_call_id,
@@ -441,7 +463,11 @@ def _update_deferred_review_state(
                 status,
                 resumed_task_id,
                 preserve_status,
-                json.dumps(error, ensure_ascii=False, sort_keys=True) if error else None,
+                (
+                    json.dumps(error, ensure_ascii=False, sort_keys=True)
+                    if error
+                    else None
+                ),
                 artifact_ref,
                 session_id,
                 vault_name,
@@ -488,7 +514,9 @@ def summarize_deferred_review(review: StoredDeferredReview) -> dict[str, Any]:
 def _review_from_row(row: dict[str, Any]) -> StoredDeferredReview:
     try:
         requests = _DEFERRED_TOOL_REQUESTS_ADAPTER.validate_json(row["requests_json"])
-        resume_messages = _MODEL_MESSAGE_LIST_ADAPTER.validate_json(row["resume_messages_json"])
+        resume_messages = _MODEL_MESSAGE_LIST_ADAPTER.validate_json(
+            row["resume_messages_json"]
+        )
         resume_config = _loads_resume_config(row.get("resume_config_json"))
         review_context = _loads_resume_config(row.get("review_context_json"))
     except Exception as exc:  # noqa: BLE001
@@ -555,7 +583,4 @@ def _tool_names(requests: DeferredToolRequests) -> list[str]:
 
 
 def _dict_row_factory(cursor, row) -> dict[str, Any]:
-    return {
-        column[0]: row[index]
-        for index, column in enumerate(cursor.description)
-    }
+    return {column[0]: row[index] for index, column in enumerate(cursor.description)}

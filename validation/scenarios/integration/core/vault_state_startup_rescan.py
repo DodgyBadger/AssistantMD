@@ -1,8 +1,8 @@
 """Integration scenario for vault-state startup and manual rescan refresh."""
 
+import asyncio
 import sqlite3
 import sys
-import asyncio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -51,7 +51,9 @@ class VaultStateStartupRescanScenario(BaseScenario):
         response = self.call_api("/api/vaults/rescan", method="POST")
         rescan_events = self.events_since(checkpoint)
 
-        self.soft_assert_equal(response.status_code, 200, "Manual vault rescan should succeed")
+        self.soft_assert_equal(
+            response.status_code, 200, "Manual vault rescan should succeed"
+        )
         self.assert_event_contains(
             rescan_events,
             name="vault_state_refresh_completed",

@@ -5,12 +5,16 @@ Persistence for ingestion jobs.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, JSON
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import Base, create_engine_from_system_db, create_session_factory, create_tables
+from core.database import (
+    Base,
+    create_engine_from_system_db,
+    create_session_factory,
+    create_tables,
+)
 from core.ingestion.models import JobStatus
 
 
@@ -27,7 +31,9 @@ class IngestionJob(Base):
     error = Column(Text, nullable=True)
     outputs = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 def _get_engine():
@@ -49,8 +55,8 @@ def create_job(
     source_uri: str,
     vault: str,
     source_type: str,
-    mime_hint: Optional[str],
-    options: Optional[dict],
+    mime_hint: str | None,
+    options: dict | None,
 ) -> IngestionJob:
     session_factory = _get_session_factory()
     try:
@@ -71,7 +77,7 @@ def create_job(
         raise RuntimeError(f"Failed to create ingestion job: {exc}") from exc
 
 
-def update_job_status(job_id: int, status: JobStatus, error: Optional[str] = None) -> None:
+def update_job_status(job_id: int, status: JobStatus, error: str | None = None) -> None:
     session_factory = _get_session_factory()
     try:
         with session_factory() as session:
@@ -101,13 +107,15 @@ def update_job_outputs(job_id: int, outputs: list[str]) -> None:
         raise RuntimeError(f"Failed to update outputs for job {job_id}: {exc}") from exc
 
 
-def get_job(job_id: int) -> Optional[IngestionJob]:
+def get_job(job_id: int) -> IngestionJob | None:
     session_factory = _get_session_factory()
     with session_factory() as session:
         return session.get(IngestionJob, job_id)
 
 
-def find_job_for_source(source_uri: str, vault: str, statuses: Optional[list[str]] = None) -> Optional[IngestionJob]:
+def find_job_for_source(
+    source_uri: str, vault: str, statuses: list[str] | None = None
+) -> IngestionJob | None:
     """
     Find the most recent job for a source/vault matching optional statuses.
     """

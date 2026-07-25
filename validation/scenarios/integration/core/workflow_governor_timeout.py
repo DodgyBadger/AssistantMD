@@ -8,13 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+import core.runtime.workflow_governor as governor_module
 from core.authoring.workflow_execution import WorkflowExecutionResult
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.workflow_runs import WorkflowRunStore
-import core.runtime.workflow_governor as governor_module
 from validation.core.base_scenario import BaseScenario
 
 
@@ -54,7 +54,9 @@ class WorkflowGovernorTimeoutScenario(BaseScenario):
             coordinator = TaskCoordinator()
             task_runner = ExecutionTaskRunner(
                 task_coordinator=coordinator,
-                background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+                background_spawner=RuntimeBackgroundSpawner(
+                    background_loop=asyncio.get_running_loop()
+                ),
             )
             run_store = WorkflowRunStore(str(self.artifacts_dir / "system"))
             governor = WorkflowGovernor(
@@ -78,7 +80,9 @@ class WorkflowGovernorTimeoutScenario(BaseScenario):
         workflow_result = metadata.get("workflow_result")
         workflow_failure = metadata.get("workflow_failure")
 
-        self.soft_assert_equal(result.status, "timed_out", "Workflow result should report timeout")
+        self.soft_assert_equal(
+            result.status, "timed_out", "Workflow result should report timeout"
+        )
         self.soft_assert_equal(
             durable_run.status if durable_run else None,
             "timed_out",

@@ -9,9 +9,11 @@ from pathlib import Path
 
 from core.database import get_system_database_path
 from core.logger import UnifiedLogger
-from core.settings import get_task_mutation_retention_days, get_task_snapshot_retention_days
+from core.settings import (
+    get_task_mutation_retention_days,
+    get_task_snapshot_retention_days,
+)
 from core.vault_state.models import FileSnapshot, SnapshotSet
-
 
 logger = UnifiedLogger(tag="vault-snapshots")
 

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Literal
 
 from core.web.errors import WebStrategyConfigurationError
-
 
 WebCapability = Literal["web_search", "web_extract", "web_crawl"]
 StrategyHandler = Callable[..., Awaitable[Any]]

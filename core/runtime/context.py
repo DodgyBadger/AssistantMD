@@ -8,23 +8,23 @@ for scheduler, workflow loader, and related components.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.authoring.template_discovery import WorkflowLoader
-from core.logger import UnifiedLogger
-from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.logger import UnifiedLogger
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
+from core.scheduling.jobs import setup_scheduler_jobs
+from core.scheduling.system_jobs import sync_system_scheduler_jobs
 from core.vault_state import VaultStateService
 from core.workflow_runs import WorkflowRunStore
-from core.scheduling.system_jobs import sync_system_scheduler_jobs
+
 from . import state as runtime_state
 from .config import RuntimeConfig
 
@@ -65,7 +65,7 @@ class RuntimeContext:
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime
-    last_config_reload: Optional[datetime] = None
+    last_config_reload: datetime | None = None
     session_buffers: dict[str, BufferStore] = field(default_factory=dict)
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
@@ -139,7 +139,9 @@ class RuntimeContext:
         if not refresh_vault_state:
             return results
         try:
-            vault_state_results = VaultStateService().refresh_all_vaults(self.config.data_root)
+            vault_state_results = VaultStateService().refresh_all_vaults(
+                self.config.data_root
+            )
         except Exception as exc:  # noqa: BLE001
             self.logger.add_sink("validation").warning(
                 "vault_state_refresh_all_failed",
@@ -198,7 +200,9 @@ class RuntimeContext:
                 "vault_state_enabled": result.get("vault_state_enabled"),
                 "vault_state_refreshed": result.get("vault_state_refreshed"),
                 "vault_state_failed": result.get("vault_state_failed"),
-                "vault_state_latest_sequence": result.get("vault_state_latest_sequence"),
+                "vault_state_latest_sequence": result.get(
+                    "vault_state_latest_sequence"
+                ),
             },
         )
 
@@ -230,5 +234,5 @@ class RuntimeContext:
             "system_root": str(self.config.system_root),
             "scheduler": scheduler_info,
             "features": self.config.features,
-            "log_level": self.config.log_level
+            "log_level": self.config.log_level,
         }

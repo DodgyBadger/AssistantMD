@@ -31,9 +31,13 @@ class RepeatedChatHistoryCompactionScenario(BaseScenario):
             vault.name,
             [
                 _user("Objective: draft the Alfa client research memo."),
-                ModelResponse(parts=[TextPart(content="Progress: created the initial outline.")]),
+                ModelResponse(
+                    parts=[TextPart(content="Progress: created the initial outline.")]
+                ),
                 _user("Constraint: cite sources in APA style."),
-                ModelResponse(parts=[TextPart(content="Next step: collect source notes.")]),
+                ModelResponse(
+                    parts=[TextPart(content="Next step: collect source notes.")]
+                ),
             ],
         )
 
@@ -120,68 +124,75 @@ class RepeatedChatHistoryCompactionScenario(BaseScenario):
             compaction.get_compaction_keep_recent = original_keep_recent
             compaction._generate_compaction_summary = original_generate_summary
 
-        messages_before = [first.messages_before, second.messages_before, third.messages_before]
-        assert messages_before == [4, 4, 4], (
-            "Each compaction should read the current effective history, not all raw archival rows"
-        )
-        assert [first.messages_after, second.messages_after, third.messages_after] == [2, 2, 2], (
-            "Each compaction should rewrite to one card plus one preserved recent message"
-        )
+        messages_before = [
+            first.messages_before,
+            second.messages_before,
+            third.messages_before,
+        ]
+        assert messages_before == [
+            4,
+            4,
+            4,
+        ], "Each compaction should read the current effective history, not all raw archival rows"
+        assert [first.messages_after, second.messages_after, third.messages_after] == [
+            2,
+            2,
+            2,
+        ], "Each compaction should rewrite to one card plus one preserved recent message"
 
         assert "Objective: draft the Alfa client research memo." in str(
             captured_inputs[0]["older_text"]
-        ), (
-            "First compaction should receive initial objective history"
-        )
-        assert "AssistantMD compacted chat history" in str(captured_inputs[1]["older_text"]), (
-            "Second compaction should receive the previous compaction card"
-        )
-        assert "Round 1 card" in str(captured_inputs[1]["older_text"]), (
-            "Second compaction should be able to merge prior card content"
-        )
-        assert "Update: source notes are collected." in str(captured_inputs[1]["older_text"]), (
-            "Second compaction should receive newer raw turns after the first checkpoint"
-        )
-        assert "Round 2 card" in str(captured_inputs[2]["older_text"]), (
-            "Third compaction should receive the latest merged card"
-        )
-        assert "Round 1 card" not in str(captured_inputs[2]["older_text"]), (
-            "Third compaction should not replay stale checkpoint rows after replacement"
-        )
-        assert "Blocker: waiting for finance appendix." in str(captured_inputs[2]["recent_text"]), (
-            "Recent slice should preserve the newest assistant turn verbatim"
-        )
+        ), "First compaction should receive initial objective history"
+        assert "AssistantMD compacted chat history" in str(
+            captured_inputs[1]["older_text"]
+        ), "Second compaction should receive the previous compaction card"
+        assert "Round 1 card" in str(
+            captured_inputs[1]["older_text"]
+        ), "Second compaction should be able to merge prior card content"
+        assert "Update: source notes are collected." in str(
+            captured_inputs[1]["older_text"]
+        ), "Second compaction should receive newer raw turns after the first checkpoint"
+        assert "Round 2 card" in str(
+            captured_inputs[2]["older_text"]
+        ), "Third compaction should receive the latest merged card"
+        assert "Round 1 card" not in str(
+            captured_inputs[2]["older_text"]
+        ), "Third compaction should not replay stale checkpoint rows after replacement"
+        assert "Blocker: waiting for finance appendix." in str(
+            captured_inputs[2]["recent_text"]
+        ), "Recent slice should preserve the newest assistant turn verbatim"
 
         effective_messages = store.get_stored_messages(session_id, vault.name)
-        assert len(effective_messages) == 2, (
-            "Effective history should stay compact after three rounds"
-        )
-        assert "Round 3 card" in effective_messages[0].content_text, (
-            "Latest effective history should expose the newest recovery card"
-        )
-        assert "Round 1 card" not in effective_messages[0].content_text, (
-            "Latest recovery card should not be an accumulation of prior cards"
-        )
-        assert effective_messages[1].content_text == "Blocker: waiting for finance appendix.", (
-            "Latest effective history should preserve the configured recent message"
-        )
-        assert store.get_message_count(session_id, vault.name, mode="raw") == 8, (
-            "Repeated compaction should preserve all raw archival messages"
-        )
-        assert store.get_message_count(session_id, vault.name) == 2, (
-            "Default message count should use the latest effective checkpoint"
-        )
-        assert store.get_session_history_revision(session_id, vault.name) == 6, (
-            "Raw appends and compactions should each advance effective-history revision"
-        )
+        assert (
+            len(effective_messages) == 2
+        ), "Effective history should stay compact after three rounds"
+        assert (
+            "Round 3 card" in effective_messages[0].content_text
+        ), "Latest effective history should expose the newest recovery card"
+        assert (
+            "Round 1 card" not in effective_messages[0].content_text
+        ), "Latest recovery card should not be an accumulation of prior cards"
+        assert (
+            effective_messages[1].content_text
+            == "Blocker: waiting for finance appendix."
+        ), "Latest effective history should preserve the configured recent message"
+        assert (
+            store.get_message_count(session_id, vault.name, mode="raw") == 8
+        ), "Repeated compaction should preserve all raw archival messages"
+        assert (
+            store.get_message_count(session_id, vault.name) == 2
+        ), "Default message count should use the latest effective checkpoint"
+        assert (
+            store.get_session_history_revision(session_id, vault.name) == 6
+        ), "Raw appends and compactions should each advance effective-history revision"
 
         metadata = store.get_session_metadata(session_id, vault.name)
-        assert metadata["last_compaction"]["compaction_id"] == third.compaction_id, (
-            "Session metadata should point at the newest compaction checkpoint"
-        )
-        assert metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v3", (
-            "Newest compaction metadata should retain the recovery-card contract"
-        )
+        assert (
+            metadata["last_compaction"]["compaction_id"] == third.compaction_id
+        ), "Session metadata should point at the newest compaction checkpoint"
+        assert (
+            metadata["last_compaction"]["prompt_contract_version"] == "recovery-card-v3"
+        ), "Newest compaction metadata should retain the recovery-card contract"
 
         conn = sqlite3.connect(runtime.config.system_root / "chat_sessions.db")
         try:
@@ -201,9 +212,11 @@ class RepeatedChatHistoryCompactionScenario(BaseScenario):
             second.compaction_id,
             third.compaction_id,
         ], "All compaction checkpoints should be retained for audit"
-        assert [row[1] for row in checkpoint_rows] == [3, 5, 7], (
-            "Each checkpoint should record the raw high-water mark it compacted through"
-        )
+        assert [row[1] for row in checkpoint_rows] == [
+            3,
+            5,
+            7,
+        ], "Each checkpoint should record the raw high-water mark it compacted through"
 
 
 def _user(content: str) -> ModelRequest:

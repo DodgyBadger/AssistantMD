@@ -8,7 +8,6 @@ from core.settings.store import get_general_settings
 from core.web.registry import WebCapability, web_strategy_registry
 from core.web.strategies import register_builtin_web_strategies
 
-
 _STRATEGY_SETTING_NAMES: dict[WebCapability, str] = {
     "web_search": "web_search_strategy",
     "web_extract": "web_extract_strategy",

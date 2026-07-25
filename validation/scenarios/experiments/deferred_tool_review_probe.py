@@ -52,13 +52,17 @@ class DeferredToolReviewProbeScenario(BaseScenario):
             first_result.output, DeferredToolRequests
         ), "Deferred tool call should become run output"
         assert not calls, "Deferred tool should not execute before approval"
-        assert len(first_result.output.approvals) == 1, "One approval request should be returned"
+        assert (
+            len(first_result.output.approvals) == 1
+        ), "One approval request should be returned"
 
         approval_call = first_result.output.approvals[0]
         assert (
             approval_call.tool_name == "reviewed_write"
         ), "Approval request should preserve tool name"
-        assert approval_call.tool_call_id, "Approval request should include a tool call id"
+        assert (
+            approval_call.tool_call_id
+        ), "Approval request should include a tool call id"
         assert dict(approval_call.args) == {
             "path": "a",
             "content": "a",
@@ -77,7 +81,9 @@ class DeferredToolReviewProbeScenario(BaseScenario):
                 }
             ),
         )
-        assert approved_result.output == "done", "Approved resume should complete normally"
+        assert (
+            approved_result.output == "done"
+        ), "Approved resume should complete normally"
         assert calls == [
             ("reviewed.md", "edited content")
         ], "ToolApproved override_args should replace original tool args"
@@ -88,9 +94,9 @@ class DeferredToolReviewProbeScenario(BaseScenario):
         assert (
             approved_tool_return.tool_call_id == approval_call.tool_call_id
         ), "Approved tool return should use the original tool call id"
-        assert approved_tool_return.content == "wrote reviewed.md: edited content", (
-            "Approved resumes must return the executed tool's actual response to the model"
-        )
+        assert (
+            approved_tool_return.content == "wrote reviewed.md: edited content"
+        ), "Approved resumes must return the executed tool's actual response to the model"
         assert approved_tool_return.outcome == "success"
 
         unchanged_first_result = await agent.run("write without editing")
@@ -103,9 +109,9 @@ class DeferredToolReviewProbeScenario(BaseScenario):
         )
         unchanged_tool_return = _first_tool_return(unchanged_result.new_messages())
         assert unchanged_tool_return is not None
-        assert unchanged_tool_return.content == "wrote a: a", (
-            "Unedited approvals must return the executed tool's actual response to the model"
-        )
+        assert (
+            unchanged_tool_return.content == "wrote a: a"
+        ), "Unedited approvals must return the executed tool's actual response to the model"
         assert unchanged_tool_return.outcome == "success"
 
         denied_first_result = await agent.run("write another file")
@@ -120,16 +126,20 @@ class DeferredToolReviewProbeScenario(BaseScenario):
                 }
             ),
         )
-        assert denied_result.output == "done", "Denied resume should continue the agent run"
+        assert (
+            denied_result.output == "done"
+        ), "Denied resume should continue the agent run"
         assert calls == [
             ("reviewed.md", "edited content"),
             ("a", "a"),
         ], "Denied deferred tool should not execute"
         denied_tool_return = _first_tool_return(denied_result.new_messages())
-        assert denied_tool_return is not None, "Denied resume should add a tool return message"
-        assert denied_tool_return.content == "Please revise this before writing.", (
-            "Denied reason should be the canonical tool response"
-        )
+        assert (
+            denied_tool_return is not None
+        ), "Denied resume should add a tool return message"
+        assert (
+            denied_tool_return.content == "Please revise this before writing."
+        ), "Denied reason should be the canonical tool response"
         assert denied_tool_return.outcome == "denied"
 
         default_denied_first_result = await agent.run("deny without a reason")
@@ -161,7 +171,9 @@ class DeferredToolReviewProbeScenario(BaseScenario):
         final_events = [
             event for event in stream_events if isinstance(event, AgentRunResultEvent)
         ]
-        assert len(final_events) == 1, "Streaming deferred run should emit one final result"
+        assert (
+            len(final_events) == 1
+        ), "Streaming deferred run should emit one final result"
         assert isinstance(
             final_events[0].result.output, DeferredToolRequests
         ), "Streaming final output should be DeferredToolRequests"
@@ -225,9 +237,9 @@ async def _assert_file_write_result_delivery(vault: Path) -> None:
     )
     conflict_return = _first_tool_return(conflict_result.new_messages())
     assert conflict_return is not None
-    assert conflict_return.content == "Cannot write to 'Actual.md' - file already exists.", (
-        "The model must receive file_write's actual rejected-operation response"
-    )
+    assert (
+        conflict_return.content == "Cannot write to 'Actual.md' - file already exists."
+    ), "The model must receive file_write's actual rejected-operation response"
     assert (vault / "Actual.md").read_text(encoding="utf-8") == "actual content"
 
 
@@ -278,9 +290,9 @@ async def _assert_mixed_result_delivery() -> None:
     assert returns[create_call.tool_call_id].outcome == "success"
     assert returns[delete_call.tool_call_id].content == "Keep the existing file."
     assert returns[delete_call.tool_call_id].outcome == "denied"
-    assert executed == [("create", "draft.md")], (
-        "Mixed review results must execute only their matching approved calls"
-    )
+    assert executed == [
+        ("create", "draft.md")
+    ], "Mixed review results must execute only their matching approved calls"
 
 
 def _first_tool_return(messages: list[Any]) -> ToolReturnPart | None:

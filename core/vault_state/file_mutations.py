@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import tempfile
+import threading
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
-import os
 from pathlib import Path
-import shutil
-import tempfile
-import threading
 from typing import Any
-import uuid
 
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
@@ -39,7 +39,6 @@ from core.vault_state.snapshots import (
     ensure_file_snapshot,
 )
 
-
 logger = UnifiedLogger(tag="vault-mutations")
 
 
@@ -53,7 +52,7 @@ class VaultMutationRejected(Exception):
 
 UNCERTAIN_MUTATION_STAGES = {"refresh", "persist"}
 _MUTATION_LOCKS = tuple(threading.RLock() for _ in range(256))
-_VAULT_MUTATION_LOCKS: tuple["_ReentrantReadWriteLock", ...]
+_VAULT_MUTATION_LOCKS: tuple[_ReentrantReadWriteLock, ...]
 _EXPECTED_HASH_UNSET = object()
 
 
@@ -1314,9 +1313,11 @@ def _move_vault_file_locked(
             before_exists=True,
             before_hash=source_before_hash,
             after_exists=source_path.exists(),
-            after_hash=hash_file_bytes(source_path, length=None)
-            if source_path.exists()
-            else None,
+            after_hash=(
+                hash_file_bytes(source_path, length=None)
+                if source_path.exists()
+                else None
+            ),
             task_id=task.task_id if task is not None else None,
             event_sequence=event_sequence,
             before_snapshot_id=source_snapshot_id,

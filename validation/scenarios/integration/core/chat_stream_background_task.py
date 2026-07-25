@@ -123,7 +123,9 @@ class ChatStreamBackgroundTaskScenario(BaseScenario):
             "running",
             "Background streaming chat task should enter running state",
         )
-        cancellation = await runtime.task_coordinator.cancel_task(cancel_start.task.task_id)
+        cancellation = await runtime.task_coordinator.cancel_task(
+            cancel_start.task.task_id
+        )
         self.soft_assert(
             cancellation is not None and cancellation.effective,
             "Task cancellation should be effective for background streaming chat",

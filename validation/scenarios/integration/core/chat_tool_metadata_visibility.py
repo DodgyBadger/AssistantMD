@@ -24,8 +24,7 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             tools = payload.get("tools", [])
             tool_names = {tool.get("name") for tool in tools}
             tool_descriptions = {
-                tool.get("name"): str(tool.get("description") or "")
-                for tool in tools
+                tool.get("name"): str(tool.get("description") or "") for tool in tools
             }
 
             self.soft_assert(

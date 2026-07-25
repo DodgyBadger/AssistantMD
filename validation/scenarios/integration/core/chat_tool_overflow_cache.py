@@ -21,11 +21,12 @@ class ChatToolOverflowCacheScenario(BaseScenario):
 
         await self.start_system()
 
+        from pydantic_ai.models.test import TestModel
+
         import core.chat.executor as chat_executor
         from core.authoring.cache import get_cache_artifact
         from core.authoring.shared.tool_binding import resolve_tool_binding
         from core.runtime.state import get_runtime_context
-        from pydantic_ai.models.test import TestModel
 
         cache_ref_holder = {"value": ""}
         call_index = {"value": 0}
@@ -44,12 +45,14 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                 assert cache_ref, "Scenario must capture a cache ref before reading it"
                 return {
                     "code": (
-                        f'artifact = await read_cache(ref={cache_ref!r})\n'
+                        f"artifact = await read_cache(ref={cache_ref!r})\n"
                         'artifact.content if artifact.exists else "CACHE_NOT_FOUND"'
                     )
                 }
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None, chat_mode=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, tools, model, thinking
             call_index["value"] += 1
             if call_index["value"] == 1:
@@ -80,7 +83,9 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                 method="PUT",
                 data={"value": "50"},
             )
-            assert update_setting.status_code == 200, "Scenario should lower chat overflow threshold"
+            assert (
+                update_setting.status_code == 200
+            ), "Scenario should lower chat overflow threshold"
 
             chat_result = await self.run_chat_task(
                 {
@@ -91,19 +96,27 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert chat_result["start_response"].status_code == 200, (
-                "Chat task with oversized tool result should start"
-            )
-            assert chat_result["terminal_event"].get("event") == "done", (
-                "Chat execution with oversized tool result should succeed"
-            )
+            assert (
+                chat_result["start_response"].status_code == 200
+            ), "Chat task with oversized tool result should start"
+            assert (
+                chat_result["terminal_event"].get("event") == "done"
+            ), "Chat execution with oversized tool result should succeed"
 
             response_text = chat_result["text"]
             session_id = chat_result["session_id"]
 
-            self.soft_assert("stored in cache ref '" in response_text, "Response should mention cache ref storage")
-            self.soft_assert("Preview:" in response_text, "Response should include a compact preview")
-            self.soft_assert("buffer" not in response_text.lower(), "Response should not refer to buffer routing")
+            self.soft_assert(
+                "stored in cache ref '" in response_text,
+                "Response should mention cache ref storage",
+            )
+            self.soft_assert(
+                "Preview:" in response_text, "Response should include a compact preview"
+            )
+            self.soft_assert(
+                "buffer" not in response_text.lower(),
+                "Response should not refer to buffer routing",
+            )
 
             match = re.search(r"cache ref '([^']+)'", response_text)
             assert match, "Response should contain an extractable cache ref"
@@ -123,9 +136,15 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                 week_start_day=0,
                 system_root=runtime.config.system_root,
             )
-            assert artifact is not None, "Oversized chat tool output should be persisted in cache"
+            assert (
+                artifact is not None
+            ), "Oversized chat tool output should be persisted in cache"
 
-            self.soft_assert_equal(artifact["origin"], "chat_tool_overflow", "Cache artifact origin should be tracked")
+            self.soft_assert_equal(
+                artifact["origin"],
+                "chat_tool_overflow",
+                "Cache artifact origin should be tracked",
+            )
             self.soft_assert_equal(
                 artifact["metadata"].get("tool_name"),
                 "overflow_probe",
@@ -146,9 +165,13 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                 limit=20,
             )
             overflow_events = [
-                event for event in persisted_events if event.event_type == "overflow_cached"
+                event
+                for event in persisted_events
+                if event.event_type == "overflow_cached"
             ]
-            assert overflow_events, "Overflow cache event should be persisted for UI inspection"
+            assert (
+                overflow_events
+            ), "Overflow cache event should be persisted for UI inspection"
             overflow_event = overflow_events[-1]
             self.soft_assert(
                 "stored in cache ref '" in (overflow_event.result_text or ""),
@@ -172,12 +195,12 @@ class ChatToolOverflowCacheScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert followup["start_response"].status_code == 200, (
-                "Cache read follow-up task should start"
-            )
-            assert followup["terminal_event"].get("event") == "done", (
-                "Cache read follow-up should succeed"
-            )
+            assert (
+                followup["start_response"].status_code == 200
+            ), "Cache read follow-up task should start"
+            assert (
+                followup["terminal_event"].get("event") == "done"
+            ), "Cache read follow-up should succeed"
             self.soft_assert(
                 "OVERFLOW_SEGMENT" in followup["text"],
                 "code_execution should read the previously cached oversized chat tool output",

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-import threading
-from typing import Iterable
-import uuid
 
 from sqlalchemy import select
 

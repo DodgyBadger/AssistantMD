@@ -19,10 +19,18 @@ class FileOpsInlineEditPolicyScenario(BaseScenario):
         vault = self.create_vault("FileOpsInlineEditPolicyVault")
         await self.start_system()
         try:
-            normal_binding = resolve_tool_binding(["file_read", "file_write"], vault_path=str(vault))
+            normal_binding = resolve_tool_binding(
+                ["file_read", "file_write"], vault_path=str(vault)
+            )
             assert normal_binding.tool_names() == ["file_read", "file_write"]
-            assert getattr(normal_binding.tool_functions[0], "requires_approval", False) is False
-            assert getattr(normal_binding.tool_functions[1], "requires_approval", False) is False
+            assert (
+                getattr(normal_binding.tool_functions[0], "requires_approval", False)
+                is False
+            )
+            assert (
+                getattr(normal_binding.tool_functions[1], "requires_approval", False)
+                is False
+            )
 
             inline_edit_binding = resolve_tool_binding(
                 ["file_read", "file_write"],
@@ -30,8 +38,18 @@ class FileOpsInlineEditPolicyScenario(BaseScenario):
                 approval_tool_names=approval_tools_for_chat_mode(INLINE_EDIT_CHAT_MODE),
             )
             assert inline_edit_binding.tool_names() == ["file_read", "file_write"]
-            assert getattr(inline_edit_binding.tool_functions[0], "requires_approval", False) is False
-            assert getattr(inline_edit_binding.tool_functions[1], "requires_approval", False) is True
+            assert (
+                getattr(
+                    inline_edit_binding.tool_functions[0], "requires_approval", False
+                )
+                is False
+            )
+            assert (
+                getattr(
+                    inline_edit_binding.tool_functions[1], "requires_approval", False
+                )
+                is True
+            )
         finally:
             await self.stop_system()
             self.teardown_scenario()

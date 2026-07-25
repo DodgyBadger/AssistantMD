@@ -3,7 +3,6 @@ API endpoint implementations for the AssistantMD system.
 """
 
 from datetime import datetime
-from typing import List
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -11,18 +10,25 @@ from pydantic_ai import BinaryContent
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from core.logger import UnifiedLogger
-from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
-from core.runtime.state import get_runtime_context, RuntimeStateError
-from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
+from api.import_models import (
+    ImportJobInfo,
+    ImportScanRequest,
+    ImportScanResponse,
+    ImportUrlRequest,
+    ImportUrlResponse,
+)
+from core.chat.executor import UploadedImageAttachment
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
     start_chat_turn_retry_task,
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
-from core.chat.executor import UploadedImageAttachment
+from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
+from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
+from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.settings import (
     get_chunking_max_image_bytes_per_image,
     get_chunking_max_image_bytes_total,
@@ -32,184 +38,177 @@ from core.settings import (
     get_vault_upload_max_mb_per_file,
 )
 
+from .exceptions import (
+    APIException,
+    ChatSessionVaultMismatchError,
+)
 from .models import (
-    WorkflowLoadErrorsResponse,
-    WorkflowRunHistoryResponse,
     CachePurgeResponse,
-    SystemTemplateSeedResponse,
-    SystemMigrationRunRequest,
-    SystemMigrationRunResponse,
-    SystemMigrationStatusResponse,
-    VaultRescanRequest,
-    VaultRescanResponse,
-    VaultActivityResponse,
-    VaultActivityRollbackPreviewResponse,
-    VaultActivityRollbackRequest,
-    VaultActivityRollbackResponse,
-    VaultStateCleanupResponse,
-    ExecuteWorkflowRequest,
-    ExecuteWorkflowResponse,
-    WorkflowEnabledRequest,
-    WorkflowEnabledResponse,
-    WorkflowFileResponse,
-    WorkflowFileUpdateRequest,
-    EditProposalResponse,
-    DeferredReviewResponse,
-    DeferredReviewSubmitRequest,
-    DeferredReviewSubmitResponse,
-    VaultFileReferenceListResponse,
-    VaultPathResolveRequest,
-    VaultPathResolveResponse,
-    VaultPathMutationRequest,
-    VaultPathMutationResponse,
-    VaultFileResponse,
-    VaultFileRevisionResponse,
-    VaultFileRevisionRestoreRequest,
-    VaultFileRevisionRestoreResponse,
-    VaultFileUpdateRequest,
-    ExecutionTaskCancelResponse,
-    ExecutionTaskInfo,
-    ExecutionTaskListResponse,
-    StatusResponse,
-    ChatTaskRequest,
-    ChatTaskStartResponse,
-    ChatSessionModeRequest,
-    ChatSessionModeResponse,
-    SystemLogResponse,
-    SystemSettingsResponse,
-    UpdateSettingsRequest,
-    ModelConfigRequest,
-    OpenAIOAuthCompleteRequest,
-    OpenAIOAuthDeviceCheckResponse,
-    OpenAIOAuthDeviceStartResponse,
-    OpenAIOAuthStartRequest,
-    OpenAIOAuthStartResponse,
-    ProviderConfigRequest,
-    ModelInfo,
-    ProviderInfo,
-    OperationResult,
-    SecretInfo,
-    SecretUpdateRequest,
-    SettingInfo,
-    SettingUpdateRequest,
-    MetadataResponse,
-    TemplateInfo,
-    ChatSessionInfo,
-    ChatSessionSummaryResponse,
-    ChatSessionSummaryUpdateRequest,
+    ChatHistoryCompactionRequest,
+    ChatHistoryCompactionResponse,
+    ChatHistoryCompactionStatusResponse,
     ChatSessionDetailResponse,
     ChatSessionExportRequest,
     ChatSessionExportResponse,
     ChatSessionForkRequest,
     ChatSessionForkResponse,
+    ChatSessionInfo,
+    ChatSessionModeRequest,
+    ChatSessionModeResponse,
     ChatSessionRetryRequest,
-    ChatHistoryCompactionRequest,
-    ChatHistoryCompactionResponse,
-    ChatHistoryCompactionStatusResponse,
     ChatSessionsPurgeRequest,
     ChatSessionsPurgeResponse,
-    GoalCleanupRequest,
-    GoalCleanupResponse,
+    ChatSessionSummaryResponse,
+    ChatSessionSummaryUpdateRequest,
     ChatSessionTitleRequest,
     ChatSessionWorkspaceRequest,
+    ChatTaskRequest,
+    ChatTaskStartResponse,
     ChatWorkspaceInfo,
+    DeferredReviewResponse,
+    DeferredReviewSubmitRequest,
+    DeferredReviewSubmitResponse,
+    EditProposalResponse,
+    ExecuteWorkflowRequest,
+    ExecuteWorkflowResponse,
+    ExecutionTaskCancelResponse,
+    ExecutionTaskInfo,
+    ExecutionTaskListResponse,
+    GoalCleanupRequest,
+    GoalCleanupResponse,
+    MetadataResponse,
+    ModelConfigRequest,
+    ModelInfo,
+    OpenAIOAuthCompleteRequest,
+    OpenAIOAuthDeviceCheckResponse,
+    OpenAIOAuthDeviceStartResponse,
+    OpenAIOAuthStartRequest,
+    OpenAIOAuthStartResponse,
+    OperationResult,
+    ProviderConfigRequest,
+    ProviderInfo,
+    SecretInfo,
+    SecretUpdateRequest,
+    SettingInfo,
+    SettingUpdateRequest,
+    StatusResponse,
+    SystemLogResponse,
+    SystemMigrationRunRequest,
+    SystemMigrationRunResponse,
+    SystemMigrationStatusResponse,
+    SystemSettingsResponse,
+    SystemTemplateSeedResponse,
+    TemplateInfo,
+    UpdateSettingsRequest,
+    VaultActivityResponse,
+    VaultActivityRollbackPreviewResponse,
+    VaultActivityRollbackRequest,
+    VaultActivityRollbackResponse,
     VaultDirectoryListResponse,
+    VaultFileReferenceListResponse,
+    VaultFileResponse,
+    VaultFileRevisionResponse,
+    VaultFileRevisionRestoreRequest,
+    VaultFileRevisionRestoreResponse,
+    VaultFileUpdateRequest,
+    VaultPathMutationRequest,
+    VaultPathMutationResponse,
+    VaultPathResolveRequest,
+    VaultPathResolveResponse,
+    VaultRescanRequest,
+    VaultRescanResponse,
+    VaultStateCleanupResponse,
+    WorkflowEnabledRequest,
+    WorkflowEnabledResponse,
+    WorkflowFileResponse,
+    WorkflowFileUpdateRequest,
+    WorkflowLoadErrorsResponse,
+    WorkflowRunHistoryResponse,
 )
-from .exceptions import (
-    APIException,
-    ChatSessionVaultMismatchError,
-)
-from .utils import create_error_response, serialize_exception
 from .services import (
     ChatSessionVaultMismatch,
-    rescan_vaults_and_update_scheduler,
-    get_system_status,
-    execute_workflow_manually,
-    set_workflow_enabled_state,
-    get_workflow_file,
-    update_workflow_file,
-    get_metadata,
-    get_enabled_chat_tool_names,
-    resolve_vault_root,
-    list_context_templates,
-    list_chat_sessions,
-    get_chat_session_summary,
-    update_chat_session_summary,
-    delete_chat_session_summary,
-    get_chat_session_detail,
-    fork_chat_session,
-    export_chat_session_markdown,
-    compact_chat_session_history,
-    get_chat_history_compaction_status,
-    purge_chat_sessions,
-    cleanup_goals,
-    set_chat_session_title,
-    set_chat_session_workspace,
-    set_chat_session_mode,
-    list_vault_directories,
-    list_vault_file_references,
-    resolve_vault_path_references,
-    resolve_vault_upload_target,
-    mutate_vault_path,
-    upload_vault_file,
-    get_vault_file,
-    get_vault_file_revisions,
-    restore_vault_file_revision,
-    update_vault_file,
-    get_chat_edit_proposal,
-    get_chat_deferred_review,
-    submit_chat_deferred_review,
-    delete_chat_session,
-    get_system_activity_log,
-    export_system_activity_log,
-    get_system_settings,
-    update_system_settings,
-    repair_settings_from_template,
-    get_general_settings_config,
-    update_general_setting_value,
-    get_configurable_models,
-    upsert_configurable_model,
-    delete_configurable_model,
-    get_configurable_providers,
-    check_openai_oauth_device_connection,
-    start_openai_oauth_connection,
-    start_openai_oauth_device_connection,
-    complete_openai_oauth_callback,
-    complete_openai_oauth_manual,
-    disconnect_openai_oauth_connection,
-    upsert_configurable_provider,
-    delete_configurable_provider,
-    list_secrets,
-    update_secret,
-    delete_secret_entry,
-    scan_import_folder,
-    import_url_direct,
-    get_workflow_load_errors,
-    get_workflow_run_history,
-    purge_expired_cache,
-    get_system_database_migration_status,
-    run_system_database_migrations,
-    refresh_system_authoring_templates,
     cancel_chat_session_task,
     cancel_execution_task,
+    check_openai_oauth_device_connection,
+    cleanup_goals,
+    cleanup_vault_state,
+    compact_chat_session_history,
+    complete_openai_oauth_callback,
+    complete_openai_oauth_manual,
+    delete_chat_session,
+    delete_chat_session_summary,
+    delete_configurable_model,
+    delete_configurable_provider,
+    delete_secret_entry,
+    disconnect_openai_oauth_connection,
+    execute_workflow_manually,
+    export_chat_session_markdown,
+    export_system_activity_log,
+    fork_chat_session,
     get_active_chat_task,
+    get_chat_deferred_review,
+    get_chat_edit_proposal,
+    get_chat_history_compaction_status,
+    get_chat_session_detail,
+    get_chat_session_summary,
+    get_configurable_models,
+    get_configurable_providers,
+    get_enabled_chat_tool_names,
     get_execution_task,
-    list_execution_tasks,
-    list_workflow_tasks,
+    get_general_settings_config,
+    get_metadata,
+    get_system_activity_log,
+    get_system_database_migration_status,
+    get_system_settings,
+    get_system_status,
     get_vault_activity,
     get_vault_activity_rollback_preview,
-    rollback_vault_activity,
+    get_vault_file,
+    get_vault_file_revisions,
     get_vault_snapshot_file,
-    cleanup_vault_state,
+    get_workflow_file,
+    get_workflow_load_errors,
+    get_workflow_run_history,
+    import_url_direct,
+    list_chat_sessions,
+    list_context_templates,
+    list_execution_tasks,
+    list_secrets,
+    list_vault_directories,
+    list_vault_file_references,
+    list_workflow_tasks,
+    mutate_vault_path,
+    purge_chat_sessions,
+    purge_expired_cache,
+    refresh_system_authoring_templates,
+    repair_settings_from_template,
+    rescan_vaults_and_update_scheduler,
     resolve_chat_session_for_request,
+    resolve_vault_path_references,
+    resolve_vault_root,
+    resolve_vault_upload_target,
+    restore_vault_file_revision,
+    rollback_vault_activity,
+    run_system_database_migrations,
+    scan_import_folder,
+    set_chat_session_mode,
+    set_chat_session_title,
+    set_chat_session_workspace,
+    set_workflow_enabled_state,
+    start_openai_oauth_connection,
+    start_openai_oauth_device_connection,
+    submit_chat_deferred_review,
+    update_chat_session_summary,
+    update_general_setting_value,
+    update_secret,
+    update_system_settings,
+    update_vault_file,
+    update_workflow_file,
+    upload_vault_file,
+    upsert_configurable_model,
+    upsert_configurable_provider,
 )
-from api.import_models import (
-    ImportScanRequest,
-    ImportScanResponse,
-    ImportJobInfo,
-    ImportUrlRequest,
-    ImportUrlResponse,
-)
+from .utils import create_error_response, serialize_exception
 
 # Create API router
 router = APIRouter(prefix="/api", tags=["AssistantMD API"])
@@ -236,7 +235,11 @@ async def _parse_chat_task_payload(
 
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
-        image_paths = [str(item).strip() for item in form.getlist("image_paths") if str(item).strip()]
+        image_paths = [
+            str(item).strip()
+            for item in form.getlist("image_paths")
+            if str(item).strip()
+        ]
         payload = ChatTaskRequest.model_validate(
             {
                 "vault_name": str(form.get("vault_name") or "").strip(),
@@ -245,7 +248,8 @@ async def _parse_chat_task_payload(
                 "session_id": str(form.get("session_id") or "").strip() or None,
                 "model": str(form.get("model") or "").strip(),
                 "thinking": str(form.get("thinking") or "").strip() or None,
-                "context_template": str(form.get("context_template") or "").strip() or None,
+                "context_template": str(form.get("context_template") or "").strip()
+                or None,
                 "workspace_path": str(form.get("workspace_path") or "").strip() or None,
                 "chat_mode": str(form.get("chat_mode") or "normal").strip() or "normal",
             }
@@ -291,9 +295,11 @@ async def _parse_chat_task_payload(
                         "total_image_bytes": total_image_bytes,
                     },
                 )
-            media_type = str(
-                getattr(item, "content_type", None) or "application/octet-stream"
-            ).strip().lower()
+            media_type = (
+                str(getattr(item, "content_type", None) or "application/octet-stream")
+                .strip()
+                .lower()
+            )
             uploads.append(
                 UploadedImageAttachment(
                     display_name=display_name,
@@ -473,7 +479,9 @@ async def _start_chat_task_request(
             bound_vault=exc.bound_vault,
         ) from exc
 
-    resolved_thinking = normalize_thinking_value(chat_request.thinking, source_name="chat thinking")
+    resolved_thinking = normalize_thinking_value(
+        chat_request.thinking, source_name="chat thinking"
+    )
     logger.info(
         "Chat task request accepted",
         data={
@@ -513,6 +521,7 @@ async def _start_chat_task_request(
 ## Health & Status Endpoints
 #######################################################################
 
+
 @router.get("/health")
 async def health_check():
     """
@@ -528,28 +537,17 @@ async def health_check():
 
         return JSONResponse(
             status_code=200,
-            content={
-                "status": "healthy",
-                "scheduler_running": scheduler_running
-            }
+            content={"status": "healthy", "scheduler_running": scheduler_running},
         )
     except RuntimeStateError:
         # Runtime not initialized yet - still starting up
         return JSONResponse(
-            status_code=503,
-            content={
-                "status": "starting",
-                "scheduler_running": False
-            }
+            status_code=503, content={"status": "starting", "scheduler_running": False}
         )
     except Exception:
         # Something is wrong
         return JSONResponse(
-            status_code=503,
-            content={
-                "status": "unhealthy",
-                "scheduler_running": False
-            }
+            status_code=503, content={"status": "unhealthy", "scheduler_running": False}
         )
 
 
@@ -557,10 +555,10 @@ async def health_check():
 async def get_status():
     """
     Get current system status including vault discovery, scheduler status, and system health.
-    
+
     Returns comprehensive information about:
     - Discovered vaults and their workflow counts
-    - Scheduler status and job information  
+    - Scheduler status and job information
     - System health indicators
     """
     try:
@@ -571,11 +569,11 @@ async def get_status():
             scheduler = runtime.scheduler
         except RuntimeStateError:
             pass  # Runtime context not available - status will show scheduler as stopped
-        
+
         # Get comprehensive system status
         status = await get_system_status(scheduler)
         return status
-        
+
     except Exception as e:
         return create_error_response(e)
 
@@ -584,8 +582,8 @@ async def get_status():
 async def system_activity_log(
     limit: int = 200,
     cursor: str | None = None,
-    level: List[str] | None = Query(None),
-    tag: List[str] | None = Query(None),
+    level: list[str] | None = Query(None),
+    tag: list[str] | None = Query(None),
     search: str | None = None,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
@@ -611,13 +609,16 @@ async def system_activity_log_export():
     return StreamingResponse(
         export_system_activity_log(),
         media_type="application/x-ndjson",
-        headers={"Content-Disposition": 'attachment; filename="assistantmd-activity.jsonl"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="assistantmd-activity.jsonl"'
+        },
     )
 
 
 #######################################################################
 ## Execution Task Endpoints
 #######################################################################
+
 
 @router.get("/tasks", response_model=ExecutionTaskListResponse)
 async def execution_tasks(
@@ -753,7 +754,7 @@ async def repair_system_settings():
         return create_error_response(e)
 
 
-@router.get("/system/settings/general", response_model=List[SettingInfo])
+@router.get("/system/settings/general", response_model=list[SettingInfo])
 async def list_general_settings():
     """List general (non-secret) settings entries."""
     try:
@@ -822,7 +823,7 @@ async def import_url(request: ImportUrlRequest):
         return create_error_response(e)
 
 
-@router.get("/system/models", response_model=List[ModelInfo])
+@router.get("/system/models", response_model=list[ModelInfo])
 async def list_models():
     """List all model configuration entries with availability metadata."""
     try:
@@ -849,7 +850,7 @@ async def delete_model(model_name: str):
         return create_error_response(e)
 
 
-@router.get("/system/providers", response_model=List[ProviderInfo])
+@router.get("/system/providers", response_model=list[ProviderInfo])
 async def list_providers():
     """List provider configurations."""
     try:
@@ -955,7 +956,7 @@ async def delete_provider(provider_name: str):
         return create_error_response(e)
 
 
-@router.get("/system/secrets", response_model=List[SecretInfo])
+@router.get("/system/secrets", response_model=list[SecretInfo])
 async def list_secrets_endpoint():
     """List stored secrets and whether they currently have values."""
     try:
@@ -1014,7 +1015,9 @@ async def get_system_database_migration_status_endpoint():
 
 
 @router.post("/system/migrations/run", response_model=SystemMigrationRunResponse)
-async def run_system_database_migrations_endpoint(request: SystemMigrationRunRequest = SystemMigrationRunRequest()):
+async def run_system_database_migrations_endpoint(
+    request: SystemMigrationRunRequest = SystemMigrationRunRequest(),
+):
     """Run registered system database migrations."""
     try:
         return run_system_database_migrations(backup=request.backup)
@@ -1022,7 +1025,9 @@ async def run_system_database_migrations_endpoint(request: SystemMigrationRunReq
         return create_error_response(e)
 
 
-@router.post("/system/authoring/seed-refresh", response_model=SystemTemplateSeedResponse)
+@router.post(
+    "/system/authoring/seed-refresh", response_model=SystemTemplateSeedResponse
+)
 async def refresh_system_authoring_templates_endpoint():
     """Manually refresh packaged system Authoring templates."""
     try:
@@ -1041,14 +1046,15 @@ async def cleanup_vault_state_endpoint():
 
 
 #######################################################################
-## Vault Management Endpoints  
+## Vault Management Endpoints
 #######################################################################
+
 
 @router.post("/vaults/rescan", response_model=VaultRescanResponse)
 async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
     """
     Force immediate rediscovery of all vault directories and reload workflow configurations.
-    
+
     This endpoint:
     - Rediscovers all vault directories
     - Reloads all workflow configurations from discovered vaults
@@ -1070,14 +1076,14 @@ async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
 
         return VaultRescanResponse(
             success=True,
-            vaults_discovered=results['vaults_discovered'],
-            workflows_loaded=results['workflows_loaded'],
-            enabled_workflows=results['enabled_workflows'],
-            scheduler_jobs_synced=results['scheduler_jobs_synced'],
+            vaults_discovered=results["vaults_discovered"],
+            workflows_loaded=results["workflows_loaded"],
+            enabled_workflows=results["enabled_workflows"],
+            scheduler_jobs_synced=results["scheduler_jobs_synced"],
             message=f"Rescan completed successfully: {results['vaults_discovered']} vaults, {results['enabled_workflows']} enabled workflows, {results['scheduler_jobs_synced']} jobs synced",
             metadata=metadata,
         )
-        
+
     except Exception as e:
         return create_error_response(e)
 
@@ -1156,8 +1162,6 @@ async def vault_snapshot_content(snapshot_id: int):
         return create_error_response(e)
 
 
-
-
 @router.post("/workflows/execute", response_model=ExecuteWorkflowResponse)
 async def execute_workflow(request: ExecuteWorkflowRequest):
     """
@@ -1207,7 +1211,9 @@ async def save_workflow_file(global_id: str, request: WorkflowFileUpdateRequest)
 
 
 @router.get("/workflows/load-errors", response_model=WorkflowLoadErrorsResponse)
-async def workflow_load_errors(vault_name: str | None = None, workflow_name: str | None = None):
+async def workflow_load_errors(
+    vault_name: str | None = None, workflow_name: str | None = None
+):
     """Return workflow load errors without exposing the full system status payload."""
     try:
         if workflow_name and _looks_like_workflow_path(workflow_name):
@@ -1221,7 +1227,9 @@ async def workflow_load_errors(vault_name: str | None = None, workflow_name: str
                 details={"workflow_name": workflow_name},
             )
         return WorkflowLoadErrorsResponse(
-            errors=get_workflow_load_errors(vault_name=vault_name, workflow_name=workflow_name)
+            errors=get_workflow_load_errors(
+                vault_name=vault_name, workflow_name=workflow_name
+            )
         )
     except Exception as e:
         return create_error_response(e)
@@ -1231,7 +1239,9 @@ async def workflow_load_errors(vault_name: str | None = None, workflow_name: str
 async def workflow_run_history(global_id: str, limit: int = 50):
     """Return recent durable outcomes for one workflow."""
     try:
-        return WorkflowRunHistoryResponse(**get_workflow_run_history(global_id, limit=limit))
+        return WorkflowRunHistoryResponse(
+            **get_workflow_run_history(global_id, limit=limit)
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -1256,7 +1266,7 @@ async def metadata():
         return create_error_response(e)
 
 
-@router.get("/context/templates", response_model=List[TemplateInfo])
+@router.get("/context/templates", response_model=list[TemplateInfo])
 async def context_templates(vault_name: str):
     """
     List available context templates for a vault (vault + system sources).
@@ -1267,7 +1277,9 @@ async def context_templates(vault_name: str):
         return create_error_response(e)
 
 
-@router.get("/vaults/{vault_name}/directories", response_model=VaultDirectoryListResponse)
+@router.get(
+    "/vaults/{vault_name}/directories", response_model=VaultDirectoryListResponse
+)
 async def vault_directories(vault_name: str, path: str | None = None):
     """Return child directories for workspace selection."""
     try:
@@ -1276,7 +1288,9 @@ async def vault_directories(vault_name: str, path: str | None = None):
         return create_error_response(e)
 
 
-@router.get("/vaults/{vault_name}/file-refs", response_model=VaultFileReferenceListResponse)
+@router.get(
+    "/vaults/{vault_name}/file-refs", response_model=VaultFileReferenceListResponse
+)
 async def vault_file_references(
     vault_name: str,
     path: str | None = None,
@@ -1301,7 +1315,9 @@ async def vault_file_references(
         return create_error_response(e)
 
 
-@router.post("/vaults/{vault_name}/file-refs/resolve", response_model=VaultPathResolveResponse)
+@router.post(
+    "/vaults/{vault_name}/file-refs/resolve", response_model=VaultPathResolveResponse
+)
 async def resolve_vault_file_references(
     vault_name: str,
     request: VaultPathResolveRequest,
@@ -1317,7 +1333,9 @@ async def resolve_vault_file_references(
         return create_error_response(e)
 
 
-@router.post("/vaults/{vault_name}/paths/mutate", response_model=VaultPathMutationResponse)
+@router.post(
+    "/vaults/{vault_name}/paths/mutate", response_model=VaultPathMutationResponse
+)
 async def mutate_vault_explorer_path(
     vault_name: str,
     request: VaultPathMutationRequest,
@@ -1335,7 +1353,9 @@ async def mutate_vault_explorer_path(
         return create_error_response(e)
 
 
-@router.post("/vaults/{vault_name}/files/upload", response_model=VaultPathMutationResponse)
+@router.post(
+    "/vaults/{vault_name}/files/upload", response_model=VaultPathMutationResponse
+)
 async def upload_vault_explorer_file(
     vault_name: str,
     path: str,
@@ -1508,7 +1528,7 @@ async def submit_deferred_review_artifact(
         return create_error_response(e)
 
 
-@router.get("/chat/sessions", response_model=List[ChatSessionInfo])
+@router.get("/chat/sessions", response_model=list[ChatSessionInfo])
 async def chat_sessions(vault_name: str):
     """
     List persisted chat sessions for a vault ordered by latest activity.
@@ -1528,7 +1548,9 @@ async def chat_session_active_task(session_id: str):
         return create_error_response(e)
 
 
-@router.post("/chat/sessions/{session_id}/cancel", response_model=ExecutionTaskCancelResponse)
+@router.post(
+    "/chat/sessions/{session_id}/cancel", response_model=ExecutionTaskCancelResponse
+)
 async def cancel_chat_session(session_id: str):
     """Request cancellation for the active process-local task in a chat session."""
     try:
@@ -1537,7 +1559,9 @@ async def cancel_chat_session(session_id: str):
         return create_error_response(e)
 
 
-@router.get("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+@router.get(
+    "/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse
+)
 async def chat_session_summary(session_id: str, vault_name: str):
     """Return a lightweight summary preview for one chat session."""
     try:
@@ -1546,7 +1570,9 @@ async def chat_session_summary(session_id: str, vault_name: str):
         return create_error_response(e)
 
 
-@router.put("/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse)
+@router.put(
+    "/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse
+)
 async def update_chat_session_summary_endpoint(
     session_id: str,
     vault_name: str,
@@ -1605,7 +1631,9 @@ async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
         return create_error_response(e)
 
 
-@router.patch("/chat/sessions/{session_id}/workspace", response_model=ChatWorkspaceInfo | None)
+@router.patch(
+    "/chat/sessions/{session_id}/workspace", response_model=ChatWorkspaceInfo | None
+)
 async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRequest):
     """Set or clear the workspace path for a chat session."""
     try:
@@ -1614,11 +1642,15 @@ async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRe
         return create_error_response(e)
 
 
-@router.patch("/chat/sessions/{session_id}/mode", response_model=ChatSessionModeResponse)
+@router.patch(
+    "/chat/sessions/{session_id}/mode", response_model=ChatSessionModeResponse
+)
 async def set_session_mode(session_id: str, request: ChatSessionModeRequest):
     """Persist the selected mode for a chat session."""
     try:
-        chat_mode = set_chat_session_mode(request.vault_name, session_id, request.chat_mode)
+        chat_mode = set_chat_session_mode(
+            request.vault_name, session_id, request.chat_mode
+        )
         return ChatSessionModeResponse(session_id=session_id, chat_mode=chat_mode)
     except Exception as e:
         return create_error_response(e)
@@ -1638,7 +1670,9 @@ async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRe
 
 
 @router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
-async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSessionRetryRequest):
+async def retry_chat_session_turn_endpoint(
+    session_id: str, request: ChatSessionRetryRequest
+):
     """Retry the latest retryable unfinished chat turn for one session."""
     try:
         try:
@@ -1675,8 +1709,12 @@ async def retry_chat_session_turn_endpoint(session_id: str, request: ChatSession
         return create_error_response(e)
 
 
-@router.post("/chat/sessions/{session_id}/export", response_model=ChatSessionExportResponse)
-async def export_chat_session_endpoint(session_id: str, request: ChatSessionExportRequest):
+@router.post(
+    "/chat/sessions/{session_id}/export", response_model=ChatSessionExportResponse
+)
+async def export_chat_session_endpoint(
+    session_id: str, request: ChatSessionExportRequest
+):
     """Export one persisted chat session transcript into the owning vault."""
     try:
         vault_path = str(resolve_vault_root(request.vault_name))
@@ -1685,7 +1723,10 @@ async def export_chat_session_endpoint(session_id: str, request: ChatSessionExpo
         return create_error_response(e)
 
 
-@router.get("/chat/sessions/{session_id}/compaction-status", response_model=ChatHistoryCompactionStatusResponse)
+@router.get(
+    "/chat/sessions/{session_id}/compaction-status",
+    response_model=ChatHistoryCompactionStatusResponse,
+)
 async def chat_history_compaction_status_endpoint(session_id: str, vault_name: str):
     """Return compaction status for one persisted chat session."""
     try:
@@ -1694,8 +1735,12 @@ async def chat_history_compaction_status_endpoint(session_id: str, vault_name: s
         return create_error_response(e)
 
 
-@router.post("/chat/sessions/{session_id}/compact", response_model=ChatHistoryCompactionResponse)
-async def compact_chat_history_endpoint(session_id: str, request: ChatHistoryCompactionRequest):
+@router.post(
+    "/chat/sessions/{session_id}/compact", response_model=ChatHistoryCompactionResponse
+)
+async def compact_chat_history_endpoint(
+    session_id: str, request: ChatHistoryCompactionRequest
+):
     """Compact one persisted chat session into a summary plus recent turns."""
     try:
         vault_path = str(resolve_vault_root(request.vault_name))
@@ -1729,9 +1774,10 @@ async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
 ## Error Handlers (Note: These will be registered with the main FastAPI app)
 #######################################################################
 
+
 def register_exception_handlers(app):
     """Register exception handlers with the FastAPI app."""
-    
+
     @app.exception_handler(APIException)
     async def api_exception_handler(request, exc: APIException):
         """Handle API-specific exceptions with proper error responses."""

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Type
+from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ToolReturn
@@ -23,15 +24,14 @@ from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
 from core.web.config import get_web_tool_strategy_requirements
 
-
 logger = UnifiedLogger(tag="workflow-tool-binding")
 
 
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    params: Dict[str, str]
-    tool_class: Type
+    params: dict[str, str]
+    tool_class: type
     tool_function: object
     week_start_day: int = 0
 
@@ -105,7 +105,7 @@ def resolve_tool_binding(
             f"Tool(s) unavailable or disabled: {requested}. Available enabled tools: {available_tools}"
         )
 
-    tool_classes: list[Type] = []
+    tool_classes: list[type] = []
     tool_functions: list[object] = []
     tool_specs: list[ToolSpec] = []
     skipped_tools: list[tuple[str, list[str]]] = []
@@ -151,9 +151,9 @@ def resolve_tool_binding(
                 tool_function,
                 tool_name=tool_name,
                 tool_instructions=tool_class.get_instructions(),
-                requires_approval=True
-                if tool_name in (approval_tool_names or set())
-                else None,
+                requires_approval=(
+                    True if tool_name in (approval_tool_names or set()) else None
+                ),
             )
             tool_functions.append(wrapped_tool)
             tool_specs.append(
@@ -197,7 +197,7 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
     if not results:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
 
-    specs_by_name: Dict[str, ToolSpec] = {}
+    specs_by_name: dict[str, ToolSpec] = {}
     fallback_functions: list[object] = []
     notes: list[str] = []
 
@@ -270,7 +270,7 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
         if allow_empty:
             return ""
         raise ValueError("Tools value cannot be empty")
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         parts: list[str] = []
         for item in value:
             if not isinstance(item, str):
@@ -290,11 +290,11 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
     raise ValueError("Tools value cannot be empty")
 
 
-def _get_tool_configs() -> Dict[str, ToolConfig]:
+def _get_tool_configs() -> dict[str, ToolConfig]:
     return get_enabled_tools_config()
 
 
-def _load_tool_class(tool_name: str) -> Type:
+def _load_tool_class(tool_name: str) -> type:
     configs = _get_tool_configs()
     if tool_name not in configs:
         available_tools = ", ".join(configs.keys())
@@ -470,7 +470,7 @@ def _tool_argument_binding_error(
     return None
 
 
-def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
+def _has_meaningful_tool_args(kwargs: dict[str, Any]) -> bool:
     """Return True when the tool call includes at least one non-empty user argument."""
     if not kwargs:
         return False
@@ -479,7 +479,7 @@ def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
             continue
         if isinstance(value, str) and not value.strip():
             continue
-        if isinstance(value, (list, tuple, dict, set)) and not value:
+        if isinstance(value, list | tuple | dict | set) and not value:
             continue
         return True
     return False
@@ -532,6 +532,6 @@ def _return_value_type(value: Any) -> str:
         return "none"
     if isinstance(value, str):
         return "text"
-    if isinstance(value, (dict, list, tuple)):
+    if isinstance(value, dict | list | tuple):
         return "json"
     return type(value).__name__
