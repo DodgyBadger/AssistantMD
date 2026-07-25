@@ -1647,13 +1647,13 @@ def _remaining_directory_blockers(vault_root: Path, target: Path) -> tuple[str, 
 
 
 def _relative_to_vault(vault_root: Path, path: Path) -> str:
-    return normalize_vault_relative_path(path.relative_to(vault_root))
+    return str(normalize_vault_relative_path(path.relative_to(vault_root)))
 
 
 def _persist_or_log_mutation(
     *,
     service: VaultStateService,
-    task,
+    task: Any,
     result: RecordedMutationResult,
     vault_root: Path,
     operation_id: str,

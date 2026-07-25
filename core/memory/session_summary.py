@@ -946,13 +946,13 @@ def _is_upsert_value_supplied(value: object) -> bool:
 
 
 def _clean_upsert_text(value: SessionSummaryTextInput) -> str | None:
-    if value is SESSION_SUMMARY_FIELD_UNSET:
+    if isinstance(value, _UnsetValue):
         return None
     return _clean_text(value)
 
 
 def _dump_upsert_metadata(value: SessionSummaryMetadataInput) -> str | None:
-    if value is SESSION_SUMMARY_FIELD_UNSET or value is None:
+    if isinstance(value, _UnsetValue) or value is None:
         return None
     return _dump_json(value)
 

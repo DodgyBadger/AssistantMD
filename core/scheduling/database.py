@@ -11,7 +11,10 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from core.database import get_system_database_definition, get_system_database_path
 
 
-def create_job_store(system_root: str = None, wipe: bool = False) -> SQLAlchemyJobStore:
+def create_job_store(
+    system_root: str | None = None,
+    wipe: bool = False,
+) -> SQLAlchemyJobStore:
     """Create APScheduler SQLAlchemy job store for persistent job storage.
 
     Args:

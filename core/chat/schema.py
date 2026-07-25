@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
@@ -183,7 +185,7 @@ def ensure_chat_sessions_schema(
         conn.close()
 
 
-def _migrate_compaction_checkpoints(conn) -> None:
+def _migrate_compaction_checkpoints(conn: sqlite3.Connection) -> None:
     """Add append-only chat compaction checkpoint storage."""
     conn.execute(
         """
@@ -220,7 +222,12 @@ def _migrate_compaction_checkpoints(conn) -> None:
     )
 
 
-def _ensure_column(conn, table_name: str, column_name: str, definition: str) -> None:
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
     """Add a column to an existing SQLite table when it is missing."""
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     existing = {str(row[1]) for row in rows}
@@ -228,7 +235,7 @@ def _ensure_column(conn, table_name: str, column_name: str, definition: str) -> 
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
-def _deduplicate_session_ids(conn) -> None:
+def _deduplicate_session_ids(conn: sqlite3.Connection) -> None:
     """Ensure historical composite-key sessions have globally unique IDs."""
     duplicate_rows = conn.execute(
         """
@@ -282,7 +289,7 @@ def _deduplicate_session_ids(conn) -> None:
 
 
 def _deduplicated_session_id(
-    conn, *, session_id: str, vault_name: str, index: int
+    conn: sqlite3.Connection, *, session_id: str, vault_name: str, index: int
 ) -> str:
     vault_part = (
         vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")

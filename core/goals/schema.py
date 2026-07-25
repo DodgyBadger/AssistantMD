@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
 
@@ -48,7 +50,7 @@ def ensure_goal_ops_schema(
         conn.close()
 
 
-def _create_goal_ops_tables(conn) -> None:
+def _create_goal_ops_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS goals (
@@ -173,7 +175,7 @@ def _create_goal_ops_tables(conn) -> None:
     )
 
 
-def _add_goal_source_provenance(conn) -> None:
+def _add_goal_source_provenance(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "goals")
     for column in ("source_type", "source_id", "source_task_id", "source_label"):
         if column not in columns:
@@ -186,12 +188,12 @@ def _add_goal_source_provenance(conn) -> None:
     )
 
 
-def _add_goal_plan_snapshot(conn) -> None:
+def _add_goal_plan_snapshot(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "goals")
     if "plan_json" not in columns:
         conn.execute("ALTER TABLE goals ADD COLUMN plan_json TEXT")
 
 
-def _table_columns(conn, table_name: str) -> set[str]:
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row[1]) for row in rows}

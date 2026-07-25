@@ -5,7 +5,8 @@ import sqlite3
 from dataclasses import dataclass
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.schema import Table
 
 from core.logger import UnifiedLogger
@@ -90,7 +91,7 @@ def get_system_database_definition(db_name: str) -> SystemDatabaseDefinition:
     return definition
 
 
-def get_system_database_path(db_name: str, system_root: str = None) -> str:
+def get_system_database_path(db_name: str, system_root: str | None = None) -> str:
     """Get the full path for a system database file.
 
     Args:
@@ -108,7 +109,10 @@ def get_system_database_path(db_name: str, system_root: str = None) -> str:
     return os.path.join(system_root, f"{db_name}.db")
 
 
-def create_engine_from_system_db(db_name: str, system_root: str = None):
+def create_engine_from_system_db(
+    db_name: str,
+    system_root: str | None = None,
+) -> Engine:
     """Create SQLAlchemy engine for a system database with runtime context support.
 
     Automatically uses the system_root from runtime context when available,
@@ -139,7 +143,7 @@ def create_engine_from_system_db(db_name: str, system_root: str = None):
 
 
 def connect_sqlite_from_system_db(
-    db_name: str, system_root: str = None
+    db_name: str, system_root: str | None = None
 ) -> sqlite3.Connection:
     """Open a raw sqlite3 connection for a declared system DB.
 
@@ -153,7 +157,7 @@ def connect_sqlite_from_system_db(
     return sqlite3.connect(database_path)
 
 
-def create_session_factory(engine):
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     """Create SQLAlchemy session factory for an engine.
 
     Args:
@@ -165,7 +169,7 @@ def create_session_factory(engine):
     return sessionmaker(bind=engine)
 
 
-def create_tables(engine, *tables: Table) -> None:
+def create_tables(engine: Engine, *tables: Table) -> None:
     """Create only the explicitly declared tables for a system DB."""
     if not tables:
         raise ValueError("create_tables requires at least one table")

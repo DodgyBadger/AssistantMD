@@ -181,10 +181,10 @@ def build_api_error_details(exception: Exception) -> dict[str, Any]:
         return details
 
     classification = classify_exception(exception, phase="api_request")
-    details = classification.to_metadata()
-    details["error_type"] = type(exception).__name__
-    details.setdefault("http_status", 500)
-    return details
+    classified_details: dict[str, Any] = dict(classification.to_metadata())
+    classified_details["error_type"] = type(exception).__name__
+    classified_details.setdefault("http_status", 500)
+    return classified_details
 
 
 def _classify_api_exception(
@@ -276,7 +276,7 @@ def _log_api_error_response(
     )
 
 
-def safe_path_join(*paths) -> str:
+def safe_path_join(*paths: str | os.PathLike[str]) -> str:
     """
     Safely join paths and ensure the result is within expected bounds.
 
@@ -299,4 +299,4 @@ def safe_path_join(*paths) -> str:
         if not normalized.startswith("/app/data"):
             raise ValueError(f"Path traversal detected or invalid path: {normalized}")
 
-    return normalized
+    return str(normalized)
