@@ -2,8 +2,9 @@
 
 ## Status
 
-Implemented. Focused validation passes via
-`integration/core/vault_explorer_upload`.
+Implemented and hardened. Focused validation passes via
+`integration/core/vault_explorer_upload`; maintainer full-suite and browser
+review remain pending.
 
 ## Goal
 
@@ -92,6 +93,16 @@ existing ingestion flow for Markdown conversion.
 5. Refresh the Explorer once after the batch and reveal an uploaded path.
 6. Add focused scenario coverage, update the API/UI architecture contract, and
    complete a refactor/hardening pass.
+
+## Hardening Review
+
+- The create-only binary mutation boundary now uses exclusive file creation and
+  removes a partially written destination when the write fails.
+- A focused regression assertion simulates an interrupted binary write and
+  confirms that the API reports failure without leaving the destination behind.
+- The final create remains protected by the shared per-path mutation lock, and
+  an external destination race is translated to the existing `file_exists`
+  mutation contract.
 
 ## Next Phase
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -102,6 +103,49 @@ class VaultExplorerUploadScenario(BaseScenario):
         self.soft_assert(
             not (vault / "oversized.pdf").exists(),
             "Oversized upload should not create a destination",
+        )
+
+        partial_path = vault / "partial-write.pdf"
+
+        class FailingBinaryDestination:
+            def __enter__(self):
+                self._stream = partial_path.open("wb")
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                self._stream.close()
+
+            def write(self, content):
+                self._stream.write(content[:4])
+                raise OSError("simulated interrupted upload write")
+
+        original_path_open = Path.open
+
+        def fail_partial_upload(path, mode="r", *args, **kwargs):
+            if path == partial_path and mode == "xb":
+                return FailingBinaryDestination()
+            return original_path_open(path, mode, *args, **kwargs)
+
+        with patch.object(Path, "open", fail_partial_upload):
+            interrupted = client.post(
+                f"/api/vaults/{vault.name}/files/upload",
+                params={"path": partial_path.name},
+                files={
+                    "file": (
+                        partial_path.name,
+                        payload,
+                        "application/pdf",
+                    )
+                },
+            )
+        self.soft_assert_equal(
+            interrupted.status_code,
+            500,
+            "Interrupted upload writes should report a server failure",
+        )
+        self.soft_assert(
+            not partial_path.exists(),
+            "Interrupted upload writes should remove the partial destination",
         )
 
         traversal = client.post(

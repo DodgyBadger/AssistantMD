@@ -317,11 +317,51 @@ def write_vault_file_bytes(
         vault_path=vault_path,
         path=path,
         operation="write",
-        mutator=lambda full_path: full_path.write_bytes(content),
+        mutator=lambda full_path: _write_vault_file_bytes(
+            full_path,
+            content,
+            fail_if_exists=fail_if_exists,
+        ),
         fail_if_exists=fail_if_exists,
         create_parent=True,
         warn_without_task=warn_without_task,
     )
+
+
+def _write_vault_file_bytes(
+    full_path: Path,
+    content: bytes,
+    *,
+    fail_if_exists: bool,
+) -> None:
+    """Write bytes without leaving a partial create-only destination."""
+    if not fail_if_exists:
+        full_path.write_bytes(content)
+        return
+
+    try:
+        destination = full_path.open("xb")
+    except FileExistsError as exc:
+        raise VaultMutationRejected(
+            "file_exists",
+            f"Cannot mutate '{full_path.name}' - file already exists.",
+        ) from exc
+
+    try:
+        with destination:
+            destination.write(content)
+    except Exception:
+        try:
+            full_path.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            raise VaultMutationRejected(
+                "mutation_state_uncertain",
+                (
+                    f"Binary write for '{full_path.name}' failed and its partial "
+                    f"destination could not be removed: {cleanup_error}"
+                ),
+            ) from cleanup_error
+        raise
 
 
 def append_vault_file(

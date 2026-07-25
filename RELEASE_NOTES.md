@@ -13,7 +13,10 @@ stays focused while files remain directly accessible when needed.
 - **Browse and edit:** Open the Vault Explorer from the chat toolbar or workspace
   selector. Browse the full vault, preview rendered Markdown, edit UTF-8 text,
   copy or add paths to a prompt, set the session workspace, create files and
-  folders, move or rename paths, and delete files or empty folder trees.
+  folders, upload local documents and other binary files, move or rename paths,
+  and delete files or empty folder trees. Uploads are create-only, preserve
+  successful files when another file in the selection fails, and can stage
+  supported documents in `AssistantMD/Import` for the existing Import Files flow.
 - **Open files from chat:** File and directory references in assistant
   messages become live links that open the same Explorer at the referenced path.
 - **Review agent edits:** Switch a chat session between Normal and Inline edit modes.
