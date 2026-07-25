@@ -34,7 +34,7 @@ def is_virtual_docs_path(path: str) -> bool:
     return get_virtual_mount_key(path) == "__virtual_docs__"
 
 
-def resolve_virtual_path(path: str) -> tuple[str, dict[str, str | bool]]:
+def resolve_virtual_path(path: str) -> tuple[str, dict[str, object]]:
     """Resolve a virtual mount path to an absolute path and mount metadata."""
     mount_key = get_virtual_mount_key(path)
     if not mount_key:

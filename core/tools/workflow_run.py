@@ -12,14 +12,20 @@ from typing import Any
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
-from core.authoring.contracts import AssembleContextResult, ContextMessage
+from core.authoring.contracts import (
+    AssembleContextResult,
+    ContextMessage,
+    HistoryMessage,
+)
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     TERMINAL_STATUS_VALUES,
+    ExecutionTaskCancellationResult,
     ExecutionTaskKind,
+    ExecutionTaskSnapshot,
     ExecutionTaskSource,
     workflow_vault_scope,
 )
@@ -62,7 +68,7 @@ def _workflow_run_failure(
     )
 
 
-def _heartbeat_age_seconds(task) -> float | None:
+def _heartbeat_age_seconds(task: ExecutionTaskSnapshot) -> float | None:
     heartbeat_at = getattr(task, "last_heartbeat_at", None)
     if heartbeat_at is None:
         raw = (
@@ -224,6 +230,10 @@ class WorkflowRun(BaseTool):
                     )
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
+                    if task is None:
+                        raise RuntimeError(
+                            "Scoped workflow task lookup returned no task or error"
+                        )
                     return cls._format_task_status(task)
 
                 if op == "cancel":
@@ -474,7 +484,7 @@ Full documentation:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_task_start(task) -> str:
+    def _format_task_start(task: ExecutionTaskSnapshot) -> str:
         return "\n".join(
             [
                 "success: True",
@@ -487,7 +497,7 @@ Full documentation:
         )
 
     @staticmethod
-    def _format_task_status(task) -> str:
+    def _format_task_status(task: ExecutionTaskSnapshot) -> str:
         heartbeat_age = _heartbeat_age_seconds(task)
         heartbeat_stale = (
             task.status not in TERMINAL_STATUS_VALUES
@@ -535,7 +545,7 @@ Full documentation:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_task_cancel(cancellation) -> str:
+    def _format_task_cancel(cancellation: ExecutionTaskCancellationResult) -> str:
         task = cancellation.snapshot
         return "\n".join(
             [
@@ -550,7 +560,9 @@ Full documentation:
         )
 
     @staticmethod
-    async def _get_scoped_workflow_task(task_id: str, vault_name: str):
+    async def _get_scoped_workflow_task(
+        task_id: str, vault_name: str
+    ) -> tuple[ExecutionTaskSnapshot | None, str | None]:
         runtime = get_runtime_context()
         task = await runtime.task_coordinator.get_task(task_id)
         if task is None:
@@ -679,7 +691,11 @@ Full documentation:
         assembled = WorkflowRun._normalize_context_result(value)
         messages = tuple(assembled.messages or ())
         instructions = tuple(assembled.instructions or ())
-        roles = [message.role for message in messages if getattr(message, "role", None)]
+        roles = [
+            message.role
+            for message in messages
+            if isinstance(message, ContextMessage | HistoryMessage) and message.role
+        ]
         details = [
             "assembled_context: True",
             f"message_count: {len(messages)}",
@@ -863,7 +879,7 @@ Full documentation:
         enabled_before: bool | None = None,
         enabled_after: bool | None = None,
     ) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "operation": operation,
             "workflow_id": workflow_id,
             "status": status,
