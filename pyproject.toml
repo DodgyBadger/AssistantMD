@@ -51,6 +51,9 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+package = false
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
@@ -91,3 +94,9 @@ asyncio_mode = "auto"
 testpaths = ["validation"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
+
+[dependency-groups]
+dev = [
+    "types-python-dateutil>=2.9.0.20260716",
+    "types-pyyaml>=6.0.12.20260724",
+]

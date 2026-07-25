@@ -23,8 +23,8 @@ ENV UV_CACHE_DIR=/tmp/uv-cache
 
 WORKDIR /app
 # Copy dependency files first for better layer caching
-COPY ./docker/pyproject.toml /app/
-COPY ./docker/uv.lock /app/
+COPY ./pyproject.toml /app/
+COPY ./uv.lock /app/
 
 # Install dependencies directly to system Python (no venv)
 RUN --mount=type=cache,target=/root/.cache/uv \

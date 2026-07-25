@@ -22,12 +22,12 @@ if ! command -v uv >/dev/null 2>&1; then
   python3 -m pip install --no-cache-dir uv || echo "WARNING: failed to install uv"
 fi
 
-# 3. Use uv to sync dependencies from docker/pyproject.toml + uv.lock
+# 3. Use uv to sync dependencies from root pyproject.toml + uv.lock
 #    into system Python (/usr/local), matching production image behavior.
-if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.lock" ]; then
+if [ -f "${REPO_DIR}/pyproject.toml" ] && [ -f "${REPO_DIR}/uv.lock" ]; then
   echo "Syncing dependencies with uv (including dev deps)..."
   (
-    cd "${REPO_DIR}/docker"
+    cd "${REPO_DIR}"
     unset VIRTUAL_ENV
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_LINK_MODE=copy \
@@ -35,11 +35,11 @@ if [ -f "${REPO_DIR}/docker/pyproject.toml" ] && [ -f "${REPO_DIR}/docker/uv.loc
     uv sync --extra dev --no-install-project || echo "WARNING: uv sync failed; continuing"
   )
   # Remove stale project venv to avoid accidental interpreter/path drift.
-  if [ -d "${REPO_DIR}/docker/.venv" ]; then
-    rm -rf "${REPO_DIR}/docker/.venv" || echo "WARNING: failed to remove docker/.venv"
+  if [ -d "${REPO_DIR}/.venv" ]; then
+    rm -rf "${REPO_DIR}/.venv" || echo "WARNING: failed to remove .venv"
   fi
 else
-  echo "WARNING: docker/pyproject.toml or docker/uv.lock not found; skipping uv sync."
+  echo "WARNING: pyproject.toml or uv.lock not found; skipping uv sync."
 fi
 
 # 4. Install Node.js dependencies and build Tailwind CSS

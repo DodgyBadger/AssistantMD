@@ -47,7 +47,6 @@ jobs:
         uses: astral-sh/setup-uv@v2
 
       - name: Sync Python dependencies
-        working-directory: docker
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
@@ -137,7 +136,6 @@ jobs:
         uses: astral-sh/setup-uv@v2
 
       - name: Sync dependencies
-        working-directory: docker
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.UV_PROJECT_ENVIRONMENT }}
         run: uv sync --frozen --all-extras --no-install-project
