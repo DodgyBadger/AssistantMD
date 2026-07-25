@@ -1863,7 +1863,9 @@ def set_chat_session_workspace(
     return _chat_workspace_info(normalized_path)
 
 
-def set_chat_session_mode(vault_name: str, session_id: str, chat_mode: str) -> str:
+def set_chat_session_mode(
+    vault_name: str, session_id: str, chat_mode: str
+) -> Literal["normal", "inline_edit"]:
     """Set the selected mode for an existing chat session."""
     existing_session = _chat_store.get_session_by_id(session_id)
     if existing_session is None:
@@ -1878,7 +1880,7 @@ def set_chat_session_mode(vault_name: str, session_id: str, chat_mode: str) -> s
             error_type="ChatSessionVaultMismatch",
             message=f"Chat session '{session_id}' belongs to another vault.",
         )
-    normalized = (
+    normalized: Literal["normal", "inline_edit"] = (
         "inline_edit" if str(chat_mode).strip().lower() == "inline_edit" else "normal"
     )
     _chat_store.set_session_chat_mode(

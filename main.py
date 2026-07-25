@@ -1,10 +1,10 @@
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-import os
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from core.runtime.paths import (
     resolve_bootstrap_data_root,
@@ -17,11 +17,12 @@ _BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
 _BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
 set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 
-from core.runtime.config import RuntimeConfig  # noqa: E402
-from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
-from core.logger import UnifiedLogger  # noqa: E402
-from api.endpoints import router as api_router, register_exception_handlers  # noqa: E402
+from api.endpoints import register_exception_handlers  # noqa: E402
+from api.endpoints import router as api_router  # noqa: E402
 from api.services import set_system_startup_time  # noqa: E402
+from core.logger import UnifiedLogger  # noqa: E402
+from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
+from core.runtime.config import RuntimeConfig  # noqa: E402
 
 # Create main logger
 logger = UnifiedLogger(tag="main")
@@ -35,6 +36,7 @@ logger = UnifiedLogger(tag="main")
 ## FastAPI lifespan with runtime bootstrap
 #######################################################################
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -43,8 +45,7 @@ async def lifespan(app: FastAPI):
 
     # Create runtime configuration for production
     config = RuntimeConfig.for_production(
-        data_root=_BOOTSTRAP_DATA_ROOT,
-        system_root=_BOOTSTRAP_SYSTEM_ROOT
+        data_root=_BOOTSTRAP_DATA_ROOT, system_root=_BOOTSTRAP_SYSTEM_ROOT
     )
 
     # Bootstrap runtime services
@@ -58,12 +59,10 @@ async def lifespan(app: FastAPI):
     yield  # App runs here
 
     # Shutdown
-    if hasattr(app.state, 'runtime') and app.state.runtime:
+    if hasattr(app.state, "runtime") and app.state.runtime:
         await app.state.runtime.shutdown()
         app.state.runtime = None  # Clear app state to match global context
         logger.info("Application shutdown complete")
-
-
 
 
 #######################################################################
@@ -85,7 +84,9 @@ async def prevent_runtime_response_caching(request, call_next):
     response = await call_next(request)
     path = request.url.path
     if path == "/" or path.startswith("/api/") or path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
     return response
@@ -95,10 +96,12 @@ async def prevent_runtime_response_caching(request, call_next):
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
 
+
 # Serve main UI at root
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(static_dir, "index.html"))
+
 
 # Set up unified logging with instrumentation
 logger.setup_instrumentation(app)

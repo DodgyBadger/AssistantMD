@@ -3,8 +3,9 @@ API endpoint implementations for the AssistantMD system.
 """
 
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 from starlette.datastructures import FormData, UploadFile
@@ -255,7 +256,9 @@ async def _parse_chat_task_payload(
             }
         )
         uploads: list[UploadedImageAttachment] = []
-        image_items = [item for item in form.getlist("images") if hasattr(item, "read")]
+        image_items = [
+            item for item in form.getlist("images") if isinstance(item, UploadFile)
+        ]
         max_images = get_chunking_max_images_per_prompt()
         if max_images > 0 and len(image_items) > max_images:
             raise APIException(
@@ -313,7 +316,7 @@ async def _parse_chat_task_payload(
     )
 
 
-async def _read_chat_image_upload(item, *, display_name: str) -> bytes:
+async def _read_chat_image_upload(item: UploadFile, *, display_name: str) -> bytes:
     """Read one multipart image upload while enforcing the per-image byte limit."""
     max_image_bytes = get_chunking_max_image_bytes_per_image()
     chunks: list[bytes] = []
@@ -523,7 +526,7 @@ async def _start_chat_task_request(
 
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> JSONResponse:
     """
     Lightweight health check endpoint for Docker healthcheck and monitoring.
 
@@ -552,7 +555,7 @@ async def health_check():
 
 
 @router.get("/status", response_model=StatusResponse)
-async def get_status():
+async def get_status() -> StatusResponse | JSONResponse:
     """
     Get current system status including vault discovery, scheduler status, and system health.
 
@@ -587,7 +590,7 @@ async def system_activity_log(
     search: str | None = None,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
-):
+) -> SystemLogResponse | JSONResponse:
     """Retrieve one filtered page from retained System Activity."""
     try:
         return await get_system_activity_log(
@@ -604,7 +607,7 @@ async def system_activity_log(
 
 
 @router.get("/system/activity-log/export")
-async def system_activity_log_export():
+async def system_activity_log_export() -> StreamingResponse:
     """Download all retained raw System Activity JSONL segments."""
     return StreamingResponse(
         export_system_activity_log(),
@@ -625,7 +628,7 @@ async def execution_tasks(
     kind: str | None = None,
     scope: str | None = None,
     include_terminal: bool = True,
-):
+) -> ExecutionTaskListResponse | JSONResponse:
     """List process-local execution task snapshots."""
     try:
         return await list_execution_tasks(
@@ -638,7 +641,7 @@ async def execution_tasks(
 
 
 @router.get("/tasks/{task_id}", response_model=ExecutionTaskInfo)
-async def execution_task(task_id: str):
+async def execution_task(task_id: str) -> ExecutionTaskInfo | JSONResponse:
     """Return one process-local execution task snapshot."""
     try:
         return await get_execution_task(task_id)
@@ -647,7 +650,7 @@ async def execution_task(task_id: str):
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=ExecutionTaskCancelResponse)
-async def cancel_task(task_id: str):
+async def cancel_task(task_id: str) -> ExecutionTaskCancelResponse | JSONResponse:
     """Request cancellation for one process-local execution task."""
     try:
         return await cancel_execution_task(task_id)
@@ -656,7 +659,9 @@ async def cancel_task(task_id: str):
 
 
 @router.get("/chat/tasks/{task_id}/events")
-async def chat_task_events(task_id: str, after_sequence: int = 0):
+async def chat_task_events(
+    task_id: str, after_sequence: int = 0
+) -> StreamingResponse | JSONResponse:
     """Stream buffered process-local chat task events as SSE."""
     try:
         task = await get_execution_task(task_id)
@@ -698,7 +703,7 @@ async def chat_task_events(task_id: str, after_sequence: int = 0):
 
 
 @router.post("/chat/tasks", response_model=ChatTaskStartResponse)
-async def start_chat_task(request: Request):
+async def start_chat_task(request: Request) -> ChatTaskStartResponse | JSONResponse:
     """Start task-owned streaming chat execution and return its task snapshot."""
     try:
         chat_request, image_uploads = await _parse_chat_task_payload(request)
@@ -728,7 +733,7 @@ async def start_chat_task(request: Request):
 
 
 @router.get("/system/settings", response_model=SystemSettingsResponse)
-async def system_settings():
+async def system_settings() -> SystemSettingsResponse | JSONResponse:
     """Return the current settings configuration file."""
     try:
         return await get_system_settings()
@@ -737,7 +742,9 @@ async def system_settings():
 
 
 @router.put("/system/settings", response_model=SystemSettingsResponse)
-async def update_system_settings_endpoint(request: UpdateSettingsRequest):
+async def update_system_settings_endpoint(
+    request: UpdateSettingsRequest,
+) -> SystemSettingsResponse | JSONResponse:
     """Validate and persist updated settings YAML content."""
     try:
         return await update_system_settings(request.content)
@@ -746,7 +753,7 @@ async def update_system_settings_endpoint(request: UpdateSettingsRequest):
 
 
 @router.post("/system/settings/repair", response_model=SystemSettingsResponse)
-async def repair_system_settings():
+async def repair_system_settings() -> SystemSettingsResponse | JSONResponse:
     """Merge missing settings from template into active settings (with backup)."""
     try:
         return repair_settings_from_template()
@@ -755,7 +762,7 @@ async def repair_system_settings():
 
 
 @router.get("/system/settings/general", response_model=list[SettingInfo])
-async def list_general_settings():
+async def list_general_settings() -> list[SettingInfo] | JSONResponse:
     """List general (non-secret) settings entries."""
     try:
         return get_general_settings_config()
@@ -764,7 +771,9 @@ async def list_general_settings():
 
 
 @router.put("/system/settings/general/{setting_key}", response_model=SettingInfo)
-async def update_general_setting(setting_key: str, request: SettingUpdateRequest):
+async def update_general_setting(
+    setting_key: str, request: SettingUpdateRequest
+) -> SettingInfo | JSONResponse:
     """Update a general setting value."""
     try:
         return update_general_setting_value(setting_key, request)
@@ -778,7 +787,7 @@ async def update_general_setting(setting_key: str, request: SettingUpdateRequest
 
 
 @router.post("/import/scan", response_model=ImportScanResponse)
-async def import_scan(request: ImportScanRequest):
+async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONResponse:
     try:
         jobs, skipped = await scan_import_folder(
             vault=request.vault,
@@ -804,7 +813,7 @@ async def import_scan(request: ImportScanRequest):
 
 
 @router.post("/import/url", response_model=ImportUrlResponse)
-async def import_url(request: ImportUrlRequest):
+async def import_url(request: ImportUrlRequest) -> ImportUrlResponse | JSONResponse:
     try:
         job = await import_url_direct(
             vault=request.vault,
@@ -824,7 +833,7 @@ async def import_url(request: ImportUrlRequest):
 
 
 @router.get("/system/models", response_model=list[ModelInfo])
-async def list_models():
+async def list_models() -> list[ModelInfo] | JSONResponse:
     """List all model configuration entries with availability metadata."""
     try:
         return get_configurable_models()
@@ -833,7 +842,9 @@ async def list_models():
 
 
 @router.put("/system/models/{model_name}", response_model=ModelInfo)
-async def upsert_model(model_name: str, request: ModelConfigRequest):
+async def upsert_model(
+    model_name: str, request: ModelConfigRequest
+) -> ModelInfo | JSONResponse:
     """Create or update a model configuration entry."""
     try:
         return upsert_configurable_model(model_name, request)
@@ -842,7 +853,7 @@ async def upsert_model(model_name: str, request: ModelConfigRequest):
 
 
 @router.delete("/system/models/{model_name}", response_model=OperationResult)
-async def delete_model(model_name: str):
+async def delete_model(model_name: str) -> OperationResult | JSONResponse:
     """Delete a user-editable model configuration entry."""
     try:
         return delete_configurable_model(model_name)
@@ -851,7 +862,7 @@ async def delete_model(model_name: str):
 
 
 @router.get("/system/providers", response_model=list[ProviderInfo])
-async def list_providers():
+async def list_providers() -> list[ProviderInfo] | JSONResponse:
     """List provider configurations."""
     try:
         return get_configurable_providers()
@@ -863,7 +874,9 @@ async def list_providers():
     "/system/providers/openai/oauth/start",
     response_model=OpenAIOAuthStartResponse,
 )
-async def start_openai_oauth(payload: OpenAIOAuthStartRequest):
+async def start_openai_oauth(
+    payload: OpenAIOAuthStartRequest,
+) -> OpenAIOAuthStartResponse | JSONResponse:
     """Start an OpenAI OAuth connection attempt."""
     try:
         return start_openai_oauth_connection(
@@ -878,7 +891,7 @@ async def start_openai_oauth(payload: OpenAIOAuthStartRequest):
     "/system/providers/openai/oauth/device/start",
     response_model=OpenAIOAuthDeviceStartResponse,
 )
-async def start_openai_oauth_device():
+async def start_openai_oauth_device() -> OpenAIOAuthDeviceStartResponse | JSONResponse:
     """Start an OpenAI OAuth device-code connection attempt."""
     try:
         return await start_openai_oauth_device_connection()
@@ -890,7 +903,7 @@ async def start_openai_oauth_device():
     "/system/providers/openai/oauth/device/check",
     response_model=OpenAIOAuthDeviceCheckResponse,
 )
-async def check_openai_oauth_device():
+async def check_openai_oauth_device() -> OpenAIOAuthDeviceCheckResponse | JSONResponse:
     """Check an OpenAI OAuth device-code connection attempt."""
     try:
         return await check_openai_oauth_device_connection()
@@ -899,7 +912,9 @@ async def check_openai_oauth_device():
 
 
 @router.get("/system/providers/openai/oauth/callback", response_model=ProviderInfo)
-async def complete_openai_oauth_callback_endpoint(code: str, state: str):
+async def complete_openai_oauth_callback_endpoint(
+    code: str, state: str
+) -> ProviderInfo | JSONResponse:
     """Complete OpenAI OAuth from callback query parameters."""
     try:
         return await complete_openai_oauth_callback(code=code, state=state)
@@ -908,7 +923,9 @@ async def complete_openai_oauth_callback_endpoint(code: str, state: str):
 
 
 @router.post("/system/providers/openai/oauth/complete", response_model=ProviderInfo)
-async def complete_openai_oauth_manual_endpoint(request: OpenAIOAuthCompleteRequest):
+async def complete_openai_oauth_manual_endpoint(
+    request: OpenAIOAuthCompleteRequest,
+) -> ProviderInfo | JSONResponse:
     """Complete OpenAI OAuth from a pasted redirect URL or code/state pair."""
     try:
         return await complete_openai_oauth_manual(request)
@@ -917,7 +934,7 @@ async def complete_openai_oauth_manual_endpoint(request: OpenAIOAuthCompleteRequ
 
 
 @router.get("/system/providers/openai/oauth/status", response_model=ProviderInfo)
-async def get_openai_oauth_status_endpoint():
+async def get_openai_oauth_status_endpoint() -> ProviderInfo | JSONResponse:
     """Return OpenAI provider status including sanitized OAuth metadata."""
     try:
         return next(
@@ -930,7 +947,7 @@ async def get_openai_oauth_status_endpoint():
 
 
 @router.delete("/system/providers/openai/oauth", response_model=OperationResult)
-async def disconnect_openai_oauth_endpoint():
+async def disconnect_openai_oauth_endpoint() -> OperationResult | JSONResponse:
     """Disconnect OpenAI OAuth without changing provider auth mode."""
     try:
         return disconnect_openai_oauth_connection()
@@ -939,7 +956,9 @@ async def disconnect_openai_oauth_endpoint():
 
 
 @router.put("/system/providers/{provider_name}", response_model=ProviderInfo)
-async def upsert_provider(provider_name: str, request: ProviderConfigRequest):
+async def upsert_provider(
+    provider_name: str, request: ProviderConfigRequest
+) -> ProviderInfo | JSONResponse:
     """Create or update a provider configuration."""
     try:
         return upsert_configurable_provider(provider_name, request)
@@ -948,7 +967,7 @@ async def upsert_provider(provider_name: str, request: ProviderConfigRequest):
 
 
 @router.delete("/system/providers/{provider_name}", response_model=OperationResult)
-async def delete_provider(provider_name: str):
+async def delete_provider(provider_name: str) -> OperationResult | JSONResponse:
     """Delete a user-editable provider configuration."""
     try:
         return delete_configurable_provider(provider_name)
@@ -957,7 +976,7 @@ async def delete_provider(provider_name: str):
 
 
 @router.get("/system/secrets", response_model=list[SecretInfo])
-async def list_secrets_endpoint():
+async def list_secrets_endpoint() -> list[SecretInfo] | JSONResponse:
     """List stored secrets and whether they currently have values."""
     try:
         return list_secrets()
@@ -966,7 +985,9 @@ async def list_secrets_endpoint():
 
 
 @router.put("/system/secrets", response_model=OperationResult)
-async def set_secret_endpoint(request: SecretUpdateRequest):
+async def set_secret_endpoint(
+    request: SecretUpdateRequest,
+) -> OperationResult | JSONResponse:
     """Create, update, or clear a stored secret."""
     try:
         return update_secret(request)
@@ -975,7 +996,7 @@ async def set_secret_endpoint(request: SecretUpdateRequest):
 
 
 @router.delete("/system/secrets/{secret_name}", response_model=OperationResult)
-async def delete_secret_endpoint(secret_name: str):
+async def delete_secret_endpoint(secret_name: str) -> OperationResult | JSONResponse:
     """Delete a stored secret entry entirely."""
     try:
         return delete_secret_entry(secret_name)
@@ -984,7 +1005,7 @@ async def delete_secret_endpoint(secret_name: str):
 
 
 @router.post("/system/cache/purge-expired", response_model=CachePurgeResponse)
-async def purge_expired_cache_endpoint():
+async def purge_expired_cache_endpoint() -> CachePurgeResponse | JSONResponse:
     """Manually delete expired cache artifacts."""
     try:
         return purge_expired_cache()
@@ -993,7 +1014,9 @@ async def purge_expired_cache_endpoint():
 
 
 @router.post("/system/goals/cleanup", response_model=GoalCleanupResponse)
-async def cleanup_goals_endpoint(request: GoalCleanupRequest):
+async def cleanup_goals_endpoint(
+    request: GoalCleanupRequest,
+) -> GoalCleanupResponse | JSONResponse:
     """Manually delete old completed or cancelled goals for a vault."""
     try:
         return cleanup_goals(
@@ -1006,7 +1029,9 @@ async def cleanup_goals_endpoint(request: GoalCleanupRequest):
 
 
 @router.get("/system/migrations/status", response_model=SystemMigrationStatusResponse)
-async def get_system_database_migration_status_endpoint():
+async def get_system_database_migration_status_endpoint() -> (
+    SystemMigrationStatusResponse | JSONResponse
+):
     """Inspect registered system database migrations."""
     try:
         return get_system_database_migration_status()
@@ -1016,8 +1041,8 @@ async def get_system_database_migration_status_endpoint():
 
 @router.post("/system/migrations/run", response_model=SystemMigrationRunResponse)
 async def run_system_database_migrations_endpoint(
-    request: SystemMigrationRunRequest = SystemMigrationRunRequest(),
-):
+    request: SystemMigrationRunRequest = SystemMigrationRunRequest(backup=True),
+) -> SystemMigrationRunResponse | JSONResponse:
     """Run registered system database migrations."""
     try:
         return run_system_database_migrations(backup=request.backup)
@@ -1028,7 +1053,9 @@ async def run_system_database_migrations_endpoint(
 @router.post(
     "/system/authoring/seed-refresh", response_model=SystemTemplateSeedResponse
 )
-async def refresh_system_authoring_templates_endpoint():
+async def refresh_system_authoring_templates_endpoint() -> (
+    SystemTemplateSeedResponse | JSONResponse
+):
     """Manually refresh packaged system Authoring templates."""
     try:
         return refresh_system_authoring_templates()
@@ -1037,7 +1064,7 @@ async def refresh_system_authoring_templates_endpoint():
 
 
 @router.post("/vault-state/cleanup", response_model=VaultStateCleanupResponse)
-async def cleanup_vault_state_endpoint():
+async def cleanup_vault_state_endpoint() -> VaultStateCleanupResponse | JSONResponse:
     """Manually delete expired vault-state activity and safety artifacts."""
     try:
         return cleanup_vault_state()
@@ -1051,7 +1078,9 @@ async def cleanup_vault_state_endpoint():
 
 
 @router.post("/vaults/rescan", response_model=VaultRescanResponse)
-async def rescan_vaults(request: VaultRescanRequest = VaultRescanRequest()):
+async def rescan_vaults(
+    request: VaultRescanRequest = VaultRescanRequest(),
+) -> VaultRescanResponse | JSONResponse:
     """
     Force immediate rediscovery of all vault directories and reload workflow configurations.
 
@@ -1095,7 +1124,7 @@ async def vault_activity(
     task_id: str | None = None,
     include_expired: bool = False,
     operation: str | None = None,
-):
+) -> VaultActivityResponse | JSONResponse:
     """Return recent durable attributed activity for one vault."""
     try:
         return get_vault_activity(
@@ -1113,7 +1142,9 @@ async def vault_activity(
     "/vaults/{vault_name}/activity/{activity_id}/rollback",
     response_model=VaultActivityRollbackPreviewResponse,
 )
-async def vault_activity_rollback_preview(vault_name: str, activity_id: str):
+async def vault_activity_rollback_preview(
+    vault_name: str, activity_id: str
+) -> VaultActivityRollbackPreviewResponse | JSONResponse:
     """Return current all-or-nothing rollback availability for one activity."""
     try:
         return get_vault_activity_rollback_preview(
@@ -1132,7 +1163,7 @@ async def vault_activity_rollback(
     vault_name: str,
     activity_id: str,
     request: VaultActivityRollbackRequest,
-):
+) -> VaultActivityRollbackResponse | JSONResponse:
     """Restore every supported path in one activity atomically."""
     try:
         return rollback_vault_activity(
@@ -1148,7 +1179,7 @@ async def vault_activity_rollback(
 
 
 @router.get("/vault-state/snapshots/{snapshot_id}/content")
-async def vault_snapshot_content(snapshot_id: int):
+async def vault_snapshot_content(snapshot_id: int) -> FileResponse | JSONResponse:
     """Serve one retained vault-state file snapshot inline."""
     try:
         snapshot = get_vault_snapshot_file(snapshot_id)
@@ -1163,7 +1194,9 @@ async def vault_snapshot_content(snapshot_id: int):
 
 
 @router.post("/workflows/execute", response_model=ExecuteWorkflowResponse)
-async def execute_workflow(request: ExecuteWorkflowRequest):
+async def execute_workflow(
+    request: ExecuteWorkflowRequest,
+) -> ExecuteWorkflowResponse | JSONResponse:
     """
     Execute a specific workflow manually.
     """
@@ -1180,7 +1213,9 @@ async def execute_workflow(request: ExecuteWorkflowRequest):
 
 
 @router.post("/workflows/enabled", response_model=WorkflowEnabledResponse)
-async def set_workflow_enabled(request: WorkflowEnabledRequest):
+async def set_workflow_enabled(
+    request: WorkflowEnabledRequest,
+) -> WorkflowEnabledResponse | JSONResponse:
     """Set a workflow enabled flag in frontmatter."""
     try:
         return await set_workflow_enabled_state(request.global_id, request.enabled)
@@ -1189,7 +1224,7 @@ async def set_workflow_enabled(request: WorkflowEnabledRequest):
 
 
 @router.get("/workflows/file", response_model=WorkflowFileResponse)
-async def workflow_file(global_id: str):
+async def workflow_file(global_id: str) -> WorkflowFileResponse | JSONResponse:
     """Return editable workflow file content."""
     try:
         return get_workflow_file(global_id)
@@ -1198,7 +1233,9 @@ async def workflow_file(global_id: str):
 
 
 @router.put("/workflows/file", response_model=WorkflowFileResponse)
-async def save_workflow_file(global_id: str, request: WorkflowFileUpdateRequest):
+async def save_workflow_file(
+    global_id: str, request: WorkflowFileUpdateRequest
+) -> WorkflowFileResponse | JSONResponse:
     """Replace workflow file content and reload workflows."""
     try:
         return await update_workflow_file(
@@ -1213,7 +1250,7 @@ async def save_workflow_file(global_id: str, request: WorkflowFileUpdateRequest)
 @router.get("/workflows/load-errors", response_model=WorkflowLoadErrorsResponse)
 async def workflow_load_errors(
     vault_name: str | None = None, workflow_name: str | None = None
-):
+) -> WorkflowLoadErrorsResponse | JSONResponse:
     """Return workflow load errors without exposing the full system status payload."""
     try:
         if workflow_name and _looks_like_workflow_path(workflow_name):
@@ -1236,7 +1273,9 @@ async def workflow_load_errors(
 
 
 @router.get("/workflows/runs", response_model=WorkflowRunHistoryResponse)
-async def workflow_run_history(global_id: str, limit: int = 50):
+async def workflow_run_history(
+    global_id: str, limit: int = 50
+) -> WorkflowRunHistoryResponse | JSONResponse:
     """Return recent durable outcomes for one workflow."""
     try:
         return WorkflowRunHistoryResponse(
@@ -1247,7 +1286,9 @@ async def workflow_run_history(global_id: str, limit: int = 50):
 
 
 @router.get("/workflows/tasks", response_model=ExecutionTaskListResponse)
-async def workflow_tasks(vault_name: str | None = None):
+async def workflow_tasks(
+    vault_name: str | None = None,
+) -> ExecutionTaskListResponse | JSONResponse:
     """List process-local workflow execution task snapshots."""
     try:
         return await list_workflow_tasks(vault_name=vault_name)
@@ -1256,7 +1297,7 @@ async def workflow_tasks(vault_name: str | None = None):
 
 
 @router.get("/metadata", response_model=MetadataResponse)
-async def metadata():
+async def metadata() -> MetadataResponse | JSONResponse:
     """
     Get metadata for UI (vaults, models, tools).
     """
@@ -1267,7 +1308,7 @@ async def metadata():
 
 
 @router.get("/context/templates", response_model=list[TemplateInfo])
-async def context_templates(vault_name: str):
+async def context_templates(vault_name: str) -> list[TemplateInfo] | JSONResponse:
     """
     List available context templates for a vault (vault + system sources).
     """
@@ -1280,7 +1321,9 @@ async def context_templates(vault_name: str):
 @router.get(
     "/vaults/{vault_name}/directories", response_model=VaultDirectoryListResponse
 )
-async def vault_directories(vault_name: str, path: str | None = None):
+async def vault_directories(
+    vault_name: str, path: str | None = None
+) -> VaultDirectoryListResponse | JSONResponse:
     """Return child directories for workspace selection."""
     try:
         return list_vault_directories(vault_name, path)
@@ -1299,7 +1342,7 @@ async def vault_file_references(
     scope: str = "workspace",
     limit: int = 100,
     offset: int = 0,
-):
+) -> VaultFileReferenceListResponse | JSONResponse:
     """Return file and folder candidates for chat reference insertion."""
     try:
         return list_vault_file_references(
@@ -1321,7 +1364,7 @@ async def vault_file_references(
 async def resolve_vault_file_references(
     vault_name: str,
     request: VaultPathResolveRequest,
-):
+) -> VaultPathResolveResponse | JSONResponse:
     """Resolve candidate file and directory references from rendered chat content."""
     try:
         return resolve_vault_path_references(
@@ -1339,7 +1382,7 @@ async def resolve_vault_file_references(
 async def mutate_vault_explorer_path(
     vault_name: str,
     request: VaultPathMutationRequest,
-):
+) -> VaultPathMutationResponse | JSONResponse:
     """Apply one direct user mutation from the vault explorer."""
     try:
         return mutate_vault_path(
@@ -1360,7 +1403,7 @@ async def upload_vault_explorer_file(
     vault_name: str,
     path: str,
     request: Request,
-):
+) -> VaultPathMutationResponse | JSONResponse:
     """Upload one create-only binary file into the selected vault."""
     form: FormData | None = None
     try:
@@ -1403,7 +1446,7 @@ async def upload_vault_explorer_file(
 
 
 @router.get("/vaults/{vault_name}/files", response_model=VaultFileResponse)
-async def vault_file(vault_name: str, path: str):
+async def vault_file(vault_name: str, path: str) -> VaultFileResponse | JSONResponse:
     """Return editable vault file content."""
     try:
         return get_vault_file(vault_name, path)
@@ -1415,7 +1458,9 @@ async def vault_file(vault_name: str, path: str):
     "/vaults/{vault_name}/files/revisions",
     response_model=VaultFileRevisionResponse,
 )
-async def vault_file_revisions(vault_name: str, path: str, limit: int = 50):
+async def vault_file_revisions(
+    vault_name: str, path: str, limit: int = 50
+) -> VaultFileRevisionResponse | JSONResponse:
     """Return retained revision history for one exact vault file path."""
     try:
         return get_vault_file_revisions(
@@ -1435,7 +1480,7 @@ async def restore_vault_revision(
     vault_name: str,
     snapshot_id: int,
     request: VaultFileRevisionRestoreRequest,
-):
+) -> VaultFileRevisionRestoreResponse | JSONResponse:
     """Restore one retained exact-path file revision."""
     try:
         return restore_vault_file_revision(
@@ -1448,7 +1493,9 @@ async def restore_vault_revision(
 
 
 @router.put("/vaults/{vault_name}/files", response_model=VaultFileResponse)
-async def save_vault_file(vault_name: str, path: str, request: VaultFileUpdateRequest):
+async def save_vault_file(
+    vault_name: str, path: str, request: VaultFileUpdateRequest
+) -> VaultFileResponse | JSONResponse:
     """Replace vault file content with optimistic concurrency checks."""
     try:
         return update_vault_file(
@@ -1466,7 +1513,9 @@ async def save_vault_file(vault_name: str, path: str, request: VaultFileUpdateRe
     "/vaults/{vault_name}/chat/{session_id}/edit-proposals/{artifact_ref:path}",
     response_model=EditProposalResponse,
 )
-async def chat_edit_proposal(vault_name: str, session_id: str, artifact_ref: str):
+async def chat_edit_proposal(
+    vault_name: str, session_id: str, artifact_ref: str
+) -> EditProposalResponse | JSONResponse:
     """Return a chat edit proposal artifact."""
     try:
         return get_chat_edit_proposal(
@@ -1482,7 +1531,9 @@ async def chat_edit_proposal(vault_name: str, session_id: str, artifact_ref: str
     "/vaults/{vault_name}/chat/{session_id}/deferred-reviews/{artifact_ref:path}",
     response_model=DeferredReviewResponse,
 )
-async def chat_deferred_review(vault_name: str, session_id: str, artifact_ref: str):
+async def chat_deferred_review(
+    vault_name: str, session_id: str, artifact_ref: str
+) -> DeferredReviewResponse | JSONResponse:
     """Return a deferred inline review request."""
     try:
         return get_chat_deferred_review(
@@ -1503,7 +1554,7 @@ async def submit_deferred_review_artifact(
     session_id: str,
     artifact_ref: str,
     request: DeferredReviewSubmitRequest,
-):
+) -> DeferredReviewSubmitResponse | JSONResponse:
     """Submit deferred inline review decisions and resume the chat run."""
     try:
         resolved_session_id = resolve_chat_session_for_request(
@@ -1521,7 +1572,7 @@ async def submit_deferred_review_artifact(
             ChatSessionVaultMismatchError(
                 session_id=exc.session_id,
                 requested_vault=exc.requested_vault,
-                actual_vault=exc.actual_vault,
+                bound_vault=exc.bound_vault,
             )
         )
     except Exception as e:
@@ -1529,7 +1580,7 @@ async def submit_deferred_review_artifact(
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionInfo])
-async def chat_sessions(vault_name: str):
+async def chat_sessions(vault_name: str) -> list[ChatSessionInfo] | JSONResponse:
     """
     List persisted chat sessions for a vault ordered by latest activity.
     """
@@ -1540,7 +1591,7 @@ async def chat_sessions(vault_name: str):
 
 
 @router.get("/chat/sessions/{session_id}/active-task", response_model=ExecutionTaskInfo)
-async def chat_session_active_task(session_id: str):
+async def chat_session_active_task(session_id: str) -> ExecutionTaskInfo | JSONResponse:
     """Return the active process-local execution task for a chat session."""
     try:
         return await get_active_chat_task(session_id)
@@ -1551,7 +1602,9 @@ async def chat_session_active_task(session_id: str):
 @router.post(
     "/chat/sessions/{session_id}/cancel", response_model=ExecutionTaskCancelResponse
 )
-async def cancel_chat_session(session_id: str):
+async def cancel_chat_session(
+    session_id: str,
+) -> ExecutionTaskCancelResponse | JSONResponse:
     """Request cancellation for the active process-local task in a chat session."""
     try:
         return await cancel_chat_session_task(session_id)
@@ -1562,10 +1615,14 @@ async def cancel_chat_session(session_id: str):
 @router.get(
     "/chat/sessions/{session_id}/summary", response_model=ChatSessionSummaryResponse
 )
-async def chat_session_summary(session_id: str, vault_name: str):
+async def chat_session_summary(
+    session_id: str, vault_name: str
+) -> ChatSessionSummaryResponse | JSONResponse:
     """Return a lightweight summary preview for one chat session."""
     try:
-        return get_chat_session_summary(vault_name, session_id)
+        return ChatSessionSummaryResponse.model_validate(
+            get_chat_session_summary(vault_name, session_id)
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -1577,20 +1634,24 @@ async def update_chat_session_summary_endpoint(
     session_id: str,
     vault_name: str,
     request: ChatSessionSummaryUpdateRequest,
-):
+) -> ChatSessionSummaryResponse | JSONResponse:
     """Manually update one session summary record."""
     try:
-        return await update_chat_session_summary(
-            vault_name=vault_name,
-            session_id=session_id,
-            data=request.model_dump(mode="python"),
+        return ChatSessionSummaryResponse.model_validate(
+            await update_chat_session_summary(
+                vault_name=vault_name,
+                session_id=session_id,
+                data=request.model_dump(mode="python"),
+            )
         )
     except Exception as e:
         return create_error_response(e)
 
 
 @router.delete("/chat/sessions/{session_id}/summary")
-async def delete_chat_session_summary_endpoint(session_id: str, vault_name: str):
+async def delete_chat_session_summary_endpoint(
+    session_id: str, vault_name: str
+) -> dict[str, Any] | JSONResponse:
     """Delete one session summary record without deleting the chat session."""
     try:
         return delete_chat_session_summary(vault_name, session_id)
@@ -1599,7 +1660,9 @@ async def delete_chat_session_summary_endpoint(session_id: str, vault_name: str)
 
 
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
-async def chat_session_detail(session_id: str, vault_name: str):
+async def chat_session_detail(
+    session_id: str, vault_name: str
+) -> ChatSessionDetailResponse | JSONResponse:
     """
     Load one persisted chat session for UI rehydration.
     """
@@ -1610,7 +1673,9 @@ async def chat_session_detail(session_id: str, vault_name: str):
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_chat_session_endpoint(session_id: str, vault_name: str):
+async def delete_chat_session_endpoint(
+    session_id: str, vault_name: str
+) -> dict[str, Any] | JSONResponse:
     """Delete one chat session from the canonical store."""
     try:
         vault_path = str(resolve_vault_root(vault_name))
@@ -1621,7 +1686,9 @@ async def delete_chat_session_endpoint(session_id: str, vault_name: str):
 
 
 @router.patch("/chat/sessions/{session_id}/title")
-async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
+async def set_session_title(
+    session_id: str, request: ChatSessionTitleRequest
+) -> dict[str, Any] | JSONResponse:
     """Set or clear the user-defined title for a chat session."""
     try:
         title = (request.title or "").strip() or None
@@ -1634,7 +1701,9 @@ async def set_session_title(session_id: str, request: ChatSessionTitleRequest):
 @router.patch(
     "/chat/sessions/{session_id}/workspace", response_model=ChatWorkspaceInfo | None
 )
-async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRequest):
+async def set_session_workspace(
+    session_id: str, request: ChatSessionWorkspaceRequest
+) -> ChatWorkspaceInfo | None | JSONResponse:
     """Set or clear the workspace path for a chat session."""
     try:
         return set_chat_session_workspace(request.vault_name, session_id, request.path)
@@ -1645,7 +1714,9 @@ async def set_session_workspace(session_id: str, request: ChatSessionWorkspaceRe
 @router.patch(
     "/chat/sessions/{session_id}/mode", response_model=ChatSessionModeResponse
 )
-async def set_session_mode(session_id: str, request: ChatSessionModeRequest):
+async def set_session_mode(
+    session_id: str, request: ChatSessionModeRequest
+) -> ChatSessionModeResponse | JSONResponse:
     """Persist the selected mode for a chat session."""
     try:
         chat_mode = set_chat_session_mode(
@@ -1657,7 +1728,9 @@ async def set_session_mode(session_id: str, request: ChatSessionModeRequest):
 
 
 @router.post("/chat/sessions/{session_id}/fork", response_model=ChatSessionForkResponse)
-async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRequest):
+async def fork_chat_session_endpoint(
+    session_id: str, request: ChatSessionForkRequest
+) -> ChatSessionForkResponse | JSONResponse:
     """Fork one persisted chat session through a specific message sequence."""
     try:
         return fork_chat_session(
@@ -1672,7 +1745,7 @@ async def fork_chat_session_endpoint(session_id: str, request: ChatSessionForkRe
 @router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
 async def retry_chat_session_turn_endpoint(
     session_id: str, request: ChatSessionRetryRequest
-):
+) -> ChatTaskStartResponse | JSONResponse:
     """Retry the latest retryable unfinished chat turn for one session."""
     try:
         try:
@@ -1714,7 +1787,7 @@ async def retry_chat_session_turn_endpoint(
 )
 async def export_chat_session_endpoint(
     session_id: str, request: ChatSessionExportRequest
-):
+) -> ChatSessionExportResponse | JSONResponse:
     """Export one persisted chat session transcript into the owning vault."""
     try:
         vault_path = str(resolve_vault_root(request.vault_name))
@@ -1727,7 +1800,9 @@ async def export_chat_session_endpoint(
     "/chat/sessions/{session_id}/compaction-status",
     response_model=ChatHistoryCompactionStatusResponse,
 )
-async def chat_history_compaction_status_endpoint(session_id: str, vault_name: str):
+async def chat_history_compaction_status_endpoint(
+    session_id: str, vault_name: str
+) -> ChatHistoryCompactionStatusResponse | JSONResponse:
     """Return compaction status for one persisted chat session."""
     try:
         return await get_chat_history_compaction_status(vault_name, session_id)
@@ -1740,7 +1815,7 @@ async def chat_history_compaction_status_endpoint(session_id: str, vault_name: s
 )
 async def compact_chat_history_endpoint(
     session_id: str, request: ChatHistoryCompactionRequest
-):
+) -> ChatHistoryCompactionResponse | JSONResponse:
     """Compact one persisted chat session into a summary plus recent turns."""
     try:
         vault_path = str(resolve_vault_root(request.vault_name))
@@ -1755,7 +1830,9 @@ async def compact_chat_history_endpoint(
 
 
 @router.post("/chat/sessions/purge", response_model=ChatSessionsPurgeResponse)
-async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
+async def purge_chat_sessions_endpoint(
+    request: ChatSessionsPurgeRequest,
+) -> ChatSessionsPurgeResponse | JSONResponse:
     """
     Delete old chat sessions and their transcript files for a vault.
     """
@@ -1775,15 +1852,19 @@ async def purge_chat_sessions_endpoint(request: ChatSessionsPurgeRequest):
 #######################################################################
 
 
-def register_exception_handlers(app):
+def register_exception_handlers(app: FastAPI) -> None:
     """Register exception handlers with the FastAPI app."""
 
     @app.exception_handler(APIException)
-    async def api_exception_handler(request, exc: APIException):
+    async def api_exception_handler(
+        request: Request, exc: APIException
+    ) -> JSONResponse:
         """Handle API-specific exceptions with proper error responses."""
         return create_error_response(exc)
 
     @app.exception_handler(Exception)
-    async def general_exception_handler(request, exc: Exception):
+    async def general_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         """Handle unexpected exceptions with generic error responses."""
         return create_error_response(exc)

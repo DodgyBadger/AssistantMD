@@ -18,13 +18,13 @@ The original configuration was stored in `docker/pyproject.toml` and was not
 discovered by root tool invocations. After moving it to the repository root,
 the canonical `uv run ...` baseline is:
 
-- `uv run ruff check api core validation`: passes after resolving 1,351
-  discovered findings.
-- `uv run black --check api core validation`: passes across all 297 files after
-  normalizing 202 files.
-- `uv run mypy api core`: 565 errors in 56 of 192 production source files after
-  the runtime/tool contract batch. Lint and annotation modernization initially
-  produced 663 errors in 80 files.
+- `uv run ruff check .`: passes across all 303 Python files after resolving the
+  production, root-entry-point, and maintenance-script findings.
+- `uv run black --check .`: passes across all 303 Python files after
+  normalization.
+- `uv run mypy api core`: 474 errors in 55 of 192 production source files after
+  typing the API transport boundary. Lint and annotation modernization
+  initially produced 663 errors in 80 files.
 - The largest production mypy categories are `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
   (29), `no-any-return` (27), `union-attr` (24), and missing/untyped imports
@@ -97,6 +97,11 @@ ADR 0025 (durable vault activities).
      tool factories, goal/delegate payloads, and workflow vault-path resolution
      are explicit. Goal, workflow lifecycle, session ops, and delegate scenarios
      pass.
+   - API transport batch complete: every endpoint has an explicit return
+     contract, declared response models are reflected in annotations, multipart
+     image uploads are narrowed to actual upload objects, and the mismatched
+     deferred-review vault error path uses the service exception's real field.
+     The endpoint module now passes production mypy.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral
@@ -127,10 +132,9 @@ The final handoff requests maintainer execution of
 
 ## Next Steps
 
-1. Commit the behavior-neutral lint/format normalization.
-2. Categorize the post-normalization mypy baseline by shared foundation.
-3. Fix missing annotations and optional-value parsing before persistence and
-   external protocol mismatches.
+1. Type the API service helpers that feed multiple endpoints.
+2. Resolve the vault-state and ingestion service clusters before ORM leaves.
+3. Address chat/model-provider protocol mismatches.
 4. Run focused scenarios for any correction that changes executable behavior.
 
 ## Next Phase

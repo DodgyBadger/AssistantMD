@@ -9,14 +9,15 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run registered AssistantMD system database migrations.")
+    parser = argparse.ArgumentParser(
+        description="Run registered AssistantMD system database migrations."
+    )
     parser.add_argument(
         "--system-root",
         default=str(REPO_ROOT / "system"),
@@ -42,7 +43,10 @@ def main() -> int:
     system_root = Path(args.system_root).expanduser().resolve()
     _set_bootstrap_roots(system_root)
 
-    from core.system_migrations import get_system_migration_status, run_system_migrations
+    from core.system_migrations import (
+        get_system_migration_status,
+        run_system_migrations,
+    )
 
     status = (
         get_system_migration_status(system_root)
@@ -70,13 +74,21 @@ def _status_payload(status) -> dict[str, object]:
 
 
 def _print_status(status, *, status_only: bool) -> None:
-    heading = "System database migration status" if status_only else "System database migrations completed"
+    heading = (
+        "System database migration status"
+        if status_only
+        else "System database migrations completed"
+    )
     print(heading)
     print(f"System root: {status.system_root}")
     print(f"Pending migrations: {status.pending_count}")
     for target in status.targets:
-        applied = ", ".join(str(version) for version in target.applied_versions) or "(none)"
-        pending = ", ".join(str(version) for version in target.pending_versions) or "(none)"
+        applied = (
+            ", ".join(str(version) for version in target.applied_versions) or "(none)"
+        )
+        pending = (
+            ", ".join(str(version) for version in target.pending_versions) or "(none)"
+        )
         exists = "yes" if target.exists else "no"
         print(f"\n{target.db_name} [{target.namespace}]")
         print(f"  path: {target.db_path}")

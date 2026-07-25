@@ -12,8 +12,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Dict
-
 
 DEFAULT_OUTPUT = "system/secrets.yaml"
 CI_SECRET_KEYS = [
@@ -28,9 +26,9 @@ CI_SECRET_KEYS = [
 ]
 
 
-def collect_secrets(keys: list[str]) -> Dict[str, str]:
+def collect_secrets(keys: list[str]) -> dict[str, str]:
     """Return mapping of provided keys to non-empty environment values."""
-    secrets: Dict[str, str] = {}
+    secrets: dict[str, str] = {}
     for key in keys:
         value = os.environ.get(key)
         if value:
@@ -38,7 +36,7 @@ def collect_secrets(keys: list[str]) -> Dict[str, str]:
     return secrets
 
 
-def write_yaml(path: Path, data: Dict[str, str]) -> None:
+def write_yaml(path: Path, data: dict[str, str]) -> None:
     """Write a shallow YAML mapping using only standard library facilities."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -47,7 +45,9 @@ def write_yaml(path: Path, data: Dict[str, str]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed secrets.yaml from environment variables.")
+    parser = argparse.ArgumentParser(
+        description="Seed secrets.yaml from environment variables."
+    )
     parser.add_argument(
         "--output",
         default=DEFAULT_OUTPUT,
