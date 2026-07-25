@@ -5,9 +5,12 @@ Persistence for ingestion jobs.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Table, Text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from core.database import (
     Base,
@@ -21,34 +24,38 @@ from core.ingestion.models import JobStatus
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    source_uri = Column(String, nullable=False)
-    vault = Column(String, nullable=True)
-    source_type = Column(String, nullable=False)
-    mime_hint = Column(String, nullable=True)
-    options = Column(JSON, nullable=True)
-    status = Column(String, nullable=False, default=JobStatus.QUEUED.value)
-    error = Column(Text, nullable=True)
-    outputs = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_uri: Mapped[str] = mapped_column(String, nullable=False)
+    vault: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_type: Mapped[str] = mapped_column(String, nullable=False)
+    mime_hint: Mapped[str | None] = mapped_column(String, nullable=True)
+    options: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default=JobStatus.QUEUED.value
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outputs: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
 
-def _get_engine():
+def _get_engine() -> Engine:
     # Uses the centralized declared system DB registry.
     return create_engine_from_system_db("ingestion_jobs")
 
 
-def _get_session_factory():
+def _get_session_factory() -> sessionmaker[Session]:
     return create_session_factory(_get_engine())
 
 
 def init_db() -> None:
     """Create tables if they do not exist."""
     engine = _get_engine()
-    create_tables(engine, IngestionJob.__table__)
+    create_tables(engine, cast(Table, IngestionJob.__table__))
 
 
 def create_job(
@@ -56,7 +63,7 @@ def create_job(
     vault: str,
     source_type: str,
     mime_hint: str | None,
-    options: dict | None,
+    options: dict[str, Any] | None,
 ) -> IngestionJob:
     session_factory = _get_session_factory()
     try:
@@ -110,7 +117,7 @@ def update_job_outputs(job_id: int, outputs: list[str]) -> None:
 def get_job(job_id: int) -> IngestionJob | None:
     session_factory = _get_session_factory()
     with session_factory() as session:
-        return session.get(IngestionJob, job_id)
+        return cast(IngestionJob | None, session.get(IngestionJob, job_id))
 
 
 def find_job_for_source(
@@ -128,15 +135,16 @@ def find_job_for_source(
         )
         if statuses:
             query = query.filter(IngestionJob.status.in_(statuses))
-        return query.first()
+        return cast(IngestionJob | None, query.first())
 
 
 def list_jobs(limit: int = 50) -> list[IngestionJob]:
     session_factory = _get_session_factory()
     with session_factory() as session:
-        return (
+        return cast(
+            list[IngestionJob],
             session.query(IngestionJob)
             .order_by(IngestionJob.created_at.desc())
             .limit(limit)
-            .all()
+            .all(),
         )

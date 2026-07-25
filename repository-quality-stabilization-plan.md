@@ -22,8 +22,9 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 313 errors in 48 of 192 production source files after
-  modernizing the vault-state ORM boundary. Lint and annotation modernization
+- `uv run mypy api core`: 267 errors in 46 of 192 production source files after
+  modernizing the ingestion persistence and service boundary. Lint and
+  annotation modernization
   initially produced 663 errors in 80 files.
 - The largest production mypy categories are `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -122,6 +123,11 @@ ADR 0025 (durable vault activities).
      existing tables and columns. This removed legacy column/value ambiguity
      throughout vault-state consumers. Manifest, mutation, rollback, activity
      migration, and startup migration scenarios pass.
+   - Ingestion persistence/service batch complete: job models use typed
+     SQLAlchemy mappings, importer/extractor adapters retain document types,
+     lifecycle methods have explicit outcomes, and settings access fails over
+     through one checked lookup boundary. Core and scheduled ingestion
+     scenarios pass.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral

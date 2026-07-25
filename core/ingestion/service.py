@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.jobs import (
@@ -20,7 +21,9 @@ from core.ingestion.jobs import (
     update_job_status,
 )
 from core.ingestion.models import (
+    ExtractedDocument,
     JobStatus,
+    RawDocument,
     RenderMode,
     RenderOptions,
     SourceKind,
@@ -47,7 +50,7 @@ class IngestionService:
         "image_ocr": "MISTRAL_API_KEY",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = UnifiedLogger(tag="ingestion")
         self._load_builtin_handlers()
         init_db()
@@ -58,7 +61,7 @@ class IngestionService:
         vault: str,
         source_type: str,
         mime_hint: str | None,
-        options: dict | None,
+        options: dict[str, Any] | None,
     ) -> IngestionJob:
         opts = options or {}
         return create_job(source_uri, vault, source_type, mime_hint, opts)
@@ -69,16 +72,16 @@ class IngestionService:
     def get_job(self, job_id: int) -> IngestionJob | None:
         return get_job(job_id)
 
-    def mark_processing(self, job_id: int):
+    def mark_processing(self, job_id: int) -> None:
         update_job_status(job_id, JobStatus.PROCESSING)
 
-    def mark_completed(self, job_id: int):
+    def mark_completed(self, job_id: int) -> None:
         update_job_status(job_id, JobStatus.COMPLETED)
 
-    def mark_failed(self, job_id: int, error: str):
+    def mark_failed(self, job_id: int, error: str) -> None:
         update_job_status(job_id, JobStatus.FAILED, error)
 
-    def process_job(self, job_id: int):
+    def process_job(self, job_id: int) -> None:
         """
         Process a single ingestion job end-to-end.
         """
@@ -157,7 +160,9 @@ class IngestionService:
                 raw_doc = importer_fn(source_path)
 
             suffix = source_path.suffix.lower() if source_path else ""
-            options = job.options if isinstance(job.options, dict) else {}
+            options: dict[str, Any] = (
+                job.options if isinstance(job.options, dict) else {}
+            )
             pdf_mode = (
                 str(options.get("pdf_mode", "markdown")).strip().lower()
                 if isinstance(options, dict)
@@ -338,7 +343,7 @@ class IngestionService:
     def _render_pdf_page_images(
         self,
         *,
-        raw_doc,
+        raw_doc: RawDocument,
         vault: str,
         source_path: Path | None,
         relative_dir: str,
@@ -429,7 +434,9 @@ class IngestionService:
 
         return [manifest_rel.as_posix(), *page_paths]
 
-    def _resolve_importer(self, source_path: Path, mime_hint: str | None):
+    def _resolve_importer(
+        self, source_path: Path, mime_hint: str | None
+    ) -> Callable[..., RawDocument] | None:
         """
         Pick the first registered importer matching mime hint or file extension.
         """
@@ -443,7 +450,9 @@ class IngestionService:
 
         return candidates[0] if candidates else None
 
-    def _resolve_importer_for_url(self, source_uri: str, mime_hint: str | None):
+    def _resolve_importer_for_url(
+        self, source_uri: str, mime_hint: str | None
+    ) -> Callable[..., RawDocument] | None:
         """
         Pick importer for URLs based on scheme/mime.
         """
@@ -461,11 +470,18 @@ class IngestionService:
         candidates.extend(importer_registry.get("url"))
         return candidates[0] if candidates else None
 
-    def _get_ingestion_settings(self) -> dict:
+    def _get_ingestion_settings(self) -> dict[str, Any]:
         """
         Map general settings entries to a simple ingestion settings dict.
         """
         general_settings = get_general_settings()
+
+        def setting_value(key: str) -> Any:
+            entry = general_settings.get(key)
+            if entry is None:
+                raise KeyError(key)
+            return entry.value
+
         pdf_default_strategies: list[str] = []
         ocr_model = "mistral-ocr-latest"
         ocr_endpoint = "https://api.mistral.ai/v1/ocr"
@@ -476,55 +492,49 @@ class IngestionService:
         url_fetch_strategy = "curl"
         try:
             pdf_default_strategies = list(
-                general_settings.get("ingestion_pdf_default_strategies").value
+                setting_value("ingestion_pdf_default_strategies")
             )
         except Exception:
             pdf_default_strategies = []
         try:
-            ocr_model = str(general_settings.get("ingestion_ocr_model").value)
+            ocr_model = str(setting_value("ingestion_ocr_model"))
         except Exception:
             try:
-                ocr_model = str(general_settings.get("ingestion_pdf_ocr_model").value)
+                ocr_model = str(setting_value("ingestion_pdf_ocr_model"))
             except Exception:
                 ocr_model = "mistral-ocr-latest"
         try:
-            ocr_endpoint = str(general_settings.get("ingestion_ocr_endpoint").value)
+            ocr_endpoint = str(setting_value("ingestion_ocr_endpoint"))
         except Exception:
             try:
-                ocr_endpoint = str(
-                    general_settings.get("ingestion_pdf_ocr_endpoint").value
-                )
+                ocr_endpoint = str(setting_value("ingestion_pdf_ocr_endpoint"))
             except Exception:
                 ocr_endpoint = "https://api.mistral.ai/v1/ocr"
         try:
             image_default_strategies = list(
-                general_settings.get("ingestion_image_default_strategies").value
+                setting_value("ingestion_image_default_strategies")
             )
         except Exception:
             image_default_strategies = []
         try:
-            base_output_dir = str(
-                general_settings.get("ingestion_output_path_pattern").value
-            )
+            base_output_dir = str(setting_value("ingestion_output_path_pattern"))
         except Exception:
             base_output_dir = "Imported/"
         try:
             url_read_timeout_seconds = int(
-                general_settings.get("ingestion_url_read_timeout_seconds").value
+                setting_value("ingestion_url_read_timeout_seconds")
             )
         except Exception:
             url_read_timeout_seconds = 10
         try:
             url_connect_timeout_seconds = int(
-                general_settings.get("ingestion_url_connect_timeout_seconds").value
+                setting_value("ingestion_url_connect_timeout_seconds")
             )
         except Exception:
             url_connect_timeout_seconds = 10
         try:
             url_fetch_strategy = (
-                str(general_settings.get("ingestion_url_fetch_strategy").value)
-                .strip()
-                .lower()
+                str(setting_value("ingestion_url_fetch_strategy")).strip().lower()
                 or "curl"
             )
         except Exception:
@@ -549,7 +559,9 @@ class IngestionService:
             },
         }
 
-    def _resolve_extractor(self, mime: str | None):
+    def _resolve_extractor(
+        self, mime: str | None
+    ) -> Callable[..., ExtractedDocument] | None:
         """
         Pick the first registered extractor for the given MIME type.
         """
@@ -558,24 +570,33 @@ class IngestionService:
         candidates = extractor_registry.get(mime.lower())
         return candidates[0] if candidates else None
 
-    def _resolve_extractor_by_strategy(self, strategy_id: str):
+    def _resolve_extractor_by_strategy(
+        self, strategy_id: str
+    ) -> Callable[..., ExtractedDocument] | None:
         """
         Pick extractor registered for a specific strategy id, falling back to MIME when strategy matches known mime.
         """
         candidates = extractor_registry.get(f"strategy:{strategy_id}")
         if candidates:
-            return candidates[0]
+            return cast(Callable[..., ExtractedDocument], candidates[0])
         # Allow strategy ids that equal a MIME type
         candidates = extractor_registry.get(strategy_id.lower())
-        return candidates[0] if candidates else None
+        return (
+            cast(Callable[..., ExtractedDocument], candidates[0])
+            if candidates
+            else None
+        )
 
     def _get_strategies(
-        self, job: IngestionJob, suffix: str, ingestion_settings: dict
+        self,
+        job: IngestionJob,
+        suffix: str,
+        ingestion_settings: dict[str, Any],
     ) -> list[str]:
         """
         Determine strategy order for a job from options or mime defaults.
         """
-        opts = job.options or {}
+        opts: dict[str, Any] = job.options or {}
         strategies = opts.get("strategies")
         if isinstance(strategies, list) and strategies:
             return [str(s) for s in strategies]
@@ -613,13 +634,13 @@ class IngestionService:
 
     def _run_strategies(
         self,
-        raw_doc,
+        raw_doc: RawDocument,
         strategies: list[str],
-        ingestion_settings: dict,
-        options: dict | None = None,
+        ingestion_settings: dict[str, Any],
+        options: dict[str, Any] | None = None,
         *,
         log_context: dict[str, Any] | None = None,
-    ):
+    ) -> tuple[ExtractedDocument | None, list[str] | None]:
         """
         Try extractors in order; return first non-empty result.
         """
@@ -706,7 +727,7 @@ class IngestionService:
         return None, warnings if warnings else None
 
     def _job_log_context(self, job: IngestionJob) -> dict[str, Any]:
-        options = job.options if isinstance(job.options, dict) else {}
+        options: dict[str, Any] = job.options if isinstance(job.options, dict) else {}
         source_uri = (
             sanitize_url_for_log(job.source_uri)
             if job.source_type == SourceKind.URL.value
