@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -29,8 +30,10 @@ from .schema import DB_NAME, ensure_chat_sessions_schema
 
 logger = UnifiedLogger(tag="chat-store")
 
-_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
-_MODEL_MESSAGE_LIST_ADAPTER = TypeAdapter(list[ModelMessage])
+_MODEL_MESSAGE_ADAPTER: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_LIST_ADAPTER: TypeAdapter[list[ModelMessage]] = TypeAdapter(
+    list[ModelMessage]
+)
 HistoryMode = Literal["effective", "raw"]
 
 
@@ -1131,7 +1134,7 @@ class ChatStore:
 
     def _fetch_effective_messages_from_conn(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         session_id: str,
         vault_name: str,
@@ -1167,7 +1170,7 @@ class ChatStore:
 
     def _fetch_raw_messages_from_conn(
         self,
-        conn,
+        conn: sqlite3.Connection,
         *,
         session_id: str,
         vault_name: str,
@@ -1263,7 +1266,7 @@ class ChatStore:
 
     def _stored_messages_from_rows(
         self,
-        rows,
+        rows: Sequence[Sequence[Any]],
         *,
         session_id: str,
         vault_name: str,
@@ -1310,7 +1313,7 @@ class ChatStore:
 
     @staticmethod
     def _latest_compaction_checkpoint(
-        conn,
+        conn: sqlite3.Connection,
         *,
         session_id: str,
         vault_name: str,
@@ -1358,7 +1361,7 @@ class ChatStore:
 
     @staticmethod
     def _highest_message_sequence_index(
-        conn, *, session_id: str, vault_name: str
+        conn: sqlite3.Connection, *, session_id: str, vault_name: str
     ) -> int:
         row = conn.execute(
             """
@@ -1370,14 +1373,19 @@ class ChatStore:
         ).fetchone()
         return int(row[0] if row else -1)
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         # Re-ensure the schema at call time so long-lived store instances remain
         # correct when the active runtime root changes across validation/system boot.
         ensure_chat_sessions_schema(self.system_root)
-        return connect_sqlite_from_system_db(DB_NAME, self.system_root)
+        return cast(
+            sqlite3.Connection,
+            connect_sqlite_from_system_db(DB_NAME, self.system_root),
+        )
 
     @staticmethod
-    def _upsert_session(conn, *, session_id: str, vault_name: str) -> None:
+    def _upsert_session(
+        conn: sqlite3.Connection, *, session_id: str, vault_name: str
+    ) -> None:
         conn.execute(
             """
             INSERT INTO chat_sessions (session_id, vault_name)
@@ -1390,7 +1398,7 @@ class ChatStore:
 
     @staticmethod
     def _touch_session(
-        conn,
+        conn: sqlite3.Connection,
         *,
         session_id: str,
         vault_name: str,
@@ -1430,7 +1438,9 @@ class ChatStore:
         )
 
     @staticmethod
-    def _session_metadata(conn, *, session_id: str, vault_name: str) -> dict[str, Any]:
+    def _session_metadata(
+        conn: sqlite3.Connection, *, session_id: str, vault_name: str
+    ) -> dict[str, Any]:
         row = conn.execute(
             """
             SELECT metadata_json
@@ -1450,7 +1460,9 @@ class ChatStore:
         return metadata
 
     @staticmethod
-    def _next_sequence_index(conn, *, session_id: str, vault_name: str) -> int:
+    def _next_sequence_index(
+        conn: sqlite3.Connection, *, session_id: str, vault_name: str
+    ) -> int:
         row = conn.execute(
             """
             SELECT COALESCE(MAX(sequence_index), -1) + 1
@@ -1463,7 +1475,7 @@ class ChatStore:
 
     @staticmethod
     def _merged_session_metadata_json(
-        conn,
+        conn: sqlite3.Connection,
         *,
         session_id: str,
         vault_name: str,
@@ -1485,6 +1497,8 @@ def _validate_history_mode(mode: str) -> None:
 
 def _metadata_history_revision(metadata: dict[str, Any]) -> int:
     raw = metadata.get("history_revision")
+    if raw is None:
+        return 0
     try:
         revision = int(raw)
     except (TypeError, ValueError):
@@ -1538,25 +1552,28 @@ def _message_for_model_history(
     return replace(message, parts=portable_parts)
 
 
-def _strip_response_provider_item_ids(parts) -> list:
+def _strip_response_provider_item_ids(parts: Sequence[Any]) -> list[Any]:
     """Remove provider response item ids that require exact reasoning-item replay."""
     return [_strip_response_part_provider_item_id(part) for part in parts]
 
 
-def _strip_response_part_provider_item_id(part):
-    if not is_dataclass(part):
-        return part
-    field_names = {field.name for field in fields(part)}
+def _strip_response_part_provider_item_id(part: Any) -> Any:
+    untyped_part: Any = part
+    if not is_dataclass(untyped_part):
+        return untyped_part
+    field_names = {field.name for field in fields(untyped_part)}
     updates: dict[str, Any] = {}
-    if "id" in field_names and getattr(part, "id", None) is not None:
+    if "id" in field_names and getattr(untyped_part, "id", None) is not None:
         updates["id"] = None
     if "tool_call_id" in field_names:
-        tool_call_id = getattr(part, "tool_call_id", None)
+        tool_call_id = getattr(untyped_part, "tool_call_id", None)
         if isinstance(tool_call_id, str) and "|" in tool_call_id:
             updates["tool_call_id"] = tool_call_id.split("|", 1)[0]
     if not updates:
-        return part
-    return replace(part, **updates)
+        return untyped_part
+    # `is_dataclass` is the runtime guard, but typeshed cannot narrow `Any` to
+    # its private dataclass protocol for `replace`.
+    return replace(untyped_part, **updates)  # type: ignore[type-var]
 
 
 def _extract_role_and_text(msg: ModelMessage) -> tuple[str, str]:
