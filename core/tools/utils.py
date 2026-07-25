@@ -5,7 +5,9 @@ Provides security validation and path resolution for all file operations.
 """
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import tiktoken
 
@@ -32,14 +34,17 @@ def is_virtual_docs_path(path: str) -> bool:
     return get_virtual_mount_key(path) == "__virtual_docs__"
 
 
-def resolve_virtual_path(path: str) -> tuple[str, dict]:
+def resolve_virtual_path(path: str) -> tuple[str, dict[str, str | bool]]:
     """Resolve a virtual mount path to an absolute path and mount metadata."""
     mount_key = get_virtual_mount_key(path)
     if not mount_key:
         raise ValueError("Not a virtual mount path")
 
     mount = VIRTUAL_MOUNTS[mount_key]
-    root = Path(mount["root"]).resolve()
+    root_value = mount.get("root")
+    if not isinstance(root_value, str):
+        raise ValueError(f"Virtual mount '{mount_key}' has no valid root")
+    root = Path(root_value).resolve()
 
     normalized = _normalize_virtual_path(path)
     rel = normalized[len(mount_key) :].lstrip("/")
@@ -129,7 +134,7 @@ def estimate_token_count(text: str, encoding_name: str = "cl100k_base") -> int:
     return len(encoding.encode(text))
 
 
-def get_tool_instructions(tools):
+def get_tool_instructions(tools: Sequence[Any]) -> str:
     """Compose a concise capability summary for enabled tools."""
     if not tools:
         return ""

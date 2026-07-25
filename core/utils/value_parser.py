@@ -239,8 +239,12 @@ class DirectiveValueParser:
             and value.endswith(")")
             and allowed_normalized is not None
         ):
-            params_section = value[1:-1].strip()
-            parsed = parse_parameters(params_section) if params_section else None
+            parameter_only_section = value[1:-1].strip()
+            parsed = (
+                parse_parameters(parameter_only_section)
+                if parameter_only_section
+                else None
+            )
             if parsed:
                 return "", parsed
 
@@ -261,21 +265,25 @@ class DirectiveValueParser:
                 remainder = remainder[close_idx + 1 :].strip()
 
         parameters: dict[str, str] = {}
-
         # If we already extracted a base path (quoted or [[link]]), only parse
         # parameters from the remaining text.
         if base_value is not None:
             if remainder:
                 stripped_remainder = remainder.strip()
+                remainder_params_section: str | None
 
                 if stripped_remainder.startswith("(") and stripped_remainder.endswith(
                     ")"
                 ):
-                    params_section = stripped_remainder[1:-1].strip()
+                    remainder_params_section = stripped_remainder[1:-1].strip()
                 else:
-                    _, params_section = split_base_and_params(remainder)
+                    _, remainder_params_section = split_base_and_params(remainder)
 
-                parsed = parse_parameters(params_section) if params_section else None
+                parsed = (
+                    parse_parameters(remainder_params_section)
+                    if remainder_params_section
+                    else None
+                )
                 if parsed:
                     parameters = parsed
             return base_value, parameters
@@ -283,8 +291,12 @@ class DirectiveValueParser:
         # Otherwise, attempt to split trailing parameters from the value. If the
         # trailing parentheses don't parse as recognized parameters, treat the
         # whole string as the base value to avoid misclassifying filenames.
-        candidate_base, params_section = split_base_and_params(remainder)
-        parsed_params = parse_parameters(params_section) if params_section else None
+        candidate_base, trailing_params_section = split_base_and_params(remainder)
+        parsed_params = (
+            parse_parameters(trailing_params_section)
+            if trailing_params_section
+            else None
+        )
 
         if parsed_params is None:
             return value, {}

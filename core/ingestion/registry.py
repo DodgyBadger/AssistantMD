@@ -10,14 +10,14 @@ ExtractorFn = Callable[[Any], Any]
 
 
 class Registry:
-    def __init__(self):
-        self._items: dict[str, list[Callable]] = {}
+    def __init__(self) -> None:
+        self._items: dict[str, list[Callable[..., Any]]] = {}
 
-    def register(self, key: str, fn: Callable) -> None:
+    def register(self, key: str, fn: Callable[..., Any]) -> None:
         items = self._items.setdefault(key, [])
         items.append(fn)
 
-    def get(self, key: str) -> list[Callable]:
+    def get(self, key: str) -> list[Callable[..., Any]]:
         return self._items.get(key, [])
 
     def keys(self) -> list[str]:

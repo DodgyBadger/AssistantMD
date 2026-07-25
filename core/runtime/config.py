@@ -36,7 +36,7 @@ class RuntimeConfig:
     log_level: str = "INFO"
     features: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         # Convert string paths to Path objects
         if isinstance(self.data_root, str):

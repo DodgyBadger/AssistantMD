@@ -298,7 +298,7 @@ class PatternUtilities:
         return converted
 
     @staticmethod
-    def _alphanum_sort_key(filepath: str):
+    def _alphanum_sort_key(filepath: str) -> list[int | str]:
         """Natural sort key for filenames (e.g., file2 before file10)."""
         filename = os.path.basename(filepath).lower()
         return [

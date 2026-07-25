@@ -14,7 +14,7 @@ class BaseTool(ABC):
 
     @classmethod
     @abstractmethod
-    def get_tool(cls, vault_path: str = None) -> Tool:
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the Pydantic AI Tool implementation.
 
         Args:
