@@ -6,9 +6,9 @@ import importlib
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Tool
 from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
@@ -31,14 +31,14 @@ logger = UnifiedLogger(tag="workflow-tool-binding")
 class ToolSpec:
     name: str
     params: dict[str, str]
-    tool_class: type
-    tool_function: object
+    tool_class: type[BaseTool]
+    tool_function: Tool
     week_start_day: int = 0
 
 
 @dataclass(frozen=True)
 class ToolBindingResult:
-    tool_functions: list[object]
+    tool_functions: list[Tool]
     tool_instructions: str
     tool_specs: list[ToolSpec]
 
@@ -105,8 +105,8 @@ def resolve_tool_binding(
             f"Tool(s) unavailable or disabled: {requested}. Available enabled tools: {available_tools}"
         )
 
-    tool_classes: list[type] = []
-    tool_functions: list[object] = []
+    tool_classes: list[type[BaseTool]] = []
+    tool_functions: list[Tool] = []
     tool_specs: list[ToolSpec] = []
     skipped_tools: list[tuple[str, list[str]]] = []
     invalid_tools: list[tuple[str, str]] = []
@@ -198,7 +198,7 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
 
     specs_by_name: dict[str, ToolSpec] = {}
-    fallback_functions: list[object] = []
+    fallback_functions: list[Tool] = []
     notes: list[str] = []
 
     for result in results:
@@ -291,10 +291,10 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
 
 
 def _get_tool_configs() -> dict[str, ToolConfig]:
-    return get_enabled_tools_config()
+    return cast(dict[str, ToolConfig], get_enabled_tools_config())
 
 
-def _load_tool_class(tool_name: str) -> type:
+def _load_tool_class(tool_name: str) -> type[BaseTool]:
     configs = _get_tool_configs()
     if tool_name not in configs:
         available_tools = ", ".join(configs.keys())
@@ -359,16 +359,16 @@ def _parse_tools(value: str) -> list[str]:
 
 
 def _wrap_tool_function(
-    tool,
+    tool: Tool,
     *,
     tool_name: str,
     tool_instructions: str | None = None,
     requires_approval: bool | None = None,
-):
-    original_func = tool.function
+) -> Tool:
+    original_func = cast(Callable[..., Any], tool.function)
     original_takes_ctx = getattr(tool, "takes_ctx", False)
 
-    async def _call_async(ctx: RunContext, **kwargs):
+    async def _call_async(ctx: RunContext[Any], **kwargs: Any) -> ToolReturn:
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
@@ -391,7 +391,7 @@ def _wrap_tool_function(
             result = await original_func(**kwargs)
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
-    def _call_sync(ctx: RunContext, **kwargs):
+    def _call_sync(ctx: RunContext[Any], **kwargs: Any) -> ToolReturn:
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
@@ -415,6 +415,7 @@ def _wrap_tool_function(
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
+    untyped_wrapper: Any = wrapper
     try:
         sig = inspect.signature(original_func)
         params_list = list(sig.parameters.values())
@@ -425,7 +426,7 @@ def _wrap_tool_function(
                 annotation=RunContext,
             )
             params_list = [ctx_param] + params_list
-        wrapper.__signature__ = sig.replace(parameters=params_list)
+        untyped_wrapper.__signature__ = sig.replace(parameters=params_list)
     except (ValueError, TypeError):
         pass
 
@@ -437,7 +438,7 @@ def _wrap_tool_function(
     wrapper.__annotations__ = annotations
 
     return type(tool)(
-        wrapper,
+        cast(Any, wrapper),
         takes_ctx=True,
         name=getattr(tool, "name", None) or tool_name,
         description=getattr(tool, "description", None),
@@ -505,16 +506,20 @@ def _to_tool_return(
 ) -> ToolReturn:
     """Normalize bound tool calls to a Pydantic ToolReturn envelope."""
     if isinstance(result, ToolReturn):
-        metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
-        metadata.setdefault("status", status)
-        metadata.setdefault("tool_name", tool_name)
-        metadata.setdefault("return_type", _return_value_type(result.return_value))
+        existing_metadata = (
+            dict(result.metadata) if isinstance(result.metadata, dict) else {}
+        )
+        existing_metadata.setdefault("status", status)
+        existing_metadata.setdefault("tool_name", tool_name)
+        existing_metadata.setdefault(
+            "return_type", _return_value_type(result.return_value)
+        )
         if error_type:
-            metadata.setdefault("error_type", error_type)
+            existing_metadata.setdefault("error_type", error_type)
         return ToolReturn(
             return_value=result.return_value,
             content=result.content,
-            metadata=metadata,
+            metadata=existing_metadata,
         )
 
     metadata: dict[str, Any] = {
