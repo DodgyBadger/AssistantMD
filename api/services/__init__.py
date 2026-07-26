@@ -23,7 +23,6 @@ from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
 from core.activity_log import iter_activity_export, query_activity_log
-from core.authoring.cache import purge_expired_cache_artifacts
 from core.authoring.template_discovery import (
     list_system_workflow_templates,
     list_templates,
@@ -49,7 +48,6 @@ from core.chat.edit_proposals import (
 from core.chat.task_execution import start_deferred_review_resume_task
 from core.chat.workspace import normalize_workspace_path
 from core.constants import ASSISTANTMD_ROOT_DIR, INLINE_EDIT_DENIAL_MESSAGE
-from core.goals import GoalOpsStore
 from core.llm.openai_auth import (
     openai_oauth_enabled_from_settings,
     openai_provider_api_key_available,
@@ -168,7 +166,6 @@ from core.workflow_runs import WorkflowRunRecord
 
 from ..exceptions import APIException, SystemConfigurationError
 from ..models import (
-    CachePurgeResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
     ChatSessionDetailResponse,
@@ -186,7 +183,6 @@ from ..models import (
     DeferredReviewResponse,
     DeferredReviewSubmitResponse,
     EditProposalResponse,
-    GoalCleanupResponse,
     MetadataResponse,
     ModelConfigRequest,
     ModelInfo,
@@ -250,6 +246,7 @@ from .execution_tasks import (
     list_workflow_tasks,
 )
 from .ingestion import import_url_direct, scan_import_folder
+from .maintenance import cleanup_goals, purge_expired_cache
 from .shared import chat_store as _chat_store
 from .shared import (
     get_vault_path as _get_vault_path,
@@ -1899,66 +1896,6 @@ def set_chat_session_mode(
         chat_mode=normalized,
     )
     return normalized
-
-
-def purge_expired_cache() -> CachePurgeResponse:
-    """Delete expired cache artifacts on demand."""
-    now = datetime.now()
-    purged_count = purge_expired_cache_artifacts(now=now)
-    logger.info(
-        "Manual cache purge completed",
-        data={
-            "purged_count": purged_count,
-            "now": now.isoformat(),
-        },
-    )
-    return CachePurgeResponse(
-        success=True,
-        message=f"Purged {purged_count} expired cache artifact(s).",
-        purged_count=purged_count,
-    )
-
-
-def cleanup_goals(
-    vault_name: str,
-    *,
-    status: str,
-    older_than_days: int | None,
-) -> GoalCleanupResponse:
-    """Delete old completed or cancelled goals for a vault."""
-    status_key = (status or "completed").strip().lower()
-    status_map = {
-        "completed": ("completed",),
-        "cancelled": ("cancelled",),
-        "completed_or_cancelled": ("completed", "cancelled"),
-    }
-    statuses = status_map.get(status_key)
-    if statuses is None:
-        raise ValueError(
-            "status must be completed, cancelled, or completed_or_cancelled"
-        )
-
-    deleted = GoalOpsStore().purge_goals(
-        vault_name=vault_name,
-        statuses=statuses,
-        older_than_days=older_than_days,
-    )
-    logger.info(
-        "Manual goal cleanup completed",
-        data={
-            "vault_name": vault_name,
-            "status": status_key,
-            "older_than_days": older_than_days,
-            "deleted": deleted,
-        },
-    )
-    if deleted == 0:
-        message = "No goals matched."
-    elif deleted == 1:
-        message = "Deleted 1 goal."
-    else:
-        message = f"Deleted {deleted} goals."
-    return GoalCleanupResponse(success=True, deleted=deleted, message=message)
 
 
 def get_system_database_migration_status() -> SystemMigrationStatusResponse:

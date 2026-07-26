@@ -268,6 +268,8 @@ Progress:
 - Vault activity listing, rollback preview/execution, snapshot serving, and
   retained-state cleanup now live with that projection and preserve the
   existing `api.services` export surface.
+- Manual cache and goal-retention maintenance now live in a dedicated service
+  module; cache purge and goal lifecycle scenarios pass.
 
 ### Validation
 
