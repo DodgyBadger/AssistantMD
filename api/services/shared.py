@@ -2,10 +2,12 @@
 
 from typing import Any
 
+from core.chat.chat_store import ChatStore
 from core.logger import UnifiedLogger
 from core.runtime.state import get_runtime_context
 
 logger = UnifiedLogger(tag="api-services")
+chat_store = ChatStore()
 
 
 def get_workflow_loader() -> Any:
