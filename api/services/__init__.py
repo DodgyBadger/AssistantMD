@@ -48,13 +48,8 @@ from core.chat.edit_proposals import (
 )
 from core.chat.task_execution import start_deferred_review_resume_task
 from core.chat.workspace import normalize_workspace_path
-from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR, INLINE_EDIT_DENIAL_MESSAGE
+from core.constants import ASSISTANTMD_ROOT_DIR, INLINE_EDIT_DENIAL_MESSAGE
 from core.goals import GoalOpsStore
-from core.ingestion.jobs import find_job_for_source
-from core.ingestion.models import JobStatus, SourceKind
-from core.ingestion.registry import importer_registry
-from core.ingestion.service import IngestionService
-from core.ingestion.task_execution import process_ingestion_job_in_task
 from core.llm.openai_auth import (
     openai_oauth_enabled_from_settings,
     openai_provider_api_key_available,
@@ -75,7 +70,6 @@ from core.llm.openai_oauth import (
     start_openai_oauth as start_openai_oauth_attempt,
 )
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
-from core.logger import UnifiedLogger
 from core.memory.session_summary import SessionSummaryStore
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -257,9 +251,9 @@ from .execution_tasks import (
     list_execution_tasks,
     list_workflow_tasks,
 )
+from .ingestion import import_url_direct, scan_import_folder
+from .shared import logger
 
-# Create API services logger
-logger = UnifiedLogger(tag="api-services")
 _chat_store = ChatStore()
 _VAULT_FILE_REFERENCE_LIMIT = 100
 _VAULT_FILE_READ_MAX_BYTES = 2 * 1024 * 1024
@@ -3195,166 +3189,6 @@ def collect_scheduler_status(scheduler=None) -> SchedulerInfo:
             disabled_workflows=0,
             job_details=[],
         )
-
-
-async def scan_import_folder(
-    vault: str,
-    queue_only: bool = False,
-    strategies: list[str] | None = None,
-    capture_ocr_images: bool | None = None,
-    pdf_mode: str | None = None,
-):
-    """
-    Enqueue ingestion jobs and process inline jobs under execution task context.
-    """
-    runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
-        vault=vault,
-        strategies=strategies,
-        capture_ocr_images=capture_ocr_images,
-        pdf_mode=pdf_mode,
-    )
-
-    if not queue_only and jobs_created:
-        refreshed_jobs = []
-        for job in jobs_created:
-            await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
-            refreshed_jobs.append(ingest_service.get_job(job.id) or job)
-        jobs_created = refreshed_jobs
-
-    logger.info(
-        "Import scan completed",
-        data={
-            "vault": vault,
-            "jobs_created": len(jobs_created),
-            "skipped": len(skipped),
-            "queue_only": queue_only,
-        },
-    )
-
-    return jobs_created, skipped
-
-
-def _enqueue_import_scan_jobs(
-    *,
-    vault: str,
-    strategies: list[str] | None,
-    capture_ocr_images: bool | None,
-    pdf_mode: str | None,
-):
-    """Create ingestion jobs for supported files in a vault import folder."""
-    runtime = get_runtime_context()
-    import_root = (
-        Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
-    )
-    legacy_import_root = (
-        Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
-    )
-    import_root.mkdir(parents=True, exist_ok=True)
-
-    ingest_service: IngestionService = runtime.ingestion
-
-    jobs_created = []
-    skipped = []
-    supported_exts = {key for key in importer_registry.keys() if key.startswith(".")}
-
-    search_roots = [import_root]
-    if legacy_import_root.exists():
-        search_roots.append(legacy_import_root)
-
-    extractor_options: dict[str, Any] = {}
-    if capture_ocr_images is not None:
-        extractor_options["ocr_capture_images"] = bool(capture_ocr_images)
-    normalized_pdf_mode = (pdf_mode or "").strip().lower()
-    if normalized_pdf_mode not in {"", "markdown", "page_images"}:
-        normalized_pdf_mode = ""
-
-    for root in search_roots:
-        for item in sorted(root.iterdir()):
-            if item.is_dir():
-                continue
-            suffix = item.suffix.lower()
-            if suffix not in supported_exts:
-                skipped.append(str(item.name))
-                continue
-            existing_job = find_job_for_source(
-                source_uri=item.name,
-                vault=vault,
-                statuses=[
-                    JobStatus.QUEUED.value,
-                    JobStatus.PROCESSING.value,
-                ],
-            )
-            if existing_job:
-                skipped.append(str(item.name))
-                continue
-
-            job_options: dict[str, Any] = {}
-            if strategies:
-                job_options["strategies"] = strategies
-            if extractor_options:
-                job_options["extractor_options"] = extractor_options
-            if normalized_pdf_mode:
-                job_options["pdf_mode"] = normalized_pdf_mode
-
-            job = ingest_service.enqueue_job(
-                source_uri=item.name,
-                vault=vault,
-                source_type=SourceKind.FILE.value,
-                mime_hint=None,
-                options=job_options,
-            )
-            jobs_created.append(job)
-
-    return runtime, ingest_service, jobs_created, skipped
-
-
-async def import_url_direct(vault: str, url: str, clean_html: bool = True):
-    """
-    Import a single URL immediately with vault mutations grouped as API ingestion.
-    """
-    runtime = get_runtime_context()
-    ingest_service: IngestionService = runtime.ingestion
-
-    job = ingest_service.enqueue_job(
-        source_uri=url,
-        vault=vault,
-        source_type=SourceKind.URL.value,
-        mime_hint="text/html",
-        options={"extractor_options": {"clean_html": clean_html}},
-    )
-    await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
-    job = ingest_service.get_job(job.id)
-    outputs = job.outputs if job else None
-    logger.info(
-        "Import URL completed",
-        data={
-            "vault": vault,
-            "status": job.status if job else None,
-            "outputs_count": len(outputs) if outputs is not None else 0,
-            "clean_html": clean_html,
-        },
-    )
-    return job
-
-
-async def _process_ingestion_job_for_api(
-    runtime,
-    ingest_service: IngestionService,
-    job_id: int,
-    vault: str,
-) -> None:
-    """Process one API-triggered ingestion job under execution task context."""
-    try:
-        await process_ingestion_job_in_task(
-            task_coordinator=runtime.task_coordinator,
-            process_job_fn=ingest_service.process_job,
-            job_id=job_id,
-            vault=vault,
-            source=ExecutionTaskSource.API,
-        )
-    except Exception:
-        # process_job updates status/error; callers inspect refreshed job state.
-        pass
 
 
 def collect_system_health() -> SystemInfo:

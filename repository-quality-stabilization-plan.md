@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 147 errors in 34 of 192 production source files after
-  typing chat streaming and capability boundaries. Lint and annotation
+- `uv run mypy api core`: 141 errors in 34 of 195 production source files after
+  extracting and typing API ingestion services. Lint and annotation
   modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -252,6 +252,13 @@ the current import contract.
    typed settings and confidential-state boundaries can be corrected in place.
 7. Remove the monolithic module, verify every endpoint import, then resolve the
    remaining mypy findings within the smaller service modules.
+
+Progress:
+
+- Package boundary established with stable `api.services` imports.
+- Process-local execution-task projections extracted and validated.
+- API ingestion orchestration extracted with explicit runtime/job contracts;
+  core and scheduled ingestion scenarios pass.
 
 ### Validation
 
