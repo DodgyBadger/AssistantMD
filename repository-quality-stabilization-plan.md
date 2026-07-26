@@ -191,12 +191,87 @@ Behavior-affecting corrections must also run their closest individual scenario.
 The final handoff requests maintainer execution of
 `python validation/run_validation.py ...` across the full suite.
 
+## API Service Decomposition
+
+`api/services.py` has grown to 5,081 lines and combines approximately one
+hundred functions from unrelated API domains. Before resolving its remaining
+type backlog, convert it into a package of cohesive modules while preserving
+the current import contract.
+
+### Invariants
+
+- `api.endpoints` continues importing public service functions from
+  `api.services`; endpoint paths, response models, exceptions, and payloads do
+  not change.
+- `ChatStore` remains the canonical chat-session boundary.
+- Vault Explorer writes, revision restore, and activity rollback continue
+  through the existing vault-state mutation and audit services.
+- Execution tasks remain process-local runtime state, and workflow history
+  remains in the durable workflow-run store.
+- Ingestion API entrypoints continue delegating to the ingestion pipeline.
+- Typed settings remain separate from secret values. Internal OpenAI OAuth
+  state remains hidden behind the dedicated OAuth boundary and generic secret
+  APIs do not expose it.
+- Persistent `/app/data` and `/app/system` state is not rewritten or reset by
+  this structural refactor.
+
+### Target Structure
+
+- `api/services/__init__.py`: stable public re-exports only.
+- `api/services/shared.py`: API-service logger, shared chat-store instance, and
+  genuinely cross-domain helpers/constants.
+- `api/services/vault_files.py`: vault roots, files, revisions, uploads,
+  references, Explorer mutations, and workspace path handling.
+- `api/services/deferred_reviews.py`: edit proposals and deferred-review
+  approval/resume handling.
+- `api/services/chat_sessions.py`: session metadata, summaries, detail,
+  transcript export, compaction, and deletion.
+- `api/services/execution_tasks.py`: task lookup, listing, and cancellation.
+- `api/services/vault_state.py`: activity, rollback, snapshot, cache, goal, and
+  migration maintenance surfaces.
+- `api/services/ingestion.py`: import scans and direct URL ingestion.
+- `api/services/workflows.py`: workflow files, lifecycle, execution, scheduler
+  projections, and durable run history.
+- `api/services/system.py`: status, health, activity log, configuration errors,
+  template refresh, and metadata.
+- `api/services/configuration.py`: general settings, models, providers, secrets,
+  and OpenAI OAuth API projections.
+
+### Implementation Sequence
+
+1. Create the package and shared module, preserving the complete public symbol
+   surface through `api.services`.
+2. Extract low-coupling execution-task, ingestion, and vault-state maintenance
+   groups first; run API import checks and their focused scenarios.
+3. Extract workflow and system-status groups; preserve scheduler/runtime
+   injection seams and workflow history projections.
+4. Extract vault-file and deferred-review groups together where private path
+   and mutation helpers are shared.
+5. Extract chat-session services while retaining the one shared `ChatStore`.
+6. Extract configuration, provider, secret, and OAuth services last so their
+   typed settings and confidential-state boundaries can be corrected in place.
+7. Remove the monolithic module, verify every endpoint import, then resolve the
+   remaining mypy findings within the smaller service modules.
+
+### Validation
+
+- Import smoke test: `python -c "import api.endpoints; import api.services"`.
+- Repository checks: `uv run ruff check .`, `uv run black --check .`, and
+  `uv run mypy api core`.
+- Focused scenarios after the relevant extraction stage:
+  execution tasks/chat cancellation, ingestion, vault file references and
+  rollback, workflow lifecycle/history, chat persistence/deferred review, and
+  settings/provider/OAuth contracts.
+- The maintainer-owned full validation suite remains the final merge gate.
+
 ## Next Steps
 
-1. Type the API service helpers that feed multiple endpoints.
-2. Resolve the vault-state and ingestion service clusters before ORM leaves.
-3. Address chat/model-provider protocol mismatches.
-4. Run focused scenarios for any correction that changes executable behavior.
+1. Decompose `api/services.py` behind a stable package export surface.
+2. Type each extracted service domain before proceeding to the next.
+3. Resolve the remaining small production clusters after API services are
+   clean.
+4. Run focused scenarios for every extraction and any correction that changes
+   executable behavior.
 
 ## Next Phase
 

@@ -172,8 +172,8 @@ from core.vault_state.service import VaultStateService
 from core.vector import VectorService
 from core.workflow_runs import WorkflowRunRecord
 
-from .exceptions import APIException, SystemConfigurationError
-from .models import (
+from ..exceptions import APIException, SystemConfigurationError
+from ..models import (
     CachePurgeResponse,
     ChatHistoryCompactionResponse,
     ChatHistoryCompactionStatusResponse,
@@ -247,10 +247,10 @@ from .models import (
     WorkflowFileResponse,
     WorkflowSummary,
 )
-from .models import (
+from ..models import (
     ConfigurationError as APIConfigurationError,
 )
-from .utils import generate_session_id
+from ..utils import generate_session_id
 
 # Create API services logger
 logger = UnifiedLogger(tag="api-services")
