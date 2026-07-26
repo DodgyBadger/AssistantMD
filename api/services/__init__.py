@@ -258,7 +258,14 @@ from .shared import (
     get_workflow_loader as _get_workflow_loader,
 )
 from .shared import logger
-from .vault_activity import vault_activity_group_info as _vault_activity_group_info
+from .vault_activity import (
+    SnapshotFileResponse,
+    cleanup_vault_state,
+    get_vault_activity,
+    get_vault_activity_rollback_preview,
+    get_vault_snapshot_file,
+    rollback_vault_activity,
+)
 
 _VAULT_FILE_REFERENCE_LIMIT = 100
 _VAULT_FILE_READ_MAX_BYTES = 2 * 1024 * 1024
@@ -311,15 +318,6 @@ class ChatSessionVaultMismatch(ValueError):
             f"Chat session '{session_id}' belongs to vault '{bound_vault}', "
             f"not vault '{requested_vault}'."
         )
-
-
-@dataclass(frozen=True)
-class SnapshotFileResponse:
-    """Resolved snapshot artifact for HTTP serving."""
-
-    path: Path
-    filename: str
-    media_type: str
 
 
 def resolve_chat_session_for_request(
@@ -1901,183 +1899,6 @@ def set_chat_session_mode(
         chat_mode=normalized,
     )
     return normalized
-
-
-def get_vault_activity(
-    *,
-    vault_name: str,
-    limit: int = 50,
-    task_id: str | None = None,
-    include_expired: bool = False,
-    operation: str | None = None,
-) -> VaultActivityResponse:
-    """Return durable attributed vault activity for one vault."""
-    _get_vault_path(vault_name)
-    groups = VaultStateService().list_activities(
-        vault_name=vault_name,
-        limit=limit,
-        task_id=task_id,
-        include_expired=include_expired,
-        operation=operation,
-    )
-    return VaultActivityResponse(
-        vault_name=vault_name,
-        groups=[_vault_activity_group_info(group) for group in groups],
-    )
-
-
-def get_vault_activity_rollback_preview(
-    *,
-    vault_name: str,
-    activity_id: str,
-) -> VaultActivityRollbackPreviewResponse:
-    """Return current all-or-nothing rollback availability for one activity."""
-    vault_root = _get_vault_path(vault_name)
-    try:
-        plan = preview_activity_rollback(
-            vault_path=vault_root,
-            activity_id=activity_id,
-        )
-    except LookupError as exc:
-        raise APIException(
-            status_code=404,
-            error_type="VaultActivityNotFound",
-            message=str(exc),
-            details={"vault_name": vault_name, "activity_id": activity_id},
-        ) from exc
-    return _vault_activity_rollback_preview_info(plan)
-
-
-def rollback_vault_activity(
-    *,
-    vault_name: str,
-    activity_id: str,
-    expected_states: list[tuple[str, bool, str | None]],
-) -> VaultActivityRollbackResponse:
-    """Restore every supported path in one activity to its first before-state."""
-    vault_root = _get_vault_path(vault_name)
-    try:
-        result = execute_activity_rollback(
-            vault_path=vault_root,
-            activity_id=activity_id,
-            expected_states=expected_states,
-        )
-    except LookupError as exc:
-        raise APIException(
-            status_code=404,
-            error_type="VaultActivityNotFound",
-            message=str(exc),
-            details={"vault_name": vault_name, "activity_id": activity_id},
-        ) from exc
-    except ActivityRollbackUnavailable as exc:
-        preview = _vault_activity_rollback_preview_info(exc.plan)
-        raise APIException(
-            status_code=409,
-            error_type="VaultActivityRollbackUnavailable",
-            message="Activity rollback is not currently available.",
-            details=preview.model_dump(mode="json"),
-        ) from exc
-    except VaultMutationRejected as exc:
-        raise APIException(
-            status_code=409,
-            error_type="VaultActivityRollbackConflict",
-            message=str(exc),
-            details={
-                "vault_name": vault_name,
-                "activity_id": activity_id,
-                "code": exc.code,
-            },
-        ) from exc
-    return VaultActivityRollbackResponse(
-        success=True,
-        source_activity_id=result.source_activity_id,
-        rollback_activity_id=result.rollback_activity_id,
-        vault_name=result.vault_name,
-        restored_count=result.restored_count,
-        deleted_count=result.deleted_count,
-        message=(
-            f"Rolled back {result.restored_count + result.deleted_count} file state(s)."
-        ),
-    )
-
-
-def _vault_activity_rollback_preview_info(
-    plan: ActivityRollbackPlan,
-) -> VaultActivityRollbackPreviewResponse:
-    return VaultActivityRollbackPreviewResponse(
-        activity_id=plan.activity_id,
-        activity_label=plan.activity_label,
-        vault_name=plan.vault_name,
-        can_rollback=plan.can_rollback,
-        restore_count=plan.restore_count,
-        delete_count=plan.delete_count,
-        paths=[
-            VaultActivityRollbackPathInfo(
-                path=path.path,
-                action=path.action,
-                expected_exists=path.expected_exists,
-                expected_sha256=path.expected_sha256,
-                restore_exists=path.restore_exists,
-                restore_sha256=path.restore_sha256,
-            )
-            for path in plan.paths
-        ],
-        issues=[
-            VaultActivityRollbackIssueInfo(
-                code=issue.code,
-                message=issue.message,
-                path=issue.path,
-            )
-            for issue in plan.issues
-        ],
-    )
-
-
-def cleanup_vault_state() -> VaultStateCleanupResponse:
-    """Manually delete expired vault-state safety artifacts."""
-    result = cleanup_expired_vault_state()
-    return VaultStateCleanupResponse(
-        success=True,
-        expired_activity_rows_deleted=result.expired_activity_rows_deleted,
-        expired_mutation_rows_deleted=result.expired_mutation_rows_deleted,
-        expired_snapshot_rows_deleted=result.expired_snapshot_rows_deleted,
-        snapshot_files_deleted=result.snapshot_files_deleted,
-        snapshot_dirs_deleted=result.snapshot_dirs_deleted,
-        message=(
-            "Vault-state cleanup completed: "
-            f"{result.expired_activity_rows_deleted} activity row(s), "
-            f"{result.expired_mutation_rows_deleted} mutation row(s), "
-            f"{result.expired_snapshot_rows_deleted} snapshot row(s), "
-            f"{result.snapshot_files_deleted} snapshot file(s), "
-            f"{result.snapshot_dirs_deleted} snapshot directory/directories deleted."
-        ),
-    )
-
-
-def get_vault_snapshot_file(snapshot_id: int) -> SnapshotFileResponse:
-    """Resolve a retained vault snapshot file for inline display."""
-    if snapshot_id <= 0:
-        raise APIException(
-            status_code=400,
-            error_type="InvalidSnapshotId",
-            message="Snapshot id must be a positive integer.",
-            details={"snapshot_id": snapshot_id},
-        )
-
-    snapshot = VaultStateService().resolve_snapshot_file(snapshot_id)
-    if snapshot is None:
-        raise APIException(
-            status_code=404,
-            error_type="VaultSnapshotNotFound",
-            message=f"Vault snapshot not found or no longer retained: {snapshot_id}",
-            details={"snapshot_id": snapshot_id},
-        )
-
-    return SnapshotFileResponse(
-        path=snapshot.path,
-        filename=Path(snapshot.vault_path).name or f"snapshot-{snapshot_id}",
-        media_type=mimetypes.guess_type(snapshot.vault_path)[0] or "text/plain",
-    )
 
 
 def purge_expired_cache() -> CachePurgeResponse:

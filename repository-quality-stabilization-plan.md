@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 138 errors in 34 of 196 production source files after
-  extracting the vault-activity API projection. Lint and annotation
+- `uv run mypy api core`: 137 errors in 34 of 196 production source files after
+  extracting the complete vault-activity API surface. Lint and annotation
   modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -265,6 +265,9 @@ Progress:
 - The singleton chat store now lives in shared service state, and durable
   vault-activity groups are projected in their own typed module. Activity
   rollback, mutation recording, and Vault Explorer reference scenarios pass.
+- Vault activity listing, rollback preview/execution, snapshot serving, and
+  retained-state cleanup now live with that projection and preserve the
+  existing `api.services` export surface.
 
 ### Validation
 
