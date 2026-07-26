@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessage, UserContent
@@ -29,11 +29,11 @@ class CollectedAgentRun:
 
 
 async def create_agent(
-    model=None,
-    tools: list | None = None,
+    model: Any = None,
+    tools: list[Any] | None = None,
     retries: int | None = None,
     output_type: Any | None = None,
-    history_processors: list | None = None,
+    history_processors: list[Any] | None = None,
     capabilities: list[Any] | None = None,
     thinking: ThinkingValue | object = _THINKING_UNSET,
 ) -> Agent:
@@ -65,8 +65,10 @@ async def create_agent(
 
         default_model_name = str(default_model_value).lower().strip()
 
-        resolved_thinking = (
-            get_default_model_thinking() if thinking is _THINKING_UNSET else thinking
+        resolved_thinking: ThinkingValue = (
+            get_default_model_thinking()
+            if thinking is _THINKING_UNSET
+            else cast(ThinkingValue, thinking)
         )
         model = build_model_instance(default_model_name, thinking=resolved_thinking)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
@@ -101,7 +103,7 @@ async def create_agent(
 async def generate_stream(
     agent: Agent,
     prompt: PromptInput,
-    message_history,
+    message_history: Sequence[ModelMessage] | None,
 ) -> AsyncIterator[str]:
     try:
         async with agent.run_stream(prompt, message_history=message_history) as result:
@@ -130,9 +132,9 @@ async def generate_stream(
 async def generate_response(
     agent: Agent,
     prompt: PromptInput,
-    message_history=None,
-    deps=None,
-):
+    message_history: Sequence[ModelMessage] | None = None,
+    deps: Any = None,
+) -> Any:
     try:
         result = await collect_response(
             agent,
@@ -149,8 +151,8 @@ async def generate_response(
 async def collect_response(
     agent: Agent,
     prompt: PromptInput,
-    message_history=None,
-    deps=None,
+    message_history: Sequence[ModelMessage] | None = None,
+    deps: Any = None,
     usage_limits: UsageLimits | None = None,
 ) -> CollectedAgentRun:
     """Run an agent through the streaming transport and return one final result.

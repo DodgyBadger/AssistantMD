@@ -44,13 +44,7 @@ def _get_model_mappings() -> dict[str, tuple[str, str]]:
 
     mappings: dict[str, tuple[str, str]] = {}
     for model_name, model_config in models.items():
-        if hasattr(model_config, "provider"):
-            provider = model_config.provider
-            model_string = model_config.model_string
-        else:
-            provider = model_config["provider"]
-            model_string = model_config["model_string"]
-        mappings[model_name] = (provider, model_string)
+        mappings[model_name] = (model_config.provider, model_config.model_string)
 
     return mappings
 
@@ -61,10 +55,7 @@ def _get_model_capabilities() -> dict[str, set[str]]:
     capabilities_map: dict[str, set[str]] = {}
 
     for model_name, model_config in models.items():
-        if hasattr(model_config, "capabilities"):
-            capabilities = list(model_config.capabilities or ["text"])
-        else:
-            capabilities = list(model_config.get("capabilities", ["text"]))
+        capabilities = list(model_config.capabilities or ["text"])
         normalized = {
             str(capability).strip().lower()
             for capability in capabilities
@@ -87,10 +78,7 @@ def _get_provider_configs() -> dict[str, dict[str, Any]]:
     config_map: dict[str, dict[str, Any]] = {}
 
     for name, provider_config in providers.items():
-        if hasattr(provider_config, "model_dump"):
-            config_map[name] = provider_config.model_dump()
-        else:
-            config_map[name] = provider_config
+        config_map[name] = provider_config.model_dump()
 
     return config_map
 
