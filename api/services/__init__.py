@@ -252,6 +252,12 @@ from .execution_tasks import (
     list_workflow_tasks,
 )
 from .ingestion import import_url_direct, scan_import_folder
+from .shared import (
+    get_vault_path as _get_vault_path,
+)
+from .shared import (
+    get_workflow_loader as _get_workflow_loader,
+)
 from .shared import logger
 
 _chat_store = ChatStore()
@@ -2335,20 +2341,6 @@ def get_workflow_load_errors(
     if workflow_name:
         errors = [error for error in errors if error.workflow_name == workflow_name]
     return errors
-
-
-def _get_workflow_loader():
-    """Get workflow loader from runtime context."""
-    runtime = get_runtime_context()
-    return runtime.workflow_loader
-
-
-def _get_vault_path(vault_name: str) -> str:
-    """Return vault path from loader cache."""
-    vault_info = _get_workflow_loader().get_vault_info()
-    if vault_name not in vault_info:
-        raise ValueError(f"Vault '{vault_name}' not found")
-    return vault_info[vault_name].get("path")
 
 
 def set_system_startup_time(startup_time: datetime):
