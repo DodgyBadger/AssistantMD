@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 182 errors in 41 of 192 production source files after
-  typing authoring-context assembly. Lint and annotation modernization
+- `uv run mypy api core`: 167 errors in 38 of 192 production source files after
+  completing the authoring-host protocol. Lint and annotation modernization
   initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -149,6 +149,10 @@ ADR 0025 (durable vault activities).
      restoration, tool-exchange batches, parsed templates, and executable
      sources now retain concrete contracts. Authoring, default-context,
      structured assembly, and tool-passthrough scenarios pass.
+   - Authoring-host protocol batch complete: the shared host contract now
+     declares the vault, date, buffer, session, and file-state capabilities
+     required by helper executors and direct-tool bindings. Authoring, default
+     context, and tool-failure scenarios pass.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral

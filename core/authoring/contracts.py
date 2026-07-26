@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from core.runtime.buffers import BufferStore
+    from core.utils.file_state import WorkflowFileStateManager
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
@@ -393,6 +398,14 @@ class FinishResult:
 @runtime_checkable
 class AuthoringHost(Protocol):
     """Host-side runtime state exposed to helper executors."""
+
+    vault_path: str | None
+    reference_date: datetime
+    week_start_day: int
+    run_buffers: BufferStore
+    session_buffers: BufferStore
+    state_manager: WorkflowFileStateManager | None
+    session_key: str | None
 
     def get_monty_inputs(self) -> dict[str, Any]: ...
 
