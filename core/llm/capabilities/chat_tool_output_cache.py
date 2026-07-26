@@ -32,12 +32,12 @@ class ToolEventSink(Protocol):
 
     def add_tool_event(
         self,
+        *,
         session_id: str,
         vault_name: str,
         tool_call_id: str,
         tool_name: str,
         event_type: str,
-        *,
         args: dict[str, Any] | None = None,
         result_text: str | None = None,
         result_metadata: dict[str, Any] | None = None,

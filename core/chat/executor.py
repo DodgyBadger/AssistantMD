@@ -225,7 +225,7 @@ def _is_user_prompt_request(message: ModelMessage) -> bool:
     )
 
 
-def _serialize_exception(exc: Exception) -> dict[str, Any]:
+def _serialize_exception(exc: BaseException) -> dict[str, Any]:
     """Return stable exception details for activity-log diagnostics."""
     return {
         "error_type": type(exc).__name__,
@@ -567,12 +567,20 @@ def _log_chat_failure(
     context_template: str | None = None,
     workspace_path: str | None = None,
     extra: dict[str, Any] | None = None,
-    exc: Exception,
+    exc: BaseException,
 ) -> None:
     """Emit structured failure logs for chat session execution."""
     payload = _serialize_exception(exc)
-    classification = classify_exception(exc, phase=phase)
-    payload.update(classification.to_metadata())
+    if isinstance(exc, Exception):
+        payload.update(classify_exception(exc, phase=phase).to_metadata())
+    else:
+        payload.update(
+            {
+                "failure_kind": "cancelled",
+                "retryable": False,
+                "phase": phase,
+            }
+        )
     if extra:
         payload.update(extra)
     rss_bytes = _get_process_rss_bytes()
@@ -950,7 +958,7 @@ async def _prepare_chat_execution(
     )
     for inst in [base_instructions, tool_instructions]:
         if inst:
-            agent.instructions(lambda _ctx, text=inst: text)
+            agent.instructions(inst)
 
     base_message_history = (
         message_history_override
@@ -1031,7 +1039,7 @@ async def _prepare_deferred_review_resume_execution(
     )
     for inst in [base_instructions, tool_instructions]:
         if inst:
-            agent.instructions(lambda _ctx, text=inst: text)
+            agent.instructions(inst)
 
     return PreparedChatExecution(
         agent=agent,

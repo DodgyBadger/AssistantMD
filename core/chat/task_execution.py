@@ -131,6 +131,10 @@ async def start_chat_turn_retry_task(
         raise ValueError("The latest unfinished chat turn is not marked retryable.")
 
     accepted_sequence_index = marker.get("accepted_user_sequence_index")
+    if not isinstance(accepted_sequence_index, int | str):
+        raise ValueError(
+            "The unfinished turn marker does not identify an accepted user message."
+        )
     try:
         accepted_sequence_index = int(accepted_sequence_index)
     except (TypeError, ValueError) as exc:
@@ -367,9 +371,6 @@ async def start_chat_stream_task(
         session_id=session_id,
         chat_mode=chat_mode,
     )
-    display_prompt_kwargs = (
-        {"display_prompt": display_prompt} if display_prompt is not None else {}
-    )
     prepared = await chat_executor._prepare_chat_execution(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -382,7 +383,7 @@ async def start_chat_stream_task(
         thinking=thinking,
         context_template=context_template,
         chat_mode=chat_mode,
-        **display_prompt_kwargs,
+        display_prompt=display_prompt,
     )
     return await start_prepared_chat_stream_task(
         prepared=prepared,
@@ -425,11 +426,6 @@ async def start_queued_chat_stream_task(
                     session_id=session_id,
                     chat_mode=chat_mode,
                 )
-                display_prompt_kwargs = (
-                    {"display_prompt": display_prompt}
-                    if display_prompt is not None
-                    else {}
-                )
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,
                     vault_path=vault_path,
@@ -442,7 +438,7 @@ async def start_queued_chat_stream_task(
                     thinking=thinking,
                     context_template=context_template,
                     chat_mode=chat_mode,
-                    **display_prompt_kwargs,
+                    display_prompt=display_prompt,
                 )
             except asyncio.CancelledError:
                 raise
@@ -732,12 +728,12 @@ async def _run_prepared_chat_stream_task(
                             _delta_event_data(delta_text),
                         )
                     elif isinstance(event.delta, ThinkingPartDelta):
-                        delta_text = event.delta.content_delta
-                        if delta_text:
+                        thinking_delta = event.delta.content_delta
+                        if thinking_delta:
                             await event_buffer.append(
                                 task.task_id,
                                 "thinking_delta",
-                                _thinking_delta_event_data(delta_text),
+                                _thinking_delta_event_data(thinking_delta),
                             )
 
                 elif isinstance(event, FunctionToolCallEvent):
@@ -1055,7 +1051,7 @@ async def stream_chat_task_sse(
     try:
         while True:
             if pending_event is None:
-                pending_event = asyncio.create_task(iterator.__anext__())
+                pending_event = asyncio.ensure_future(iterator.__anext__())
             try:
                 event = await asyncio.wait_for(
                     asyncio.shield(pending_event),

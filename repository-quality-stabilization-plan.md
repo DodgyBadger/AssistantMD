@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 157 errors in 36 of 192 production source files after
-  typing LLM agent and configuration boundaries. Lint and annotation
+- `uv run mypy api core`: 147 errors in 34 of 192 production source files after
+  typing chat streaming and capability boundaries. Lint and annotation
   modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -158,6 +158,11 @@ ADR 0025 (durable vault activities).
      and dependency inputs are explicit, and default thinking is narrowed before
      model construction. Model failure, compaction, usage-limit, and session-tool
      scenarios pass.
+   - Chat execution batch complete: tool-event sinks agree on keyword-only
+     persistence, optional display prompts cross explicit parameters, thinking
+     deltas remain independently narrowed, cancellation diagnostics accept
+     `BaseException`, and SSE subscriptions retain awaitable task types.
+     Streaming, cancellation, manual-retry, and overflow-cache scenarios pass.
 4. **Runtime and integration contracts**
    - Fix chat/task, Pydantic AI, model-provider, and tool protocol mismatches.
    - Add focused scenarios only where a type finding reveals a behavioral
