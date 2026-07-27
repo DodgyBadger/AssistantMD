@@ -15,7 +15,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
 - `core/chat/surface_adapter.py` — normalized adapter contract for non-web chat surfaces
 - `core/chat/compaction.py` — automatic compaction task registration
-- `api/services.py` — API adapters for task listing, detail, and cancellation
+- `api/services/execution_tasks.py` — API adapters for task listing, detail,
+  and cancellation
 
 ## Task model
 

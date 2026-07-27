@@ -51,5 +51,5 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | Web Retrieval | Provider strategies, normalized web results, bounded URL transport, public-network policy | `core/web/` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_read.py` |
 | [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |
-| [Ingestion Pipeline](ingestion-pipeline.md) | Import queue, extraction strategies, rendering/storage, worker execution | `core/ingestion/`, `api/services.py` |
+| [Ingestion Pipeline](ingestion-pipeline.md) | Import queue, extraction strategies, rendering/storage, worker execution | `core/ingestion/`, `api/services/ingestion.py` |
 | [Validation](validation.md) | End-to-end test scenarios and artifacts | `validation/` |

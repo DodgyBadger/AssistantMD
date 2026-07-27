@@ -120,7 +120,8 @@ This is why project-level tool additions should also be included in `core/settin
 
 ## Configuration Editing APIs
 
-Primary implementation: `core/settings/config_editor.py` and `api/services.py`
+Primary implementation: `core/settings/config_editor.py` and
+`api/services/configuration.py`
 
 Behavior:
 

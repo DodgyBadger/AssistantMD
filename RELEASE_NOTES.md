@@ -43,6 +43,14 @@ be loaded on demand, and the raw JSONL history can be exported for diagnostics.
 Validation and high-volume helper events no longer crowd out user-relevant
 activity.
 
+### Reliability and maintenance
+
+The API service layer and its runtime contracts have been hardened ahead of the
+v0.7 branch freeze. Chat, workflow, Vault Explorer, configuration, ingestion,
+and system-status operations retain the same API surface while using clearer
+domain boundaries and stricter internal validation, reducing regression risk
+for future maintenance.
+
 ### Web retrieval
 
 Web research now uses stable `web_search`, `web_extract`, and `web_crawl`

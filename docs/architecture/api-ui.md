@@ -6,7 +6,8 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
 
 - `main.py`
 - `api/endpoints.py`
-- `api/services.py`
+- `api/services/` — domain service modules with stable re-exports from
+  `api.services`
 - `api/models.py`
 - `static/`
 - `static/js/deferred-reviews.js` — inline tool-review cards and submission
@@ -26,6 +27,11 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
   lifecycle.
 - Service-layer orchestration for runtime operations.
 - Static single-page UI hosting.
+
+API service ownership is split by domain: chat sessions, configuration,
+deferred reviews, execution tasks, ingestion, maintenance, system status,
+activity, vault files, and workflows. `api.services` remains the stable import
+surface used by endpoints and validation.
 
 ## Request routing model
 

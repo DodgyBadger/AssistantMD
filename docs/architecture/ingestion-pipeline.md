@@ -24,7 +24,8 @@ Conversely, `web_extract` does not create ingestion jobs or vault artifacts.
 
 ## Entry Points
 
-API entrypoints call service helpers in `api/services.py`:
+API entrypoints call service helpers exported by `api.services` and implemented
+in `api/services/ingestion.py`:
 
 - `/import/scan` -> `scan_import_folder(...)`
 - `/import/url` -> `import_url_direct(...)`
@@ -161,7 +162,7 @@ Behavior:
 
 ## Primary Code
 
-- `api/services.py`
+- `api/services/ingestion.py`
 - `core/ingestion/service.py`
 - `core/ingestion/task_execution.py`
 - `core/ingestion/worker.py`
