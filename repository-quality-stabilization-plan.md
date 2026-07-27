@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 93 errors in 34 of 199 production source files after
-  consolidating typed UI metadata with configuration services. Lint and
+- `uv run mypy api core`: 82 errors in 31 production source files after
+  extracting and typing workflow services. Lint and
   annotation modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -231,9 +231,9 @@ the current import contract.
   migration maintenance surfaces.
 - `api/services/ingestion.py`: import scans and direct URL ingestion.
 - `api/services/workflows.py`: workflow files, lifecycle, execution, scheduler
-  projections, and durable run history.
-- `api/services/system.py`: status, health, activity log, configuration errors,
-  template refresh, and metadata.
+  reload, configuration errors, and durable run history.
+- `api/services/system.py`: status, health, activity log, template refresh, and
+  metadata.
 - `api/services/configuration.py`: general settings, models, providers, secrets,
   and OpenAI OAuth API projections.
 
@@ -284,6 +284,10 @@ Progress:
   construction, and configuration/model/tool scenarios pass.
 - UI metadata now reuses typed model/tool settings projections from the same
   configuration boundary instead of maintaining legacy dictionary fallbacks.
+- Workflow history/projection, source authoring, enablement, configuration
+  errors, scheduler reload, and manual execution now live in a dedicated
+  workflow service. The moved module is type-clean, the stable facade imports
+  remain intact, and the facade is down to 2,908 lines.
 
 ### Validation
 
