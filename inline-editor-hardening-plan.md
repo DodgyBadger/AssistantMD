@@ -479,3 +479,11 @@ H2-01 through H2-06 are implemented.
 Maintainers should still run the full validation suite. Browser-level checks for
 an open Activity modal changing between enabled and read-only states, and for
 create-then-restore without closing the file modal, remain part of live review.
+
+### Workspace Indicator Follow-up
+
+- Replace the Vault Explorer workspace dot in normal and focus modes with a
+  theme-accented glow on the folder SVG itself.
+- Preserve the shared `has-workspace` state, workspace-aware title, and ARIA
+  label; this is a visual-only change.
+- Verify CSS generation, static quality checks, and both theme/layout states.
