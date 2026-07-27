@@ -35,6 +35,7 @@ from core.runtime.paths import (
 from core.runtime.reload_service import reload_configuration
 from core.settings import (
     SettingsError,
+    get_default_chat_mode,
     validate_settings,
 )
 from core.settings.config_editor import (
@@ -59,6 +60,8 @@ from core.settings.store import (
     ProviderConfig,
     SettingsEntry,
     get_active_settings_path,
+    get_disabled_tool_names,
+    get_general_settings,
     get_models_config,
     get_providers_config,
     get_tools_config,
@@ -67,6 +70,7 @@ from core.settings.upgrades import upgrade_settings_mapping
 
 from ..exceptions import SystemConfigurationError
 from ..models import (
+    MetadataResponse,
     ModelConfigRequest,
     ModelInfo,
     OpenAIOAuthCompleteRequest,
@@ -82,8 +86,9 @@ from ..models import (
     SettingInfo,
     SettingUpdateRequest,
     SystemSettingsResponse,
+    ToolInfo,
 )
-from .shared import logger
+from .shared import get_workflow_loader, logger
 
 
 def _build_settings_response(path: Path) -> SystemSettingsResponse:
@@ -866,4 +871,59 @@ def delete_secret_entry(name: str) -> OperationResult:
         success=True,
         message=f"Deleted {name}.",
         restart_required=reload_result.restart_required,
+    )
+
+
+async def get_metadata() -> MetadataResponse:
+    """Return vault, model, tool, and selected settings metadata for the UI."""
+    vaults = list(get_workflow_loader().get_vault_info())
+    config_status = validate_settings()
+    model_issue_messages = {
+        issue.name.split(":", 1)[1]: issue.message
+        for issue in config_status.issues
+        if issue.name.startswith("model:")
+    }
+    models = [
+        _build_model_info(
+            name,
+            config,
+            config_status.model_availability,
+            model_issue_messages,
+        )
+        for name, config in get_models_config().items()
+    ]
+    tools = [
+        ToolInfo(
+            name=name,
+            description=config.description or "",
+            requires_secrets=config.required_secret_keys(),
+            available=config_status.tool_availability.get(name, True),
+            user_editable=config.user_editable,
+            chat_visible=config.chat_visible,
+        )
+        for name, config in get_tools_config().items()
+        if config.chat_visible
+    ]
+    general_settings = get_general_settings()
+    default_entry = general_settings.get("default_context_script")
+    default_context_script = (
+        str(default_entry.value).strip() or None
+        if default_entry is not None and default_entry.value
+        else None
+    )
+    return MetadataResponse(
+        vaults=vaults,
+        models=models,
+        tools=tools,
+        settings={
+            "disabled_tools": get_disabled_tool_names(),
+            "default_chat_mode": get_default_chat_mode(),
+            "default_model_thinking": getattr(
+                general_settings.get("default_model_thinking"), "value", "default"
+            ),
+            "auto_cache_max_tokens": getattr(
+                general_settings.get("auto_cache_max_tokens"), "value", 0
+            ),
+        },
+        default_context_script=default_context_script,
     )

@@ -22,9 +22,9 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 104 errors in 34 of 199 production source files after
-  extracting and typing configuration API services. Lint and annotation
-  modernization initially produced 663 errors in 80 files.
+- `uv run mypy api core`: 93 errors in 34 of 199 production source files after
+  consolidating typed UI metadata with configuration services. Lint and
+  annotation modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
   (29), `no-any-return` (27), `union-attr` (24), and missing/untyped imports
@@ -282,6 +282,8 @@ Progress:
   secrets now live in a dedicated configuration service. Typed settings models
   replace legacy dictionary fallbacks, provider responses are complete at
   construction, and configuration/model/tool scenarios pass.
+- UI metadata now reuses typed model/tool settings projections from the same
+  configuration boundary instead of maintaining legacy dictionary fallbacks.
 
 ### Validation
 
