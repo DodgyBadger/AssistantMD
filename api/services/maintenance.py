@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from core.authoring.cache import purge_expired_cache_artifacts
+from core.authoring.template_discovery import seed_system_templates
 from core.goals import GoalOpsStore
 from core.runtime.paths import get_system_root
 from core.system_migrations import SystemMigrationStatus
@@ -20,6 +21,7 @@ from ..models import (
     SystemMigrationRunResponse,
     SystemMigrationStatusResponse,
     SystemMigrationTargetInfo,
+    SystemTemplateSeedResponse,
 )
 from .shared import logger
 
@@ -152,4 +154,44 @@ def _build_system_migration_status_response(
             )
             for target in status.targets
         ],
+    )
+
+
+def refresh_system_authoring_templates() -> SystemTemplateSeedResponse:
+    """Refresh packaged system Authoring templates on demand."""
+    try:
+        result = seed_system_templates(get_system_root(), overwrite=True)
+    except Exception as exc:
+        raise SystemConfigurationError(
+            f"Failed to refresh system authoring templates: {exc}"
+        ) from exc
+
+    created = result.get("created", [])
+    updated = result.get("updated", [])
+    skipped = result.get("skipped", [])
+    errors = result.get("errors", [])
+    success = bool(result.get("success", False))
+    logger.info(
+        "Manual system authoring template refresh completed",
+        data={
+            "created": len(created),
+            "updated": len(updated),
+            "skipped": len(skipped),
+            "errors": len(errors),
+            "success": success,
+        },
+    )
+    message = (
+        "System authoring templates refreshed: "
+        f"{len(created)} created, {len(updated)} updated, {len(skipped)} skipped."
+    )
+    if errors:
+        message += f" {len(errors)} error(s) occurred."
+    return SystemTemplateSeedResponse(
+        success=success,
+        message=message,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        errors=errors,
     )

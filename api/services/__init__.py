@@ -26,7 +26,6 @@ from core.activity_log import iter_activity_export, query_activity_log
 from core.authoring.template_discovery import (
     list_system_workflow_templates,
     list_templates,
-    seed_system_templates,
 )
 from core.chat import export_chat_transcript, remove_chat_transcript_exports
 from core.chat.chat_store import StoredChatSession
@@ -197,7 +196,6 @@ from ..models import (
     SystemInfo,
     SystemLogResponse,
     SystemSettingsResponse,
-    SystemTemplateSeedResponse,
     SystemWorkflowTemplateSummary,
     TemplateInfo,
     ToolInfo,
@@ -241,6 +239,7 @@ from .maintenance import (
     cleanup_goals,
     get_system_database_migration_status,
     purge_expired_cache,
+    refresh_system_authoring_templates,
     run_system_database_migrations,
 )
 from .shared import chat_store as _chat_store
@@ -1892,49 +1891,6 @@ def set_chat_session_mode(
         chat_mode=normalized,
     )
     return normalized
-
-
-def refresh_system_authoring_templates() -> SystemTemplateSeedResponse:
-    """Refresh packaged system Authoring templates on demand."""
-    try:
-        result = seed_system_templates(get_system_root(), overwrite=True)
-    except Exception as exc:
-        raise SystemConfigurationError(
-            f"Failed to refresh system authoring templates: {exc}"
-        ) from exc
-
-    created = result.get("created", [])
-    updated = result.get("updated", [])
-    skipped = result.get("skipped", [])
-    errors = result.get("errors", [])
-    success = bool(result.get("success", False))
-
-    logger.info(
-        "Manual system authoring template refresh completed",
-        data={
-            "created": len(created),
-            "updated": len(updated),
-            "skipped": len(skipped),
-            "errors": len(errors),
-            "success": success,
-        },
-    )
-
-    message = (
-        "System authoring templates refreshed: "
-        f"{len(created)} created, {len(updated)} updated, {len(skipped)} skipped."
-    )
-    if errors:
-        message += f" {len(errors)} error(s) occurred."
-
-    return SystemTemplateSeedResponse(
-        success=success,
-        message=message,
-        created=created,
-        updated=updated,
-        skipped=skipped,
-        errors=errors,
-    )
 
 
 def get_workflow_load_errors(

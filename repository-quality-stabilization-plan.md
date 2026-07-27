@@ -273,6 +273,8 @@ Progress:
 - System database migration inspection/run projections now share that
   maintenance boundary with a concrete migration-status contract; direct and
   startup migration scenarios pass.
+- Packaged system-template refresh now shares the maintenance boundary; the
+  seed/refresh scenario passes.
 
 ### Validation
 
