@@ -326,3 +326,17 @@ Progress:
 ## Next Phase
 
 Maintainer validation and merge preparation.
+
+## Debt Prevention Guardrail
+
+The agent guides now define the clean production-Python baseline as a required
+commit and handoff gate:
+
+- `uv run ruff check .`
+- `uv run black --check .`
+- `uv run mypy api core`
+
+Feature development, refactor/hardening, testing, and review-prep guidance all
+link to the same canonical rule. The guidance prohibits deferring findings as
+legacy debt, weakening checker configuration, or adding broad suppressions, and
+requires narrow justification for unavoidable external-library boundaries.

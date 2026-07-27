@@ -120,6 +120,9 @@ are ordered by severity; summaries and cleanup suggestions come afterward.
    distinct from structural refactors when practical.
 
 ## Checklist
+- Preserve the zero-finding
+  [Production Python Quality Gate](coding-standards.md#production-python-quality-gate);
+  structural work is not complete while new or discovered findings remain.
 - Remove duplicated logic that can drift:
   parameter schemas, validation paths, payload construction, routing decisions.
 - Extract mixed-responsibility functions into focused helpers.
@@ -154,6 +157,8 @@ are ordered by severity; summaries and cleanup suggestions come afterward.
 - Changing public contracts accidentally while cleaning internals.
 - Leaving split-brain validation or policy logic in multiple helpers.
 - Calling work “done” once scenarios pass without addressing obvious drift risks.
+- Hiding type uncertainty behind broad `Any`, casts, or checker suppressions
+  instead of typing the owning boundary.
 
 ## Reference Docs
 - [Coding Standards](coding-standards.md)

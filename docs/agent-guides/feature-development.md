@@ -13,12 +13,15 @@
 - Prefer narrow, explicit helpers over broad catch-all logic.
 - Add or update decision-boundary logging where the changed behavior needs observability.
 - Keep temporary probes or scaffolding easy to remove.
+- Use targeted Ruff, Black, and MyPy checks while iterating; before committing,
+  run the complete [Production Python Quality Gate](coding-standards.md#production-python-quality-gate).
 
 ## Common Mistakes
 - Writing parallel logic paths that will drift.
 - Adding validation or routing rules in multiple places without a shared source of truth.
 - Hiding real failures behind broad exception handling.
 - Letting implementation sprawl before contract coverage exists.
+- Deferring a static-analysis failure as unrelated legacy debt.
 
 ## Phase Exit
 Move to [Testing and Validation](testing-and-validation.md) once the behavior exists in some form and needs deterministic proof.
