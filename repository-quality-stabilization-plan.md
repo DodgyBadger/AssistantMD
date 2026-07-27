@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 82 errors in 31 production source files after
-  extracting and typing workflow services. Lint and
+- `uv run mypy api core`: 73 errors in 33 of 204 production source files after
+  completing the API service decomposition. Lint and
   annotation modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -288,6 +288,15 @@ Progress:
   errors, scheduler reload, and manual execution now live in a dedicated
   workflow service. The moved module is type-clean, the stable facade imports
   remain intact, and the facade is down to 2,908 lines.
+- Chat persistence, summaries, export, compaction, and mode/workspace state now
+  live in a typed chat-session service; `ChatStore` exposes the stored chat mode
+  as its actual literal contract.
+- Deferred review inspection/submission and Vault Explorer file, revision,
+  upload, mutation, and reference services now have dedicated boundaries. Their
+  shared response/path seams remain centralized rather than duplicated.
+- System status, health, template discovery, and workflow-load errors complete
+  the extraction. `api/services/__init__.py` is now a 343-line compatibility
+  facade, and all extracted service modules are individually type-clean.
 
 ### Validation
 

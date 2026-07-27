@@ -34,6 +34,7 @@ from ..models import (
     SystemWorkflowTemplateSummary,
     WorkflowEnabledResponse,
     WorkflowFileResponse,
+    WorkflowRunInfo,
     WorkflowSummary,
 )
 from .execution_tasks import (
@@ -75,19 +76,20 @@ def _project_latest_workflow_runs(
     workflow_summaries: list[WorkflowSummary],
     system_workflow_templates: list[SystemWorkflowTemplateSummary],
     latest_runs: list[WorkflowRunRecord],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, WorkflowRunInfo]:
     """Map vault workflows and cross-vault system templates to Dashboard rows."""
     workflow_ids = {summary.global_id for summary in workflow_summaries}
     system_template_ids = {
         f"system/{template.name}" for template in system_workflow_templates
     }
-    projected: dict[str, dict[str, Any]] = {}
+    projected: dict[str, WorkflowRunInfo] = {}
     for run in latest_runs:
+        run_info = WorkflowRunInfo.model_validate(run.to_dict())
         if run.workflow_id in workflow_ids:
-            projected[run.workflow_id] = run.to_dict()
+            projected[run.workflow_id] = run_info
             continue
         if run.workflow_name in system_template_ids:
-            projected.setdefault(run.workflow_name, run.to_dict())
+            projected.setdefault(run.workflow_name, run_info)
     return projected
 
 

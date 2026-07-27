@@ -986,7 +986,9 @@ class ChatStore:
             metadata_update={"chat_mode": normalized},
         )
 
-    def get_session_chat_mode(self, session_id: str, vault_name: str) -> str:
+    def get_session_chat_mode(
+        self, session_id: str, vault_name: str
+    ) -> Literal["normal", "inline_edit"]:
         """Return the selected chat mode for one session."""
         value = str(
             self.get_session_metadata(session_id, vault_name).get("chat_mode")
