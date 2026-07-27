@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -13,7 +14,7 @@ from pydantic_ai.toolsets import FunctionToolset
 
 def build_assistant_tools_capabilities(
     *,
-    tools: list[object],
+    tools: Sequence[Any],
     instructions: str,
 ) -> list[Any]:
     """Build Pydantic AI capabilities for AssistantMD tool exposure."""

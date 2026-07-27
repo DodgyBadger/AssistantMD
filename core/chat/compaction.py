@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import (
@@ -359,19 +359,26 @@ async def maybe_auto_compact_after_turn(
             vault_path=vault_path,
             source=ExecutionTaskSource.SYSTEM,
         )
-    return await runtime.task_runner.run_inline(
-        ExecutionTaskSpec(
-            kind=ExecutionTaskKind.HISTORY_COMPACTION,
-            scope=chat_session_scope(session_id),
-            source=ExecutionTaskSource.SYSTEM,
-            label=compaction_task_label(session_id),
-            metadata={"vault": vault_name, "session_id": session_id, "automatic": True},
-        ),
-        lambda _task: compact_chat_history(
-            session_id=session_id,
-            vault_name=vault_name,
-            vault_path=vault_path,
-            source=ExecutionTaskSource.SYSTEM,
+    return cast(
+        ChatHistoryCompactionResult,
+        await runtime.task_runner.run_inline(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.HISTORY_COMPACTION,
+                scope=chat_session_scope(session_id),
+                source=ExecutionTaskSource.SYSTEM,
+                label=compaction_task_label(session_id),
+                metadata={
+                    "vault": vault_name,
+                    "session_id": session_id,
+                    "automatic": True,
+                },
+            ),
+            lambda _task: compact_chat_history(
+                session_id=session_id,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                source=ExecutionTaskSource.SYSTEM,
+            ),
         ),
     )
 

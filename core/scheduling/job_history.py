@@ -189,7 +189,7 @@ def _scheduled_run_time(event: Any) -> str | None:
     if value is None:
         return None
     try:
-        return value.isoformat()
+        return str(value.isoformat())
     except Exception:
         return str(value)
 

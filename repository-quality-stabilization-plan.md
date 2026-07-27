@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 41 errors in 19 of 204 production source files after
-  completing the API service decomposition and low-risk contract typing. Lint and
+- `uv run mypy api core`: zero errors across 204 production source files after
+  completing the API service decomposition and contract typing. Lint and
   annotation modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -297,6 +297,14 @@ Progress:
 - System status, health, template discovery, and workflow-load errors complete
   the extraction. `api/services/__init__.py` is now a 343-line compatibility
   facade, and all extracted service modules are individually type-clean.
+- The remaining production typing backlog is resolved without suppressions:
+  workflow/task results, goal payloads, vault-state transactions, chat
+  compaction/transcripts, chunking image decisions, web results, settings, and
+  scheduler boundaries now expose their actual contracts.
+- Focused workflow history, goals, chat persistence, vault mutation recording,
+  web capability, delegate, and chat compaction scenarios pass. The workflow
+  history scenario caught and verified restoration of the dictionary projection
+  contract before finalizing the batch.
 
 ### Validation
 

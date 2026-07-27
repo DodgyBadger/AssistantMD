@@ -147,8 +147,8 @@ Full documentation:
             source = cls._infer_source(ctx)
             return store.create_goal(
                 vault_name=vault_name,
-                title=data.get("title"),
-                objective=data.get("objective"),
+                title=str(data.get("title") or ""),
+                objective=str(data.get("objective") or ""),
                 workspace_path_hint=data.get("workspace_path_hint"),
                 success_criteria=data.get("success_criteria"),
                 metadata=data.get("metadata"),
@@ -206,7 +206,7 @@ Full documentation:
         if operation == "checkpoint":
             return store.checkpoint(
                 goal_id=_goal_id(goal_id, data),
-                summary=data.get("summary"),
+                summary=str(data.get("summary") or ""),
                 current_state=data.get("current_state"),
                 next_actions=data.get("next_actions"),
                 open_questions=data.get("open_questions"),

@@ -224,17 +224,17 @@ class WorkflowRun(BaseTool):
                             operation=op,
                             message="task_id is required for operation='status'.",
                         )
-                    task, error = await cls._get_scoped_workflow_task(
+                    status_task, error = await cls._get_scoped_workflow_task(
                         task_id=normalized_task_id,
                         vault_name=vault_name,
                     )
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
-                    if task is None:
+                    if status_task is None:
                         raise RuntimeError(
                             "Scoped workflow task lookup returned no task or error"
                         )
-                    return cls._format_task_status(task)
+                    return cls._format_task_status(status_task)
 
                 if op == "cancel":
                     normalized_task_id = (task_id or "").strip()

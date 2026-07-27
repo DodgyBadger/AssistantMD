@@ -6,8 +6,9 @@ Tracks which files have been processed by workflows to support incremental proce
 
 import os
 from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, DateTime, String, Table
 
 from core.database import (
     Base,
@@ -66,7 +67,7 @@ class WorkflowFileStateManager:
 
     def _init_database(self) -> None:
         """Initialize database schema if it doesn't exist."""
-        create_tables(self.engine, ProcessedFile.__table__)
+        create_tables(self.engine, cast(Table, ProcessedFile.__table__))
 
     def _normalize_path_for_state(self, filepath: str) -> str:
         """
@@ -111,7 +112,7 @@ class WorkflowFileStateManager:
 
             return hashes, path_processed_at
 
-    def mark_files_processed(self, file_records: list[dict[str, object]]) -> None:
+    def mark_files_processed(self, file_records: list[dict[str, Any]]) -> None:
         """Mark files as processed for this workflow.
 
         Args:

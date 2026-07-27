@@ -148,7 +148,11 @@ class DelegateTool(BaseTool):
                     thinking=resolved_thinking,
                 )
                 if instructions:
-                    agent.instructions(lambda _ctx, text=instructions: text)
+
+                    def delegate_instructions() -> str:
+                        return instructions
+
+                    agent.instructions(delegate_instructions)
 
                 usage_limits = _delegate_usage_limits(max_tool_calls)
                 result = await asyncio.wait_for(
@@ -412,16 +416,16 @@ def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
                     tool_calls.append(call)
                     tool_calls_by_id[part.tool_call_id] = call
             elif isinstance(part, ToolReturnPart):
-                call = tool_calls_by_id.get(part.tool_call_id)
-                if call is None:
+                returned_call = tool_calls_by_id.get(part.tool_call_id)
+                if returned_call is None:
                     continue
-                call["outcome"] = part.outcome
-                call["result"] = _compact_value(
+                returned_call["outcome"] = part.outcome
+                returned_call["result"] = _compact_value(
                     part.content,
                     max_chars=DELEGATE_AUDIT_MAX_RESULT_CHARS,
                 )
                 if isinstance(part.metadata, dict):
-                    call["metadata"] = _compact_mapping(part.metadata)
+                    returned_call["metadata"] = _compact_mapping(part.metadata)
 
     tool_error_count = sum(
         1

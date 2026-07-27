@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 from core.authoring.workflow_execution import (
     WorkflowExecutionResult,
@@ -297,7 +297,7 @@ class WorkflowGovernor:
                         str(result.status or "").strip().lower()
                         == ExecutionTaskStatus.TIMED_OUT.value
                     ):
-                        return result
+                        return cast(WorkflowExecutionResult, result)
 
                     result = replace(
                         result, details=[*result.details, f"task_id: {active_task_id}"]
@@ -373,7 +373,7 @@ class WorkflowGovernor:
                         execution_time_seconds=result.execution_time_seconds,
                     )
                     await self._mark_task_terminal_from_result(active_task_id, result)
-                    return result
+                    return cast(WorkflowExecutionResult, result)
                 except asyncio.CancelledError:
                     self._log_workflow_event(
                         "workflow_task_cancelled",
@@ -429,20 +429,23 @@ class WorkflowGovernor:
                         global_semaphore.release()
 
             try:
-                return await self._task_runner.run_with_gate(
-                    task,
-                    ExecutionGatePolicy(
-                        key=workflow_vault_scope(vault_name),
-                        queued_status="queued_for_vault",
-                        queued_metadata={
-                            "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
-                        },
-                        queue_position_key=None,
-                        holder_task_id_key=None,
-                        clear_metadata={"workflow_queue_reason": None},
-                        on_queued=_log_vault_gate_queue,
+                return cast(
+                    WorkflowExecutionResult,
+                    await self._task_runner.run_with_gate(
+                        task,
+                        ExecutionGatePolicy(
+                            key=workflow_vault_scope(vault_name),
+                            queued_status="queued_for_vault",
+                            queued_metadata={
+                                "workflow_queue_reason": f"workflow_vault_active:{vault_name}",
+                            },
+                            queue_position_key=None,
+                            holder_task_id_key=None,
+                            clear_metadata={"workflow_queue_reason": None},
+                            on_queued=_log_vault_gate_queue,
+                        ),
+                        _run_in_vault_gate,
                     ),
-                    _run_in_vault_gate,
                 )
             except asyncio.CancelledError as exc:
                 self._workflow_run_store.finalize_run(
@@ -701,6 +704,6 @@ def _workflow_run_terminal_status(result: WorkflowExecutionResult) -> str:
 def _attach_workflow_run_id(exc: BaseException, run_id: str) -> None:
     """Mark raised failures so the scheduler listener does not duplicate them."""
     try:
-        exc.assistantmd_workflow_run_id = run_id
+        cast(Any, exc).assistantmd_workflow_run_id = run_id
     except Exception:
         return

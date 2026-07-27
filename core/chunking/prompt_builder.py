@@ -143,11 +143,13 @@ def build_input_files_prompt(
         _append_text(parts, text_lines, base_prompt)
 
     if not file_lists and not has_empty_directive:
-        prompt = parts[0] if len(parts) == 1 and isinstance(parts[0], str) else parts
+        early_prompt: PromptInput = (
+            parts[0] if len(parts) == 1 and isinstance(parts[0], str) else parts
+        )
         if not parts:
-            prompt = ""
+            early_prompt = ""
         return InputFilesPromptBuildResult(
-            prompt=prompt,
+            prompt=early_prompt,
             prompt_text="".join(text_lines),
             attached_image_count=0,
             attached_image_bytes=0,
@@ -247,7 +249,7 @@ def build_input_files_prompt(
                 continue
 
             source_markdown_path = _resolve_source_markdown_path(item) or filepath
-            decision = evaluate_markdown_image_policy(
+            markdown_decision = evaluate_markdown_image_policy(
                 file_content=content,
                 markdown_chunks=markdown_chunks,
                 source_markdown_path=source_markdown_path,
@@ -255,13 +257,16 @@ def build_input_files_prompt(
                 auto_cache_max_tokens=effective_auto_cache_limit,
                 policy=effective_policy,
             )
-            if not decision.attach_images:
+            if not markdown_decision.attach_images:
                 _append_text(
-                    parts, text_lines, f"{decision.normalized_text or content}\n"
+                    parts,
+                    text_lines,
+                    f"{markdown_decision.normalized_text or content}\n",
                 )
-                if decision.reason:
+                if markdown_decision.reason:
                     warnings.append(
-                        f"Skipped image attachments for '{filepath}': {decision.reason}."
+                        f"Skipped image attachments for '{filepath}': "
+                        f"{markdown_decision.reason}."
                     )
                 continue
 

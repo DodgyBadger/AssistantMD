@@ -48,8 +48,8 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
             for row in session.query(VaultMutation).all()
             if _is_expired(row.expires_at, cleanup_time)
         ]
-        for row in expired_mutations:
-            session.delete(row)
+        for mutation in expired_mutations:
+            session.delete(mutation)
         expired_mutation_rows_deleted = len(expired_mutations)
         session.flush()
 
@@ -61,8 +61,8 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
             .filter(VaultMutation.activity_id == row.activity_id)
             .first()
         ]
-        for row in expired_activities:
-            session.delete(row)
+        for activity in expired_activities:
+            session.delete(activity)
         expired_activity_rows_deleted = len(expired_activities)
 
         expired_snapshots = [
@@ -70,20 +70,20 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
             for row in session.query(SnapshotSet).all()
             if _is_expired(row.expires_at, cleanup_time)
         ]
-        for row in expired_snapshots:
+        for snapshot in expired_snapshots:
             files_deleted, dirs_deleted = _delete_snapshot_root(
-                snapshot_root=Path(row.snapshot_root),
+                snapshot_root=Path(snapshot.snapshot_root),
                 snapshot_base=snapshot_base,
             )
             snapshot_files_deleted += files_deleted
             snapshot_dirs_deleted += dirs_deleted
             for file_snapshot in (
                 session.query(FileSnapshot)
-                .filter(FileSnapshot.snapshot_set_id == row.id)
+                .filter(FileSnapshot.snapshot_set_id == snapshot.id)
                 .all()
             ):
                 session.delete(file_snapshot)
-            session.delete(row)
+            session.delete(snapshot)
         expired_snapshot_rows_deleted = len(expired_snapshots)
         session.commit()
 

@@ -6,12 +6,12 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from core.database import connect_sqlite_from_system_db
 from core.goals.schema import DB_NAME, ensure_goal_ops_schema
-from core.vault_state.service import VaultStateService
+from core.vault_state.service import VaultActivityGroup, VaultStateService
 
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
 GOAL_SOURCE_TYPES = {"chat", "workflow", "context"}
@@ -185,39 +185,39 @@ class GoalOpsStore:
         changed: dict[str, Any] = {}
         if title is not GOAL_FIELD_UNSET:
             assignments.append("title = ?")
-            value = _required_text(title, "title")
-            params.append(value)
-            changed["title"] = value
+            title_value = _required_text(title, "title")
+            params.append(title_value)
+            changed["title"] = title_value
         if objective is not GOAL_FIELD_UNSET:
             assignments.append("objective = ?")
-            value = _required_text(objective, "objective")
-            params.append(value)
-            changed["objective"] = value
+            objective_value = _required_text(objective, "objective")
+            params.append(objective_value)
+            changed["objective"] = objective_value
         if status is not GOAL_FIELD_UNSET:
             assignments.append("status = ?")
-            value = _validate_status(str(status), GOAL_STATUSES, "goal status")
-            params.append(value)
-            changed["status"] = value
+            status_value = _validate_status(str(status), GOAL_STATUSES, "goal status")
+            params.append(status_value)
+            changed["status"] = status_value
         if workspace_path_hint is not GOAL_FIELD_UNSET:
             assignments.append("workspace_path_hint = ?")
-            value = _optional_text(workspace_path_hint)
-            params.append(value)
-            changed["workspace_path_hint"] = value
+            workspace_value = _optional_text(workspace_path_hint)
+            params.append(workspace_value)
+            changed["workspace_path_hint"] = workspace_value
         if success_criteria is not GOAL_FIELD_UNSET:
             assignments.append("success_criteria_json = ?")
-            value = list(_clean_string_list(success_criteria))
-            params.append(_dump_json(value))
-            changed["success_criteria"] = value
+            criteria_value = list(_clean_string_list(success_criteria))
+            params.append(_dump_json(criteria_value))
+            changed["success_criteria"] = criteria_value
         if plan is not GOAL_FIELD_UNSET:
             assignments.append("plan_json = ?")
-            value = _clean_json_value(plan)
-            params.append(_dump_json(value))
-            changed["plan"] = value
+            plan_value = _clean_json_value(plan)
+            params.append(_dump_json(plan_value))
+            changed["plan"] = plan_value
         if metadata is not GOAL_FIELD_UNSET:
             assignments.append("metadata_json = ?")
-            value = _clean_dict(metadata)
-            params.append(_dump_json(value))
-            changed["metadata"] = value
+            metadata_value = _clean_dict(metadata)
+            params.append(_dump_json(metadata_value))
+            changed["metadata"] = metadata_value
         if not assignments:
             raise ValueError("update_goal requires at least one field to update")
         assignments.append("updated_at = ?")
@@ -488,7 +488,7 @@ class GoalOpsStore:
         ).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
-        return row
+        return cast(sqlite3.Row, row)
 
     def _touch_goal(self, conn: sqlite3.Connection, goal_id: str, now: str) -> None:
         conn.execute(
@@ -637,7 +637,7 @@ def _bounded_limit(value: Any, *, maximum: int = 100) -> int:
     return max(1, min(maximum, limit))
 
 
-def _mutation_group_to_dict(group) -> dict[str, Any]:
+def _mutation_group_to_dict(group: VaultActivityGroup) -> dict[str, Any]:
     return {
         "activity_id": group.activity_id,
         "activity_kind": group.activity_kind,

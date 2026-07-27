@@ -33,6 +33,7 @@ from ..models import (
     SystemInfo,
     TemplateInfo,
     VaultInfo,
+    WorkflowRunInfo,
 )
 from .shared import (
     get_vault_path as _get_vault_path,
@@ -406,7 +407,10 @@ async def get_system_status(scheduler: Any | None = None) -> StatusResponse:
             enabled_workflows=enabled_workflows,
             disabled_workflows=disabled_workflows,
             system_workflow_templates=system_workflow_templates,
-            workflow_runs=latest_workflow_runs,
+            workflow_runs={
+                workflow_id: WorkflowRunInfo.model_validate(run)
+                for workflow_id, run in latest_workflow_runs.items()
+            },
             configuration_errors=configuration_errors,
             configuration_status=configuration_status,
         )

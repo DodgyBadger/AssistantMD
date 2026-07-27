@@ -88,10 +88,10 @@ def _extract_transcript_role_and_text(message: StoredChatMessage) -> tuple[str, 
 
     if isinstance(message.message, ModelRequest):
         for part in parts:
-            if isinstance(part, UserPromptPart) and isinstance(
-                getattr(part, "content", None), str
-            ):
-                visible_parts.append(part.content)
+            if isinstance(part, UserPromptPart):
+                content = getattr(part, "content", None)
+                if isinstance(content, str):
+                    visible_parts.append(content)
         return (
             "user",
             "\n".join(

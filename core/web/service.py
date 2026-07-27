@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from core.settings.secrets_store import secret_has_value
 from core.web.config import get_web_strategy_name
 from core.web.errors import WebStrategyConfigurationError, WebUrlPolicyError
@@ -62,7 +64,7 @@ class WebCapabilityService:
             max_results=max(1, min(int(max_results), 10)),
         )
         _assert_result_strategy(selected, result.strategy)
-        return result
+        return cast(WebSearchResult, result)
 
     async def extract(
         self,
@@ -102,7 +104,7 @@ class WebCapabilityService:
         )
         _assert_result_strategy(selected, result.strategy)
         if not policy_failures:
-            return result
+            return cast(WebExtractionResult, result)
         return WebExtractionResult(
             strategy=result.strategy,
             items=result.items,
@@ -135,7 +137,7 @@ class WebCapabilityService:
             allow_external=bool(allow_external),
         )
         _assert_result_strategy(selected, result.strategy)
-        return result
+        return cast(WebCrawlResult, result)
 
 
 def _normalize_urls(urls: str | list[str]) -> list[str]:

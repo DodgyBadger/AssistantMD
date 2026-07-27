@@ -1767,7 +1767,7 @@ def _default_list_max_results() -> int:
         return 200
 
 
-def _default_search_timeout_seconds() -> int:
+def _default_search_timeout_seconds() -> float:
     try:
         return get_file_search_timeout_seconds()
     except Exception:

@@ -108,7 +108,7 @@ def create_job_args(
     """
     if data_root is None:
         runtime = get_runtime_context()
-        data_root = runtime.config.data_root
+        data_root = str(runtime.config.data_root)
 
     return {
         "global_id": global_id,

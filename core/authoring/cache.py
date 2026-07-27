@@ -617,7 +617,7 @@ def add_context_summary(
             ),
         )
         conn.commit()
-        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
             f"Failed to insert context summary for session {session_id}: {exc}"

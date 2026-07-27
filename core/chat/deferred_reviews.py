@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -582,5 +583,5 @@ def _tool_names(requests: DeferredToolRequests) -> list[str]:
     return sorted(names)
 
 
-def _dict_row_factory(cursor, row) -> dict[str, Any]:
+def _dict_row_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> dict[str, Any]:
     return {column[0]: row[index] for index, column in enumerate(cursor.description)}

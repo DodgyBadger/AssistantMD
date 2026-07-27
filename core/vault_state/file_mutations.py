@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
@@ -502,12 +502,15 @@ def restore_file_states_atomically(
                 states=resolved,
                 temp_root=Path(temp_dir),
             )
-            return _run_file_state_restore_transaction(
-                service=VaultStateService(),
-                vault_root=vault_root,
-                vault_name=vault_root.name,
-                states=resolved,
-                before_states=before_states,
+            return cast(
+                tuple[FileStateTransition, ...],
+                _run_file_state_restore_transaction(
+                    service=VaultStateService(),
+                    vault_root=vault_root,
+                    vault_name=vault_root.name,
+                    states=resolved,
+                    before_states=before_states,
+                ),
             )
 
 
@@ -606,13 +609,16 @@ def _restore_vault_file_states_locked(
             )
             return results
 
-        return _run_file_state_restore_transaction(
-            service=service,
-            vault_root=vault_root,
-            vault_name=vault_name,
-            states=states,
-            before_states=before_states,
-            finalize=persist_restore,
+        return cast(
+            tuple[RecordedMutationResult, ...],
+            _run_file_state_restore_transaction(
+                service=service,
+                vault_root=vault_root,
+                vault_name=vault_name,
+                states=states,
+                before_states=before_states,
+                finalize=persist_restore,
+            ),
         )
 
 
