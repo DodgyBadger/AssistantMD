@@ -87,8 +87,16 @@ class ChatTaskSessionQueueScenario(BaseScenario):
             thinking=None,
             context_template=None,
             chat_mode="normal",
+            display_prompt=None,
         ):
-            del vault_path, image_paths, image_uploads, thinking, chat_mode
+            del (
+                vault_path,
+                image_paths,
+                image_uploads,
+                thinking,
+                chat_mode,
+                display_prompt,
+            )
             if prompt == "slow preflight prompt":
                 slow_preflight_started.set()
                 await asyncio.Event().wait()

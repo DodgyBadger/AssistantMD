@@ -74,8 +74,16 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             thinking=None,
             context_template=None,
             chat_mode="normal",
+            display_prompt=None,
         ):
-            del vault_path, image_paths, image_uploads, thinking, chat_mode
+            del (
+                vault_path,
+                image_paths,
+                image_uploads,
+                thinking,
+                chat_mode,
+                display_prompt,
+            )
             history = (
                 chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
             )
