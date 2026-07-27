@@ -22,7 +22,6 @@ from pydantic_ai import DeferredToolResults, ToolApproved, ToolDenied
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from sqlalchemy import func, select
 
-from core.activity_log import iter_activity_export, query_activity_log
 from core.authoring.template_discovery import (
     list_system_workflow_templates,
     list_templates,
@@ -194,7 +193,6 @@ from ..models import (
     SettingUpdateRequest,
     StatusResponse,
     SystemInfo,
-    SystemLogResponse,
     SystemSettingsResponse,
     SystemWorkflowTemplateSummary,
     TemplateInfo,
@@ -250,6 +248,7 @@ from .shared import (
     get_workflow_loader as _get_workflow_loader,
 )
 from .shared import logger
+from .system_activity import export_system_activity_log, get_system_activity_log
 from .vault_activity import (
     SnapshotFileResponse,
     cleanup_vault_state,
@@ -3281,66 +3280,6 @@ async def rescan_vaults_and_update_scheduler(scheduler=None) -> dict[str, Any]:
     except Exception as e:
         error_msg = f"Failed to rescan vaults and update scheduler: {str(e)}"
         raise SystemConfigurationError(error_msg) from e
-
-
-async def get_system_activity_log(
-    *,
-    limit: int = 200,
-    cursor: str | None = None,
-    levels: tuple[str, ...] = (),
-    tags: tuple[str, ...] = (),
-    search: str | None = None,
-    start_time: datetime | None = None,
-    end_time: datetime | None = None,
-) -> SystemLogResponse:
-    """Return one filtered newest-first page from retained System Activity."""
-    log_path = get_system_root() / "activity.log"
-
-    try:
-        page = query_activity_log(
-            log_path,
-            limit=limit,
-            cursor=cursor,
-            levels=levels,
-            tags=tags,
-            search=search,
-            start_time=start_time,
-            end_time=end_time,
-        )
-    except ValueError as exc:
-        raise APIException(
-            status_code=400,
-            error_type="InvalidActivityCursor",
-            message=str(exc),
-        ) from exc
-    except OSError as exc:
-        raise SystemConfigurationError(f"Failed to query activity log: {exc}") from exc
-
-    if not page.entries:
-        return SystemLogResponse(
-            entries=[],
-            next_cursor=None,
-            earliest_retained_timestamp=page.earliest_retained_timestamp,
-            total_matching=page.total_matching,
-            retained_size_bytes=page.total_size_bytes,
-            available_levels=page.available_levels,
-            available_tags=page.available_tags,
-        )
-
-    return SystemLogResponse(
-        entries=page.entries,
-        next_cursor=page.next_cursor,
-        earliest_retained_timestamp=page.earliest_retained_timestamp,
-        total_matching=page.total_matching,
-        retained_size_bytes=page.total_size_bytes,
-        available_levels=page.available_levels,
-        available_tags=page.available_tags,
-    )
-
-
-def export_system_activity_log():
-    """Yield retained raw System Activity JSONL in chronological order."""
-    return iter_activity_export(get_system_root() / "activity.log")
 
 
 def _build_settings_response(path: Path) -> SystemSettingsResponse:

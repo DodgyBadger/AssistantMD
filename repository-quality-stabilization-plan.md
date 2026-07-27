@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 136 errors in 34 of 197 production source files after
-  extracting typed system migration services. Lint and annotation
+- `uv run mypy api core`: 132 errors in 34 of 198 production source files after
+  extracting typed System Activity services. Lint and annotation
   modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`
@@ -275,6 +275,9 @@ Progress:
   startup migration scenarios pass.
 - Packaged system-template refresh now shares the maintenance boundary; the
   seed/refresh scenario passes.
+- Retained System Activity query/export now has its own service module; raw
+  entries and timestamp strings are validated into API models, and the history
+  scenario passes.
 
 ### Validation
 
