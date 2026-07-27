@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic_ai import Embedder
 from pydantic_ai.embeddings import EmbeddingModel
 from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
+from pydantic_ai.embeddings.settings import EmbeddingSettings
 from pydantic_ai.embeddings.test import TestEmbeddingModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -90,7 +91,7 @@ class VectorService:
             raise ValueError("Embedding input cannot be empty")
         resolved = resolve_embedding_model_config(model_alias)
         embedder = Embedder(self._build_embedding_model(resolved))
-        settings = {"dimensions": resolved.dimensions}
+        settings = EmbeddingSettings(dimensions=resolved.dimensions)
         if input_type == "query":
             result = await embedder.embed_query(texts, settings=settings)
         else:

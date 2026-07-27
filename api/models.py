@@ -505,7 +505,7 @@ class StatusResponse(BaseModel):
         description="Configuration errors encountered during loading",
     )
     configuration_status: ConfigurationStatusInfo = Field(
-        default_factory=ConfigurationStatusInfo,
+        default_factory=lambda: ConfigurationStatusInfo(),
         description="Aggregated configuration health information",
     )
 

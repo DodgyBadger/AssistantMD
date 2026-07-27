@@ -46,7 +46,7 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
             if display_source_path is None:
                 display_source_path = options.source_filename
 
-    frontmatter = {
+    frontmatter: dict[str, object | None] = {
         "source": os.path.basename(options.source_filename or ""),
         "source_path": display_source_path,
         "mime": doc.mime,
@@ -163,7 +163,7 @@ def _render_ocr_image_artifacts(
 
 def _as_positive_int(value: object, fallback: int) -> int:
     try:
-        parsed = int(value)
+        parsed = int(str(value))
     except Exception:
         return fallback
     return parsed if parsed > 0 else fallback

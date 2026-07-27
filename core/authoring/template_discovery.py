@@ -309,7 +309,7 @@ def _read_template(path: Path, name: str, source: str) -> TemplateRecord:
 # ---------------------------------------------------------------------------
 
 
-def discover_vaults(data_root: str = None) -> list[str]:
+def discover_vaults(data_root: str | None = None) -> list[str]:
     """Return sorted list of vault names from first-level directories."""
     if data_root is None:
         data_root = str(get_data_root())
@@ -651,8 +651,11 @@ class WorkflowLoader:
     """
 
     def __init__(
-        self, _data_root: str = None, *, _allow_direct_instantiation: bool = False
-    ):
+        self,
+        _data_root: str | None = None,
+        *,
+        _allow_direct_instantiation: bool = False,
+    ) -> None:
         if not _allow_direct_instantiation:
             raise RuntimeError(
                 "Direct WorkflowLoader instantiation is discouraged. "
@@ -667,7 +670,7 @@ class WorkflowLoader:
     async def load_workflows(
         self,
         force_reload: bool = False,
-        target_global_id: str = None,
+        target_global_id: str | None = None,
     ) -> list[WorkflowDefinition]:
         """Load workflows from all vaults or a specific workflow."""
         target_vault = None

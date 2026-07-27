@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from core.database import get_system_database_path
 from core.logger import UnifiedLogger
 from core.settings import (
@@ -31,7 +33,7 @@ class SnapshotCaptureResult:
 
 def ensure_file_snapshot(
     *,
-    session,
+    session: Session,
     activity_id: str | None,
     task_id: str | None,
     task_kind: str | None = None,

@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
 
-_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_ADAPTER: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
 
 @dataclass(frozen=True)

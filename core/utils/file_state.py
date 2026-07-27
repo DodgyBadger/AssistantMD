@@ -64,7 +64,7 @@ class WorkflowFileStateManager:
 
         self._init_database()
 
-    def _init_database(self):
+    def _init_database(self) -> None:
         """Initialize database schema if it doesn't exist."""
         create_tables(self.engine, ProcessedFile.__table__)
 
@@ -111,7 +111,7 @@ class WorkflowFileStateManager:
 
             return hashes, path_processed_at
 
-    def mark_files_processed(self, file_records: list[dict]):
+    def mark_files_processed(self, file_records: list[dict[str, object]]) -> None:
         """Mark files as processed for this workflow.
 
         Args:

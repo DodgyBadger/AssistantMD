@@ -12,6 +12,7 @@ from core.ingestion.models import JobStatus
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
+    ExecutionTaskSnapshot,
     ExecutionTaskSource,
     TaskCoordinator,
     ingestion_task_label,
@@ -31,14 +32,14 @@ class IngestionWorker:
         task_coordinator: TaskCoordinator,
         task_runner: ExecutionTaskRunner,
         max_concurrent: int = 1,
-    ):
+    ) -> None:
         self.process_job_fn = process_job_fn
         self.max_concurrent = max_concurrent
         self.task_coordinator = task_coordinator
         self.task_runner = task_runner
         self.logger = UnifiedLogger(tag="ingestion-worker")
 
-    async def run_once(self):
+    async def run_once(self) -> None:
         queued = [j for j in list_jobs(limit=100) if j.status == JobStatus.QUEUED.value]
         if not queued:
             return
@@ -49,7 +50,7 @@ class IngestionWorker:
             *(self._wait_for_task_terminal(task.task_id) for task in tracked_tasks)
         )
 
-    async def _start_tracked_job(self, job_id: int):
+    async def _start_tracked_job(self, job_id: int) -> ExecutionTaskSnapshot:
         vault = self._job_vault(job_id)
         return await self.task_runner.start_background(
             ExecutionTaskSpec(

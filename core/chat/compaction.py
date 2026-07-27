@@ -46,7 +46,7 @@ from .chat_store import ChatStore
 
 logger = UnifiedLogger(tag="chat-compaction")
 
-_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_ADAPTER: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 _SESSION_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 _SESSION_LOCKS_GUARD = asyncio.Lock()
 _SUMMARY_MARKER = "AssistantMD compacted chat history"

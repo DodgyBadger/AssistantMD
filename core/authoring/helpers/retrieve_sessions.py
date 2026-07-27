@@ -87,7 +87,7 @@ async def execute(
         )
 
     items.sort(key=lambda item: str(item.metadata.get("last_activity_at") or ""))
-    limited_items = tuple(items if limit == "all" else items[:limit])
+    limited_items = tuple(items if limit == "all" else items[: int(limit)])
     result = RetrievedSessionsResult(
         selection=selection,
         status="ok",

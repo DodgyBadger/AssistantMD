@@ -117,27 +117,19 @@ def get_mistral_ocr_config(
     default_endpoint: str = "https://api.mistral.ai/v1/ocr",
 ) -> dict[str, str]:
     settings = get_general_settings()
-    try:
-        model = str(settings.get(model_setting_key).value)
-    except Exception:
-        model = default_model
-        for fallback_key in model_fallback_setting_keys or []:
-            try:
-                model = str(settings.get(fallback_key).value)
-                break
-            except Exception:
-                continue
+    model = default_model
+    for key in [model_setting_key, *(model_fallback_setting_keys or [])]:
+        setting = settings.get(key)
+        if setting is not None and setting.value:
+            model = str(setting.value)
+            break
 
-    try:
-        endpoint = str(settings.get(endpoint_setting_key).value)
-    except Exception:
-        endpoint = default_endpoint
-        for fallback_key in endpoint_fallback_setting_keys or []:
-            try:
-                endpoint = str(settings.get(fallback_key).value)
-                break
-            except Exception:
-                continue
+    endpoint = default_endpoint
+    for key in [endpoint_setting_key, *(endpoint_fallback_setting_keys or [])]:
+        setting = settings.get(key)
+        if setting is not None and setting.value:
+            endpoint = str(setting.value)
+            break
 
     return {"model": model, "endpoint": endpoint}
 

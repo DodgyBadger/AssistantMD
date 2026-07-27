@@ -158,6 +158,7 @@ def normalize_run_messages(
     if limit == "all":
         selected_messages = list(message_history)
     else:
+        assert isinstance(limit, int)
         selected_messages = run_slice(list(message_history), limit)
     return tuple(normalize_run_message(message) for message in selected_messages)
 

@@ -22,8 +22,8 @@ the canonical `uv run ...` baseline is:
   production, root-entry-point, and maintenance-script findings.
 - `uv run black --check .`: passes across all 303 Python files after
   normalization.
-- `uv run mypy api core`: 73 errors in 33 of 204 production source files after
-  completing the API service decomposition. Lint and
+- `uv run mypy api core`: 41 errors in 19 of 204 production source files after
+  completing the API service decomposition and low-risk contract typing. Lint and
   annotation modernization initially produced 663 errors in 80 files.
 - The largest initial production mypy categories were `arg-type` (228),
   `no-untyped-def` (220), `assignment` (43), `attr-defined` (33), `call-arg`

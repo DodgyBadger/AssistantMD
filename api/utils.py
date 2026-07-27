@@ -118,6 +118,7 @@ def create_error_response(exception: Exception) -> JSONResponse:
     if isinstance(exception, APIException):
         details = build_api_error_details(exception)
         error_response = ErrorResponse(
+            success=False,
             error=exception.error_type,
             message=exception.detail,
             details=details,
@@ -141,6 +142,7 @@ def create_error_response(exception: Exception) -> JSONResponse:
 
         if debug_mode:
             error_response = ErrorResponse(
+                success=False,
                 error="InternalServerError",
                 message=str(exception),
                 details={
@@ -151,6 +153,7 @@ def create_error_response(exception: Exception) -> JSONResponse:
         else:
             # Generic error for production
             error_response = ErrorResponse(
+                success=False,
                 error="InternalServerError",
                 message="An unexpected error occurred",
                 details=safe_details,

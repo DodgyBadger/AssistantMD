@@ -118,13 +118,13 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         )
         try:
             general_settings = get_general_settings()
-            ingestion_interval = int(
-                general_settings.get("ingestion_worker_interval_seconds").value
-            )
+            interval_setting = general_settings.get("ingestion_worker_interval_seconds")
+            if interval_setting is not None:
+                ingestion_interval = int(interval_setting.value)
             try:
-                ingestion_max_concurrent = int(
-                    general_settings.get("ingestion_worker_batch_size").value
-                )
+                batch_setting = general_settings.get("ingestion_worker_batch_size")
+                if batch_setting is not None:
+                    ingestion_max_concurrent = int(batch_setting.value)
             except Exception:
                 pass
         except Exception:

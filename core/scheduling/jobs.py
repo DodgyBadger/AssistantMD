@@ -15,7 +15,7 @@ logger = UnifiedLogger(tag="scheduler-jobs")
 RESERVED_JOB_IDS = SYSTEM_JOB_IDS
 
 
-def _get_job_snapshot(scheduler, job_id: str) -> dict[str, Any]:
+def _get_job_snapshot(scheduler: Any, job_id: str) -> dict[str, Any]:
     """Capture job metadata for validation events."""
     job = scheduler.get_job(job_id) if scheduler is not None else None
     if job is None:
@@ -90,7 +90,11 @@ def _log_scheduler_change(message: str, record: dict[str, Any]) -> None:
     )
 
 
-def create_job_args(global_id: str, data_root: str = None, file_path: str = None):
+def create_job_args(
+    global_id: str,
+    data_root: str | None = None,
+    file_path: str | None = None,
+) -> dict[str, Any]:
     """Create picklable job arguments for workflow execution.
 
     Returns lightweight, serializable arguments with flexible config dictionary.
@@ -116,7 +120,7 @@ def create_job_args(global_id: str, data_root: str = None, file_path: str = None
 
 
 async def setup_scheduler_jobs(
-    scheduler, manual_reload: bool = False
+    scheduler: Any, manual_reload: bool = False
 ) -> dict[str, Any]:
     """
     Set up or update scheduler jobs based on vault workflow configuration.

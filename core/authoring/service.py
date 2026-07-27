@@ -165,7 +165,8 @@ def _split_workflow_id(workflow_id: str) -> tuple[str, str]:
         raise ValueError(
             f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}"
         )
-    return workflow_id.split("/", 1)
+    vault_name, workflow_name = workflow_id.split("/", 1)
+    return vault_name, workflow_name
 
 
 def _validate_monty_frontmatter(

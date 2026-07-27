@@ -70,13 +70,12 @@ async def execute(
         limit=limit,
         message_filter=message_filter,
     )
-    integrity = analyze_tool_history_payloads(
-        tuple(
-            item.message
-            for item in result.items
-            if isinstance(getattr(item, "message", None), dict)
-        )
-    )
+    history_payloads: list[dict[str, Any]] = []
+    for item in result.items:
+        message = getattr(item, "message", None)
+        if isinstance(message, dict):
+            history_payloads.append(message)
+    integrity = analyze_tool_history_payloads(tuple(history_payloads))
     items = tuple(_build_safe_history_items(result.items))
     metadata = dict(result.metadata)
     metadata["tool_history_integrity"] = integrity.to_dict()
