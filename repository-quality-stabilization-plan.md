@@ -319,14 +319,10 @@ Progress:
 
 ## Next Steps
 
-1. Decompose `api/services.py` behind a stable package export surface.
-2. Type each extracted service domain before proceeding to the next.
-3. Resolve the remaining small production clusters after API services are
-   clean.
-4. Run focused scenarios for every extraction and any correction that changes
-   executable behavior.
+1. Maintainers run the full validation suite as the final merge gate.
+2. Review the committed decomposition and zero-error production typing baseline
+   before freezing the branch.
 
 ## Next Phase
 
-Feature development for the tooling baseline, followed by refactor and
-hardening for subsystem-by-subsystem type corrections.
+Maintainer validation and merge preparation.
