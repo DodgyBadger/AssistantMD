@@ -482,8 +482,13 @@ create-then-restore without closing the file modal, remain part of live review.
 
 ### Workspace Indicator Follow-up
 
-- Replace the Vault Explorer workspace dot in normal and focus modes with a
-  theme-accented glow on the folder SVG itself.
+- Use three explicit Vault Explorer indicator states in normal and focus modes:
+  no workspace has no glow, an existing workspace has the theme accent glow,
+  and a persisted workspace whose directory is missing has the theme error
+  glow.
 - Preserve the shared `has-workspace` state, workspace-aware title, and ARIA
-  label; this is a visual-only change.
-- Verify CSS generation, static quality checks, and both theme/layout states.
+  label, and add missing-state text for assistive technology.
+- Project directory existence from the API without clearing or rewriting the
+  persisted workspace path.
+- Verify the session persistence scenario, CSS generation, static quality
+  checks, and both theme/layout states.

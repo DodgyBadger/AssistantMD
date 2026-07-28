@@ -302,6 +302,13 @@ body.chat-focus-mode {
         drop-shadow(0 0 0.16rem rgb(var(--accent-primary) / 0.9))
         drop-shadow(0 0 0.38rem rgb(var(--accent-primary) / 0.48));
 }
+.chat-focus-explorer-button.has-missing-workspace svg,
+#file-reference-btn.has-missing-workspace svg {
+    color: rgb(var(--state-error));
+    filter:
+        drop-shadow(0 0 0.16rem rgb(var(--state-error) / 0.9))
+        drop-shadow(0 0 0.38rem rgb(var(--state-error) / 0.48));
+}
 body.chat-focus-mode #app-shell {
     max-width: none;
     width: 100%;

@@ -23,11 +23,15 @@ from core.runtime.execution_tasks import (
     chat_session_scope,
     compaction_task_label,
 )
-from core.runtime.state import get_runtime_context
+from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.runtime.task_runner import ExecutionTaskSpec
 from core.settings.store import (
     get_enabled_tool_names,
     get_enabled_tools_config,
+)
+from core.vault_state.pathing import (
+    resolve_configured_vault_root,
+    resolve_vault_relative_path,
 )
 from core.vector import VectorService
 
@@ -112,11 +116,25 @@ def resolve_chat_session_for_request(
     return generated_session_id
 
 
-def _chat_workspace_info(path: str | None) -> ChatWorkspaceInfo | None:
+def _chat_workspace_info(vault_name: str, path: str | None) -> ChatWorkspaceInfo | None:
     normalized = (path or "").strip()
     if not normalized:
         return None
-    return ChatWorkspaceInfo(path=normalized, exists=True)
+    exists = False
+    try:
+        runtime = get_runtime_context()
+        vault_root = resolve_configured_vault_root(
+            data_root=runtime.config.data_root,
+            vault_name=vault_name,
+        )
+        workspace_path = resolve_vault_relative_path(
+            vault_path=vault_root,
+            path=normalized,
+        )
+        exists = workspace_path.is_dir()
+    except (OSError, RuntimeStateError, ValueError):
+        exists = False
+    return ChatWorkspaceInfo(path=normalized, exists=exists)
 
 
 def _normalize_workspace_path(path: str | None) -> str:
@@ -214,7 +232,7 @@ def set_chat_session_workspace(
             "workspace_set": bool(normalized_path),
         },
     )
-    return _chat_workspace_info(normalized_path)
+    return _chat_workspace_info(vault_name, normalized_path)
 
 
 def set_chat_session_mode(
@@ -256,7 +274,8 @@ def list_chat_sessions(vault_name: str) -> list[ChatSessionInfo]:
             last_activity_at=session.last_activity_at,
             title=session.title or None,
             workspace=_chat_workspace_info(
-                _chat_store.get_session_workspace_path(session.session_id, vault_name)
+                vault_name,
+                _chat_store.get_session_workspace_path(session.session_id, vault_name),
             ),
             chat_mode=_chat_store.get_session_chat_mode(session.session_id, vault_name),
             has_summary=summary_store.get_session_summary(
@@ -369,9 +388,10 @@ def fork_chat_session(
             last_activity_at=new_session.last_activity_at,
             title=new_session.title or None,
             workspace=_chat_workspace_info(
+                vault_name,
                 _chat_store.get_session_workspace_path(
                     new_session.session_id, vault_name
-                )
+                ),
             ),
             chat_mode=_chat_store.get_session_chat_mode(
                 new_session.session_id, vault_name
@@ -611,7 +631,7 @@ def get_chat_session_detail(
         session_id=session_id,
         vault_name=vault_name,
         workspace=_chat_workspace_info(
-            _chat_store.get_session_workspace_path(session_id, vault_name)
+            vault_name, _chat_store.get_session_workspace_path(session_id, vault_name)
         ),
         chat_mode=_chat_store.get_session_chat_mode(session_id, vault_name),
         pending_review=(

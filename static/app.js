@@ -41,6 +41,7 @@ const state = {
     isChatFocusMode: false,
     chatComposerResize: null,
     isWorkspaceUnlocked: false,
+    workspaceExists: null,
     pendingDeferredReview: null
 };
 const chatComposeState = {
@@ -811,21 +812,27 @@ function syncChatControlLocks() {
 
 function syncVaultExplorerButtons() {
     const workspacePath = (chatElements.workspacePathInput?.value || '').trim();
+    const workspaceMissing = Boolean(workspacePath) && state.workspaceExists === false;
     const explorerReadOnly = state.isLoading || Boolean(state.pendingDeferredReview);
     const baseTitle = explorerReadOnly
         ? 'Open vault explorer in read-only mode'
         : 'Open vault explorer';
-    const title = workspacePath
-        ? `${baseTitle}\nWorkspace: ${workspacePath}`
-        : baseTitle;
-    const ariaLabel = workspacePath
-        ? `${baseTitle} for workspace ${workspacePath}`
-        : baseTitle;
+    const title = workspaceMissing
+        ? `${baseTitle}\nWorkspace folder not found: ${workspacePath}`
+        : workspacePath
+            ? `${baseTitle}\nWorkspace: ${workspacePath}`
+            : baseTitle;
+    const ariaLabel = workspaceMissing
+        ? `${baseTitle} for missing workspace ${workspacePath}`
+        : workspacePath
+            ? `${baseTitle} for workspace ${workspacePath}`
+            : baseTitle;
 
     [chatElements.fileReferenceBtn, chatElements.focusExplorerBtn].forEach((button) => {
         if (!button) return;
         button.disabled = false;
         button.classList.toggle('has-workspace', Boolean(workspacePath));
+        button.classList.toggle('has-missing-workspace', workspaceMissing);
         button.title = title;
         button.setAttribute('aria-label', ariaLabel);
     });
@@ -890,6 +897,9 @@ async function loadSession(sessionId) {
         }
         state.pendingDeferredReview = payload.pending_review || null;
         state.isWorkspaceUnlocked = false;
+        state.workspaceExists = payload.workspace
+            ? payload.workspace.exists === true
+            : null;
         if (chatElements.workspacePathInput) {
             chatElements.workspacePathInput.value = payload.workspace?.path || '';
         }
@@ -1305,6 +1315,7 @@ function setupEventListeners() {
 
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.addEventListener('input', () => {
+            state.workspaceExists = null;
             workspacePicker.syncControls();
             refreshChatEmptyState();
         });
@@ -1456,6 +1467,7 @@ function handleVaultChange() {
     state.sessionId = null;
     state.pendingDeferredReview = null;
     state.isWorkspaceUnlocked = false;
+    state.workspaceExists = null;
     state.sessions = [];
     resetChatModeToDefault();
     if (chatElements.workspacePathInput) {
@@ -1877,6 +1889,7 @@ async function clearSession(confirmReset = true) {
     state.sessionId = null;
     state.pendingDeferredReview = null;
     state.isWorkspaceUnlocked = false;
+    state.workspaceExists = null;
     resetChatModeToDefault();
     if (chatElements.workspacePathInput) {
         chatElements.workspacePathInput.value = '';

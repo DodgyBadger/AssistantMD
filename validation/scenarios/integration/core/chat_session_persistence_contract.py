@@ -221,6 +221,8 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 title_response.status_code == 200
             ), "Setting the session title should succeed"
 
+            workspace_directory = Path(vault) / "Projects" / "ForkProbe"
+            workspace_directory.mkdir(parents=True)
             workspace_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/workspace",
                 method="PATCH",
@@ -229,6 +231,25 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
             assert (
                 workspace_response.status_code == 200
             ), "Setting the session workspace should succeed"
+            self.soft_assert_equal(
+                workspace_response.json().get("exists"),
+                True,
+                "Workspace response should report an existing directory",
+            )
+
+            workspace_directory.rmdir()
+            missing_workspace_response = self.call_api(
+                f"/api/chat/sessions/{session_id}",
+                params={"vault_name": vault.name},
+            )
+            assert (
+                missing_workspace_response.status_code == 200
+            ), "Loading a session with a missing workspace should succeed"
+            self.soft_assert_equal(
+                missing_workspace_response.json().get("workspace"),
+                {"path": "Projects/ForkProbe", "exists": False},
+                "Session detail should retain and flag a missing workspace path",
+            )
 
             export_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/export",

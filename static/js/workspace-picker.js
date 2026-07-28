@@ -46,6 +46,9 @@
                 }
                 const payload = await response.json().catch(() => null);
                 input.value = payload?.path || '';
+                state.workspaceExists = payload?.path
+                    ? payload.exists === true
+                    : null;
                 state.isWorkspaceUnlocked = false;
                 await callbacks.fetchSessions(vault, sessionId);
             } catch (error) {
@@ -60,6 +63,7 @@
             if (!elements.workspacePathInput) return;
             elements.workspacePathInput.value = path || '';
             elements.workspacePathInput.dispatchEvent(new Event('input', { bubbles: true }));
+            state.workspaceExists = path ? true : null;
             state.isWorkspaceUnlocked = true;
             syncControls();
             await savePath();

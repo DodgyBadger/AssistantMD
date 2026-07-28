@@ -973,7 +973,7 @@ class ChatWorkspaceInfo(BaseModel):
     """Vault-relative workspace directory associated with a chat session."""
 
     path: str = Field("", description="Vault-relative workspace directory path")
-    exists: bool = Field(False, description="Whether a workspace path is set")
+    exists: bool = Field(False, description="Whether the workspace directory exists")
 
 
 class ChatSessionInfo(BaseModel):
