@@ -35,8 +35,16 @@
             input.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
-        function openExplorer({ revealPath = '', vaultName = '' } = {}) {
+        function openExplorer({
+            revealPath = '',
+            vaultName = '',
+            workspaceSelection = false,
+        } = {}) {
             const vault = vaultName || selectedVault();
+            const savedWorkspace = workspacePath();
+            const workspaceRecovery = Boolean(savedWorkspace)
+                && state.workspaceExists === false;
+            const workspaceSelectionMode = workspaceRecovery || workspaceSelection;
             pickerOpen = true;
             callbacks.openPathPicker?.({
                 id: 'vault-explorer-modal',
@@ -45,8 +53,16 @@
                 vaultName: vault,
                 subtitle: vault,
                 missingVaultMessage: 'Select a vault before opening the explorer.',
-                initialScope: revealPath || vaultName ? 'vault' : (workspacePath() ? 'workspace' : 'vault'),
-                revealInitialPath: revealPath,
+                initialScope: workspaceSelectionMode || revealPath || vaultName
+                    ? 'vault'
+                    : (savedWorkspace ? 'workspace' : 'vault'),
+                revealInitialPath: workspaceRecovery ? '' : revealPath,
+                selectedLabel: workspaceRecovery
+                    ? 'Workspace folder not found'
+                    : (workspaceSelectionMode && savedWorkspace ? 'Current workspace' : ''),
+                selectedPath: workspaceSelectionMode ? savedWorkspace : '',
+                workspaceRecovery,
+                workspaceSelectionMode,
                 explorer: true,
                 showPath: true,
                 expandDirectoriesOnSelect: true,
@@ -57,8 +73,10 @@
                 },
                 onOpenFile: (path) => openFile(path, { vaultName: vault, onBack: () => {} }),
                 onAddReference: insertReference,
-                onSetWorkspace: (path) => {
-                    if (!interactionLocked()) callbacks.setWorkspace?.(path);
+                onSetWorkspace: async (path) => {
+                    if (interactionLocked()) return;
+                    const saved = await callbacks.setWorkspace?.(path);
+                    if (workspaceSelectionMode && saved === true) closePicker();
                 },
                 onMutate: (payload) => mutatePath(payload, vault),
                 onUpload: (file, path) => uploadFile(file, path, vault),

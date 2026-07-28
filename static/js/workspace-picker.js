@@ -6,19 +6,19 @@
 
             const hasSession = Boolean(state.sessionId);
             const hasWorkspace = Boolean(input.value.trim());
-            const locked = state.isLoading || (hasSession && hasWorkspace && !state.isWorkspaceUnlocked);
+            const locked = state.isLoading || (hasSession && hasWorkspace);
 
             input.disabled = locked;
             input.title = locked
-                ? 'Workspace is locked for this session. Unlock to edit.'
+                ? 'Use the folder button to change this session workspace.'
                 : '';
 
             if (elements.workspacePickerBtn) {
-                elements.workspacePickerBtn.disabled = state.isLoading || (locked && !state.isWorkspaceUnlocked);
+                elements.workspacePickerBtn.disabled = state.isLoading;
             }
-            if (elements.workspaceUnlockBtn) {
-                elements.workspaceUnlockBtn.classList.toggle('hidden', !(hasSession && hasWorkspace && locked));
-                elements.workspaceUnlockBtn.disabled = state.isLoading;
+            if (elements.workspaceClearBtn) {
+                elements.workspaceClearBtn.classList.toggle('hidden', !hasWorkspace);
+                elements.workspaceClearBtn.disabled = state.isLoading;
             }
             callbacks.syncExplorerButtons?.();
         }
@@ -31,7 +31,7 @@
             const input = elements.workspacePathInput;
             const vault = elements.vaultSelector?.value || '';
             const sessionId = state.sessionId || '';
-            if (!input || !vault || !sessionId || state.isLoading) return;
+            if (!input || !vault || !sessionId || state.isLoading) return false;
 
             const path = currentPath();
             try {
@@ -49,11 +49,12 @@
                 state.workspaceExists = payload?.path
                     ? payload.exists === true
                     : null;
-                state.isWorkspaceUnlocked = false;
                 await callbacks.fetchSessions(vault, sessionId);
+                return true;
             } catch (error) {
                 console.error('Failed to save workspace path:', error);
                 callbacks.addChatErrorMessage(`Workspace not saved: ${error.message}`);
+                return false;
             } finally {
                 syncControls();
             }
@@ -61,23 +62,31 @@
 
         async function setPath(path) {
             if (!elements.workspacePathInput) return;
+            const previousPath = currentPath();
+            const previousExists = state.workspaceExists;
             elements.workspacePathInput.value = path || '';
             elements.workspacePathInput.dispatchEvent(new Event('input', { bubbles: true }));
             state.workspaceExists = path ? true : null;
-            state.isWorkspaceUnlocked = true;
             syncControls();
-            await savePath();
+            if (!state.sessionId) return true;
+            const saved = await savePath();
+            if (!saved) {
+                elements.workspacePathInput.value = previousPath;
+                state.workspaceExists = previousExists;
+                syncControls();
+            }
+            return saved;
         }
 
-        function unlockPath() {
+        async function clearPath(event) {
+            event?.preventDefault();
+            event?.stopPropagation();
             if (!elements.workspacePathInput || state.isLoading) return;
             const confirmed = window.confirm(
-                'Unlock workspace editing for this session? Future turns will use the updated workspace path.'
+                'Clear the workspace for this session? Future turns will no longer use workspace-specific context.'
             );
             if (!confirmed) return;
-            state.isWorkspaceUnlocked = true;
-            syncControls();
-            elements.workspacePathInput.focus();
+            await setPath('');
         }
 
         function openModal() {
@@ -87,9 +96,22 @@
                 alert('Select a vault before choosing a workspace.');
                 return;
             }
+            const path = currentPath();
+            const workspaceMissing = Boolean(path) && state.workspaceExists === false;
+            if (
+                Boolean(state.sessionId)
+                && path
+                && !workspaceMissing
+                && !window.confirm(
+                    'Change the workspace for this session? Future turns will use the new workspace path.'
+                )
+            ) {
+                return;
+            }
             callbacks.openVaultExplorer?.({
-                revealPath: currentPath(),
+                revealPath: workspaceMissing ? '' : path,
                 subtitle: vault,
+                workspaceSelection: true,
             });
         }
 
@@ -102,7 +124,7 @@
             currentPath,
             savePath,
             setPath,
-            unlockPath,
+            clearPath,
             openModal,
             closeModal,
         });

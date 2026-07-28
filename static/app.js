@@ -40,7 +40,6 @@ const state = {
     compactionStatusRequestId: 0,
     isChatFocusMode: false,
     chatComposerResize: null,
-    isWorkspaceUnlocked: false,
     workspaceExists: null,
     pendingDeferredReview: null
 };
@@ -55,7 +54,7 @@ const chatElements = {
     vaultSelector: document.getElementById('vault-selector'),
     workspacePathInput: document.getElementById('workspace-path-input'),
     workspacePickerBtn: document.getElementById('workspace-picker-btn'),
-    workspaceUnlockBtn: document.getElementById('workspace-unlock-btn'),
+    workspaceClearBtn: document.getElementById('workspace-clear-btn'),
     modelSelector: document.getElementById('model-selector'),
     templateSelector: document.getElementById('template-selector'),
     chatModeSelector: document.getElementById('chat-mode-selector'),
@@ -896,7 +895,6 @@ async function loadSession(sessionId) {
                 : 'normal';
         }
         state.pendingDeferredReview = payload.pending_review || null;
-        state.isWorkspaceUnlocked = false;
         state.workspaceExists = payload.workspace
             ? payload.workspace.exists === true
             : null;
@@ -1340,8 +1338,8 @@ function setupEventListeners() {
         chatElements.workspacePickerBtn.addEventListener('click', workspacePicker.openModal);
     }
 
-    if (chatElements.workspaceUnlockBtn) {
-        chatElements.workspaceUnlockBtn.addEventListener('click', workspacePicker.unlockPath);
+    if (chatElements.workspaceClearBtn) {
+        chatElements.workspaceClearBtn.addEventListener('click', workspacePicker.clearPath);
     }
 
     [chatElements.fileReferenceBtn, chatElements.focusExplorerBtn].forEach((button) => {
@@ -1466,7 +1464,6 @@ function handleVaultChange() {
     const vault = chatElements.vaultSelector ? chatElements.vaultSelector.value : '';
     state.sessionId = null;
     state.pendingDeferredReview = null;
-    state.isWorkspaceUnlocked = false;
     state.workspaceExists = null;
     state.sessions = [];
     resetChatModeToDefault();
@@ -1708,7 +1705,6 @@ async function sendMessage(promptOverride = null) {
     const workspacePathValue = workspacePicker.currentPath() || null;
     const requestSessionId = state.sessionId || createClientSessionId(vault);
     state.sessionId = requestSessionId;
-    state.isWorkspaceUnlocked = false;
     sessionControls.renderSelector();
     sessionControls.updateTitleRow();
     sessionControls.refreshCompactionProgress();
@@ -1888,7 +1884,6 @@ async function clearSession(confirmReset = true) {
 
     state.sessionId = null;
     state.pendingDeferredReview = null;
-    state.isWorkspaceUnlocked = false;
     state.workspaceExists = null;
     resetChatModeToDefault();
     if (chatElements.workspacePathInput) {

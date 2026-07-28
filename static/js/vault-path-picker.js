@@ -72,6 +72,9 @@
                             <div class="p-3 rounded border border-border-primary bg-app-elevated">
                                 <div class="text-xs uppercase text-txt-secondary">${escapeHtml(options.selectedLabel)}</div>
                                 <div class="mt-1 text-sm cell-mono text-txt-primary">${escapeHtml(options.selectedPath || 'None')}</div>
+                                ${options.workspaceSelectionMode
+                                    ? `<div class="mt-2 text-xs text-txt-secondary">Choose <strong>Use</strong> beside a folder to ${options.workspaceRecovery ? 'replace it' : 'set a new workspace'}.</div>`
+                                    : ''}
                             </div>
                         ` : ''}
                         ${showSearch ? `
@@ -478,6 +481,9 @@
                         </button>
                         ${options.explorer ? `
                             <div class="vault-explorer-row-actions">
+                                ${options.workspaceSelectionMode && kind === 'directory'
+                                    ? `<button type="button" class="vault-explorer-workspace-use" data-vault-explorer-row-action="workspace" data-path="${escapeHtml(path)}" data-kind="${kind}" aria-label="Use ${escapeHtml(path)} as the workspace" title="Use as workspace" ${readOnly ? 'disabled' : ''}>Use</button>`
+                                    : ''}
                                 <button type="button" class="ui-icon-button is-compact" data-vault-explorer-copy="${escapeHtml(path)}" aria-label="Copy path" title="Copy path">${icons.COPY_ICON_SVG}</button>
                                 <button type="button" class="ui-icon-button is-compact" data-vault-explorer-more="${escapeHtml(path)}" aria-label="More actions" title="${moreTitle}" ${readOnly ? 'disabled' : ''}>${icons.MORE_HORIZONTAL_ICON_SVG}</button>
                                 <div class="vault-explorer-row-menu hidden" data-vault-explorer-row-menu>

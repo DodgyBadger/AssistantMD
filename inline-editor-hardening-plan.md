@@ -490,5 +490,11 @@ create-then-restore without closing the file modal, remain part of live review.
   label, and add missing-state text for assistive technology.
 - Project directory existence from the API without clearing or rewriting the
   persisted workspace path.
+- When the persisted workspace is missing, open Vault Explorer at the full
+  vault, preserve the stale path as recovery context, and expose a visible
+  replacement action on directory rows.
+- Keep persisted workspace paths read-only, remove the separate unlock state,
+  warn only before replacing a valid workspace, and provide an explicit clear
+  action. Missing workspaces enter replacement mode without another warning.
 - Verify the session persistence scenario, CSS generation, static quality
-  checks, and both theme/layout states.
+  checks, recovery interactions, and both theme/layout states.

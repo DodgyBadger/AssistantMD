@@ -1633,7 +1633,6 @@
                     throw new Error('Fork response did not include a new session id.');
                 }
                 state.sessionId = forkSessionId;
-                state.isWorkspaceUnlocked = false;
                 await callbacks.fetchSessions(vault, forkSessionId);
                 await callbacks.loadSession(forkSessionId);
             } catch (error) {
