@@ -80,9 +80,9 @@ The active/latest message is not part of the retrieved history. Scripts may insp
 
 Context scripts also receive a read-only `workspace` input for the active chat
 session. `workspace.path` is the saved vault-relative workspace path, or an
-empty string when unset. `workspace.exists` is `True` when a path is set. The
-chat agent sees workspace information only when the context script includes it
-in assembled messages or instructions.
+empty string when unset. `workspace.exists` is `True` when the configured
+workspace directory exists. The chat agent sees workspace information only when
+the context script includes it in assembled messages or instructions.
 
 ## Discovery and precedence
 

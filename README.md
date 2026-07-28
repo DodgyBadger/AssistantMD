@@ -1,28 +1,46 @@
 # AssistantMD
 
-AssistantMD turns a markdown vault into a collaborative workbench for you and an AI agent. It is built on three core principles:
+> 🚀 **New in v0.7:** Browse and edit your vault without leaving chat, review
+> agent file changes inline, restore file revisions, and roll back completed
+> activities. See the [release notes](RELEASE_NOTES.md) for details and upgrade
+> guidance.
 
-- Full ownership of your files, skills, workflows and memory.
-- Flexibility to structure work around your needs, even on a per-project basis.
-- Plain text markdown files as the shared source of truth for you and the agent.
+AssistantMD is a self-hosted AI chat interface and Markdown editor in one
+focused work environment. Chat with an assistant, browse and edit
+files, review proposed changes, and automate recurring work without moving
+between separate applications.
 
-Your collection of markdown files is called a vault (borrowing the term from Obsidian). Each folder in your vault is both a place to organize your knowledge and projects, and a shared workspace for collaborating with the agent. At the start of each chat session, you can set a workspace folder so that the session stays oriented (but not locked) to that folder. Add `README.md` and `playbook.md` to your workspace folders to further orient and guide AI-assisted work sessions.
+Each area of your vault can support a different kind of work. Workspace
+orientation, local playbooks, reusable skills, workflows, and configurable
+context help adapt the assistant to the task without requiring you to build and
+manage separate agents.
+
+Your Markdown files remain the durable source of truth: readable, portable, and
+useful with or without AssistantMD.
+
+Any folder in a vault can be selected as the workspace for a chat session,
+giving the assistant focused project context without restricting access to the
+rest of the vault. Add a `README.md` or `playbook.md` to describe the project
+and guide how the assistant works there.
 
 https://github.com/user-attachments/assets/5504eff3-3c5b-4a6d-9482-d1d15a8d76e1
 
 ## Features
 
 - Mounted vaults are isolated from each other.
-- Compatible with all major LLM providers and local models.
-- Supports OpenAI API-key auth plus experimental OpenAI OAuth for chat models.
+- Supports many API model providers as well as experimental OpenAI OAuth (ChatGPT / Codex subscription).
 - Tuned for long-running tasks, tool-heavy agents, and deep work sessions.
-- Image support.
-- Clean, minimal UI including an even more minimal focus mode. And of course dark-mode!
+- Browse, preview, edit, upload, move, and organize vault files in the Vault Explorer.
+- Review and adjust agent file changes before approving them with Inline edit mode.
+- Restore file revisions or roll back all file changes from a completed activity.
+- Attach images when using a multimodal chat model.
+- Clean, minimal UI with focus and dark modes.
 - Context overflow protection for large tool results.
 - Nightly chat history summarization and indexing.
 - Export chat sessions to markdown.
 - Import PDFs and URLs to markdown.
-- Automatic tracking and snapshots of files changed through AssistantMD.
+- Search, extract, and crawl web content with configurable retrieval strategies.
+- Durable workflow history and searchable System Activity for operational visibility.
 - Extensive settings for customizing runtime behavior.
 - Smaller risk surface by focusing agent collaboration inside your vault instead of broad integrations.
 
@@ -35,17 +53,17 @@ And last but not least, **composability**. AssistantMD gives you a set of buildi
 - **[Authoring Reference](docs/use/authoring.md)** — workflow scripts and context assembly scripts
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
-
+- **[Release Notes](RELEASE_NOTES.md)**
 
 ## Requirements
 
 - Docker Engine or Docker Desktop
-- At least one LLM API key or endpoint.
+- At least one LLM API key or endpoint
 - Comfort with the terminal
 
 ## Roadmap
 
-Likely future work includes better import workflows, direct vault-file browsing in the UI, improved provider caching, and carefully scoped household/team deployment options that preserve AssistantMD's single-user vault model.
+Likely future work includes better import workflows, improved provider caching, and carefully scoped household/team deployment options that preserve AssistantMD's single-user vault model.
 
 Exploratory areas include richer chat-session retrieval, prompt/eval tools, provider batch processing for cheaper long-running workflows, and broader multimodal support.
 
