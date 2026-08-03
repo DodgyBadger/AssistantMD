@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts
 from core.authoring.contracts import (
     AuthoringCapabilityCall,
     AuthoringCapabilityDefinition,
@@ -9,9 +10,7 @@ from core.authoring.contracts import (
     RetrievedItem,
 )
 from core.authoring.helpers.common import build_capability
-from core.authoring.cache import get_cache_artifact, purge_expired_cache_artifacts
 from core.logger import UnifiedLogger
-
 
 logger = UnifiedLogger(tag="authoring-host")
 
@@ -31,7 +30,7 @@ async def execute(
 ) -> RetrievedItem:
     host = context.host
     ref = _parse_call(call)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_read_cache_started",
         data={
             "workflow_id": context.workflow_id,
@@ -67,7 +66,7 @@ async def execute(
             metadata=metadata,
         )
 
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_read_cache_completed",
         data={
             "workflow_id": context.workflow_id,
@@ -114,7 +113,7 @@ def _contract() -> dict[str, object]:
         "examples": [
             {
                 "code": (
-                    'artifact = await read_cache(ref="tool/tavily_extract/call_abc123")\n'
+                    'artifact = await read_cache(ref="tool/web_extract/call_abc123")\n'
                     "artifact.content[:2000]"
                 ),
                 "description": "Open one cached oversized tool result for local exploration.",

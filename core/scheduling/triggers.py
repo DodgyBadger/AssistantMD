@@ -5,11 +5,12 @@ Converts ParsedSchedule objects into appropriate APScheduler trigger instances
 (CronTrigger, DateTrigger) for job scheduling.
 """
 
-from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.base import BaseTrigger
+from apscheduler.triggers.date import DateTrigger
+
+from core.logger import UnifiedLogger
 
 from .parser import ParsedSchedule, ScheduleParsingError
-from core.logger import UnifiedLogger
 
 # Create module logger
 logger = UnifiedLogger(tag="scheduling-triggers")
@@ -31,17 +32,17 @@ def create_schedule_trigger(parsed_schedule: ParsedSchedule) -> BaseTrigger:
     try:
         if parsed_schedule.is_cron():
             # CronTrigger already created during parsing
-            return parsed_schedule.parameters['trigger']
+            return parsed_schedule.parameters["trigger"]
         elif parsed_schedule.is_date():
             # Create DateTrigger for one-time schedules
             return DateTrigger(**parsed_schedule.parameters)
         else:
-            raise ScheduleParsingError(f"Unsupported schedule type: {parsed_schedule.schedule_type}")
+            raise ScheduleParsingError(
+                f"Unsupported schedule type: {parsed_schedule.schedule_type}"
+            )
 
     except Exception as e:
         if isinstance(e, ScheduleParsingError):
             raise
         # Convert APScheduler exceptions to our format
         raise ScheduleParsingError(f"Failed to create trigger: {str(e)}") from e
-
-

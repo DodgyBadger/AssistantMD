@@ -6,37 +6,40 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import inspect, or_, select, text
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 
-from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.authoring.template_discovery import discover_vaults
+from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.database import (
     create_engine_from_system_db,
     create_session_factory,
-    create_tables,
     get_system_database_path,
 )
 from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import chat_session_scope
 from core.settings import (
     get_debug_enabled,
     get_vault_state_enabled,
     get_vault_state_excluded_patterns,
 )
-from core.runtime.execution_tasks import chat_session_scope
 from core.utils.hash import hash_file_bytes
+from core.vault_state.activity import VaultActivityContext
 from core.vault_state.identity import resolve_or_create_vault_identity
 from core.vault_state.models import (
     FileSnapshot,
-    TaskFileMutation,
     SnapshotSet,
+    VaultActivity,
     VaultFile,
     VaultFileEvent,
+    VaultMutation,
     VaultRecord,
 )
 from core.vault_state.patterns import ExcludedPathMatcher
-
+from core.vault_state.schema import ensure_vault_state_schema
+from core.vault_state.snapshots import compute_task_mutation_expiration
 
 logger = UnifiedLogger(tag="vault-state")
 
@@ -59,11 +62,13 @@ class VaultStateRefreshResult:
 
 
 @dataclass(frozen=True)
-class VaultTaskMutationItem:
-    """One recorded file mutation from a task."""
+class VaultMutationItem:
+    """One recorded path mutation from a durable vault activity."""
 
     id: int
-    task_id: str
+    activity_id: str
+    operation_id: str
+    task_id: str | None
     task_kind: str | None
     task_source: str | None
     task_scope: str | None
@@ -72,7 +77,9 @@ class VaultTaskMutationItem:
     step_id: str | None
     path: str
     related_path: str | None
+    target_kind: str
     operation: str
+    status: str
     event_sequence: int | None
     before_exists: bool
     before_hash: str | None
@@ -83,11 +90,12 @@ class VaultTaskMutationItem:
     snapshot_ref: str | None
     created_at: datetime
     expires_at: datetime | None
+    metadata: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class VaultTaskMutationGroup:
-    """Recorded file mutations grouped by user-facing activity."""
+class VaultActivityGroup:
+    """Recorded vault mutations grouped by attributed activity."""
 
     activity_id: str
     activity_kind: str
@@ -96,7 +104,9 @@ class VaultTaskMutationGroup:
     chat_session_title: str | None
     chat_session_created_at: str | None
     chat_session_last_activity_at: str | None
-    task_id: str
+    status: str
+    rollback_status: str | None
+    task_id: str | None
     task_kind: str | None
     task_source: str | None
     task_scope: str | None
@@ -106,10 +116,11 @@ class VaultTaskMutationGroup:
     vault_id: str
     vault_name: str
     mutation_count: int
+    operation_count: int
     first_mutation_at: datetime
     last_mutation_at: datetime
     expires_at: datetime | None
-    mutations: tuple[VaultTaskMutationItem, ...]
+    mutations: tuple[VaultMutationItem, ...]
 
 
 @dataclass(frozen=True)
@@ -122,13 +133,32 @@ class VaultSnapshotFile:
     content_hash: str | None
 
 
+@dataclass(frozen=True)
+class VaultFileRevision:
+    """One retained pre-mutation state for a vault path."""
+
+    snapshot_id: int
+    activity_id: str
+    activity_kind: str
+    activity_source: str
+    activity_label: str
+    task_id: str | None
+    path: str
+    operation: str
+    exists: bool
+    content_hash: str | None
+    snapshot_available: bool
+    created_at: datetime
+    expires_at: datetime | None
+
+
 class VaultStateService:
     """Maintain a rebuildable vault manifest and monotonic change feed."""
 
     def __init__(self) -> None:
+        ensure_vault_state_schema()
         self.engine = create_engine_from_system_db("vault_state")
         self.SessionFactory = create_session_factory(self.engine)
-        self._init_database()
 
     def refresh_vault(
         self,
@@ -205,6 +235,7 @@ class VaultStateService:
                     or existing.artifact_class != artifact_class
                 )
                 if not needs_hash:
+                    assert existing is not None
                     existing.last_seen_at = now
                     existing.vault_name = resolved_name
                     files_unchanged += 1
@@ -383,7 +414,166 @@ class VaultStateService:
                 stmt = stmt.limit(limit)
             return list(session.scalars(stmt))
 
-    def list_task_mutations(
+    def ensure_activity(
+        self,
+        *,
+        context: VaultActivityContext,
+        vault_path: str | Path,
+        vault_name: str | None = None,
+        created_at: datetime | None = None,
+    ) -> VaultActivity:
+        """Create or return one durable activity header."""
+        root = Path(vault_path).resolve()
+        identity = resolve_or_create_vault_identity(root)
+        now = created_at or datetime.now(UTC)
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, context.activity_id)
+            if activity is None:
+                activity = VaultActivity(
+                    activity_id=context.activity_id,
+                    vault_id=identity.vault_id,
+                    vault_name=vault_name or root.name,
+                    kind=context.kind,
+                    source=context.source,
+                    scope=context.scope,
+                    label=context.label,
+                    task_id=context.task_id,
+                    goal_id=context.goal_id,
+                    step_id=context.step_id,
+                    status="running",
+                    rollback_status=None,
+                    created_at=now,
+                    updated_at=now,
+                    completed_at=None,
+                    expires_at=compute_task_mutation_expiration(now),
+                    metadata_json=None,
+                )
+                session.add(activity)
+                try:
+                    session.commit()
+                except IntegrityError:
+                    session.rollback()
+                    activity = session.get(VaultActivity, context.activity_id)
+                    if activity is None:
+                        raise
+                else:
+                    session.refresh(activity)
+            session.expunge(activity)
+            return cast(VaultActivity, activity)
+
+    def finish_activity(
+        self,
+        *,
+        activity_id: str,
+        status: str,
+        rollback_status: str | None = None,
+    ) -> None:
+        """Persist one activity outcome when the activity exists."""
+        now = datetime.now(UTC)
+        event_data: dict[str, Any] | None = None
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, activity_id)
+            if activity is None:
+                return
+            if activity.status == "rolled_back" and status != "rolled_back":
+                return
+            effective_rollback_status = (
+                rollback_status
+                if rollback_status is not None
+                else activity.rollback_status
+            )
+            if (
+                activity.status == status
+                and activity.rollback_status == effective_rollback_status
+                and activity.completed_at is not None
+            ):
+                return
+            activity.status = status
+            activity.rollback_status = effective_rollback_status
+            activity.updated_at = now
+            activity.completed_at = now
+            event_data = {
+                "activity_id": activity_id,
+                "vault_id": activity.vault_id,
+                "vault_name": activity.vault_name,
+                "kind": activity.kind,
+                "source": activity.source,
+                "task_id": activity.task_id,
+                "status": status,
+                "rollback_status": effective_rollback_status,
+            }
+            session.commit()
+        if event_data is None:
+            return
+        logger.add_sink("validation").info(
+            "vault_activity_completed",
+            data={
+                "event": "vault_activity_completed",
+                **event_data,
+            },
+        )
+
+    def update_activity_metadata(
+        self,
+        *,
+        activity_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Merge bounded provenance metadata into one existing activity."""
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, activity_id)
+            if activity is None:
+                raise RuntimeError(f"Vault activity not found: {activity_id}")
+            current: dict[str, Any] = {}
+            if activity.metadata_json:
+                parsed = json.loads(activity.metadata_json)
+                if isinstance(parsed, dict):
+                    current = parsed
+            current.update(metadata)
+            activity.metadata_json = json.dumps(current, sort_keys=True)
+            activity.updated_at = datetime.now(UTC)
+            session.commit()
+
+    def set_activity_rollback_status(
+        self,
+        *,
+        activity_id: str,
+        rollback_status: str,
+    ) -> None:
+        """Update only the later rollback outcome of a completed activity."""
+        with self.SessionFactory() as session:
+            activity = session.get(VaultActivity, activity_id)
+            if activity is None:
+                raise RuntimeError(f"Vault activity not found: {activity_id}")
+            activity.rollback_status = rollback_status
+            activity.updated_at = datetime.now(UTC)
+            session.commit()
+
+    def finish_task_activities(
+        self,
+        *,
+        task_id: str,
+        status: str,
+        rollback_status: str | None = None,
+    ) -> int:
+        """Persist a terminal outcome for all vault activities owned by one task."""
+        with self.SessionFactory() as session:
+            activity_ids = list(
+                session.scalars(
+                    select(VaultActivity.activity_id).where(
+                        VaultActivity.task_id == task_id
+                    )
+                )
+            )
+        for activity_id in activity_ids:
+            self.finish_activity(
+                activity_id=activity_id,
+                status=status,
+                rollback_status=rollback_status,
+            )
+        return len(activity_ids)
+
+    def list_activities(
         self,
         *,
         vault_name: str,
@@ -393,98 +583,102 @@ class VaultStateService:
         operation: str | None = None,
         goal_id: str | None = None,
         step_id: str | None = None,
-    ) -> list[VaultTaskMutationGroup]:
-        """Return recent user-facing activity groups for one vault."""
+    ) -> list[VaultActivityGroup]:
+        """Return recent attributed vault activities for one vault."""
         now = datetime.now(UTC)
         group_limit = min(max(limit, 1), 100)
         with self.SessionFactory() as session:
-            stmt = select(TaskFileMutation).where(TaskFileMutation.vault_name == vault_name)
+            stmt = select(VaultActivity).where(VaultActivity.vault_name == vault_name)
             if task_id:
-                stmt = stmt.where(TaskFileMutation.task_id == task_id)
+                stmt = stmt.where(VaultActivity.task_id == task_id)
             if operation:
-                stmt = stmt.where(TaskFileMutation.operation == operation)
+                stmt = (
+                    stmt.join(
+                        VaultMutation,
+                        VaultMutation.activity_id == VaultActivity.activity_id,
+                    )
+                    .where(VaultMutation.operation == operation)
+                    .distinct()
+                )
             if goal_id:
-                stmt = stmt.where(TaskFileMutation.goal_id == goal_id)
+                stmt = stmt.where(VaultActivity.goal_id == goal_id)
             if step_id:
-                stmt = stmt.where(TaskFileMutation.step_id == step_id)
+                stmt = stmt.where(VaultActivity.step_id == step_id)
             if not include_expired:
                 stmt = stmt.where(
                     or_(
-                        TaskFileMutation.expires_at.is_(None),
-                        TaskFileMutation.expires_at >= now,
+                        VaultActivity.expires_at.is_(None),
+                        VaultActivity.expires_at >= now,
                     )
                 )
-            stmt = stmt.order_by(TaskFileMutation.created_at.desc(), TaskFileMutation.id.desc())
-            rows = list(session.scalars(stmt.limit(group_limit * 50)))
-
-        grouped: dict[str, list[TaskFileMutation]] = {}
-        ordered_activity_ids: list[str] = []
-        for row in rows:
-            activity_id = self._activity_group_id(row)
-            if activity_id not in grouped:
-                if len(ordered_activity_ids) >= group_limit:
-                    continue
-                grouped[activity_id] = []
-                ordered_activity_ids.append(activity_id)
-            grouped[activity_id].append(row)
-
-        groups: list[VaultTaskMutationGroup] = []
-        for activity_id in ordered_activity_ids:
-            activity_rows = sorted(grouped[activity_id], key=lambda item: item.created_at)
-            first = activity_rows[0]
-            last = activity_rows[-1]
-            expires_values = [row.expires_at for row in activity_rows if row.expires_at is not None]
-            groups.append(
-                VaultTaskMutationGroup(
-                    activity_id=activity_id,
-                    activity_kind=self._activity_kind(first),
-                    activity_label=self._activity_label(first),
-                    chat_session_id=self._chat_session_id(first),
-                    chat_session_title=None,
-                    chat_session_created_at=None,
-                    chat_session_last_activity_at=None,
-                    task_id=activity_id if self._activity_kind(first) == "chat" else first.task_id,
-                    task_kind=first.task_kind,
-                    task_source=first.task_source,
-                    task_scope=first.task_scope,
-                    task_label=first.task_label,
-                    goal_id=first.goal_id,
-                    step_id=first.step_id,
-                    vault_id=first.vault_id,
-                    vault_name=first.vault_name,
-                    mutation_count=len(activity_rows),
-                    first_mutation_at=first.created_at,
-                    last_mutation_at=last.created_at,
-                    expires_at=min(expires_values) if expires_values else None,
-                    mutations=tuple(
-                        VaultTaskMutationItem(
-                            id=row.id,
-                            task_id=row.task_id,
-                            task_kind=row.task_kind,
-                            task_source=row.task_source,
-                            task_scope=row.task_scope,
-                            task_label=row.task_label,
-                            goal_id=row.goal_id,
-                            step_id=row.step_id,
-                            path=row.path,
-                            related_path=row.related_path,
-                            operation=row.operation,
-                            event_sequence=row.event_sequence,
-                            before_exists=bool(row.before_exists),
-                            before_hash=row.before_hash,
-                            before_snapshot_id=row.before_snapshot_id,
-                            after_exists=bool(row.after_exists),
-                            after_hash=row.after_hash,
-                            after_snapshot_id=row.after_snapshot_id,
-                            snapshot_ref=row.snapshot_ref,
-                            created_at=row.created_at,
-                            expires_at=row.expires_at,
-                        )
-                        for row in activity_rows
-                    ),
-                )
+            stmt = stmt.order_by(
+                VaultActivity.updated_at.desc(),
+                VaultActivity.activity_id.desc(),
             )
+            activities = list(session.scalars(stmt.limit(group_limit)))
+
+            groups: list[VaultActivityGroup] = []
+            for activity in activities:
+                rows = list(
+                    session.scalars(
+                        select(VaultMutation)
+                        .where(VaultMutation.activity_id == activity.activity_id)
+                        .order_by(
+                            VaultMutation.created_at.asc(), VaultMutation.id.asc()
+                        )
+                    )
+                )
+                first_at = rows[0].created_at if rows else activity.created_at
+                last_at = rows[-1].created_at if rows else activity.updated_at
+                expires_values = [
+                    value
+                    for value in [
+                        activity.expires_at,
+                        *(row.expires_at for row in rows),
+                    ]
+                    if value is not None
+                ]
+                groups.append(
+                    self._activity_group(
+                        activity, rows, first_at, last_at, expires_values
+                    )
+                )
         return groups
+
+    @staticmethod
+    def _activity_group(
+        activity: VaultActivity,
+        rows: list[VaultMutation],
+        first_at: datetime,
+        last_at: datetime,
+        expires_values: list[datetime],
+    ) -> VaultActivityGroup:
+        return VaultActivityGroup(
+            activity_id=activity.activity_id,
+            activity_kind=activity.kind,
+            activity_label=activity.label,
+            chat_session_id=_chat_session_id(activity.kind, activity.scope),
+            chat_session_title=None,
+            chat_session_created_at=None,
+            chat_session_last_activity_at=None,
+            status=activity.status,
+            rollback_status=activity.rollback_status,
+            task_id=activity.task_id,
+            task_kind=activity.kind if activity.task_id else None,
+            task_source=activity.source if activity.task_id else None,
+            task_scope=activity.scope if activity.task_id else None,
+            task_label=activity.label if activity.task_id else None,
+            goal_id=activity.goal_id,
+            step_id=activity.step_id,
+            vault_id=activity.vault_id,
+            vault_name=activity.vault_name,
+            mutation_count=len(rows),
+            operation_count=len({row.operation_id for row in rows}),
+            first_mutation_at=first_at,
+            last_mutation_at=last_at,
+            expires_at=min(expires_values) if expires_values else None,
+            mutations=tuple(_mutation_item(activity, row) for row in rows),
+        )
 
     def list_chat_session_mutations(
         self,
@@ -492,52 +686,116 @@ class VaultStateService:
         vault_name: str,
         session_id: str,
         include_expired: bool = False,
-    ) -> tuple[VaultTaskMutationItem, ...]:
+    ) -> tuple[VaultMutationItem, ...]:
         """Return file mutations recorded for one chat session."""
         now = datetime.now(UTC)
         scope = chat_session_scope(session_id)
         with self.SessionFactory() as session:
-            stmt = select(TaskFileMutation).where(
-                TaskFileMutation.vault_name == vault_name,
-                TaskFileMutation.task_kind == "chat",
-                TaskFileMutation.task_scope == scope,
+            stmt = (
+                select(VaultMutation, VaultActivity)
+                .join(
+                    VaultActivity,
+                    VaultActivity.activity_id == VaultMutation.activity_id,
+                )
+                .where(
+                    VaultActivity.vault_name == vault_name,
+                    VaultActivity.kind == "chat",
+                    VaultActivity.scope == scope,
+                )
             )
             if not include_expired:
                 stmt = stmt.where(
                     or_(
-                        TaskFileMutation.expires_at.is_(None),
-                        TaskFileMutation.expires_at >= now,
+                        VaultMutation.expires_at.is_(None),
+                        VaultMutation.expires_at >= now,
                     )
                 )
-            stmt = stmt.order_by(TaskFileMutation.created_at.asc(), TaskFileMutation.id.asc())
-            rows = list(session.scalars(stmt))
+            stmt = stmt.order_by(VaultMutation.created_at.asc(), VaultMutation.id.asc())
+            rows = list(session.execute(stmt))
+
+        return tuple(_mutation_item(activity, mutation) for mutation, activity in rows)
+
+    def list_file_revisions(
+        self,
+        *,
+        vault_name: str,
+        path: str,
+        limit: int = 50,
+        include_expired: bool = False,
+    ) -> tuple[VaultFileRevision, ...]:
+        """Return retained pre-mutation states for one exact vault path."""
+        now = datetime.now(UTC)
+        row_limit = min(max(limit, 1), 100)
+        with self.SessionFactory() as session:
+            stmt = (
+                select(VaultMutation, VaultActivity, FileSnapshot)
+                .join(
+                    VaultActivity,
+                    VaultActivity.activity_id == VaultMutation.activity_id,
+                )
+                .join(
+                    FileSnapshot,
+                    FileSnapshot.id == VaultMutation.before_snapshot_id,
+                )
+                .where(
+                    VaultActivity.vault_name == vault_name,
+                    VaultMutation.path == path,
+                    VaultMutation.target_kind == "file",
+                )
+            )
+            if not include_expired:
+                stmt = stmt.where(
+                    or_(
+                        FileSnapshot.expires_at.is_(None),
+                        FileSnapshot.expires_at >= now,
+                    )
+                )
+            stmt = stmt.order_by(
+                VaultMutation.created_at.desc(),
+                VaultMutation.id.desc(),
+            ).limit(row_limit)
+            rows = list(session.execute(stmt))
 
         return tuple(
-            VaultTaskMutationItem(
-                id=row.id,
-                task_id=row.task_id,
-                task_kind=row.task_kind,
-                task_source=row.task_source,
-                task_scope=row.task_scope,
-                task_label=row.task_label,
-                goal_id=row.goal_id,
-                step_id=row.step_id,
-                path=row.path,
-                related_path=row.related_path,
-                operation=row.operation,
-                event_sequence=row.event_sequence,
-                before_exists=bool(row.before_exists),
-                before_hash=row.before_hash,
-                before_snapshot_id=row.before_snapshot_id,
-                after_exists=bool(row.after_exists),
-                after_hash=row.after_hash,
-                after_snapshot_id=row.after_snapshot_id,
-                snapshot_ref=row.snapshot_ref,
-                created_at=row.created_at,
-                expires_at=row.expires_at,
-            )
-            for row in rows
+            _file_revision_item(mutation, activity, snapshot)
+            for mutation, activity, snapshot in rows
         )
+
+    def get_file_revision(
+        self,
+        *,
+        vault_name: str,
+        snapshot_id: int,
+    ) -> VaultFileRevision | None:
+        """Return one retained mutation revision scoped to a vault."""
+        now = datetime.now(UTC)
+        with self.SessionFactory() as session:
+            row = session.execute(
+                select(VaultMutation, VaultActivity, FileSnapshot)
+                .join(
+                    VaultActivity,
+                    VaultActivity.activity_id == VaultMutation.activity_id,
+                )
+                .join(
+                    FileSnapshot,
+                    FileSnapshot.id == VaultMutation.before_snapshot_id,
+                )
+                .where(
+                    VaultActivity.vault_name == vault_name,
+                    VaultMutation.target_kind == "file",
+                    FileSnapshot.id == snapshot_id,
+                    or_(
+                        FileSnapshot.expires_at.is_(None),
+                        FileSnapshot.expires_at >= now,
+                    ),
+                )
+                .order_by(VaultMutation.created_at.desc(), VaultMutation.id.desc())
+                .limit(1)
+            ).first()
+        if row is None:
+            return None
+        mutation, activity, snapshot = row
+        return _file_revision_item(mutation, activity, snapshot)
 
     def resolve_snapshot_file(self, snapshot_id: int) -> VaultSnapshotFile | None:
         """Resolve one retained file snapshot to an on-disk path under the managed snapshot root."""
@@ -549,7 +807,9 @@ class VaultStateService:
             if snapshot_set is None or not file_snapshot.snapshot_ref:
                 return None
 
-            snapshot_path = (Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref).resolve()
+            snapshot_path = (
+                Path(snapshot_set.snapshot_root) / file_snapshot.snapshot_ref
+            ).resolve()
             snapshot_base = _snapshot_base_root().resolve()
             try:
                 snapshot_path.relative_to(snapshot_base)
@@ -574,40 +834,6 @@ class VaultStateService:
                 vault_path=file_snapshot.path,
                 content_hash=file_snapshot.content_hash,
             )
-
-    @staticmethod
-    def _activity_group_id(row: TaskFileMutation) -> str:
-        """Return the user-facing activity grouping key for a mutation row."""
-        if row.task_kind == "chat" and row.task_scope:
-            return row.task_scope
-        return row.task_id
-
-    @staticmethod
-    def _activity_kind(row: TaskFileMutation) -> str:
-        if row.task_kind == "chat" and row.task_scope:
-            return "chat"
-        if row.task_kind:
-            return row.task_kind
-        return "task"
-
-    @staticmethod
-    def _activity_label(row: TaskFileMutation) -> str:
-        if row.task_kind == "chat":
-            return f"chat: {row.vault_name}"
-        if row.task_kind == "workflow":
-            label = row.task_label or row.task_id
-            return f"workflow: {label}"
-        kind = row.task_kind or "task"
-        label = row.task_label or row.task_id
-        return f"{kind}: {label}"
-
-    @staticmethod
-    def _chat_session_id(row: TaskFileMutation) -> str | None:
-        prefix = "chat_session:"
-        scope = row.task_scope or ""
-        if row.task_kind == "chat" and scope.startswith(prefix):
-            return scope[len(prefix):]
-        return None
 
     def refresh_all_vaults(self, data_root: str | Path) -> dict[str, Any]:
         """Refresh all discovered vaults under a data root.
@@ -689,52 +915,6 @@ class VaultStateService:
             "vault_state_latest_sequence": latest_sequence,
         }
 
-    def _init_database(self) -> None:
-        create_tables(
-            self.engine,
-            VaultRecord.__table__,
-            VaultFile.__table__,
-            VaultFileEvent.__table__,
-            TaskFileMutation.__table__,
-            SnapshotSet.__table__,
-            FileSnapshot.__table__,
-        )
-        self._ensure_task_mutation_columns()
-
-    def _ensure_task_mutation_columns(self) -> None:
-        """Add non-destructive columns needed by newer task mutation readers."""
-        inspector = inspect(self.engine)
-        if "task_file_mutations" not in inspector.get_table_names():
-            return
-        existing_columns = {
-            column["name"] for column in inspector.get_columns("task_file_mutations")
-        }
-        desired_columns = {
-            "task_kind": "VARCHAR",
-            "task_source": "VARCHAR",
-            "task_scope": "VARCHAR",
-            "task_label": "VARCHAR",
-            "goal_id": "VARCHAR",
-            "step_id": "VARCHAR",
-            "related_path": "VARCHAR",
-            "event_sequence": "INTEGER",
-            "before_snapshot_id": "INTEGER",
-            "after_snapshot_id": "INTEGER",
-            "expires_at": "DATETIME",
-        }
-        missing_columns = {
-            name: column_type
-            for name, column_type in desired_columns.items()
-            if name not in existing_columns
-        }
-        if not missing_columns:
-            return
-        with self.engine.begin() as connection:
-            for name, column_type in missing_columns.items():
-                connection.execute(
-                    text(f"ALTER TABLE task_file_mutations ADD COLUMN {name} {column_type}")
-                )
-
     @staticmethod
     def _relative_path(root: Path, path: Path) -> str:
         return str(path.relative_to(root)).replace("\\", "/")
@@ -764,7 +944,9 @@ class VaultStateService:
         return "observed"
 
     @staticmethod
-    def _register_vault(session: Any, *, vault_id: str, vault_name: str, now: datetime) -> None:
+    def _register_vault(
+        session: Any, *, vault_id: str, vault_name: str, now: datetime
+    ) -> None:
         record = session.get(VaultRecord, vault_id)
         if record is None:
             session.add(
@@ -820,7 +1002,9 @@ class VaultStateService:
         sequence: int | None,
     ) -> None:
         event_name = (
-            "vault_state_file_deleted" if event_type == "deleted" else "vault_state_file_changed"
+            "vault_state_file_deleted"
+            if event_type == "deleted"
+            else "vault_state_file_changed"
         )
         data = {
             "event": event_name,
@@ -840,3 +1024,72 @@ class VaultStateService:
 
 def _snapshot_base_root() -> Path:
     return Path(get_system_database_path("vault_state")).parent / "vault_snapshots"
+
+
+def _chat_session_id(kind: str, scope: str | None) -> str | None:
+    prefix = "chat_session:"
+    normalized_scope = scope or ""
+    if kind == "chat" and normalized_scope.startswith(prefix):
+        return normalized_scope[len(prefix) :]
+    return None
+
+
+def _mutation_item(activity: VaultActivity, row: VaultMutation) -> VaultMutationItem:
+    metadata: dict[str, Any] = {}
+    if row.metadata_json:
+        try:
+            parsed = json.loads(row.metadata_json)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except (TypeError, ValueError):
+            metadata = {}
+    return VaultMutationItem(
+        id=row.id,
+        activity_id=activity.activity_id,
+        operation_id=row.operation_id,
+        task_id=activity.task_id,
+        task_kind=activity.kind if activity.task_id else None,
+        task_source=activity.source if activity.task_id else None,
+        task_scope=activity.scope if activity.task_id else None,
+        task_label=activity.label if activity.task_id else None,
+        goal_id=activity.goal_id,
+        step_id=activity.step_id,
+        path=row.path,
+        related_path=row.related_path,
+        target_kind=row.target_kind,
+        operation=row.operation,
+        status=row.status,
+        event_sequence=row.event_sequence,
+        before_exists=bool(row.before_exists),
+        before_hash=row.before_hash,
+        before_snapshot_id=row.before_snapshot_id,
+        after_exists=bool(row.after_exists),
+        after_hash=row.after_hash,
+        after_snapshot_id=row.after_snapshot_id,
+        snapshot_ref=row.snapshot_ref,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        metadata=metadata,
+    )
+
+
+def _file_revision_item(
+    mutation: VaultMutation,
+    activity: VaultActivity,
+    snapshot: FileSnapshot,
+) -> VaultFileRevision:
+    return VaultFileRevision(
+        snapshot_id=snapshot.id,
+        activity_id=activity.activity_id,
+        activity_kind=activity.kind,
+        activity_source=activity.source,
+        activity_label=activity.label,
+        task_id=activity.task_id,
+        path=mutation.path,
+        operation=mutation.operation,
+        exists=bool(snapshot.exists),
+        content_hash=snapshot.content_hash,
+        snapshot_available=bool(snapshot.exists and snapshot.snapshot_ref),
+        created_at=mutation.created_at,
+        expires_at=snapshot.expires_at,
+    )

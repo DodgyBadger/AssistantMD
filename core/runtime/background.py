@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 
@@ -22,12 +22,12 @@ class RuntimeBackgroundSpawner:
 
     def spawn(
         self,
-        coroutine_factory: Callable[[], Awaitable[Any]],
+        coroutine_factory: Callable[[], Coroutine[Any, Any, Any]],
     ) -> None:
         """Schedule a coroutine factory and register the created task for shutdown."""
 
         def _spawn() -> None:
-            background_task = asyncio.create_task(
+            background_task: asyncio.Task[Any] = asyncio.create_task(
                 coroutine_factory(),
                 context=contextvars.Context(),
             )

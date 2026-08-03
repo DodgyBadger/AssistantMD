@@ -1,6 +1,95 @@
 # Release Notes
 
 
+## 2026-08-02 - v0.7.0
+
+### Vault explorer and inline editing
+
+AssistantMD can now handle routine vault browsing, writing, organization, and
+recovery without leaving the chat window.
+
+- **Browse and edit:** Open the Vault Explorer from the chat toolbar or workspace
+  selector. Browse the full vault, preview rendered Markdown, edit UTF-8 text,
+  copy or add paths to a prompt, set the session workspace, create files and
+  folders, upload local files, move or rename paths and delete files or empty folder trees.
+- **Open files from chat:** File and directory references in assistant
+  messages become live links that open the Vault Explorer at the referenced path.
+- **Review agent edits:** Switch a chat session between Normal and Inline edit modes.
+  Inline edit presents each `file_write` operation as an editable approve-or-deny
+  card with the opportunity to make user-edits before approving or provide reasons for denying.
+- **Restore and roll back:** Open a file's revision history in the Vault Explorer
+  to preview or restore an earlier version. From AssistantMD Activity, undo all
+  file changes made by a completed chat turn, workflow run, or Explorer action in
+  one step. Rollback itself can also be undone.
+
+### Improved observability
+
+Workflow outcomes now survive restarts and appear on the Dashboard with run
+history, duration, and failure or skip reasons. An attention summary highlights
+missed, failed, and timed-out runs.
+
+System Activity now retains searchable daily history for up to 30 days, subject
+to a size limit, and supports raw JSONL export. High-volume validation and helper
+events no longer crowd out user-relevant activity.
+
+### Web retrieval
+
+Web research now uses stable `web_search`, `web_extract`, and `web_crawl`
+capabilities with an explicit strategy for each. Strategy failures are reported
+clearly and never silently fall back to another provider.
+
+The built-in curl extraction strategy shares secure, bounded retrieval with URL
+ingestion. Chromium remains available through `browser` for dynamic pages; it
+requires the 2 GB browser-capable profile and should be disabled on smaller
+deployments.
+
+### Misc
+
+- Split the 5,081-line API service module into domain modules while preserving
+  the existing API surface.
+- Cleared 663 production mypy errors and made Ruff and Black clean.
+
+### Breaking changes and upgrade guidance
+
+Revamped several tools:
+- `file_ops_safe` and `file_ops_unsafe` replaced with `file_read` and `file_write`.
+- `web_search_duckduckgo`, `web_search_tavily`, `tavily_extract` and `tavily_crawl` have  been replaced by `web_search`, `web_extract` and `web_crawl`.
+- Choice of provider for each web tool now lives in System settings:  `web_search_strategy`, `web_extract_strategy` and `web_crawl_strategy`.
+
+All custom workflows and context assembly scripts that use the old tools must be updated.
+
+Per-chat tool selection has also been removed. AssistantMD's core functionality depends on the full tool suite working together, so maintaining a different tool set for each chat is no longer practical. The built-in tool suite will stay deliberately small enough not to overwhelm the context window. Users who wish to disable a tool can do so globally with the `disabled_tools` setting (which replaces the previous `enabled_tools` setting).
+
+**After upgrading:**
+
+1. Restart AssistantMD to run registered database migrations. If System / Misc
+   still reports pending Database Migrations, run them there.
+2. Back up any local changes under `system/Authoring`, then run **Refresh System
+   Authoring Scripts** from System / Misc. This overwrites `system/Authoring`;
+   vault scripts under `AssistantMD/Authoring` are not touched.
+3. If System Notices offers **Repair settings from template**, run it. This
+   rewrites retired web tool names in settings, converts the old tool allowlist
+   into `disabled_tools`, adds the strategy settings, and preserves custom tool
+   entries. Review `disabled_tools`, `web_search_strategy`,
+   `web_extract_strategy`, and `web_crawl_strategy`; set Tavily explicitly
+   for each capability that should use it.
+4. Update custom workflows and context scripts under each vault's
+   `AssistantMD/Authoring` directory. Chat can inspect and update these
+   automations for you. Replace retired tool calls as follows:
+
+   - `file_ops_safe` or `file_ops_unsafe`: use `file_read` for `read`, `list`,
+     `search`, and `frontmatter`; use `file_write` for `write`, `append`,
+     `edit_line`, `replace_text`, `move`, `delete`, and `mkdir`.
+   - `web_search_duckduckgo` or `web_search_tavily` → `web_search`
+   - `tavily_extract` → `web_extract`
+   - `tavily_crawl` → `web_crawl`
+
+5. Review custom scripts that catch or ignore tool failures. Structured tool
+   `error` and `failed` results now raise `RuntimeError` inside Monty. Catch only
+   expected probe failures; non-error outcomes such as `not_found` remain
+   ordinary tool results.
+
+
 ## 2026-07-06 - v0.6.10
 
 ### OpenAI OAuth

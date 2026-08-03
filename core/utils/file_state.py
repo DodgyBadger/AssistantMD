@@ -6,17 +6,22 @@ Tracks which files have been processed by workflows to support incremental proce
 
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple
-from sqlalchemy import Column, String, DateTime
+from typing import Any, cast
 
-from core.database import Base, create_engine_from_system_db, create_session_factory, create_tables
-from core.runtime.paths import get_data_root
+from sqlalchemy import Column, DateTime, String, Table
+
+from core.database import (
+    Base,
+    create_engine_from_system_db,
+    create_session_factory,
+    create_tables,
+)
 from core.logger import UnifiedLogger
+from core.runtime.paths import get_data_root
 from core.utils.hash import hash_file_bytes
 from core.utils.patterns import PatternUtilities
 
 logger = UnifiedLogger(tag="file-state")
-
 
 
 class ProcessedFile(Base):
@@ -25,6 +30,7 @@ class ProcessedFile(Base):
     Uses content hashing for robust file identification across renames/moves.
     Stores both hash (for comparison) and filepath (for debugging).
     """
+
     __tablename__ = "processed_files"
 
     vault_name = Column(String, primary_key=True, nullable=False)
@@ -58,11 +64,11 @@ class WorkflowFileStateManager:
         self.SessionFactory = create_session_factory(self.engine)
 
         self._init_database()
-    
-    def _init_database(self):
+
+    def _init_database(self) -> None:
         """Initialize database schema if it doesn't exist."""
-        create_tables(self.engine, ProcessedFile.__table__)
-    
+        create_tables(self.engine, cast(Table, ProcessedFile.__table__))
+
     def _normalize_path_for_state(self, filepath: str) -> str:
         """
         Normalize file path to vault-relative, extension-stripped form used for
@@ -74,24 +80,28 @@ class WorkflowFileStateManager:
             abs_path = filepath
 
         relative_path = os.path.relpath(abs_path, self.vault_path)
-        if relative_path.endswith('.md'):
+        if relative_path.endswith(".md"):
             relative_path = relative_path[:-3]
-        return relative_path.replace('\\', '/')
+        return relative_path.replace("\\", "/")
 
-    def get_processed_state(self) -> Tuple[Set[str], Dict[str, datetime]]:
+    def get_processed_state(self) -> tuple[set[str], dict[str, datetime]]:
         """Get processed hashes and per-path processed timestamps for this workflow."""
         with self.SessionFactory() as session:
-            results = session.query(
-                ProcessedFile.content_hash,
-                ProcessedFile.filepath,
-                ProcessedFile.processed_at
-            ).filter(
-                ProcessedFile.vault_name == self.vault_name,
-                ProcessedFile.workflow_id == self.workflow_id,
-            ).all()
+            results = (
+                session.query(
+                    ProcessedFile.content_hash,
+                    ProcessedFile.filepath,
+                    ProcessedFile.processed_at,
+                )
+                .filter(
+                    ProcessedFile.vault_name == self.vault_name,
+                    ProcessedFile.workflow_id == self.workflow_id,
+                )
+                .all()
+            )
 
             hashes = set()
-            path_processed_at: Dict[str, datetime] = {}
+            path_processed_at: dict[str, datetime] = {}
 
             for content_hash, filepath, processed_at in results:
                 hashes.add(content_hash)
@@ -101,8 +111,8 @@ class WorkflowFileStateManager:
                     path_processed_at[normalized_path] = processed_at
 
             return hashes, path_processed_at
-    
-    def mark_files_processed(self, file_records: List[dict]):
+
+    def mark_files_processed(self, file_records: list[dict[str, Any]]) -> None:
         """Mark files as processed for this workflow.
 
         Args:
@@ -117,24 +127,24 @@ class WorkflowFileStateManager:
                 processed_file = ProcessedFile(
                     vault_name=self.vault_name,
                     workflow_id=self.workflow_id,
-                    content_hash=record['content_hash'],
-                    filepath=self._normalize_path_for_state(record['filepath']),
-                    processed_at=datetime.utcnow()
+                    content_hash=record["content_hash"],
+                    filepath=self._normalize_path_for_state(record["filepath"]),
+                    processed_at=datetime.utcnow(),
                 )
                 session.merge(processed_file)
 
             session.commit()
-    
+
     def get_pending_files(
         self,
-        all_files: List[str],
-        count_limit: Optional[int] = None,
+        all_files: list[str],
+        count_limit: int | None = None,
         *,
         order: str = "ctime",
         direction: str = "asc",
-        filename_dt_pattern: Optional[str] = None,
-        filename_dt_format: Optional[str] = None,
-    ) -> List[str]:
+        filename_dt_pattern: str | None = None,
+        filename_dt_format: str | None = None,
+    ) -> list[str]:
         """Filter list of files to return only pending (unprocessed) files.
 
         Returns files in chronological order (oldest first) up to the count limit.
@@ -168,7 +178,7 @@ class WorkflowFileStateManager:
                         continue
 
                 pending_files.append(filepath)
-            except (IOError, OSError) as e:
+            except OSError as e:
                 # If we can't read the file, include it as pending (it will fail
                 # later with a clear error)
                 logger.warning(
@@ -207,7 +217,9 @@ class WorkflowFileStateManager:
                 "pending_count": pending_count,
                 "order": order,
                 "dir": direction,
-                "pending_paths": [self._normalize_path_for_state(path) for path in pending_files],
+                "pending_paths": [
+                    self._normalize_path_for_state(path) for path in pending_files
+                ],
             },
         )
         return pending_files

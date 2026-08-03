@@ -14,8 +14,14 @@ class ExcludedPathMatcher:
     patterns: tuple[str, ...]
 
     @classmethod
-    def from_patterns(cls, patterns: list[str] | tuple[str, ...]) -> "ExcludedPathMatcher":
-        return cls(patterns=tuple(_normalize_pattern(pattern) for pattern in patterns if pattern))
+    def from_patterns(
+        cls, patterns: list[str] | tuple[str, ...]
+    ) -> ExcludedPathMatcher:
+        return cls(
+            patterns=tuple(
+                _normalize_pattern(pattern) for pattern in patterns if pattern
+            )
+        )
 
     def matches(self, relative_path: str | Path) -> bool:
         """Return True when a path should be excluded."""
@@ -30,7 +36,9 @@ class ExcludedPathMatcher:
                 continue
             if fnmatch.fnmatchcase(normalized, pattern):
                 return True
-            if "/" not in pattern and fnmatch.fnmatchcase(Path(normalized).name, pattern):
+            if "/" not in pattern and fnmatch.fnmatchcase(
+                Path(normalized).name, pattern
+            ):
                 return True
         return False
 

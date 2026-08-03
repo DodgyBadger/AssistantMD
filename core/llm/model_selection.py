@@ -7,10 +7,9 @@ and context systems stay consistent (for example, `none` => skip mode).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from core.utils.value_parser import DirectiveValueParser
-
 
 ModelExecutionMode = Literal["llm", "skip"]
 
@@ -20,8 +19,8 @@ class ModelExecutionSpec:
     """Resolved execution behavior for a model alias string."""
 
     mode: ModelExecutionMode
-    base_alias: Optional[str]
-    raw_alias: Optional[str]
+    base_alias: str | None
+    raw_alias: str | None
 
 
 def resolve_model_execution_spec(model_alias: str | None) -> ModelExecutionSpec:

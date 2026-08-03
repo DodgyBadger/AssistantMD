@@ -14,11 +14,15 @@ from pydantic_ai.messages import ModelMessage, ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
-from core.authoring.contracts import ScriptToolResult, ContextMessage, RetrieveResult, RetrievedItem
-from core.utils.messages import extract_role_and_text, run_slice
+from core.authoring.contracts import (
+    ContextMessage,
+    RetrievedItem,
+    RetrieveResult,
+    ScriptToolResult,
+)
 from core.logger import UnifiedLogger
 from core.runtime.buffers import BufferStore
-
+from core.utils.messages import extract_role_and_text, run_slice
 
 logger = UnifiedLogger(tag="authoring-host")
 
@@ -33,7 +37,7 @@ def coerce_tool_return_value_text(value: Any) -> str:
     """Render a tool return value as text for logs and text-only projections."""
     if isinstance(value, str):
         return value
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         text_parts = [part for part in value if isinstance(part, str)]
         if text_parts:
             return "\n".join(text_parts)
@@ -154,6 +158,7 @@ def normalize_run_messages(
     if limit == "all":
         selected_messages = list(message_history)
     else:
+        assert isinstance(limit, int)
         selected_messages = run_slice(list(message_history), limit)
     return tuple(normalize_run_message(message) for message in selected_messages)
 
@@ -176,7 +181,7 @@ def normalize_run_message(message: ModelMessage) -> RetrievedItem:
 def normalize_object_sequence(value: Any, *, field_name: str) -> tuple[Any, ...]:
     if value is None:
         return ()
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return tuple(value)
     raise ValueError(f"{field_name} must be a list or tuple when provided")
 
@@ -190,12 +195,18 @@ def normalize_optional_string(value: Any, *, field_name: str) -> str | None:
     return normalized or None
 
 
-def normalize_context_message(value: Any, *, default_role: str | None = None) -> ContextMessage:
+def normalize_context_message(
+    value: Any, *, default_role: str | None = None
+) -> ContextMessage:
     if isinstance(value, ContextMessage):
         return value
     if isinstance(value, RetrievedItem):
-        role = str(value.metadata.get("role") or default_role or "system").strip().lower()
-        return ContextMessage(role=role, content=value.content, metadata=dict(value.metadata))
+        role = (
+            str(value.metadata.get("role") or default_role or "system").strip().lower()
+        )
+        return ContextMessage(
+            role=role, content=value.content, metadata=dict(value.metadata)
+        )
     if isinstance(value, dict):
         role = str(value.get("role") or default_role or "system").strip().lower()
         content = str(value.get("content") or "")
@@ -205,7 +216,9 @@ def normalize_context_message(value: Any, *, default_role: str | None = None) ->
         elif isinstance(metadata, dict):
             metadata_dict = dict(metadata)
         else:
-            raise ValueError("assemble_context message metadata must be a dictionary when provided")
+            raise ValueError(
+                "assemble_context message metadata must be a dictionary when provided"
+            )
         return ContextMessage(role=role, content=content, metadata=metadata_dict)
     if isinstance(value, str):
         return ContextMessage(role=(default_role or "system"), content=value)
@@ -278,7 +291,7 @@ def normalize_tool_result(
                 vault_path=vault_path,
             ),
         )
-    if isinstance(result, (dict, list, tuple)):
+    if isinstance(result, dict | list | tuple):
         try:
             return_value = json.dumps(result, ensure_ascii=False, indent=2)
             metadata = {"tool_name": tool_name, "return_type": "json"}
@@ -319,21 +332,25 @@ def _project_tool_items(
     vault_path: str,
 ) -> tuple[RetrievedItem, ...]:
     return_value_text = coerce_tool_return_value_text(return_value)
-    if tool_name == "file_ops_safe":
-        return _project_file_ops_safe_items(
+    if tool_name in {"file_read", "file_ops_safe"}:
+        return _project_file_read_items(
+            tool_name=tool_name,
             return_value=return_value,
             return_value_text=return_value_text,
             metadata=metadata,
             content=content,
             vault_path=vault_path,
         )
-    if tool_name in {
-        "browser",
-        "web_search_duckduckgo",
-        "web_search_tavily",
-        "tavily_extract",
-        "tavily_crawl",
-    } and return_value_text.strip():
+    if (
+        tool_name
+        in {
+            "browser",
+            "web_search",
+            "web_extract",
+            "web_crawl",
+        }
+        and return_value_text.strip()
+    ):
         return (
             RetrievedItem(
                 ref=str(metadata.get("url") or metadata.get("endpoint") or tool_name),
@@ -350,13 +367,14 @@ def _tool_return_value_type(value: Any) -> str:
         return "none"
     if isinstance(value, str):
         return "text"
-    if isinstance(value, (dict, list, tuple)):
+    if isinstance(value, dict | list | tuple):
         return "json"
     return type(value).__name__
 
 
-def _project_file_ops_safe_items(
+def _project_file_read_items(
     *,
+    tool_name: str,
     return_value: Any,
     return_value_text: str,
     metadata: dict[str, Any],
@@ -376,7 +394,7 @@ def _project_file_ops_safe_items(
         media_mode = str(metadata.get("media_mode") or "").strip()
         item_metadata = {
             **metadata,
-            "source_tool": "file_ops_safe",
+            "source_tool": tool_name,
             "source_path": path,
             "filepath": str(metadata.get("filepath") or path),
         }
@@ -411,13 +429,15 @@ def _project_file_ops_safe_items(
                 content="",
                 exists=True,
                 metadata={
-                    "source_tool": "file_ops_safe",
+                    "source_tool": tool_name,
                     "source_path": path,
                     "filepath": path,
                     **metadata,
                 },
             )
-            for path in _file_ops_paths(metadata=metadata, result_text=return_value_text)
+            for path in _file_ops_paths(
+                metadata=metadata, result_text=return_value_text
+            )
         )
 
     return ()
@@ -464,7 +484,9 @@ def _file_ops_paths(*, metadata: dict[str, Any], result_text: str) -> tuple[str,
         line = raw_line.strip()
         if line.startswith("📄 "):
             candidate = line.partition(" ")[2].strip()
-        elif ":" in line and not line.startswith(("Found ", "No matches", "Search error")):
+        elif ":" in line and not line.startswith(
+            ("Found ", "No matches", "Search error")
+        ):
             candidate = line.split(":", 1)[0].strip()
         else:
             continue
@@ -483,7 +505,7 @@ def _file_ops_read_content(
 ) -> str:
     if isinstance(return_value, str):
         return return_value
-    if isinstance(return_value, (list, tuple)):
+    if isinstance(return_value, list | tuple):
         text_parts = [part for part in return_value if isinstance(part, str)]
         if text_parts:
             return "\n".join(text_parts)
@@ -492,7 +514,9 @@ def _file_ops_read_content(
     if vault_path:
         try:
             candidate = Path(path)
-            full_path = candidate if candidate.is_absolute() else Path(vault_path) / candidate
+            full_path = (
+                candidate if candidate.is_absolute() else Path(vault_path) / candidate
+            )
             resolved_vault = Path(vault_path).resolve()
             resolved_path = full_path.resolve()
             if (
@@ -516,7 +540,7 @@ def normalize_retrieved_items_input(
         return tuple(value.items)
     if isinstance(value, RetrievedItem):
         return (value,)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         normalized: list[RetrievedItem] = []
         for item in value:
             if not isinstance(item, RetrievedItem):
@@ -542,7 +566,9 @@ def build_input_file_data(inputs: tuple[RetrievedItem, ...]) -> list[dict[str, A
         if not source_path and item.ref:
             source_path = str(item.ref)
         if not source_path:
-            raise ValueError("inputs must come from retrieve(file) results with source paths")
+            raise ValueError(
+                "inputs must come from retrieve(file) results with source paths"
+            )
         records.append(
             {
                 "filepath": filepath or source_path,

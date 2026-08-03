@@ -47,8 +47,9 @@ class ChatCancellationScenario(BaseScenario):
 
         await self.start_system()
 
-        import core.chat.executor as chat_executor
         from pydantic_ai.models.test import TestModel
+
+        import core.chat.executor as chat_executor
 
         async def _prepared_hanging_chat(*args, **kwargs):
             return PreparedChatExecution(
@@ -92,9 +93,9 @@ class ChatCancellationScenario(BaseScenario):
                     break
                 await asyncio.sleep(0.05)
 
-            assert active and active[-1].status == "running", (
-                "Chat execution should register a running task"
-            )
+            assert (
+                active and active[-1].status == "running"
+            ), "Chat execution should register a running task"
             self.soft_assert_equal(
                 active[-1].task_id,
                 task_id,
@@ -105,23 +106,31 @@ class ChatCancellationScenario(BaseScenario):
                 if written_path.exists():
                     break
                 await asyncio.sleep(0.05)
-            assert written_path.exists(), "Hanging chat should write the rollback probe before cancellation"
+            assert (
+                written_path.exists()
+            ), "Hanging chat should write the rollback probe before cancellation"
 
-            active_response = self.call_api(f"/api/chat/sessions/{session_id}/active-task")
-            assert active_response.status_code == 200, "Active chat task endpoint succeeds"
-            assert active_response.json().get("task_id") == task_id, (
-                "Active chat task endpoint returns the running task"
+            active_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/active-task"
             )
+            assert (
+                active_response.status_code == 200
+            ), "Active chat task endpoint succeeds"
+            assert (
+                active_response.json().get("task_id") == task_id
+            ), "Active chat task endpoint returns the running task"
 
             checkpoint = self.event_checkpoint()
             cancel_response = self.call_api(
                 f"/api/chat/sessions/{session_id}/cancel",
                 method="POST",
             )
-            assert cancel_response.status_code == 200, "Chat session cancel endpoint succeeds"
-            assert cancel_response.json().get("cancelled") is True, (
-                "Chat session cancel should acknowledge cancellation"
-            )
+            assert (
+                cancel_response.status_code == 200
+            ), "Chat session cancel endpoint succeeds"
+            assert (
+                cancel_response.json().get("cancelled") is True
+            ), "Chat session cancel should acknowledge cancellation"
 
             for _ in range(50):
                 task_snapshot = await runtime.task_coordinator.get_task(task_id)
@@ -131,11 +140,15 @@ class ChatCancellationScenario(BaseScenario):
             rollback_events = self.events_since(checkpoint)
 
             task_detail = self.call_api(f"/api/tasks/{task_id}")
-            assert task_detail.status_code == 200, "Cancelled task detail remains queryable"
-            assert task_detail.json().get("status") == "cancelled", (
-                "Cancelled chat task should have cancelled terminal status"
-            )
-            assert not (Path(vault) / "notes/cancelled-chat-write.md").exists(), (
+            assert (
+                task_detail.status_code == 200
+            ), "Cancelled task detail remains queryable"
+            assert (
+                task_detail.json().get("status") == "cancelled"
+            ), "Cancelled chat task should have cancelled terminal status"
+            assert not (
+                Path(vault) / "notes/cancelled-chat-write.md"
+            ).exists(), (
                 "Cancelled chat task should rollback files created before cancellation"
             )
             self.assert_event_contains(
@@ -147,25 +160,33 @@ class ChatCancellationScenario(BaseScenario):
                 },
             )
 
-            active_after_cancel = self.call_api(f"/api/chat/sessions/{session_id}/active-task")
-            assert active_after_cancel.status_code == 404, (
-                "Cancelled chat session should no longer have an active task"
+            active_after_cancel = self.call_api(
+                f"/api/chat/sessions/{session_id}/active-task"
             )
+            assert (
+                active_after_cancel.status_code == 404
+            ), "Cancelled chat session should no longer have an active task"
 
             detail = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
             )
-            assert detail.status_code == 200, "Cancelled chat session detail is persisted"
+            assert (
+                detail.status_code == 200
+            ), "Cancelled chat session detail is persisted"
             messages = detail.json().get("messages", [])
-            assert len(messages) == 1, "Cancelled chat should persist only the user turn"
-            assert messages[0].get("role") == "user", (
-                "Cancelled chat persisted message should be the user prompt"
-            )
-            assert "Cancel this chat." in messages[0].get("content", ""), (
-                "Cancelled chat should retain the submitted prompt"
-            )
+            assert (
+                len(messages) == 1
+            ), "Cancelled chat should persist only the user turn"
+            assert (
+                messages[0].get("role") == "user"
+            ), "Cancelled chat persisted message should be the user prompt"
+            assert "Cancel this chat." in messages[0].get(
+                "content", ""
+            ), "Cancelled chat should retain the submitted prompt"
 
-            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            def _patched_prepare_agent_config(
+                vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+            ):
                 del vault_name, vault_path, tools, model, thinking
                 return ("Answer briefly.", "", TestModel(), [])
 
@@ -192,12 +213,12 @@ class ChatCancellationScenario(BaseScenario):
                 }
             )
             assert follow_up["text"], "Follow-up chat execution should complete"
-            assert follow_up["terminal_event"].get("event") == "done", (
-                "Follow-up chat task should complete"
-            )
-            assert captured_preflight_history == [("user", "Cancel this chat.")], (
-                "The next turn should load the cancelled user prompt from persisted session history"
-            )
+            assert (
+                follow_up["terminal_event"].get("event") == "done"
+            ), "Follow-up chat task should complete"
+            assert captured_preflight_history == [
+                ("user", "Cancel this chat.")
+            ], "The next turn should load the cancelled user prompt from persisted session history"
         finally:
             chat_executor._prepare_chat_execution = original_prepare_chat_execution
             chat_executor._prepare_agent_config = original_prepare_agent_config

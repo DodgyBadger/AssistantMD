@@ -11,27 +11,58 @@ from pathlib import Path
 
 from core.chat.schema import (
     CHAT_SESSION_MIGRATIONS,
-    DB_NAME as CHAT_SESSIONS_DB_NAME,
-    MIGRATION_NAMESPACE as CHAT_SESSIONS_MIGRATION_NAMESPACE,
     ensure_chat_sessions_schema,
+)
+from core.chat.schema import (
+    DB_NAME as CHAT_SESSIONS_DB_NAME,
+)
+from core.chat.schema import (
+    MIGRATION_NAMESPACE as CHAT_SESSIONS_MIGRATION_NAMESPACE,
 )
 from core.database import get_system_database_path
 from core.database_migrations import SQLiteMigration
 from core.goals.schema import (
     DB_NAME as GOAL_OPS_DB_NAME,
+)
+from core.goals.schema import (
     GOAL_OPS_MIGRATIONS,
-    MIGRATION_NAMESPACE as GOAL_OPS_MIGRATION_NAMESPACE,
     ensure_goal_ops_schema,
+)
+from core.goals.schema import (
+    MIGRATION_NAMESPACE as GOAL_OPS_MIGRATION_NAMESPACE,
 )
 from core.logger import UnifiedLogger
 from core.memory.schema import (
     DB_NAME as SESSION_SUMMARIES_DB_NAME,
+)
+from core.memory.schema import (
     MIGRATION_NAMESPACE as SESSION_SUMMARIES_MIGRATION_NAMESPACE,
+)
+from core.memory.schema import (
     SESSION_SUMMARY_MIGRATIONS,
     ensure_session_summary_schema,
 )
 from core.runtime.paths import get_system_root
-
+from core.vault_state.schema import (
+    DB_NAME as VAULT_STATE_DB_NAME,
+)
+from core.vault_state.schema import (
+    MIGRATION_NAMESPACE as VAULT_STATE_MIGRATION_NAMESPACE,
+)
+from core.vault_state.schema import (
+    VAULT_STATE_MIGRATIONS,
+    ensure_vault_state_schema,
+)
+from core.workflow_runs.schema import (
+    DB_NAME as WORKFLOW_RUNS_DB_NAME,
+)
+from core.workflow_runs.schema import (
+    MIGRATION_NAMESPACE as WORKFLOW_RUNS_MIGRATION_NAMESPACE,
+)
+from core.workflow_runs.schema import (
+    WORKFLOW_RUN_MIGRATIONS,
+    ensure_workflow_run_schema,
+)
 
 logger = UnifiedLogger(tag="system_migrations")
 
@@ -99,10 +130,30 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
             apply_migrations=True,
         ),
     ),
+    SystemMigrationTarget(
+        db_name=VAULT_STATE_DB_NAME,
+        namespace=VAULT_STATE_MIGRATION_NAMESPACE,
+        migrations=VAULT_STATE_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_vault_state_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=WORKFLOW_RUNS_DB_NAME,
+        namespace=WORKFLOW_RUNS_MIGRATION_NAMESPACE,
+        migrations=WORKFLOW_RUN_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_workflow_run_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
 )
 
 
-def get_system_migration_status(system_root: str | Path | None = None) -> SystemMigrationStatus:
+def get_system_migration_status(
+    system_root: str | Path | None = None,
+) -> SystemMigrationStatus:
     """Return pending system database migrations without mutating databases."""
     root = _resolve_system_root(system_root)
     targets = tuple(_target_status(target, root) for target in MIGRATION_TARGETS)
@@ -155,12 +206,23 @@ def _resolve_system_root(system_root: str | Path | None) -> Path:
     return Path(system_root).expanduser().resolve()
 
 
-def _target_status(target: SystemMigrationTarget, system_root: Path) -> SystemMigrationTargetStatus:
+def _target_status(
+    target: SystemMigrationTarget, system_root: Path
+) -> SystemMigrationTargetStatus:
     db_path = Path(get_system_database_path(target.db_name, str(system_root)))
-    applied_versions = _applied_versions(db_path, namespace=target.namespace) if db_path.exists() else tuple()
-    declared_versions = tuple(migration.version for migration in sorted(target.migrations, key=lambda item: item.version))
+    applied_versions = (
+        _applied_versions(db_path, namespace=target.namespace)
+        if db_path.exists()
+        else ()
+    )
+    declared_versions = tuple(
+        migration.version
+        for migration in sorted(target.migrations, key=lambda item: item.version)
+    )
     applied_set = set(applied_versions)
-    pending_versions = tuple(version for version in declared_versions if version not in applied_set)
+    pending_versions = tuple(
+        version for version in declared_versions if version not in applied_set
+    )
     return SystemMigrationTargetStatus(
         db_name=target.db_name,
         namespace=target.namespace,
@@ -175,7 +237,7 @@ def _applied_versions(db_path: Path, *, namespace: str) -> tuple[int, ...]:
     conn = sqlite3.connect(db_path)
     try:
         if not _table_exists(conn, "schema_migrations"):
-            return tuple()
+            return ()
         rows = conn.execute(
             """
             SELECT version

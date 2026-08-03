@@ -33,9 +33,17 @@ class GoalOpsScenario(BaseScenario):
         await self.start_system()
 
         binding = resolve_tool_binding(["goal_ops"], vault_path=str(vault))
-        self.soft_assert_equal(binding.tool_names(), ["goal_ops"], "goal_ops should bind through the tool registry")
+        self.soft_assert_equal(
+            binding.tool_names(),
+            ["goal_ops"],
+            "goal_ops should bind through the tool registry",
+        )
         tool = binding.tool_specs[0].tool_function
-        ctx = SimpleNamespace(deps=SimpleNamespace(vault_name=vault.name, session_id="goal_ops_chat_session"))
+        ctx = SimpleNamespace(
+            deps=SimpleNamespace(
+                vault_name=vault.name, session_id="goal_ops_chat_session"
+            )
+        )
 
         initial_plan = [
             {"text": "Review source notes", "status": "pending"},
@@ -58,11 +66,25 @@ class GoalOpsScenario(BaseScenario):
         )
         goal = self._tool_payload(create_payload)["result"]
         goal_id = goal["goal_id"]
-        self.soft_assert(goal_id.startswith("goal_"), "create_goal should return a stable goal id")
-        self.soft_assert_equal(goal["vault_name"], vault.name, "Goal should be scoped to the active vault")
-        self.soft_assert_equal(goal["workspace_path_hint"], "Clients/Acme", "Workspace should be stored as a hint")
-        self.soft_assert_equal(goal["plan"], initial_plan, "Goal plan should be stored as a JSON snapshot")
-        self.soft_assert_equal(goal["source_type"], "chat", "Goal source type should be inferred from chat deps")
+        self.soft_assert(
+            goal_id.startswith("goal_"), "create_goal should return a stable goal id"
+        )
+        self.soft_assert_equal(
+            goal["vault_name"], vault.name, "Goal should be scoped to the active vault"
+        )
+        self.soft_assert_equal(
+            goal["workspace_path_hint"],
+            "Clients/Acme",
+            "Workspace should be stored as a hint",
+        )
+        self.soft_assert_equal(
+            goal["plan"], initial_plan, "Goal plan should be stored as a JSON snapshot"
+        )
+        self.soft_assert_equal(
+            goal["source_type"],
+            "chat",
+            "Goal source type should be inferred from chat deps",
+        )
         self.soft_assert_equal(
             goal["source_id"],
             "goal_ops_chat_session",
@@ -90,7 +112,11 @@ class GoalOpsScenario(BaseScenario):
             },
         )
         updated_goal = self._tool_payload(update_payload)["result"]
-        self.soft_assert_equal(updated_goal["plan"], updated_plan, "update_goal should replace the plan snapshot")
+        self.soft_assert_equal(
+            updated_goal["plan"],
+            updated_plan,
+            "update_goal should replace the plan snapshot",
+        )
         self.soft_assert_equal(
             updated_goal["metadata"],
             {"draft_path": "Clients/Acme/renewal-briefing.md"},
@@ -105,12 +131,17 @@ class GoalOpsScenario(BaseScenario):
                 "summary": "Reviewed sources and started the renewal briefing draft.",
                 "current_state": "Risk section is started.",
                 "next_actions": ["Pull source quotes", "Finish risk table"],
-                "open_questions": ["Conservative or aggressive pricing recommendation?"],
+                "open_questions": [
+                    "Conservative or aggressive pricing recommendation?"
+                ],
                 "risks": ["Security review owner remains unclear"],
             },
         )
         checkpoint = self._tool_payload(checkpoint_payload)["result"]
-        self.soft_assert(checkpoint["checkpoint_id"].startswith("checkpoint_"), "Checkpoint id should be returned")
+        self.soft_assert(
+            checkpoint["checkpoint_id"].startswith("checkpoint_"),
+            "Checkpoint id should be returned",
+        )
         self.soft_assert_equal(
             checkpoint["next_actions"],
             ["Pull source quotes", "Finish risk table"],
@@ -155,7 +186,10 @@ class GoalOpsScenario(BaseScenario):
             checkpoint["checkpoint_id"],
             "get_goal should include the latest checkpoint",
         )
-        self.soft_assert("steps" not in latest_goal, "Goal payload should not expose first-class step rows")
+        self.soft_assert(
+            "steps" not in latest_goal,
+            "Goal payload should not expose first-class step rows",
+        )
 
         list_payload = await tool.function(
             ctx,
@@ -164,7 +198,11 @@ class GoalOpsScenario(BaseScenario):
             workspace_path_hint="Clients/Acme",
         )
         listed = self._tool_payload(list_payload)["result"]
-        self.soft_assert_equal([item["goal_id"] for item in listed], [goal_id], "list_goals should filter by workspace hint")
+        self.soft_assert_equal(
+            [item["goal_id"] for item in listed],
+            [goal_id],
+            "list_goals should filter by workspace hint",
+        )
 
         source_listed = GoalOpsStore().list_goals(
             vault_name=vault.name,
@@ -212,8 +250,16 @@ class GoalOpsScenario(BaseScenario):
                 },
             )
             workflow_goal = self._tool_payload(workflow_create_payload)["result"]
-            self.soft_assert_equal(workflow_goal["source_type"], "workflow", "Workflow ids should source goals")
-            self.soft_assert_equal(workflow_goal["source_id"], workflow_source_id, "Workflow source id should be global id")
+            self.soft_assert_equal(
+                workflow_goal["source_type"],
+                "workflow",
+                "Workflow ids should source goals",
+            )
+            self.soft_assert_equal(
+                workflow_goal["source_id"],
+                workflow_source_id,
+                "Workflow source id should be global id",
+            )
             self.soft_assert_equal(
                 workflow_goal["source_task_id"],
                 task.task_id,
@@ -236,8 +282,16 @@ class GoalOpsScenario(BaseScenario):
             },
         )
         context_goal = self._tool_payload(context_create_payload)["result"]
-        self.soft_assert_equal(context_goal["source_type"], "context", "Context script ids should source goals")
-        self.soft_assert_equal(context_goal["source_id"], context_source_id, "Context source id should be global id")
+        self.soft_assert_equal(
+            context_goal["source_type"],
+            "context",
+            "Context script ids should source goals",
+        )
+        self.soft_assert_equal(
+            context_goal["source_id"],
+            context_source_id,
+            "Context source id should be global id",
+        )
 
         mutation_checkpoint = self.event_checkpoint()
         async with runtime.task_coordinator.track_current_task(
@@ -254,7 +308,9 @@ class GoalOpsScenario(BaseScenario):
                 vault_path=vault,
                 path="notes/goal-output.md",
                 operation="write",
-                mutator=lambda full_path: full_path.write_text("Goal output\n", encoding="utf-8"),
+                mutator=lambda full_path: full_path.write_text(
+                    "Goal output\n", encoding="utf-8"
+                ),
                 create_parent=True,
             )
         mutation_events = self.events_since(mutation_checkpoint)
@@ -265,28 +321,47 @@ class GoalOpsScenario(BaseScenario):
         )
         self.assert_event_contains(
             mutation_events,
-            name="task_file_mutation_recorded",
+            name="vault_mutation_recorded",
             expected={
                 "goal_id": goal_id,
                 "path": "notes/goal-output.md",
             },
         )
 
-        activity_payload = await tool.function(ctx, operation="list_activity", goal_id=goal_id)
+        activity_payload = await tool.function(
+            ctx, operation="list_activity", goal_id=goal_id
+        )
         activity = self._tool_payload(activity_payload)["result"]
-        self.soft_assert_equal(len(activity), 1, "Goal activity should derive from task mutation rows")
+        self.soft_assert_equal(
+            len(activity), 1, "Goal activity should derive from vault activities"
+        )
         if activity:
-            self.soft_assert_equal(activity[0]["goal_id"], goal_id, "Activity group should expose goal id")
+            self.soft_assert_equal(
+                activity[0]["goal_id"], goal_id, "Activity group should expose goal id"
+            )
             self.soft_assert_equal(
                 activity[0]["mutations"][0]["path"],
                 "notes/goal-output.md",
                 "Goal activity should include the mutated path",
             )
 
-        self.soft_assert(not self._table_exists("goal_artifacts"), "goal_ops should not create an artifact table")
-        migration_status = get_system_migration_status(self._get_system_controller()._system_root)
-        goal_target = next(target for target in migration_status.targets if target.db_name == "goal_ops")
-        self.soft_assert_equal(goal_target.pending_versions, (), "goal_ops migration should be applied at startup")
+        self.soft_assert(
+            not self._table_exists("goal_artifacts"),
+            "goal_ops should not create an artifact table",
+        )
+        migration_status = get_system_migration_status(
+            self._get_system_controller()._system_root
+        )
+        goal_target = next(
+            target
+            for target in migration_status.targets
+            if target.db_name == "goal_ops"
+        )
+        self.soft_assert_equal(
+            goal_target.pending_versions,
+            (),
+            "goal_ops migration should be applied at startup",
+        )
 
         self._validate_goal_cleanup_endpoint(vault.name)
 
@@ -297,7 +372,9 @@ class GoalOpsScenario(BaseScenario):
         if hasattr(raw, "return_value"):
             raw = raw.return_value
         payload = json.loads(raw)
-        self.soft_assert_equal(payload.get("status"), "ok", "goal_ops tool call should succeed")
+        self.soft_assert_equal(
+            payload.get("status"), "ok", "goal_ops tool call should succeed"
+        )
         return payload
 
     def _table_exists(self, table_name: str) -> bool:
@@ -325,15 +402,23 @@ class GoalOpsScenario(BaseScenario):
             title="Old completed cleanup target",
             objective="Should be removed by goal cleanup.",
         )
-        store.update_goal(goal_id=old_completed["goal_id"], status="completed", reason="Finished.")
-        store.checkpoint(goal_id=old_completed["goal_id"], summary="Cleanup cascade marker.")
+        store.update_goal(
+            goal_id=old_completed["goal_id"], status="completed", reason="Finished."
+        )
+        store.checkpoint(
+            goal_id=old_completed["goal_id"], summary="Cleanup cascade marker."
+        )
 
         old_cancelled = store.create_goal(
             vault_name=vault_name,
             title="Old cancelled cleanup target",
             objective="Should be removed by goal cleanup.",
         )
-        store.update_goal(goal_id=old_cancelled["goal_id"], status="cancelled", reason="No longer needed.")
+        store.update_goal(
+            goal_id=old_cancelled["goal_id"],
+            status="cancelled",
+            reason="No longer needed.",
+        )
 
         old_active = store.create_goal(
             vault_name=vault_name,
@@ -345,9 +430,15 @@ class GoalOpsScenario(BaseScenario):
             title="Recent completed retained goal",
             objective="Should not be removed by age-filtered cleanup.",
         )
-        store.update_goal(goal_id=recent_completed["goal_id"], status="completed", reason="Finished recently.")
+        store.update_goal(
+            goal_id=recent_completed["goal_id"],
+            status="completed",
+            reason="Finished recently.",
+        )
 
-        old_timestamp = (datetime.now(UTC).replace(microsecond=0) - timedelta(days=45)).isoformat()
+        old_timestamp = (
+            datetime.now(UTC).replace(microsecond=0) - timedelta(days=45)
+        ).isoformat()
         self._set_goal_updated_at(
             [old_completed["goal_id"], old_cancelled["goal_id"], old_active["goal_id"]],
             old_timestamp,
@@ -362,22 +453,43 @@ class GoalOpsScenario(BaseScenario):
                 "older_than_days": 30,
             },
         )
-        self.soft_assert_equal(cleanup_response.status_code, 200, "Goal cleanup endpoint should succeed")
+        self.soft_assert_equal(
+            cleanup_response.status_code, 200, "Goal cleanup endpoint should succeed"
+        )
         cleanup_payload = cleanup_response.json()
-        self.soft_assert_equal(cleanup_payload.get("deleted"), 2, "Cleanup should delete old completed/cancelled goals")
+        self.soft_assert_equal(
+            cleanup_payload.get("deleted"),
+            2,
+            "Cleanup should delete old completed/cancelled goals",
+        )
 
         remaining_ids = {
             goal["goal_id"]
-            for goal in store.list_goals(vault_name=vault_name, status="active", limit=100)
+            for goal in store.list_goals(
+                vault_name=vault_name, status="active", limit=100
+            )
         }
-        self.soft_assert(old_active["goal_id"] in remaining_ids, "Cleanup should retain active goals")
+        self.soft_assert(
+            old_active["goal_id"] in remaining_ids, "Cleanup should retain active goals"
+        )
         completed_ids = {
             goal["goal_id"]
-            for goal in store.list_goals(vault_name=vault_name, status="completed", limit=100)
+            for goal in store.list_goals(
+                vault_name=vault_name, status="completed", limit=100
+            )
         }
-        self.soft_assert(recent_completed["goal_id"] in completed_ids, "Cleanup should retain recent completed goals")
-        self.soft_assert(not self._goal_exists(old_completed["goal_id"]), "Cleanup should delete old completed goals")
-        self.soft_assert(not self._goal_exists(old_cancelled["goal_id"]), "Cleanup should delete old cancelled goals")
+        self.soft_assert(
+            recent_completed["goal_id"] in completed_ids,
+            "Cleanup should retain recent completed goals",
+        )
+        self.soft_assert(
+            not self._goal_exists(old_completed["goal_id"]),
+            "Cleanup should delete old completed goals",
+        )
+        self.soft_assert(
+            not self._goal_exists(old_cancelled["goal_id"]),
+            "Cleanup should delete old cancelled goals",
+        )
         self.soft_assert(
             not self._goal_has_activity_rows(old_completed["goal_id"]),
             "Goal cleanup should cascade checkpoints and events",
@@ -399,7 +511,9 @@ class GoalOpsScenario(BaseScenario):
         db_path = self._get_system_controller()._system_root / "goal_ops.db"
         conn = sqlite3.connect(db_path)
         try:
-            row = conn.execute("SELECT 1 FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+            row = conn.execute(
+                "SELECT 1 FROM goals WHERE goal_id = ?", (goal_id,)
+            ).fetchone()
         finally:
             conn.close()
         return row is not None
@@ -408,7 +522,9 @@ class GoalOpsScenario(BaseScenario):
         db_path = self._get_system_controller()._system_root / "goal_ops.db"
         conn = sqlite3.connect(db_path)
         try:
-            event_row = conn.execute("SELECT 1 FROM goal_events WHERE goal_id = ? LIMIT 1", (goal_id,)).fetchone()
+            event_row = conn.execute(
+                "SELECT 1 FROM goal_events WHERE goal_id = ? LIMIT 1", (goal_id,)
+            ).fetchone()
             checkpoint_row = conn.execute(
                 "SELECT 1 FROM goal_checkpoints WHERE goal_id = ? LIMIT 1",
                 (goal_id,),

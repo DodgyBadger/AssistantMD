@@ -1,15 +1,17 @@
 import json
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncIterator, Optional, List, Sequence
+from typing import Any, cast
 
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessage, UserContent
 from pydantic_ai.usage import UsageLimits
+
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
-from core.llm.thinking import ThinkingValue
 from core.llm.model_selection import ModelExecutionSpec
+from core.llm.thinking import ThinkingValue
 from core.settings import get_default_model_thinking
 from core.settings.store import get_general_settings
 
@@ -25,13 +27,14 @@ class CollectedAgentRun:
     output: Any
     messages: list[ModelMessage]
 
+
 async def create_agent(
-    model=None,
-    tools: Optional[List] = None,
-    retries: Optional[int] = None,
-    output_type: Optional[Any] = None,
-    history_processors: Optional[List] = None,
-    capabilities: Optional[List[Any]] = None,
+    model: Any = None,
+    tools: list[Any] | None = None,
+    retries: int | None = None,
+    output_type: Any | None = None,
+    history_processors: list[Any] | None = None,
+    capabilities: list[Any] | None = None,
     thinking: ThinkingValue | object = _THINKING_UNSET,
 ) -> Agent:
     """Create agent by composing pre-configured components following Pydantic AI patterns.
@@ -49,7 +52,7 @@ async def create_agent(
     Returns:
         Configured Pydantic AI Agent ready for use
     """
-    
+
     # Handle default model if none provided
     if model is None:
         general_settings = get_general_settings()
@@ -62,10 +65,10 @@ async def create_agent(
 
         default_model_name = str(default_model_value).lower().strip()
 
-        resolved_thinking = (
+        resolved_thinking: ThinkingValue = (
             get_default_model_thinking()
             if thinking is _THINKING_UNSET
-            else thinking
+            else cast(ThinkingValue, thinking)
         )
         model = build_model_instance(default_model_name, thinking=resolved_thinking)
         if isinstance(model, ModelExecutionSpec) and model.mode == "skip":
@@ -73,24 +76,26 @@ async def create_agent(
                 "default_model cannot use skip mode ('none'). "
                 "Set a concrete LLM alias in system/settings.yaml."
             )
-    
+
     # Pure composition - assemble the pre-configured pieces
     agent_kwargs = {
-        'model': model,
-        'retries': retries if retries is not None else DEFAULT_TOOL_RETRIES
+        "model": model,
+        "retries": retries if retries is not None else DEFAULT_TOOL_RETRIES,
     }
     if history_processors:
-        agent_kwargs['history_processors'] = history_processors
+        agent_kwargs["history_processors"] = history_processors
     if tools:
-        agent_kwargs['tools'] = tools
+        agent_kwargs["tools"] = tools
     if output_type is not None:
-        agent_kwargs['output_type'] = output_type
+        agent_kwargs["output_type"] = output_type
     if capabilities:
-        agent_kwargs['capabilities'] = capabilities
+        agent_kwargs["capabilities"] = capabilities
 
     agent = Agent(**agent_kwargs)
 
-    agent.instructions(lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}.")
+    agent.instructions(
+        lambda _: f"The current date is {datetime.today().strftime('%A, %B %d, %Y')}."
+    )
 
     return agent
 
@@ -98,31 +103,28 @@ async def create_agent(
 async def generate_stream(
     agent: Agent,
     prompt: PromptInput,
-    message_history,
+    message_history: Sequence[ModelMessage] | None,
 ) -> AsyncIterator[str]:
     try:
-        async with agent.run_stream(
-            prompt,
-            message_history=message_history
-        ) as result:
+        async with agent.run_stream(prompt, message_history=message_history) as result:
             full_response = ""
             async for text in result.stream_text():
-                delta_text = text[len(full_response):]
+                delta_text = text[len(full_response) :]
                 full_response = text
-                
+
                 chunk = {
-                    "choices": [{
-                        "delta": {
-                            "content": delta_text
-                        },
-                        "index": 0,
-                        "finish_reason": None
-                    }]
+                    "choices": [
+                        {
+                            "delta": {"content": delta_text},
+                            "index": 0,
+                            "finish_reason": None,
+                        }
+                    ]
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
-            
+
             yield f"data: {json.dumps({'choices': [{'delta': {}, 'index': 0, 'finish_reason': 'stop'}]})}\n\n"
-            
+
     except Exception:
         raise
 
@@ -130,9 +132,9 @@ async def generate_stream(
 async def generate_response(
     agent: Agent,
     prompt: PromptInput,
-    message_history=None,
-    deps=None,
-):
+    message_history: Sequence[ModelMessage] | None = None,
+    deps: Any = None,
+) -> Any:
     try:
         result = await collect_response(
             agent,
@@ -149,8 +151,8 @@ async def generate_response(
 async def collect_response(
     agent: Agent,
     prompt: PromptInput,
-    message_history=None,
-    deps=None,
+    message_history: Sequence[ModelMessage] | None = None,
+    deps: Any = None,
     usage_limits: UsageLimits | None = None,
 ) -> CollectedAgentRun:
     """Run an agent through the streaming transport and return one final result.

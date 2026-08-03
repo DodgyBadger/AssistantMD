@@ -6,6 +6,7 @@ workspace-local orientation files, and bounded user notes without depending on
 the internal structure of those markdown files.
 """
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,7 +59,10 @@ Use the validation vault playbook.
 ## Large Section
 
 """
-            + ("- Filler context note line that should eventually be truncated.\n" * 500)
+            + (
+                "- Filler context note line that should eventually be truncated.\n"
+                * 500
+            )
             + """
 """,
         )
@@ -89,7 +93,9 @@ This workspace intentionally has no README.
 
         await self.start_system()
 
-        from core.authoring.context_manager import build_context_manager_history_processor
+        from core.authoring.context_manager import (
+            build_context_manager_history_processor,
+        )
 
         session_id = "default_context_session"
         processor = build_context_manager_history_processor(
@@ -185,7 +191,8 @@ This workspace intentionally has no README.
             if getattr(part, "part_kind", None) == "system-prompt"
         )
         self.soft_assert(
-            "The current chat workspace is `Projects/WorkspaceB`." in missing_readme_system_text,
+            "The current chat workspace is `Projects/WorkspaceB`."
+            in missing_readme_system_text,
             "Expected workspace instructions to include the workspace path without a README",
         )
         self.soft_assert(
@@ -199,8 +206,10 @@ This workspace intentionally has no README.
         )
 
         activity_log = self.call_api("/api/system/activity-log")
-        self.soft_assert_equal(activity_log.status_code, 200, "Activity log fetch should succeed")
-        activity_content = activity_log.json()["content"]
+        self.soft_assert_equal(
+            activity_log.status_code, 200, "Activity log fetch should succeed"
+        )
+        activity_content = json.dumps(activity_log.json()["entries"])
         self.soft_assert(
             '"event": "context_template_run_completed"' in activity_content,
             "Expected activity log to include context-template completion event",

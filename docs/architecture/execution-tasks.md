@@ -15,7 +15,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
 - `core/chat/surface_adapter.py` — normalized adapter contract for non-web chat surfaces
 - `core/chat/compaction.py` — automatic compaction task registration
-- `api/services.py` — API adapters for task listing, detail, and cancellation
+- `api/services/execution_tasks.py` — API adapters for task listing, detail,
+  and cancellation
 
 ## Task model
 
@@ -68,6 +69,11 @@ cleanup.
 Task-owned chat uses the queued form: the API returns a task snapshot
 immediately, the background runner attaches to that task, and subscribers read
 process-local buffered events by task id.
+When a chat run returns deferred tool requests, that process-local task still
+finishes. The durable pending continuation belongs to the chat-session store,
+not to a waiting asyncio task. Submitting the review atomically claims that
+continuation and creates a new queued chat task with the stored messages and
+Pydantic AI deferred-tool results.
 Scheduled ingestion jobs also use the queued background form so scheduler-owned
 imports are visible as ingestion execution tasks while they run.
 Manual and automatic chat history compaction use the inline runner form so the
@@ -114,6 +120,12 @@ For a given chat session, task-owned chat runs are serialized by task creation
 time. Later runs remain `queued` until older non-terminal chat tasks in the same
 `chat_session:<session_id>` scope finish.
 
+Deferred-review resume tasks use the same session gate and task kind. They do
+not persist another user request, and their terminal state is mirrored into the
+durable deferred-review row. A pending review blocks a new ordinary chat run for
+that session, while cancellation remains a normal execution-task operation for
+an active originating or resumed task.
+
 Manual workflow execution is task-oriented at the API layer: `/api/workflows/execute`
 starts the workflow in the background and returns the created task snapshot.
 Clients should poll `/api/tasks/{task_id}` for terminal status and call
@@ -121,6 +133,13 @@ Clients should poll `/api/tasks/{task_id}` for terminal status and call
 result details are attached to task metadata as `workflow_result` when available.
 Failed or timed-out workflow terminal metadata also includes `workflow_failure`
 when the governor can classify the failure.
+
+Workflow execution also creates a durable workflow run record. The execution
+task id is retained as provenance on that record, but the two lifecycles have
+different purposes: execution tasks provide live process-local cancellation and
+status, while `workflow_runs.db` provides restart-safe workflow outcome history.
+Scheduler misses can have durable workflow run records without execution tasks
+because no worker started.
 
 ## Observability
 

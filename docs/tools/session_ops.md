@@ -83,6 +83,11 @@ Returns pretty-printed JSON text. Successful operations include a stable
 `status` and `operation` value, plus operation-specific data such as
 `session_summary` or ranked `matches`.
 
+Operational failures return a structured failed tool envelope to chat agents.
+The same failure raises `RuntimeError` when `session_ops` is called directly
+from Monty, so a required summarization failure cannot be mistaken for a
+successful script result.
+
 ## Filtering
 
 Use `filter` only for deterministic metadata constraints. Filtering changes

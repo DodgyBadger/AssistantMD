@@ -38,16 +38,21 @@ class DelegateToolScenario(BaseScenario):
             method="PUT",
             data={"value": str(configured_delegate_limit)},
         )
-        assert delegate_limit_update.status_code == 200, "Delegate tool-call limit setting updates"
+        assert (
+            delegate_limit_update.status_code == 200
+        ), "Delegate tool-call limit setting updates"
         delegate_timeout_update = self.call_api(
             "/api/system/settings/general/delegate_timeout_seconds",
             method="PUT",
             data={"value": str(configured_delegate_timeout)},
         )
-        assert delegate_timeout_update.status_code == 200, "Delegate timeout setting updates"
+        assert (
+            delegate_timeout_update.status_code == 200
+        ), "Delegate timeout setting updates"
+
+        from pydantic_ai.models.test import TestModel
 
         import core.chat.executor as chat_executor
-        from pydantic_ai.models.test import TestModel
 
         current_case = {"name": "basic"}
 
@@ -65,23 +70,29 @@ class DelegateToolScenario(BaseScenario):
                     return {
                         "prompt": "Use your tools.",
                         "model": "test",
-                        "tools": ["file_ops_safe", "delegate", "code_execution"],
+                        "tools": ["file_read", "delegate", "code_execution"],
                     }
                 if case == "child_tools":
                     return {
                         "prompt": "List available notes.",
                         "model": "test",
-                        "tools": ["file_ops_safe"],
+                        "tools": ["file_read"],
                     }
                 if case == "limit_failure":
                     return {"prompt": "Exceed child usage limits.", "model": "test"}
                 if case == "model_request_limit_failure":
-                    return {"prompt": "Exceed child model request usage limits.", "model": "test"}
+                    return {
+                        "prompt": "Exceed child model request usage limits.",
+                        "model": "test",
+                    }
                 raise AssertionError(f"Unexpected delegate case: {case}")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, vault_path, tools, model, thinking
             from core.authoring.shared.tool_binding import resolve_tool_binding
+
             binding = resolve_tool_binding(["delegate"], vault_path=str(vault))
             return (
                 "You must call delegate before responding.",
@@ -104,7 +115,9 @@ class DelegateToolScenario(BaseScenario):
                 return None
 
             async def run(self, *_args, **_kwargs):
-                raise AssertionError("delegate child agents must use streaming model calls")
+                raise AssertionError(
+                    "delegate child agents must use streaming model calls"
+                )
 
             def run_stream(self, *_args, **_kwargs):
                 error = self.error
@@ -139,7 +152,9 @@ class DelegateToolScenario(BaseScenario):
                 return None
 
             async def run(self, *_args, **_kwargs):
-                raise AssertionError("delegate child agents must use streaming model calls")
+                raise AssertionError(
+                    "delegate child agents must use streaming model calls"
+                )
 
             def run_stream(self, *_args, **_kwargs):
                 return _StreamingChildRun()
@@ -184,11 +199,15 @@ class DelegateToolScenario(BaseScenario):
         async def _patched_create_agent(*args, **kwargs):
             if current_case["name"] == "limit_failure":
                 return _FailingChildAgent(
-                    UsageLimitExceeded("The next tool call(s) would exceed the tool_calls_limit")
+                    UsageLimitExceeded(
+                        "The next tool call(s) would exceed the tool_calls_limit"
+                    )
                 )
             if current_case["name"] == "model_request_limit_failure":
                 return _FailingChildAgent(
-                    UsageLimitExceeded("The next request would exceed the request_limit of 75")
+                    UsageLimitExceeded(
+                        "The next request would exceed the request_limit of 75"
+                    )
                 )
             return await original_create_agent(*args, **kwargs)
 
@@ -205,8 +224,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert basic["start_response"].status_code == 200, "Basic delegate chat task should start"
-            assert basic["terminal_event"].get("event") == "done", "Basic delegate call should succeed"
+            assert (
+                basic["start_response"].status_code == 200
+            ), "Basic delegate chat task should start"
+            assert (
+                basic["terminal_event"].get("event") == "done"
+            ), "Basic delegate call should succeed"
             basic_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -246,12 +269,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert stripping["start_response"].status_code == 200, (
-                "Forbidden tool stripping chat task should start"
-            )
-            assert stripping["terminal_event"].get("event") == "done", (
-                "Forbidden tool stripping call should succeed"
-            )
+            assert (
+                stripping["start_response"].status_code == 200
+            ), "Forbidden tool stripping chat task should start"
+            assert (
+                stripping["terminal_event"].get("event") == "done"
+            ), "Forbidden tool stripping call should succeed"
             stripping_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -259,7 +282,7 @@ class DelegateToolScenario(BaseScenario):
                 name="delegate_started",
                 expected={
                     "workflow_id": "delegate_forbidden_stripping",
-                    "tool_names": ["file_ops_safe"],
+                    "tool_names": ["file_read"],
                     "stripped_tools": ["code_execution", "delegate"],
                 },
             )
@@ -281,12 +304,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert child_tools["start_response"].status_code == 200, (
-                "Delegate with child tools chat task should start"
-            )
-            assert child_tools["terminal_event"].get("event") == "done", (
-                "Delegate with child tools should succeed"
-            )
+            assert (
+                child_tools["start_response"].status_code == 200
+            ), "Delegate with child tools chat task should start"
+            assert (
+                child_tools["terminal_event"].get("event") == "done"
+            ), "Delegate with child tools should succeed"
             child_events = self.events_since(checkpoint)
 
             self.assert_event_contains(
@@ -294,7 +317,7 @@ class DelegateToolScenario(BaseScenario):
                 name="delegate_tool_binding_resolved",
                 expected={
                     "workflow_id": "delegate_child_tools",
-                    "requested": ["file_ops_safe"],
+                    "requested": ["file_read"],
                 },
             )
             self.assert_event_contains(
@@ -315,12 +338,12 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert limit_failure["start_response"].status_code == 200, (
-                "Delegate limit failure chat task should start"
-            )
-            assert limit_failure["terminal_event"].get("event") == "done", (
-                "Delegate limit failure should not abort chat"
-            )
+            assert (
+                limit_failure["start_response"].status_code == 200
+            ), "Delegate limit failure chat task should start"
+            assert (
+                limit_failure["terminal_event"].get("event") == "done"
+            ), "Delegate limit failure should not abort chat"
             limit_events = self.events_since(checkpoint)
             self.assert_event_contains(
                 limit_events,
@@ -353,14 +376,16 @@ class DelegateToolScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert model_request_limit_failure["start_response"].status_code == 200, (
-                "Delegate model-request limit failure chat task should start"
-            )
-            assert model_request_limit_failure["terminal_event"].get("event") == "done", (
-                "Delegate model-request limit failure should not abort chat"
-            )
+            assert (
+                model_request_limit_failure["start_response"].status_code == 200
+            ), "Delegate model-request limit failure chat task should start"
+            assert (
+                model_request_limit_failure["terminal_event"].get("event") == "done"
+            ), "Delegate model-request limit failure should not abort chat"
             request_limit_context = delegate_module._delegate_usage_limit_context(
-                UsageLimitExceeded("The next request would exceed the request_limit of 75"),
+                UsageLimitExceeded(
+                    "The next request would exceed the request_limit of 75"
+                ),
                 max_tool_calls=configured_delegate_limit,
             )
             self.soft_assert_equal(
@@ -456,7 +481,10 @@ class DelegateToolScenario(BaseScenario):
                 billing_result = await invoke_bound_tool(
                     timeout_binding.tool_functions[0],
                     tool_name="delegate",
-                    arguments={"prompt": "Trigger child provider billing failure.", "model": "test"},
+                    arguments={
+                        "prompt": "Trigger child provider billing failure.",
+                        "model": "test",
+                    },
                     run_buffers={},
                     session_buffers={},
                     session_id="delegate_billing_failure",
@@ -522,7 +550,7 @@ class DelegateToolScenario(BaseScenario):
             name="delegate_tool_binding_resolved",
             expected={
                 "workflow_id": "DelegateToolVault/delegate_with_tools",
-                "requested": ["file_ops_safe"],
+                "requested": ["file_read"],
             },
         )
         self.assert_event_contains(
@@ -563,7 +591,7 @@ class DelegateToolScenario(BaseScenario):
             tool_name="delegate",
             arguments={
                 "prompt": "Read notes/content.md and return its text.",
-                "tools": ["file_ops_safe"],
+                "tools": ["file_read"],
                 "model": "test",
             },
             run_buffers={},
@@ -594,7 +622,7 @@ class DelegateToolScenario(BaseScenario):
             if isinstance(tool_calls, list) and tool_calls:
                 self.soft_assert_equal(
                     tool_calls[0].get("tool"),
-                    "file_ops_safe",
+                    "file_read",
                     "Delegate audit should record child tool names",
                 )
                 self.soft_assert(
@@ -609,7 +637,9 @@ class DelegateToolScenario(BaseScenario):
             DELEGATE_MARKDOWN_IMAGE_WORKFLOW,
         )
         checkpoint = self.event_checkpoint()
-        markdown_image_result = await self.run_workflow(vault, "delegate_markdown_image")
+        markdown_image_result = await self.run_workflow(
+            vault, "delegate_markdown_image"
+        )
         self.soft_assert_equal(
             markdown_image_result.status,
             "completed",
@@ -621,7 +651,7 @@ class DelegateToolScenario(BaseScenario):
             name="delegate_tool_binding_resolved",
             expected={
                 "workflow_id": "DelegateToolVault/delegate_markdown_image",
-                "requested": ["file_ops_safe"],
+                "requested": ["file_read"],
             },
         )
         markdown_image_output = vault / "outputs" / "delegate-markdown-image-result.md"
@@ -646,10 +676,10 @@ description: Validate delegate with child tool access
 ```python
 result = await delegate(
     prompt="Read notes/content.md and return its text.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="test",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="outputs/delegate-with-tools-result.md",
     content=result.return_value,
@@ -670,10 +700,10 @@ description: Validate delegate with markdown containing an embedded image
 ```python
 result = await delegate(
     prompt="Read notes/with-image.md and describe what source was provided.",
-    tools=["file_ops_safe"],
+    tools=["file_read"],
     model="test",
 )
-await file_ops_safe(
+await file_write(
     operation="write",
     path="outputs/delegate-markdown-image-result.md",
     content=result.return_value,

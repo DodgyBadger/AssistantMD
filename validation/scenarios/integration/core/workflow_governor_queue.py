@@ -9,12 +9,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+import core.runtime.workflow_governor as governor_module
 from core.authoring.workflow_execution import WorkflowExecutionResult
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
-import core.runtime.workflow_governor as governor_module
+from core.workflow_runs import WorkflowRunStore
 from validation.core.base_scenario import BaseScenario
 
 
@@ -30,7 +31,11 @@ class WorkflowGovernorQueueScenario(BaseScenario):
             governor_module.get_workflow_task_timeout_seconds = lambda: 0.0
 
             governor_module.get_max_concurrent_workflows = lambda: 0
-            same_vault = await _run_probe(("VaultA/first", "VaultA/second"))
+            history_root = self.artifacts_dir / "workflow-history"
+            same_vault = await _run_probe(
+                ("VaultA/first", "VaultA/second"),
+                system_root=history_root,
+            )
             self.soft_assert_equal(
                 same_vault["max_active"],
                 1,
@@ -48,7 +53,10 @@ class WorkflowGovernorQueueScenario(BaseScenario):
                 "Second same-vault workflow should start after the first ends",
             )
 
-            different_vaults = await _run_probe(("VaultA/first", "VaultB/first"))
+            different_vaults = await _run_probe(
+                ("VaultA/first", "VaultB/first"),
+                system_root=history_root,
+            )
             self.soft_assert_equal(
                 different_vaults["max_active"],
                 2,
@@ -56,7 +64,10 @@ class WorkflowGovernorQueueScenario(BaseScenario):
             )
 
             governor_module.get_max_concurrent_workflows = lambda: 1
-            global_limited = await _run_probe(("VaultA/first", "VaultB/first"))
+            global_limited = await _run_probe(
+                ("VaultA/first", "VaultB/first"),
+                system_root=history_root,
+            )
             self.soft_assert_equal(
                 global_limited["max_active"],
                 1,
@@ -71,7 +82,9 @@ class WorkflowGovernorQueueScenario(BaseScenario):
         self.assert_no_failures()
 
 
-async def _run_probe(global_ids: tuple[str, str]) -> dict[str, Any]:
+async def _run_probe(
+    global_ids: tuple[str, str], *, system_root: Path
+) -> dict[str, Any]:
     active = 0
     max_active = 0
     timeline: list[str] = []
@@ -109,9 +122,15 @@ async def _run_probe(global_ids: tuple[str, str]) -> dict[str, Any]:
     coordinator = TaskCoordinator()
     task_runner = ExecutionTaskRunner(
         task_coordinator=coordinator,
-        background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+        background_spawner=RuntimeBackgroundSpawner(
+            background_loop=asyncio.get_running_loop()
+        ),
     )
-    governor = WorkflowGovernor(task_coordinator=coordinator, task_runner=task_runner)
+    governor = WorkflowGovernor(
+        task_coordinator=coordinator,
+        task_runner=task_runner,
+        workflow_run_store=WorkflowRunStore(str(system_root)),
+    )
 
     results = await asyncio.gather(
         *(

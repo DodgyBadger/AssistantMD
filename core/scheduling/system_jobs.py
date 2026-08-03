@@ -10,7 +10,6 @@ from core.logger import UnifiedLogger
 from core.settings import get_vault_scan_interval_seconds, get_vault_state_enabled
 from core.vault_state import VaultStateService
 
-
 INGESTION_WORKER_JOB_ID = "ingestion-worker"
 VAULT_STATE_REFRESH_JOB_ID = "vault-state-refresh"
 SYSTEM_JOB_IDS = frozenset({INGESTION_WORKER_JOB_ID, VAULT_STATE_REFRESH_JOB_ID})
@@ -66,7 +65,11 @@ def run_scheduled_vault_state_refresh(data_root: str) -> dict[str, Any]:
     should_log_activity = bool(
         result.get("vault_state_failed") or result.get("vault_state_changes_detected")
     )
-    log = logger.add_sink("validation") if should_log_activity else logger.set_sinks(["validation"])
+    log = (
+        logger.add_sink("validation")
+        if should_log_activity
+        else logger.set_sinks(["validation"])
+    )
     log.info(
         "Vault state scheduled refresh completed",
         data=data,

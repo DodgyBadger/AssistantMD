@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, backfilled.
+Accepted, backfilled. Complemented by
+[0024 - Use One Chat-Native Vault Explorer Surface](0024-chat-native-unified-vault-explorer.md).
 
 ## Context
 

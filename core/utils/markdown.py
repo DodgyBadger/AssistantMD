@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
 
 
-def parse_markdown_sections(content: str, delimiter: str = "##") -> Dict[str, str]:
+def parse_markdown_sections(content: str, delimiter: str = "##") -> dict[str, str]:
     """Extract markdown sections from content using the specified heading delimiter.
 
     Args:
@@ -16,9 +15,11 @@ def parse_markdown_sections(content: str, delimiter: str = "##") -> Dict[str, st
     Returns:
         Dictionary mapping section names to their body text (stripped).
     """
-    sections: Dict[str, str] = {}
+    sections: dict[str, str] = {}
     escaped = re.escape(delimiter)
     pattern = rf"^{escaped} (.+?)\s*\n(.*?)(?=^{escaped} |\Z)"
-    for section_name, section_content in re.findall(pattern, content, re.MULTILINE | re.DOTALL):
+    for section_name, section_content in re.findall(
+        pattern, content, re.MULTILINE | re.DOTALL
+    ):
         sections[section_name] = section_content.strip()
     return sections

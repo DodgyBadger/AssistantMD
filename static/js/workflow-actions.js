@@ -228,6 +228,84 @@
             document.getElementById('workflow-file-modal')?.remove();
         }
 
+        async function openWorkflowRunHistory(globalId) {
+            if (!globalId) return;
+            document.getElementById('workflow-run-history-modal')?.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'workflow-run-history-modal';
+            overlay.className = 'app-modal-overlay fixed inset-0 z-50 flex bg-black/40';
+            overlay.innerHTML = `
+                <div class="absolute inset-0" data-workflow-history-close="true"></div>
+                <section class="app-modal-panel relative flex flex-col" role="dialog" aria-modal="true" aria-labelledby="workflow-run-history-title">
+                    <div class="app-modal-header flex-none">
+                        <div class="app-modal-title-block">
+                            <h2 id="workflow-run-history-title" class="text-lg font-semibold text-txt-primary">Workflow History</h2>
+                            <p class="mt-1 text-xs text-txt-secondary cell-mono">${utils.escapeHtml(globalId)}</p>
+                        </div>
+                        <div class="app-modal-actions">
+                            <button type="button" class="ui-icon-button is-compact" data-workflow-history-close="true" aria-label="Close" title="Close">
+                                ${icons.X_ICON_SVG}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-4 flex-1 min-h-0 overflow-y-auto" data-workflow-history-content>
+                        <p class="text-sm text-txt-secondary">Loading workflow history...</p>
+                    </div>
+                </section>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (event) => {
+                const target = event.target;
+                if (target instanceof Element && target.closest('[data-workflow-history-close="true"]')) {
+                    overlay.remove();
+                }
+            });
+
+            const content = overlay.querySelector('[data-workflow-history-content]');
+            try {
+                const response = await fetch(`api/workflows/runs?global_id=${encodeURIComponent(globalId)}&limit=100`, { cache: 'no-store' });
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.message || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                const runs = Array.isArray(data.runs) ? data.runs : [];
+                if (!runs.length) {
+                    content.innerHTML = '<p class="text-sm text-txt-secondary">No recorded runs.</p>';
+                    return;
+                }
+                content.innerHTML = `
+                    <div class="dashboard-table-wrap" role="region" aria-label="Workflow run history" tabindex="0">
+                        <table class="dashboard-table">
+                            <thead><tr><th>Result</th><th>Finished</th><th>Vault</th><th>Source</th><th>Duration</th><th>Details</th></tr></thead>
+                            <tbody>
+                                ${runs.map(run => {
+                                    const status = String(run.status || 'unknown').toLowerCase();
+                                    const finished = run.completed_at ? new Date(run.completed_at).toLocaleString() : 'In progress';
+                                    const duration = typeof run.execution_time_seconds === 'number'
+                                        ? `${run.execution_time_seconds.toFixed(2)}s`
+                                        : '—';
+                                    return `
+                                        <tr>
+                                            <td><span class="badge badge-result-${utils.escapeHtml(status)}">${utils.escapeHtml(status.replaceAll('_', ' '))}</span></td>
+                                            <td class="cell-xs">${utils.escapeHtml(finished)}</td>
+                                            <td class="cell-xs">${utils.escapeHtml(run.vault_name || '—')}</td>
+                                            <td class="cell-xs">${utils.escapeHtml(run.source || 'unknown')}</td>
+                                            <td class="cell-xs">${utils.escapeHtml(duration)}</td>
+                                            <td class="cell-xs">${utils.escapeHtml(run.reason || run.message || '—')}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading workflow history:', error);
+                content.innerHTML = `<p class="state-error text-sm">Error: ${utils.escapeHtml(error.message)}</p>`;
+            }
+        }
+
         async function executeWorkflow(globalId, triggerButton = null, isSystemTemplate = false) {
             if (!globalId) {
                 return;
@@ -346,6 +424,7 @@
             rescanVaults,
             toggleWorkflowEnabled,
             openFileEditor: openWorkflowFileEditor,
+            openRunHistory: openWorkflowRunHistory,
             executeWorkflow,
         });
     }

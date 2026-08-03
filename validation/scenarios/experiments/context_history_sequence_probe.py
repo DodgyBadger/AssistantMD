@@ -33,7 +33,9 @@ class ContextHistorySequenceProbeScenario(BaseScenario):
 
         await self.start_system()
 
-        from core.authoring.context_manager import build_context_manager_history_processor
+        from core.authoring.context_manager import (
+            build_context_manager_history_processor,
+        )
 
         session_id = "context_history_sequence_probe_session"
         store = ChatStore()
@@ -94,10 +96,18 @@ class ContextHistorySequenceProbeScenario(BaseScenario):
 
 def _persisted_fixture_messages() -> list:
     return [
-        ModelRequest(parts=[UserPromptPart(content="First user message")], run_id="run-1"),
-        ModelResponse(parts=[TextPart(content="First assistant response")], run_id="run-1"),
-        ModelRequest(parts=[UserPromptPart(content="Second user message")], run_id="run-2"),
-        ModelResponse(parts=[TextPart(content="Second assistant response")], run_id="run-2"),
+        ModelRequest(
+            parts=[UserPromptPart(content="First user message")], run_id="run-1"
+        ),
+        ModelResponse(
+            parts=[TextPart(content="First assistant response")], run_id="run-1"
+        ),
+        ModelRequest(
+            parts=[UserPromptPart(content="Second user message")], run_id="run-2"
+        ),
+        ModelResponse(
+            parts=[TextPart(content="Second assistant response")], run_id="run-2"
+        ),
     ]
 
 
@@ -155,7 +165,9 @@ def _render_model_messages(messages: list) -> str:
     for index, message in enumerate(messages):
         role, text = extract_role_and_text(message)
         parts = getattr(message, "parts", ()) or ()
-        part_kinds = ", ".join(str(getattr(part, "part_kind", type(part).__name__)) for part in parts)
+        part_kinds = ", ".join(
+            str(getattr(part, "part_kind", type(part).__name__)) for part in parts
+        )
         run_id = getattr(message, "run_id", None)
         lines.append(
             f"{index}. `{type(message).__name__}` role=`{role}` run_id=`{run_id}` "
@@ -187,7 +199,9 @@ def _render_duplicate_report(messages: list) -> str:
         role, text = extract_role_and_text(message)
         current = (role, text)
         if previous == current:
-            duplicates.append(f"- adjacent duplicate ending at index {index}: role=`{role}` text={text!r}")
+            duplicates.append(
+                f"- adjacent duplicate ending at index {index}: role=`{role}` text={text!r}"
+            )
         previous = current
     return "\n".join(duplicates) if duplicates else "_No adjacent duplicates detected._"
 

@@ -7,7 +7,6 @@ import ast
 import sys
 from pathlib import Path
 
-
 SCAN_ROOTS = (
     Path("core/tools"),
     Path("core/authoring/helpers"),
@@ -24,12 +23,26 @@ ALLOWED_DIRECT_MUTATION_FILES = {
 }
 
 ALLOWED_DIRECT_MUTATION_CALLS = {
-    (Path("api/services.py"), "scan_import_folder", "import_root.mkdir"),
-    (Path("api/services.py"), "_enqueue_import_scan_jobs", "import_root.mkdir"),
-    (Path("api/services.py"), "update_system_settings", "path.write_text"),
-    (Path("api/services.py"), "repair_settings_from_template", "active_path.write_text"),
-    (Path("api/services.py"), "_write_system_workflow_file_content", "temp_path.write_text"),
-    (Path("core/tools/file_ops_safe.py"), "_make_directory", "os.makedirs"),
+    (
+        Path("api/services/ingestion.py"),
+        "_enqueue_import_scan_jobs",
+        "import_root.mkdir",
+    ),
+    (
+        Path("api/services/configuration.py"),
+        "update_system_settings",
+        "path.write_text",
+    ),
+    (
+        Path("api/services/configuration.py"),
+        "repair_settings_from_template",
+        "active_path.write_text",
+    ),
+    (
+        Path("api/services/workflows.py"),
+        "_write_system_workflow_file_content",
+        "temp_path.write_text",
+    ),
     (Path("core/ingestion/service.py"), "process_job", "import_root.mkdir"),
 }
 
@@ -96,7 +109,9 @@ def _find_direct_mutations(path: Path) -> list[str]:
             if _is_allowed_direct_mutation(path, node, name, parents):
                 continue
             offenders.append(f"{path}:{node.lineno}: {name}")
-        if any(name == f"{module}.{function}" for module, function in MUTATING_FUNCTIONS):
+        if any(
+            name == f"{module}.{function}" for module, function in MUTATING_FUNCTIONS
+        ):
             if _is_allowed_direct_mutation(path, node, name, parents):
                 continue
             offenders.append(f"{path}:{node.lineno}: {name}")
@@ -125,13 +140,16 @@ def _containing_function_name(node: ast.AST, parents: dict[ast.AST, ast.AST]) ->
     current = node
     while current in parents:
         current = parents[current]
-        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(current, ast.FunctionDef | ast.AsyncFunctionDef):
             return current.name
     return ""
 
 
 def _attribute_is_mutating_method(name: str) -> bool:
-    if not any(name == f".{method}" or name.endswith(f".{method}") for method in MUTATING_METHODS):
+    if not any(
+        name == f".{method}" or name.endswith(f".{method}")
+        for method in MUTATING_METHODS
+    ):
         return False
     if name.endswith(".open"):
         return False

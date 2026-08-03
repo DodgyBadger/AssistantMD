@@ -5,19 +5,24 @@ APScheduler-driven worker to drain ingestion job queue.
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from collections.abc import Callable
 
 from core.ingestion.jobs import get_job, list_jobs
 from core.ingestion.models import JobStatus
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
+    ExecutionTaskSnapshot,
     ExecutionTaskSource,
     TaskCoordinator,
     ingestion_task_label,
     ingestion_vault_scope,
 )
-from core.runtime.task_runner import ExecutionTaskHooks, ExecutionTaskRunner, ExecutionTaskSpec
+from core.runtime.task_runner import (
+    ExecutionTaskHooks,
+    ExecutionTaskRunner,
+    ExecutionTaskSpec,
+)
 
 
 class IngestionWorker:
@@ -27,31 +32,25 @@ class IngestionWorker:
         task_coordinator: TaskCoordinator,
         task_runner: ExecutionTaskRunner,
         max_concurrent: int = 1,
-    ):
+    ) -> None:
         self.process_job_fn = process_job_fn
         self.max_concurrent = max_concurrent
         self.task_coordinator = task_coordinator
         self.task_runner = task_runner
         self.logger = UnifiedLogger(tag="ingestion-worker")
 
-    async def run_once(self):
+    async def run_once(self) -> None:
         queued = [j for j in list_jobs(limit=100) if j.status == JobStatus.QUEUED.value]
         if not queued:
             return
 
         selected_jobs = queued[: self.max_concurrent]
-        tracked_tasks = [
-            await self._start_tracked_job(job.id)
-            for job in selected_jobs
-        ]
+        tracked_tasks = [await self._start_tracked_job(job.id) for job in selected_jobs]
         await asyncio.gather(
-            *(
-                self._wait_for_task_terminal(task.task_id)
-                for task in tracked_tasks
-            )
+            *(self._wait_for_task_terminal(task.task_id) for task in tracked_tasks)
         )
 
-    async def _start_tracked_job(self, job_id: int):
+    async def _start_tracked_job(self, job_id: int) -> ExecutionTaskSnapshot:
         vault = self._job_vault(job_id)
         return await self.task_runner.start_background(
             ExecutionTaskSpec(

@@ -76,6 +76,10 @@ Only add events at decision boundaries; avoid noisy instrumentation.
 - Agents should run individual scenarios directly to validate functionality being built.
 - Only the maintainers should run the full validation suite.
 - In this dev container, avoid long validation jobs unless explicitly requested.
+- Static analysis is agent-owned and is separate from the maintainer-owned
+  validation suite. Production Python changes still require the complete
+  [Production Python Quality Gate](coding-standards.md#production-python-quality-gate)
+  before commit or handoff.
 
 ## Agent Smoke Tests (Local, Fast)
 - For new functions/modules, run quick ephemeral bash-based smoke tests before handoff.

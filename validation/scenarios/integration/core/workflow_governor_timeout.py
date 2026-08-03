@@ -8,12 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+import core.runtime.workflow_governor as governor_module
 from core.authoring.workflow_execution import WorkflowExecutionResult
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSource, TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
-import core.runtime.workflow_governor as governor_module
+from core.workflow_runs import WorkflowRunStore
 from validation.core.base_scenario import BaseScenario
 
 
@@ -53,14 +54,22 @@ class WorkflowGovernorTimeoutScenario(BaseScenario):
             coordinator = TaskCoordinator()
             task_runner = ExecutionTaskRunner(
                 task_coordinator=coordinator,
-                background_spawner=RuntimeBackgroundSpawner(background_loop=asyncio.get_running_loop()),
+                background_spawner=RuntimeBackgroundSpawner(
+                    background_loop=asyncio.get_running_loop()
+                ),
             )
-            governor = WorkflowGovernor(task_coordinator=coordinator, task_runner=task_runner)
+            run_store = WorkflowRunStore(str(self.artifacts_dir / "system"))
+            governor = WorkflowGovernor(
+                task_coordinator=coordinator,
+                task_runner=task_runner,
+                workflow_run_store=run_store,
+            )
             result = await governor.execute_workflow(
                 global_id="TimeoutVault/slow_probe",
                 source=ExecutionTaskSource.SCHEDULER,
             )
             tasks = await coordinator.list_tasks(kind="workflow")
+            durable_run = run_store.get_latest_run("TimeoutVault/slow_probe")
         finally:
             governor_module.execute_workflow_by_id = original_execute
             governor_module.get_workflow_task_timeout_seconds = original_timeout
@@ -71,7 +80,14 @@ class WorkflowGovernorTimeoutScenario(BaseScenario):
         workflow_result = metadata.get("workflow_result")
         workflow_failure = metadata.get("workflow_failure")
 
-        self.soft_assert_equal(result.status, "timed_out", "Workflow result should report timeout")
+        self.soft_assert_equal(
+            result.status, "timed_out", "Workflow result should report timeout"
+        )
+        self.soft_assert_equal(
+            durable_run.status if durable_run else None,
+            "timed_out",
+            "Workflow timeout should persist as the latest durable outcome",
+        )
         self.soft_assert_equal(
             task.status if task else None,
             "timed_out",

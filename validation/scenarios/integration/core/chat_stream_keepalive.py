@@ -9,7 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat.executor import PreparedChatExecution
-from core.chat.task_execution import start_prepared_chat_stream_task, stream_chat_task_sse
+from core.chat.task_execution import (
+    start_prepared_chat_stream_task,
+    stream_chat_task_sse,
+)
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
@@ -62,15 +65,27 @@ class ChatStreamKeepaliveScenario(BaseScenario):
                 chunks.append(chunk)
 
             keepalive_index = next(
-                (index for index, chunk in enumerate(chunks) if chunk.startswith(": keepalive")),
+                (
+                    index
+                    for index, chunk in enumerate(chunks)
+                    if chunk.startswith(": keepalive")
+                ),
                 None,
             )
             done_index = next(
-                (index for index, chunk in enumerate(chunks) if '"event": "done"' in chunk),
+                (
+                    index
+                    for index, chunk in enumerate(chunks)
+                    if '"event": "done"' in chunk
+                ),
                 None,
             )
-            self.soft_assert(keepalive_index is not None, "Idle stream should emit a keepalive chunk")
-            self.soft_assert(done_index is not None, "Idle stream should still emit the done event")
+            self.soft_assert(
+                keepalive_index is not None, "Idle stream should emit a keepalive chunk"
+            )
+            self.soft_assert(
+                done_index is not None, "Idle stream should still emit the done event"
+            )
             if keepalive_index is not None and done_index is not None:
                 self.soft_assert(
                     keepalive_index < done_index,
@@ -103,8 +118,10 @@ class ChatStreamKeepaliveScenario(BaseScenario):
             consume_task = asyncio.create_task(_consume_stream())
             try:
                 for _ in range(50):
-                    task_snapshot = await get_runtime_context().task_coordinator.get_task(
-                        hanging.task.task_id
+                    task_snapshot = (
+                        await get_runtime_context().task_coordinator.get_task(
+                            hanging.task.task_id
+                        )
                     )
                     if task_snapshot is not None and task_snapshot.status == "running":
                         break

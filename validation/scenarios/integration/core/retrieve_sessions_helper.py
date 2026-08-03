@@ -28,9 +28,27 @@ class RetrieveSessionsHelperScenario(BaseScenario):
         self._seed_session(chat_store, vault.name, "pending-one", title="Pending one")
         self._seed_session(chat_store, vault.name, "has-summary", title="Has summary")
         self._seed_session(chat_store, vault.name, "pending-two", title="Pending two")
-        self._seed_session(chat_store, vault.name, "stale-summary", title="Stale summary", message_count=5)
-        self._seed_session(chat_store, vault.name, "compacted-summary", title="Compacted summary", message_count=3)
-        self._seed_session(chat_store, vault.name, "current-summary", title="Current summary", message_count=4)
+        self._seed_session(
+            chat_store,
+            vault.name,
+            "stale-summary",
+            title="Stale summary",
+            message_count=5,
+        )
+        self._seed_session(
+            chat_store,
+            vault.name,
+            "compacted-summary",
+            title="Compacted summary",
+            message_count=3,
+        )
+        self._seed_session(
+            chat_store,
+            vault.name,
+            "current-summary",
+            title="Current summary",
+            message_count=4,
+        )
         summary_store.upsert_session_summary(
             vault_name=vault.name,
             session_id="has-summary",
@@ -71,14 +89,18 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             metadata={"message_count": 4, "history_revision": 1},
         )
 
-        self.create_file(vault, "AssistantMD/Authoring/retrieve_sessions_probe.md", WORKFLOW)
+        self.create_file(
+            vault, "AssistantMD/Authoring/retrieve_sessions_probe.md", WORKFLOW
+        )
 
         await self.start_system()
         result = await self.run_workflow(vault, "retrieve_sessions_probe")
         self.soft_assert_equal(result.status, "completed", "Workflow should complete")
 
         output_path = vault / "pending-sessions.md"
-        self.soft_assert(output_path.exists(), "Workflow should write pending session output")
+        self.soft_assert(
+            output_path.exists(), "Workflow should write pending session output"
+        )
         payload = json.loads(output_path.read_text(encoding="utf-8"))
         session_ids = {item["session_id"] for item in payload["items"]}
         self.soft_assert_equal(
@@ -91,10 +113,7 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             "retrieve_sessions should include current history revisions",
         )
         self.soft_assert(
-            {
-                item["session_id"]: item["summary_status"]
-                for item in payload["items"]
-            }
+            {item["session_id"]: item["summary_status"] for item in payload["items"]}
             == {
                 "pending-one": "pending",
                 "pending-two": "pending",
@@ -140,13 +159,16 @@ class RetrieveSessionsHelperScenario(BaseScenario):
             session_id,
             vault_name,
             [
-                ModelRequest(parts=[part])
-                if isinstance(part, UserPromptPart)
-                else ModelResponse(parts=[part])
+                (
+                    ModelRequest(parts=[part])
+                    if isinstance(part, UserPromptPart)
+                    else ModelResponse(parts=[part])
+                )
                 for part in messages
             ],
         )
         chat_store.set_session_title(session_id, vault_name, title)
+
 
 WORKFLOW = """---
 run_type: workflow
@@ -161,7 +183,7 @@ payload = {
     "item_count": sessions.item_count,
     "items": [item.metadata for item in sessions.items],
 }
-await file_ops_safe(
+await file_write(
     operation="write",
     path="pending-sessions.md",
     content=json.dumps(payload, indent=2, sort_keys=True),

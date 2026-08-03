@@ -5,15 +5,16 @@ Experiment scenario for the session_ops session operations contract.
 import json
 import sqlite3
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Sequence
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from pydantic_ai.embeddings import EmbedInputType, EmbeddingModel, EmbeddingResult
 from pydantic_ai import ModelRetry
+from pydantic_ai.embeddings import EmbeddingModel, EmbeddingResult, EmbedInputType
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.usage import RequestUsage
 
@@ -21,8 +22,8 @@ from core.chat.chat_store import ChatStore
 from core.memory.session_summary import SessionSummaryStore
 from core.runtime.execution_tasks import chat_session_scope
 from core.tools.session_ops import SessionOps
-from core.vector import VectorService
 from core.vault_state.service import VaultStateService
+from core.vector import VectorService
 from validation.core.base_scenario import BaseScenario
 
 
@@ -77,7 +78,9 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "session-donor-wetlands",
             vault_name,
             [
-                ModelRequest(parts=[UserPromptPart(content="Draft the wetlands donor report.")]),
+                ModelRequest(
+                    parts=[UserPromptPart(content="Draft the wetlands donor report.")]
+                ),
             ],
         )
         chat_store.ensure_session("riparian-grant-session", vault_name)
@@ -85,14 +88,18 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "unsummarized-session",
             vault_name,
             [
-                ModelRequest(parts=[UserPromptPart(content="A short unsummarized planning note.")]),
+                ModelRequest(
+                    parts=[
+                        UserPromptPart(content="A short unsummarized planning note.")
+                    ]
+                ),
             ],
         )
         chat_store.add_tool_event(
             session_id="extract-session",
             vault_name=vault_name,
             tool_call_id="read-source-1",
-            tool_name="file_ops_safe",
+            tool_name="file_read",
             event_type="call",
             args={"operation": "read", "path": "Sources/Wetlands/source-note.md"},
         )
@@ -100,7 +107,7 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             session_id="extract-session",
             vault_name=vault_name,
             tool_call_id="read-source-1",
-            tool_name="file_ops_safe",
+            tool_name="file_read",
             event_type="result",
             result_text="Source note about wetland restoration progress and donor-facing outcomes.",
             result_metadata={"token_count": 9},
@@ -109,7 +116,7 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             session_id="extract-session",
             vault_name=vault_name,
             tool_call_id="read-virtual-doc-1",
-            tool_name="file_ops_safe",
+            tool_name="file_read",
             event_type="call",
             args={"operation": "read", "path": "__virtual_docs__/tools/delegate.md"},
         )
@@ -117,7 +124,7 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             session_id="extract-session",
             vault_name=vault_name,
             tool_call_id="read-virtual-doc-1",
-            tool_name="file_ops_safe",
+            tool_name="file_read",
             event_type="result",
             result_text="Internal delegate tool documentation.",
             result_metadata={"token_count": 5},
@@ -171,7 +178,8 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                     "source_summary tool log should filter virtual docs file reads",
                 )
                 self.soft_assert(
-                    "Do not create bullets named `Session summary`, `Tool log`" in prompt,
+                    "Do not create bullets named `Session summary`, `Tool log`"
+                    in prompt,
                     "source_summary prompt should forbid meta-source labels",
                 )
             if agent is session_ops_module._SessionSummaryIntent:
@@ -348,14 +356,14 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                         ]
                     ),
                     ModelResponse(
-                        parts=[TextPart(content="This summary should not be persisted.")]
+                        parts=[
+                            TextPart(content="This summary should not be persisted.")
+                        ]
                     ),
                 ],
             )
             session_ops_module.VectorService = lambda: VectorService(
-                embedding_model_overrides={
-                    "embeddings": FailingEmbeddingModel()
-                }
+                embedding_model_overrides={"embeddings": FailingEmbeddingModel()}
             )
             index_failure_ctx = SimpleNamespace(
                 deps=SimpleNamespace(
@@ -397,16 +405,18 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "all_limit_error": all_limit_error,
             "no_query_search_error": no_query_search_error,
             "indexing_failure_error": indexing_failure_error,
-            "index_failure_summary": index_failure_summary.to_dict()
-            if index_failure_summary
-            else None,
+            "index_failure_summary": (
+                index_failure_summary.to_dict() if index_failure_summary else None
+            ),
         }
         (self.artifacts_dir / "session_ops_session_probe.json").write_text(
             json.dumps(report, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
-        self.soft_assert_equal(upserted["status"], "ok", "upsert_session_summary should succeed")
+        self.soft_assert_equal(
+            upserted["status"], "ok", "upsert_session_summary should succeed"
+        )
         self.soft_assert_equal(
             extracted["status"],
             "ok",
@@ -546,7 +556,10 @@ class SessionOpsSessionProbeScenario(BaseScenario):
             "list_sessions should not return full summaries",
         )
         self.soft_assert(
-            any(item["session_id"] == "unsummarized-session" for item in listed_pending["sessions"]),
+            any(
+                item["session_id"] == "unsummarized-session"
+                for item in listed_pending["sessions"]
+            ),
             "list_sessions should support pending summary exploration",
         )
         self.soft_assert(
@@ -621,9 +634,12 @@ async def _call_model_retry(tool, ctx, **kwargs) -> str:
 
 async def _call_exception(tool, ctx, **kwargs) -> str:
     try:
-        await tool.function(ctx, **kwargs)
+        result = await tool.function(ctx, **kwargs)
     except Exception as exc:  # noqa: BLE001
         return str(exc)
+    metadata = getattr(result, "metadata", {})
+    if isinstance(metadata, dict) and metadata.get("status") == "failed":
+        return str(getattr(result, "return_value", result))
     raise AssertionError("Expected session_ops call to fail")
 
 
@@ -636,18 +652,47 @@ def _insert_chat_mutation_rows(
 ) -> None:
     db_path = system_root / "vault_state.db"
     now = datetime.now(UTC)
-    rows = [
+    activities = [
         (
-            "memory-extract-chat-task-1",
+            f"task:memory-extract-chat-task-1:{vault_id}",
+            vault_id,
+            vault_name,
             "chat",
             "api",
             chat_session_scope(session_id),
             f"chat:{session_id}",
+            "memory-extract-chat-task-1",
+            "completed",
+            now.isoformat(),
+            now.isoformat(),
+            now.isoformat(),
+            (now + timedelta(days=365)).isoformat(),
+        ),
+        (
+            f"task:memory-extract-chat-task-2:{vault_id}",
             vault_id,
             vault_name,
+            "chat",
+            "api",
+            chat_session_scope(session_id),
+            f"chat:{session_id}",
+            "memory-extract-chat-task-2",
+            "completed",
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(seconds=1)).isoformat(),
+            (now + timedelta(days=365)).isoformat(),
+        ),
+    ]
+    mutations = [
+        (
+            f"task:memory-extract-chat-task-1:{vault_id}",
+            "memory-extract-operation-1",
             "Reports/Wetlands/update.md",
             None,
+            "file",
             "write",
+            "completed",
             101,
             0,
             None,
@@ -660,16 +705,13 @@ def _insert_chat_mutation_rows(
             (now + timedelta(days=365)).isoformat(),
         ),
         (
-            "memory-extract-chat-task-2",
-            "chat",
-            "api",
-            chat_session_scope(session_id),
-            f"chat:{session_id}",
-            vault_id,
-            vault_name,
+            f"task:memory-extract-chat-task-2:{vault_id}",
+            "memory-extract-operation-2",
             "Reports/Wetlands/archive.md",
             None,
+            "file",
             "delete",
+            "completed",
             102,
             1,
             "deleted-before-hash",
@@ -686,16 +728,26 @@ def _insert_chat_mutation_rows(
     try:
         conn.executemany(
             """
-            INSERT INTO task_file_mutations (
-                task_id, task_kind, task_source, task_scope, task_label,
-                vault_id, vault_name, path, related_path, operation,
+            INSERT INTO vault_activities (
+                activity_id, vault_id, vault_name, kind, source, scope, label,
+                task_id, status, created_at, updated_at, completed_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            activities,
+        )
+        conn.executemany(
+            """
+            INSERT INTO vault_mutations (
+                activity_id, operation_id, path, related_path, target_kind,
+                operation, status,
                 event_sequence, before_exists, before_hash, before_snapshot_id,
                 after_exists, after_hash, after_snapshot_id, snapshot_ref,
                 created_at, expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            rows,
+            mutations,
         )
         conn.commit()
     finally:
@@ -727,12 +779,16 @@ class SemanticProbeEmbeddingModel(EmbeddingModel):
         input_list, merged_settings = self.prepare_embed(inputs, settings)
         dimensions = int(merged_settings.get("dimensions") or self._dimensions)
         return EmbeddingResult(
-            embeddings=[_semantic_probe_vector(text, dimensions) for text in input_list],
+            embeddings=[
+                _semantic_probe_vector(text, dimensions) for text in input_list
+            ],
             inputs=input_list,
             input_type=input_type,
             model_name=self.model_name,
             provider_name=self.system,
-            usage=RequestUsage(input_tokens=sum(len(text.split()) for text in input_list)),
+            usage=RequestUsage(
+                input_tokens=sum(len(text.split()) for text in input_list)
+            ),
         )
 
 

@@ -35,7 +35,26 @@ do not silently switch billing paths.
 
 Runtime-relevant general settings include:
 
+- `default_chat_mode`: initial mode for new chat sessions (`normal` or
+  `inline_edit`). A session persists its own selected mode after creation.
+- `disabled_tools`: app-wide denylist of tool registry names. Registered tools
+  are available to chat, delegate child agents, workflows, context scripts, and
+  code execution unless listed here. Chat does not maintain a separate
+  per-session tool selection.
+- `web_search_strategy`, `web_extract_strategy`, and `web_crawl_strategy`:
+  provider strategy identifiers for the stable web capabilities. Strategy
+  selection is explicit; failures do not trigger another provider.
+- `ingestion_url_fetch_strategy`: URL transport used by durable ingestion,
+  independently of agent web extraction.
+- `browser_max_concurrent_sessions`, `browser_max_calls_per_turn`, and
+  `browser_min_memory_headroom_mb`: Chromium concurrency, task budget, and
+  cgroup launch-admission controls.
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
+- `chat_model_requests_limit`: maximum model requests allowed in one chat
+  response; `0` disables the circuit breaker.
+- `file_list_max_results`: maximum structured results returned by
+  `file_read(list)`; `0` disables the cap.
+- `file_search_timeout_seconds`: timeout for `file_read(search)`.
 - `persist_model_reasoning_parts`: when false, provider reasoning/thinking
   parts are not persisted in durable chat history; when true, those parts are
   stored with provider-native messages, which can increase replay tokens and
@@ -48,7 +67,7 @@ Runtime-relevant general settings include:
 - `vault_state_excluded_patterns`: gitignore-style vault-relative path patterns excluded from vault-state manifests and change feeds.
 - `vault_scan_interval_seconds`: interval in seconds for the reserved `vault-state-refresh` scheduler job; `0` disables scheduled vault-state refresh.
 - `task_rollback_enabled`: enable automatic rollback for failed, cancelled, or timed-out task file mutations.
-- `task_mutation_retention_days`: days to retain task mutation audit rows before cleanup; defaults to 365 days.
+- `task_mutation_retention_days`: days to retain attributed vault activity and mutation rows before cleanup; defaults to 365 days.
 - `task_snapshot_retention_days`: days to retain task snapshot metadata and files before cleanup; defaults to 30 days.
 - `compaction_type`: chat history compaction policy (`auto`, `suggested`, or `none`). `auto` is the default and is recommended for long-running tasks; if compaction happens too often, tune `compaction_token_threshold` before switching to `suggested` or `none`.
 - `compaction_keep_recent`: target count of recent raw chat messages preserved during compaction.
@@ -90,11 +109,19 @@ Primary implementation: `core/settings/__init__.py`
 - warnings for missing template entries
 - warnings for unknown non-user-editable entries
 
+Web capability availability includes requirements declared by the selected
+strategy. For example, selecting `tavily` makes that capability unavailable
+with a configuration warning until `TAVILY_API_KEY` is populated. The runtime
+does not substitute a secret-free strategy. Configuration health also warns
+when browser is enabled under a detectable memory limit below the supported
+2 GB browser-capable baseline.
+
 This is why project-level tool additions should also be included in `core/settings/settings.template.yaml`: otherwise they can be flagged as unexpected/deprecated during config reconciliation.
 
 ## Configuration Editing APIs
 
-Primary implementation: `core/settings/config_editor.py` and `api/services.py`
+Primary implementation: `core/settings/config_editor.py` and
+`api/services/configuration.py`
 
 Behavior:
 

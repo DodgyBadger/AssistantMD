@@ -24,7 +24,6 @@ from core.settings.secrets_store import (
     set_secret_value,
 )
 
-
 OPENAI_OAUTH_INTERNAL_SECRETS = frozenset(
     {OPENAI_OAUTH_TOKEN_SECRET, OPENAI_OAUTH_PENDING_SECRET}
 )
@@ -43,9 +42,7 @@ OPENAI_OAUTH_DEVICE_VERIFICATION_URL = "https://auth.openai.com/codex/device"
 OPENAI_OAUTH_DEVICE_USER_CODE_URL = (
     "https://auth.openai.com/api/accounts/deviceauth/usercode"
 )
-OPENAI_OAUTH_DEVICE_TOKEN_URL = (
-    "https://auth.openai.com/api/accounts/deviceauth/token"
-)
+OPENAI_OAUTH_DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token"
 OPENAI_OAUTH_SCOPE = "openid profile email offline_access"
 OPENAI_OAUTH_DEVICE_DEFAULT_POLL_INTERVAL_SECONDS = 5
 OPENAI_OAUTH_DEVICE_MIN_POLL_INTERVAL_SECONDS = 1
@@ -450,7 +447,7 @@ def start_openai_oauth(
     """Create pending PKCE state and return OAuth bootstrap data."""
 
     reference = _normalize_datetime(now or datetime.now(UTC))
-    expires_at = (reference + timedelta(seconds=OPENAI_OAUTH_PENDING_TTL_SECONDS))
+    expires_at = reference + timedelta(seconds=OPENAI_OAUTH_PENDING_TTL_SECONDS)
     state = secrets.token_hex(16)
     code_verifier = secrets.token_urlsafe(32)
     pending = OpenAIOAuthPendingState(
@@ -871,13 +868,17 @@ def token_result_to_state(
 
     return OpenAIOAuthTokenState(
         access_token=result.access_token,
-        refresh_token=result.refresh_token
-        if result.refresh_token is not None
-        else previous.refresh_token if previous is not None else None,
+        refresh_token=(
+            result.refresh_token
+            if result.refresh_token is not None
+            else previous.refresh_token if previous is not None else None
+        ),
         expires_at=result.expires_at,
-        account_id=result.account_id
-        if result.account_id is not None
-        else previous.account_id if previous is not None else None,
+        account_id=(
+            result.account_id
+            if result.account_id is not None
+            else previous.account_id if previous is not None else None
+        ),
         last_refresh_at=refreshed_at,
         last_refresh_error=refresh_error,
     )
@@ -941,7 +942,9 @@ def _pending_state_from_payload(payload: str) -> OpenAIOAuthPendingState:
         code_verifier=_required_string(
             raw, "code_verifier", "OpenAI OAuth pending state"
         ),
-        redirect_uri=_required_string(raw, "redirect_uri", "OpenAI OAuth pending state"),
+        redirect_uri=_required_string(
+            raw, "redirect_uri", "OpenAI OAuth pending state"
+        ),
         created_at=_required_string(raw, "created_at", "OpenAI OAuth pending state"),
         expires_at=_required_string(raw, "expires_at", "OpenAI OAuth pending state"),
         return_metadata=return_metadata,
@@ -994,10 +997,14 @@ def _load_json_mapping(payload: str, label: str) -> dict[str, Any]:
 
 
 def _token_result_from_response(payload: dict[str, Any]) -> OpenAIOAuthTokenResult:
-    access_token = _required_string(payload, "access_token", "OpenAI OAuth token response")
+    access_token = _required_string(
+        payload, "access_token", "OpenAI OAuth token response"
+    )
     id_token = _optional_string(payload, "id_token")
     refresh_token = _optional_string(payload, "refresh_token")
-    expires_at = _response_expires_at(payload, access_token=access_token, id_token=id_token)
+    expires_at = _response_expires_at(
+        payload, access_token=access_token, id_token=id_token
+    )
     account_id = _response_account_id(
         payload,
         access_token=access_token,

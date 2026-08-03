@@ -2,20 +2,25 @@
     function createVaultActivityController({ state, elements, utils, callbacks }) {
         const { escapeHtml, formatShortDate } = utils;
         const icons = window.AssistantMDIcons;
+        const rollbackPreviews = new WeakMap();
+
+        function interactionLocked() {
+            return Boolean(callbacks.isInteractionLocked?.());
+        }
         function renderVaultActivityResult(vaultName) {
             if (!vaultName) {
                 return '<p class="text-sm text-txt-secondary">No vault selected.</p>';
             }
             const activity = state.vaultActivity[vaultName];
             if (!activity) {
-                return '<p class="text-sm text-txt-secondary">Loading task file mutations...</p>';
+                return '<p class="text-sm text-txt-secondary">Loading vault activity...</p>';
             }
             if (activity.error) {
                 return `<p class="state-error text-sm">${escapeHtml(activity.error)}</p>`;
             }
             const groups = activity.groups || [];
             if (!groups.length) {
-                return '<p class="text-sm text-txt-secondary">No retained task file mutations for this vault.</p>';
+                return '<p class="text-sm text-txt-secondary">No retained vault activity for this vault.</p>';
             }
             const sortedGroups = sortVaultActivityGroups(groups);
             return `
@@ -24,9 +29,10 @@
                         <thead>
                             <tr>
                                 ${renderVaultActivitySortHeader('type', 'Type', 'cell-center')}
-                                ${renderVaultActivitySortHeader('task', 'Task')}
+                                ${renderVaultActivitySortHeader('task', 'Activity')}
+                                ${renderVaultActivitySortHeader('status', 'Status')}
                                 ${renderVaultActivitySortHeader('last_run', 'Last Run')}
-                                ${renderVaultActivitySortHeader('files', 'Files Mutated')}
+                                ${renderVaultActivitySortHeader('files', 'Changes')}
                             </tr>
                         </thead>
                         <tbody>
@@ -38,6 +44,7 @@
                                     <td>
                                         <span>${escapeHtml(renderActivityTaskTitle(group))}</span>
                                     </td>
+                                    <td class="cell-xs">${escapeHtml(renderActivityStatus(group))}</td>
                                     <td class="cell-xs">${formatShortDate(group.last_mutation_at)}</td>
                                     <td>
                                         <button
@@ -48,7 +55,7 @@
                                             aria-label="View activity files"
                                             title="View activity files"
                                         >
-                                            ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'}
+                                            ${group.operation_count || 0} operation${group.operation_count === 1 ? '' : 's'}
                                         </button>
                                     </td>
                                 </tr>
@@ -100,7 +107,10 @@
                 return renderActivityTaskTitle(a).localeCompare(renderActivityTaskTitle(b));
             }
             if (column === 'files') {
-                return (a.mutation_count || 0) - (b.mutation_count || 0);
+                return (a.operation_count || 0) - (b.operation_count || 0);
+            }
+            if (column === 'status') {
+                return renderActivityStatus(a).localeCompare(renderActivityStatus(b));
             }
             const aTime = Date.parse(a.last_mutation_at || '') || 0;
             const bTime = Date.parse(b.last_mutation_at || '') || 0;
@@ -117,7 +127,7 @@
                 });
             }
             return stripActivityKindPrefix(
-                group.activity_label || `${group.task_kind || 'task'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
+                group.activity_label || `${group.activity_kind || 'activity'}: ${group.vault_name || state.selectedActivityVault || 'vault'}`
             );
         }
 
@@ -127,6 +137,7 @@
             if (kind === 'workflow') return '⚙️';
             if (kind === 'context') return '🧩';
             if (kind === 'ingestion') return '📥';
+            if (kind === 'explorer') return '✎';
             return '•';
         }
 
@@ -144,7 +155,8 @@
             if (kind === 'workflow') return 'Workflow';
             if (kind === 'context') return 'Context assembly';
             if (kind === 'ingestion') return 'Ingestion';
-            return 'Task';
+            if (kind === 'explorer') return 'Vault Explorer';
+            return 'Activity';
         }
 
         function normalizedActivityKind(group) {
@@ -152,6 +164,7 @@
             if (rawKind === 'chat') return 'chat';
             if (rawKind === 'workflow') return 'workflow';
             if (rawKind === 'ingestion') return 'ingestion';
+            if (rawKind === 'explorer') return 'explorer';
             if (rawKind === 'context' || rawKind === 'context_assembly' || rawKind === 'context assembly') {
                 return 'context';
             }
@@ -160,27 +173,34 @@
             if (label.startsWith('workflow:')) return 'workflow';
             if (label.startsWith('ingestion:')) return 'ingestion';
             if (label.startsWith('context:') || label.startsWith('context assembly:')) return 'context';
-            return rawKind || 'task';
+            return rawKind || 'activity';
+        }
+
+        function renderActivityStatus(group) {
+            const value = String(group.status || 'recorded').replaceAll('_', ' ');
+            return value.replace(/\b\w/g, character => character.toUpperCase());
         }
 
         function stripActivityKindPrefix(label) {
             return String(label || '').replace(/^(chat|workflow|ingestion|context|context assembly|context_assembly):\s*/i, '');
         }
 
-        function renderMutationSnapshotLink(mutation) {
+        function renderMutationSnapshotLink(mutation, vaultName) {
             if (!mutation.before_snapshot_id) {
                 return '<span class="subtle">—</span>';
             }
-            const snapshotUrl = `api/vault-state/snapshots/${encodeURIComponent(mutation.before_snapshot_id)}/content`;
             return `
-                <a
-                    href="${snapshotUrl}"
-                    target="_blank"
-                    rel="noopener"
+                <button
+                    type="button"
                     class="text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent rounded-sm"
+                    data-vault-activity-revision="${escapeHtml(String(mutation.before_snapshot_id))}"
+                    data-vault-activity-revision-path="${escapeHtml(mutation.path || '')}"
+                    data-vault-activity-revision-vault="${escapeHtml(vaultName)}"
+                    aria-label="Open revision history for ${escapeHtml(mutation.path || 'file')}"
+                    title="Open revision history"
                 >
                     Open
-                </a>
+                </button>
             `;
         }
 
@@ -207,6 +227,12 @@
                             <h2 id="vault-activity-modal-title" class="text-lg font-semibold text-txt-primary">${renderActivityKindEmoji(group)} ${escapeHtml(renderActivityTaskTitle(group))}</h2>
                         </div>
                         <div class="app-modal-actions">
+                            <div class="vault-activity-rollback-action" data-vault-activity-rollback-area>
+                                <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="Checking rollback availability">
+                                    ${icons.RESTORE_ICON_SVG}
+                                    <span>Checking rollback...</span>
+                                </button>
+                            </div>
                             <button type="button" class="ui-icon-button is-compact" data-vault-activity-close="true" aria-label="Close" title="Close">
                                 ${icons.X_ICON_SVG}
                             </button>
@@ -214,7 +240,7 @@
                     </div>
                     <div class="p-4">
                         <div class="text-sm text-txt-secondary mb-3">
-                            Last run ${formatShortDate(group.last_mutation_at)} · ${group.mutation_count || 0} file${group.mutation_count === 1 ? '' : 's'} mutated
+                            Last run ${formatShortDate(group.last_mutation_at)} · ${group.operation_count || 0} operation${group.operation_count === 1 ? '' : 's'} · ${escapeHtml(renderActivityStatus(group))}
                         </div>
                         <div class="dashboard-table-wrap" role="region" aria-label="AssistantMD activity files" tabindex="0">
                             <table class="dashboard-table">
@@ -224,7 +250,7 @@
                                         ${renderVaultActivityMutationSortHeader('from', 'From')}
                                         ${renderVaultActivityMutationSortHeader('operation', 'Operation')}
                                         ${renderVaultActivityMutationSortHeader('time', 'Time')}
-                                        <th>Snapshot</th>
+                                        <th>Revision</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -232,9 +258,9 @@
                                         <tr>
                                             <td class="cell-mono cell-xs">${escapeHtml(mutation.path)}</td>
                                             <td class="cell-mono cell-xs">${mutation.related_path ? escapeHtml(mutation.related_path) : '<span class="subtle">—</span>'}</td>
-                                            <td>${escapeHtml(mutation.operation)}</td>
+                                            <td>${escapeHtml(mutation.operation)} ${mutation.target_kind === 'directory' ? '(folder)' : ''}</td>
                                             <td class="cell-xs">${formatShortDate(mutation.created_at)}</td>
-                                            <td>${renderMutationSnapshotLink(mutation)}</td>
+                                            <td>${renderMutationSnapshotLink(mutation, vaultName)}</td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
@@ -246,6 +272,24 @@
             overlay.addEventListener('click', (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
+                const revisionButton = target.closest('[data-vault-activity-revision]');
+                if (revisionButton instanceof HTMLButtonElement) {
+                    const revisionId = revisionButton.dataset.vaultActivityRevision || '';
+                    const path = revisionButton.dataset.vaultActivityRevisionPath || '';
+                    const revisionVault = revisionButton.dataset.vaultActivityRevisionVault || vaultName;
+                    closeVaultActivityDetails();
+                    callbacks.openFileRevision?.({
+                        vaultName: revisionVault,
+                        path,
+                        snapshotId: revisionId,
+                    });
+                    return;
+                }
+                const rollbackButton = target.closest('[data-vault-activity-rollback]');
+                if (rollbackButton instanceof HTMLButtonElement) {
+                    rollbackVaultActivity(overlay, vaultName, activityId, rollbackButton);
+                    return;
+                }
                 if (target instanceof HTMLElement) {
                     const sortButton = target.closest('[data-vault-activity-mutation-sort]');
                     if (sortButton instanceof HTMLElement) {
@@ -262,6 +306,125 @@
                 }
             });
             document.body.appendChild(overlay);
+            loadVaultActivityRollbackPreview(overlay, vaultName, activityId);
+        }
+
+        async function loadVaultActivityRollbackPreview(overlay, vaultName, activityId) {
+            const area = overlay.querySelector('[data-vault-activity-rollback-area]');
+            if (!(area instanceof HTMLElement)) return;
+            try {
+                const response = await fetch(
+                    `api/vaults/${encodeURIComponent(vaultName)}/activity/${encodeURIComponent(activityId)}/rollback`
+                );
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.message || payload.detail || `HTTP ${response.status}`);
+                }
+                if (!overlay.isConnected) return;
+                rollbackPreviews.set(overlay, payload);
+                renderRollbackAction(area, payload);
+            } catch (error) {
+                if (!overlay.isConnected) return;
+                area.innerHTML = `
+                    <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="${escapeHtml(error.message)}">
+                        ${icons.RESTORE_ICON_SVG}
+                        <span>Rollback unavailable</span>
+                    </button>
+                `;
+            }
+        }
+
+        async function rollbackVaultActivity(overlay, vaultName, activityId, button) {
+            const preview = rollbackPreviews.get(overlay);
+            if (!preview?.can_rollback || interactionLocked()) return;
+            const total = (preview.restore_count || 0) + (preview.delete_count || 0);
+            if (!window.confirm(
+                `Rollback ${total} file state${total === 1 ? '' : 's'} from this activity? The current states will remain available as revisions.`
+            )) return;
+
+            button.disabled = true;
+            const label = button.querySelector('span');
+            if (label) label.textContent = 'Rolling back...';
+            try {
+                const response = await fetch(
+                    `api/vaults/${encodeURIComponent(vaultName)}/activity/${encodeURIComponent(activityId)}/rollback`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            expected_states: (preview.paths || []).map(path => ({
+                                path: path.path,
+                                exists: path.expected_exists,
+                                sha256: path.expected_sha256,
+                            })),
+                        }),
+                    }
+                );
+                const payload = await response.json();
+                if (!response.ok) {
+                    const reason = payload.details?.issues?.[0]?.message
+                        || payload.message
+                        || payload.detail
+                        || `HTTP ${response.status}`;
+                    throw new Error(reason);
+                }
+                closeVaultActivityDetails();
+                await loadVaultActivity(vaultName);
+            } catch (error) {
+                const area = overlay.querySelector('[data-vault-activity-rollback-area]');
+                if (area instanceof HTMLElement) {
+                    area.innerHTML = `
+                        <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="${escapeHtml(error.message)}">
+                            ${icons.RESTORE_ICON_SVG}
+                            <span>Rollback failed</span>
+                        </button>
+                    `;
+                }
+            }
+        }
+
+        function renderRollbackAction(area, preview) {
+            if (interactionLocked()) {
+                area.innerHTML = `
+                    <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="Available when the active response finishes">
+                        ${icons.RESTORE_ICON_SVG}
+                        <span>Rollback activity</span>
+                    </button>
+                `;
+                return;
+            }
+            if (!preview.can_rollback) {
+                const reason = preview.issues?.[0]?.message || 'Rollback is not available for this activity.';
+                area.innerHTML = `
+                    <button type="button" class="ui-button-secondary vault-file-revision-action-button" disabled title="${escapeHtml(reason)}">
+                        ${icons.RESTORE_ICON_SVG}
+                        <span>Rollback unavailable</span>
+                    </button>
+                `;
+                return;
+            }
+            const total = (preview.restore_count || 0) + (preview.delete_count || 0);
+            area.innerHTML = `
+                <button
+                    type="button"
+                    class="ui-button-secondary vault-file-revision-action-button"
+                    data-vault-activity-rollback="true"
+                    title="Restore ${total} file state${total === 1 ? '' : 's'}"
+                >
+                    ${icons.RESTORE_ICON_SVG}
+                    <span>Rollback activity</span>
+                </button>
+            `;
+        }
+
+        function syncInteractionLocks() {
+            const overlay = document.getElementById('vault-activity-modal');
+            if (!(overlay instanceof HTMLElement)) return;
+            const area = overlay.querySelector('[data-vault-activity-rollback-area]');
+            const preview = rollbackPreviews.get(overlay);
+            if (area instanceof HTMLElement && preview) {
+                renderRollbackAction(area, preview);
+            }
         }
 
         function renderVaultActivityMutationSortHeader(column, label) {
@@ -329,7 +492,7 @@
             state.vaultActivity[vaultName] = { loading: true };
             updateVaultActivityContainer(vaultName);
             try {
-                const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/task-mutations?limit=25`);
+                const response = await fetch(`api/vaults/${encodeURIComponent(vaultName)}/activity?limit=25`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 state.vaultActivity[vaultName] = { groups: data.groups || [] };
@@ -384,6 +547,7 @@
             loadActivity: loadVaultActivity,
             updateContainer: updateVaultActivityContainer,
             closeDetails: closeVaultActivityDetails,
+            syncInteractionLocks,
             attachEventListeners,
         });
     }

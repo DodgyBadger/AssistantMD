@@ -73,9 +73,20 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             model,
             thinking=None,
             context_template=None,
+            chat_mode="normal",
+            display_prompt=None,
         ):
-            del vault_path, image_paths, image_uploads, thinking
-            history = chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            del (
+                vault_path,
+                image_paths,
+                image_uploads,
+                thinking,
+                chat_mode,
+                display_prompt,
+            )
+            history = (
+                chat_executor._CHAT_STORE.get_history(session_id, vault_name) or []
+            )
             agent = (
                 _BlockingSurfaceAgent()
                 if prompt == "cancel surface prompt"
@@ -136,7 +147,9 @@ class ChatSurfaceAdapterScenario(BaseScenario):
                     tools=[],
                 )
             )
-            running_task = await self._wait_for_task_status(cancelled.task.task_id, "running")
+            running_task = await self._wait_for_task_status(
+                cancelled.task.task_id, "running"
+            )
             cancellation = await cancel_chat_surface_task(cancelled.task.task_id)
             cancelled_events = await self._collect_events(cancelled.task.task_id)
             cancelled_task = await self._wait_for_task_terminal(cancelled.task.task_id)
@@ -159,7 +172,11 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             "Surface-started task should retain source surface metadata",
         )
         self.soft_assert_equal(
-            completed_task.metadata.get("external_conversation_id") if completed_task else None,
+            (
+                completed_task.metadata.get("external_conversation_id")
+                if completed_task
+                else None
+            ),
             "telegram-chat-123",
             "Surface-started task should retain external conversation id",
         )
@@ -169,7 +186,9 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             "Surface-started task should store normalized workspace metadata",
         )
         self.soft_assert_equal(
-            chat_executor._CHAT_STORE.get_session_workspace_path("telegram-session", vault.name),
+            chat_executor._CHAT_STORE.get_session_workspace_path(
+                "telegram-session", vault.name
+            ),
             "Projects/Surface/Inbox",
             "Surface adapter should normalize workspace paths before storing session metadata",
         )
@@ -178,7 +197,9 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             and "cannot contain '..'" in str(invalid_workspace_error),
             "Surface adapter should reject workspace traversal paths",
         )
-        history = chat_executor._CHAT_STORE.get_history("telegram-session", vault.name) or []
+        history = (
+            chat_executor._CHAT_STORE.get_history("telegram-session", vault.name) or []
+        )
         self.soft_assert(
             len(history) >= 2,
             "Surface-started chat task should persist normal chat session history",

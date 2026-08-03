@@ -14,7 +14,6 @@ import yaml
 
 from core.constants import ASSISTANTMD_ROOT_DIR
 
-
 VAULT_METADATA_RELATIVE_PATH = Path(ASSISTANTMD_ROOT_DIR) / "vault.yaml"
 _COLLISION_LOAD_ATTEMPTS = 5
 _COLLISION_LOAD_DELAY_SECONDS = 0.01
@@ -47,7 +46,9 @@ def _resolve_or_create_locked(metadata_path: Path) -> VaultIdentity:
         vault_id = str(payload.get("vault_id", "")).strip()
         if not vault_id:
             raise ValueError(f"Vault metadata is missing vault_id: {metadata_path}")
-        return VaultIdentity(vault_id=vault_id, metadata_path=metadata_path, created=False)
+        return VaultIdentity(
+            vault_id=vault_id, metadata_path=metadata_path, created=False
+        )
 
     vault_id = f"vault_{uuid.uuid4().hex}"
     metadata_path.parent.mkdir(parents=True, exist_ok=True)

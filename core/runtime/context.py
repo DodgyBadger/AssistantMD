@@ -8,22 +8,24 @@ for scheduler, workflow loader, and related components.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.authoring.template_discovery import WorkflowLoader
-from core.logger import UnifiedLogger
-from core.scheduling.jobs import setup_scheduler_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.logger import UnifiedLogger
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
-from core.vault_state import VaultStateService
+from core.scheduling.jobs import setup_scheduler_jobs
 from core.scheduling.system_jobs import sync_system_scheduler_jobs
+from core.vault_state import VaultStateService
+from core.workflow_runs import WorkflowRunStore
+
 from . import state as runtime_state
 from .config import RuntimeConfig
 
@@ -47,6 +49,7 @@ class RuntimeContext:
         ingestion_worker: IngestionWorker
         task_coordinator: Process-local execution task tracker
         workflow_governor: Workflow execution policy layer
+        workflow_run_store: Durable workflow execution history
     """
 
     config: RuntimeConfig
@@ -59,14 +62,15 @@ class RuntimeContext:
     task_coordinator: TaskCoordinator
     task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
+    workflow_run_store: WorkflowRunStore
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime
-    last_config_reload: Optional[datetime] = None
+    last_config_reload: datetime | None = None
     session_buffers: dict[str, BufferStore] = field(default_factory=dict)
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
-    async def start(self):
+    async def start(self) -> None:
         """
         Start runtime services if needed.
 
@@ -75,7 +79,7 @@ class RuntimeContext:
         """
         pass
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Gracefully shutdown all runtime services and clear global context."""
         self.logger.info("Shutting down runtime context")
 
@@ -95,7 +99,7 @@ class RuntimeContext:
         # Clear global runtime context to allow clean restart
         runtime_state.clear_runtime_context()
 
-    def sync_shutdown(self):
+    def sync_shutdown(self) -> asyncio.Task[None] | None:
         """
         Synchronous wrapper for shutdown.
 
@@ -113,13 +117,14 @@ class RuntimeContext:
         except RuntimeError:
             # No event loop running, safe to use asyncio.run
             asyncio.run(self.shutdown())
+            return None
 
     async def reload_workflows(
         self,
         manual: bool = True,
         *,
         refresh_vault_state: bool = True,
-    ):
+    ) -> dict[str, Any]:
         """
         Convenience method to reload workflow configurations.
 
@@ -131,12 +136,16 @@ class RuntimeContext:
         """
         if manual:
             self.logger.info("Reloading workflows (manual=True)")
-        results = await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        results: dict[str, Any] = dict(
+            await setup_scheduler_jobs(self.scheduler, manual_reload=manual)
+        )
         results.update(self.sync_system_scheduler_jobs())
         if not refresh_vault_state:
-            return results
+            return dict(results)
         try:
-            vault_state_results = VaultStateService().refresh_all_vaults(self.config.data_root)
+            vault_state_results = VaultStateService().refresh_all_vaults(
+                self.config.data_root
+            )
         except Exception as exc:  # noqa: BLE001
             self.logger.add_sink("validation").warning(
                 "vault_state_refresh_all_failed",
@@ -153,7 +162,7 @@ class RuntimeContext:
                 "vault_state_failed": 1,
             }
         results.update(vault_state_results)
-        return results
+        return dict(results)
 
     def start_background_vault_state_refresh(self, *, reason: str) -> None:
         """Start a non-blocking refresh of all vault-state manifests."""
@@ -162,7 +171,7 @@ class RuntimeContext:
         )
 
     async def _refresh_vault_state_in_background(self, *, reason: str) -> None:
-        self.logger.add_sink("validation").info(
+        self.logger.set_sinks(["validation"]).info(
             "Starting background vault-state refresh",
             data={
                 "event": "vault_state_background_refresh_started",
@@ -187,7 +196,7 @@ class RuntimeContext:
                 },
             )
             return
-        self.logger.add_sink("validation").info(
+        self.logger.set_sinks(["validation"]).info(
             "Background vault-state refresh completed",
             data={
                 "event": "vault_state_background_refresh_completed",
@@ -195,20 +204,24 @@ class RuntimeContext:
                 "vault_state_enabled": result.get("vault_state_enabled"),
                 "vault_state_refreshed": result.get("vault_state_refreshed"),
                 "vault_state_failed": result.get("vault_state_failed"),
-                "vault_state_latest_sequence": result.get("vault_state_latest_sequence"),
+                "vault_state_latest_sequence": result.get(
+                    "vault_state_latest_sequence"
+                ),
             },
         )
 
     def sync_system_scheduler_jobs(self) -> dict[str, int]:
         """Synchronize built-in scheduler jobs with current settings."""
-        return sync_system_scheduler_jobs(
-            scheduler=self.scheduler,
-            data_root=self.config.data_root,
-            ingestion_worker=self.ingestion_worker,
-            ingestion_interval=self.ingestion_interval,
+        return dict(
+            sync_system_scheduler_jobs(
+                scheduler=self.scheduler,
+                data_root=self.config.data_root,
+                ingestion_worker=self.ingestion_worker,
+                ingestion_interval=self.ingestion_interval,
+            )
         )
 
-    def get_runtime_summary(self) -> dict:
+    def get_runtime_summary(self) -> dict[str, Any]:
         """
         Get runtime context summary for diagnostics.
 
@@ -227,5 +240,5 @@ class RuntimeContext:
             "system_root": str(self.config.system_root),
             "scheduler": scheduler_info,
             "features": self.config.features,
-            "log_level": self.config.log_level
+            "log_level": self.config.log_level,
         }

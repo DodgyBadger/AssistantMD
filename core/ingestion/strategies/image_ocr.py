@@ -9,7 +9,9 @@ from core.ingestion.registry import extractor_registry
 from core.ingestion.strategies.mistral_ocr_common import extract_with_mistral_ocr
 
 
-def extract_image_ocr(raw: RawDocument, options: dict[str, Any] | None = None) -> ExtractedDocument:
+def extract_image_ocr(
+    raw: RawDocument, options: dict[str, Any] | None = None
+) -> ExtractedDocument:
     include_images_override = None
     if isinstance(options, dict) and "ocr_capture_images" in options:
         include_images_override = bool(options.get("ocr_capture_images"))
@@ -25,7 +27,10 @@ def extract_image_ocr(raw: RawDocument, options: dict[str, Any] | None = None) -
         endpoint_setting_key="ingestion_ocr_endpoint",
         include_image_base64_override=include_images_override,
         model_fallback_setting_keys=["ingestion_pdf_ocr_model"],
-        endpoint_fallback_setting_keys=["ingestion_image_ocr_endpoint", "ingestion_pdf_ocr_endpoint"],
+        endpoint_fallback_setting_keys=[
+            "ingestion_image_ocr_endpoint",
+            "ingestion_pdf_ocr_endpoint",
+        ],
     )
 
 

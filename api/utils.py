@@ -14,8 +14,8 @@ from core.logger import UnifiedLogger
 from core.settings.store import get_general_settings
 from core.tools.failures import FailureClassification, classify_exception
 
-from .models import ErrorResponse
 from .exceptions import APIException, InvalidVaultNameError
+from .models import ErrorResponse
 
 # Create API logger
 logger = UnifiedLogger(tag="api")
@@ -27,7 +27,9 @@ def serialize_exception(exception: Exception) -> dict:
         "error_type": type(exception).__name__,
         "error": str(exception),
         "traceback": "".join(
-            traceback.format_exception(type(exception), exception, exception.__traceback__)
+            traceback.format_exception(
+                type(exception), exception, exception.__traceback__
+            )
         ).strip(),
     }
 
@@ -54,64 +56,69 @@ def generate_session_id(vault_name: str) -> str:
 def validate_vault_name(vault_name: str) -> str:
     """
     Validate and clean a vault name for filesystem safety.
-    
+
     Args:
         vault_name: Raw vault name from user input
-        
+
     Returns:
         Cleaned vault name safe for filesystem use
-        
+
     Raises:
         InvalidVaultNameError: If vault name is invalid
     """
     if not vault_name or not vault_name.strip():
         raise InvalidVaultNameError(vault_name, "Vault name cannot be empty")
-    
+
     # Clean the name
     cleaned = vault_name.strip()
-    
+
     # Check length
     if len(cleaned) > 100:
-        raise InvalidVaultNameError(vault_name, "Vault name too long (max 100 characters)")
-    
+        raise InvalidVaultNameError(
+            vault_name, "Vault name too long (max 100 characters)"
+        )
+
     if len(cleaned) < 1:
         raise InvalidVaultNameError(vault_name, "Vault name too short")
-    
+
     # Check for invalid characters (allow alphanumeric, hyphens, underscores, spaces)
-    if not re.match(r'^[a-zA-Z0-9\-_\s]+$', cleaned):
+    if not re.match(r"^[a-zA-Z0-9\-_\s]+$", cleaned):
         raise InvalidVaultNameError(
-            vault_name, 
-            "Vault name contains invalid characters. Only letters, numbers, hyphens, underscores, and spaces are allowed"
+            vault_name,
+            "Vault name contains invalid characters. Only letters, numbers, hyphens, underscores, and spaces are allowed",
         )
-    
+
     # Check for reserved names
-    reserved_names = {'con', 'prn', 'aux', 'nul', 'logs', 'system'}
+    reserved_names = {"con", "prn", "aux", "nul", "logs", "system"}
     if cleaned.lower() in reserved_names:
         raise InvalidVaultNameError(vault_name, f"'{cleaned}' is a reserved name")
-    
+
     # Check that it doesn't start or end with spaces or special chars
     if cleaned != cleaned.strip():
-        raise InvalidVaultNameError(vault_name, "Vault name cannot start or end with spaces")
-    
+        raise InvalidVaultNameError(
+            vault_name, "Vault name cannot start or end with spaces"
+        )
+
     # Replace spaces with hyphens for filesystem safety
-    filesystem_safe = re.sub(r'\s+', '-', cleaned)
-    
+    filesystem_safe = re.sub(r"\s+", "-", cleaned)
+
     return filesystem_safe
 
 
 def create_error_response(exception: Exception) -> JSONResponse:
     """
     Create a standardized error response from an exception.
-    
+
     Args:
         exception: The exception that occurred
-        
+
     Returns:
         JSONResponse with standardized error format
     """
     if isinstance(exception, APIException):
         details = build_api_error_details(exception)
         error_response = ErrorResponse(
+            success=False,
             error=exception.error_type,
             message=exception.detail,
             details=details,
@@ -122,8 +129,7 @@ def create_error_response(exception: Exception) -> JSONResponse:
             details=details,
         )
         return JSONResponse(
-            status_code=exception.status_code,
-            content=error_response.model_dump()
+            status_code=exception.status_code, content=error_response.model_dump()
         )
     else:
         # Handle unexpected exceptions
@@ -133,24 +139,26 @@ def create_error_response(exception: Exception) -> JSONResponse:
         debug_mode = bool(debug_setting and getattr(debug_setting, "value", False))
         exception_details = serialize_exception(exception)
         safe_details = build_api_error_details(exception)
-        
+
         if debug_mode:
             error_response = ErrorResponse(
+                success=False,
                 error="InternalServerError",
                 message=str(exception),
                 details={
                     **safe_details,
                     "traceback": exception_details["traceback"],
-                }
+                },
             )
         else:
             # Generic error for production
             error_response = ErrorResponse(
-                error="InternalServerError", 
+                success=False,
+                error="InternalServerError",
                 message="An unexpected error occurred",
                 details=safe_details,
             )
-        
+
         # Always log the full traceback server-side
         logger.error(
             "Unexpected API error",
@@ -161,11 +169,8 @@ def create_error_response(exception: Exception) -> JSONResponse:
             status_code=500,
             details=safe_details,
         )
-        
-        return JSONResponse(
-            status_code=500,
-            content=error_response.model_dump()
-        )
+
+        return JSONResponse(status_code=500, content=error_response.model_dump())
 
 
 def build_api_error_details(exception: Exception) -> dict[str, Any]:
@@ -179,10 +184,10 @@ def build_api_error_details(exception: Exception) -> dict[str, Any]:
         return details
 
     classification = classify_exception(exception, phase="api_request")
-    details = classification.to_metadata()
-    details["error_type"] = type(exception).__name__
-    details.setdefault("http_status", 500)
-    return details
+    classified_details: dict[str, Any] = dict(classification.to_metadata())
+    classified_details["error_type"] = type(exception).__name__
+    classified_details.setdefault("http_status", 500)
+    return classified_details
 
 
 def _classify_api_exception(
@@ -205,7 +210,11 @@ def _classify_api_exception(
         phase=phase,
         message=str(exception.detail or ""),
         http_status=exception.status_code,
-        retry_after=None if base_details.get("retry_after") is None else str(base_details["retry_after"]),
+        retry_after=(
+            None
+            if base_details.get("retry_after") is None
+            else str(base_details["retry_after"])
+        ),
         suggested_action=suggested_action,
     )
 
@@ -270,27 +279,27 @@ def _log_api_error_response(
     )
 
 
-def safe_path_join(*paths) -> str:
+def safe_path_join(*paths: str | os.PathLike[str]) -> str:
     """
     Safely join paths and ensure the result is within expected bounds.
-    
+
     Args:
         *paths: Path components to join
-        
+
     Returns:
         Safely joined path
-        
+
     Raises:
         ValueError: If path traversal is detected
     """
     joined = os.path.join(*paths)
-    
+
     # Normalize the path to resolve any .. or . components
     normalized = os.path.normpath(joined)
-    
+
     # Check for path traversal attempts
-    if '..' in normalized or normalized.startswith('/'):
-        if not normalized.startswith('/app/data'):
+    if ".." in normalized or normalized.startswith("/"):
+        if not normalized.startswith("/app/data"):
             raise ValueError(f"Path traversal detected or invalid path: {normalized}")
-    
-    return normalized
+
+    return str(normalized)

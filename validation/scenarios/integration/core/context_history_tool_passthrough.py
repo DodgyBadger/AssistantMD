@@ -30,7 +30,9 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
 
         await self.start_system()
 
-        from core.authoring.context_manager import build_context_manager_history_processor
+        from core.authoring.context_manager import (
+            build_context_manager_history_processor,
+        )
 
         session_id = "context_tool_passthrough_session"
         processor = build_context_manager_history_processor(
@@ -42,11 +44,13 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
         )
 
         original_messages = [
-            ModelRequest(parts=[UserPromptPart(content="Review these images.")], run_id="run-1"),
+            ModelRequest(
+                parts=[UserPromptPart(content="Review these images.")], run_id="run-1"
+            ),
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"operation": "read", "path": "Math/page_images/a.png"},
                         tool_call_id="call-image-1",
                     )
@@ -56,7 +60,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Attached image 'Math/page_images/a.png'.",
                         tool_call_id="call-image-1",
                     )
@@ -66,7 +70,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"operation": "read", "path": "Math/page_images/b.png"},
                         tool_call_id="call-image-2",
                     )
@@ -76,7 +80,7 @@ class ContextHistoryToolPassthroughScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Attached image 'Math/page_images/b.png'.",
                         tool_call_id="call-image-2",
                     )

@@ -11,15 +11,27 @@ import os
 import shutil
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from core.runtime.paths import get_system_root
 
-
 SETTINGS_TEMPLATE = Path(__file__).parent / "settings.template.yaml"
+RETIRED_BUILTIN_TOOL_NAMES = frozenset(
+    {
+        "file_ops",
+        "file_ops_safe",
+        "file_ops_unsafe",
+        "propose_file_edits",
+        "review_create_file",
+        "tavily_crawl",
+        "tavily_extract",
+        "web_search_duckduckgo",
+        "web_search_tavily",
+    }
+)
 
 
 class SettingsEntry(BaseModel):
@@ -96,10 +108,10 @@ class ModelConfig(BaseModel):
 class SettingsFile(BaseModel):
     """Root schema for settings.yaml content."""
 
-    settings: Dict[str, SettingsEntry] = Field(default_factory=dict)
-    models: Dict[str, ModelConfig] = Field(default_factory=dict)
-    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
-    tools: Dict[str, ToolConfig] = Field(default_factory=dict)
+    settings: dict[str, SettingsEntry] = Field(default_factory=dict)
+    models: dict[str, ModelConfig] = Field(default_factory=dict)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    tools: dict[str, ToolConfig] = Field(default_factory=dict)
 
 
 def _resolve_system_root() -> Path:
@@ -125,7 +137,9 @@ def _ensure_settings_file(target_path: Path) -> None:
         return
 
     if not SETTINGS_TEMPLATE.exists():
-        raise FileNotFoundError(f"Default settings template missing: {SETTINGS_TEMPLATE}")
+        raise FileNotFoundError(
+            f"Default settings template missing: {SETTINGS_TEMPLATE}"
+        )
 
     shutil.copyfile(SETTINGS_TEMPLATE, target_path)
 
@@ -140,7 +154,7 @@ def load_settings() -> SettingsFile:
     """
     settings_file = get_active_settings_path()
 
-    with open(settings_file, "r", encoding="utf-8") as handle:
+    with open(settings_file, encoding="utf-8") as handle:
         raw_data = yaml.safe_load(handle) or {}
 
     for section in ("settings", "models", "providers", "tools"):
@@ -179,21 +193,80 @@ def get_active_settings_path() -> Path:
     return path
 
 
-def get_general_settings() -> Dict[str, SettingsEntry]:
+def get_general_settings() -> dict[str, SettingsEntry]:
     """Get general settings section."""
     return load_settings().settings
 
 
-def get_tools_config() -> Dict[str, ToolConfig]:
+def get_tools_config() -> dict[str, ToolConfig]:
     """Get tools configuration section from settings."""
     return load_settings().tools
 
 
-def get_models_config() -> Dict[str, ModelConfig]:
+def get_enabled_tool_names() -> list[str]:
+    """Return registered tool names not disabled by app-wide policy."""
+    settings = load_settings()
+    tools = settings.tools
+    disabled = set(get_disabled_tool_names())
+    return [
+        name
+        for name in tools
+        if name not in disabled and name not in RETIRED_BUILTIN_TOOL_NAMES
+    ]
+
+
+def get_disabled_tool_names() -> list[str]:
+    """Return configured disabled tool names that still exist in the registry."""
+    settings = load_settings()
+    tools = settings.tools
+    entry = settings.settings.get("disabled_tools")
+    raw_disabled = getattr(entry, "value", None)
+    if entry is None:
+        legacy_entry = settings.settings.get("enabled_tools") or settings.settings.get(
+            "default_chat_tools"
+        )
+        legacy_enabled = getattr(legacy_entry, "value", None)
+        if legacy_entry is not None:
+            allowed = (
+                {str(item).strip() for item in legacy_enabled}
+                if isinstance(legacy_enabled, list)
+                else set()
+            )
+            return [
+                name
+                for name in tools
+                if name not in allowed and name not in RETIRED_BUILTIN_TOOL_NAMES
+            ]
+    if not isinstance(raw_disabled, list):
+        return []
+
+    disabled: list[str] = []
+    seen: set[str] = set()
+    for item in raw_disabled:
+        name = str(item).strip()
+        if (
+            not name
+            or name in seen
+            or name not in tools
+            or name in RETIRED_BUILTIN_TOOL_NAMES
+        ):
+            continue
+        seen.add(name)
+        disabled.append(name)
+    return disabled
+
+
+def get_enabled_tools_config() -> dict[str, ToolConfig]:
+    """Return configured tools filtered by the app-wide enabled tool list."""
+    tools = get_tools_config()
+    return {name: tools[name] for name in get_enabled_tool_names() if name in tools}
+
+
+def get_models_config() -> dict[str, ModelConfig]:
     """Get models configuration section from settings."""
     return load_settings().models
 
 
-def get_providers_config() -> Dict[str, ProviderConfig]:
+def get_providers_config() -> dict[str, ProviderConfig]:
     """Get providers configuration section from settings."""
     return load_settings().providers

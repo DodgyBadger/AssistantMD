@@ -98,7 +98,9 @@ def _applied_versions(conn: sqlite3.Connection, *, namespace: str) -> set[int]:
     return {int(row[0]) for row in rows}
 
 
-def _validate_migrations(migrations: Sequence[SQLiteMigration]) -> tuple[SQLiteMigration, ...]:
+def _validate_migrations(
+    migrations: Sequence[SQLiteMigration],
+) -> tuple[SQLiteMigration, ...]:
     ordered = tuple(sorted(migrations, key=lambda migration: migration.version))
     seen_versions: set[int] = set()
     for migration in ordered:

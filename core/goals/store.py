@@ -6,12 +6,12 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from core.database import connect_sqlite_from_system_db
 from core.goals.schema import DB_NAME, ensure_goal_ops_schema
-from core.vault_state.service import VaultStateService
+from core.vault_state.service import VaultActivityGroup, VaultStateService
 
 GOAL_STATUSES = {"active", "paused", "completed", "cancelled", "blocked"}
 GOAL_SOURCE_TYPES = {"chat", "workflow", "context"}
@@ -185,39 +185,39 @@ class GoalOpsStore:
         changed: dict[str, Any] = {}
         if title is not GOAL_FIELD_UNSET:
             assignments.append("title = ?")
-            value = _required_text(title, "title")
-            params.append(value)
-            changed["title"] = value
+            title_value = _required_text(title, "title")
+            params.append(title_value)
+            changed["title"] = title_value
         if objective is not GOAL_FIELD_UNSET:
             assignments.append("objective = ?")
-            value = _required_text(objective, "objective")
-            params.append(value)
-            changed["objective"] = value
+            objective_value = _required_text(objective, "objective")
+            params.append(objective_value)
+            changed["objective"] = objective_value
         if status is not GOAL_FIELD_UNSET:
             assignments.append("status = ?")
-            value = _validate_status(str(status), GOAL_STATUSES, "goal status")
-            params.append(value)
-            changed["status"] = value
+            status_value = _validate_status(str(status), GOAL_STATUSES, "goal status")
+            params.append(status_value)
+            changed["status"] = status_value
         if workspace_path_hint is not GOAL_FIELD_UNSET:
             assignments.append("workspace_path_hint = ?")
-            value = _optional_text(workspace_path_hint)
-            params.append(value)
-            changed["workspace_path_hint"] = value
+            workspace_value = _optional_text(workspace_path_hint)
+            params.append(workspace_value)
+            changed["workspace_path_hint"] = workspace_value
         if success_criteria is not GOAL_FIELD_UNSET:
             assignments.append("success_criteria_json = ?")
-            value = list(_clean_string_list(success_criteria))
-            params.append(_dump_json(value))
-            changed["success_criteria"] = value
+            criteria_value = list(_clean_string_list(success_criteria))
+            params.append(_dump_json(criteria_value))
+            changed["success_criteria"] = criteria_value
         if plan is not GOAL_FIELD_UNSET:
             assignments.append("plan_json = ?")
-            value = _clean_json_value(plan)
-            params.append(_dump_json(value))
-            changed["plan"] = value
+            plan_value = _clean_json_value(plan)
+            params.append(_dump_json(plan_value))
+            changed["plan"] = plan_value
         if metadata is not GOAL_FIELD_UNSET:
             assignments.append("metadata_json = ?")
-            value = _clean_dict(metadata)
-            params.append(_dump_json(value))
-            changed["metadata"] = value
+            metadata_value = _clean_dict(metadata)
+            params.append(_dump_json(metadata_value))
+            changed["metadata"] = metadata_value
         if not assignments:
             raise ValueError("update_goal requires at least one field to update")
         assignments.append("updated_at = ?")
@@ -276,7 +276,9 @@ class GoalOpsStore:
                 params.append(workspace)
         if source_type:
             clauses.append("source_type = ?")
-            params.append(_validate_status(source_type, GOAL_SOURCE_TYPES, "goal source_type"))
+            params.append(
+                _validate_status(source_type, GOAL_SOURCE_TYPES, "goal source_type")
+            )
         if source_id:
             clauses.append("source_id = ?")
             params.append(_required_text(source_id, "source_id"))
@@ -363,7 +365,7 @@ class GoalOpsStore:
         clean_goal_id = _required_text(goal_id, "goal_id")
         with self._connect() as conn:
             goal = self._goal_from_row(self._require_goal(conn, clean_goal_id))
-        groups = VaultStateService().list_task_mutations(
+        groups = VaultStateService().list_activities(
             vault_name=goal.vault_name,
             limit=_bounded_limit(limit),
             goal_id=clean_goal_id,
@@ -396,7 +398,9 @@ class GoalOpsStore:
         if older_than_days is not None:
             if older_than_days < 0:
                 raise ValueError("older_than_days must be zero or greater")
-            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(days=older_than_days)
+            cutoff = datetime.now(UTC).replace(microsecond=0) - timedelta(
+                days=older_than_days
+            )
             clauses.append("updated_at < ?")
             params.append(cutoff.isoformat())
 
@@ -419,7 +423,9 @@ class GoalOpsStore:
         conn: sqlite3.Connection,
         goal_id: str,
     ) -> dict[str, Any]:
-        row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
         payload = self._goal_from_row(row).to_dict()
@@ -454,7 +460,9 @@ class GoalOpsStore:
                 now,
             ),
         )
-        row = conn.execute("SELECT * FROM goal_events WHERE event_id = ?", (event_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goal_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
         return self._event_from_row(row)
 
     def _latest_checkpoint_in_conn(
@@ -475,13 +483,17 @@ class GoalOpsStore:
         return self._checkpoint_from_row(row) if row else None
 
     def _require_goal(self, conn: sqlite3.Connection, goal_id: str) -> sqlite3.Row:
-        row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM goals WHERE goal_id = ?", (goal_id,)
+        ).fetchone()
         if row is None:
             raise ValueError(f"Goal not found: {goal_id}")
-        return row
+        return cast(sqlite3.Row, row)
 
     def _touch_goal(self, conn: sqlite3.Connection, goal_id: str, now: str) -> None:
-        conn.execute("UPDATE goals SET updated_at = ? WHERE goal_id = ?", (now, goal_id))
+        conn.execute(
+            "UPDATE goals SET updated_at = ? WHERE goal_id = ?", (now, goal_id)
+        )
 
     @staticmethod
     def _goal_from_row(row: sqlite3.Row) -> GoalRecord:
@@ -497,7 +509,9 @@ class GoalOpsStore:
             objective=str(row["objective"]),
             status=str(row["status"]),
             plan=_load_json(row["plan_json"], default=None),
-            success_criteria=tuple(_load_json(row["success_criteria_json"], default=[])),
+            success_criteria=tuple(
+                _load_json(row["success_criteria_json"], default=[])
+            ),
             metadata=_clean_dict(_load_json(row["metadata_json"], default={})),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
@@ -521,8 +535,12 @@ class GoalOpsStore:
             goal_id=str(row["goal_id"]),
             summary=str(row["summary"]),
             current_state=row["current_state"],
-            next_actions=tuple(_clean_string_list(_load_json(row["next_actions_json"], default=[]))),
-            open_questions=tuple(_clean_string_list(_load_json(row["open_questions_json"], default=[]))),
+            next_actions=tuple(
+                _clean_string_list(_load_json(row["next_actions_json"], default=[]))
+            ),
+            open_questions=tuple(
+                _clean_string_list(_load_json(row["open_questions_json"], default=[]))
+            ),
             risks=tuple(_clean_string_list(_load_json(row["risks_json"], default=[]))),
             metadata=_clean_dict(_load_json(row["metadata_json"], default={})),
             created_at=str(row["created_at"]),
@@ -598,7 +616,9 @@ def _load_json(value: Any, *, default: Any) -> Any:
 def _validate_status(value: str, allowed: set[str], label: str) -> str:
     status = _required_text(value, label).lower()
     if status not in allowed:
-        raise ValueError(f"Invalid {label}: {status}. Expected one of: {', '.join(sorted(allowed))}")
+        raise ValueError(
+            f"Invalid {label}: {status}. Expected one of: {', '.join(sorted(allowed))}"
+        )
     return status
 
 
@@ -617,11 +637,13 @@ def _bounded_limit(value: Any, *, maximum: int = 100) -> int:
     return max(1, min(maximum, limit))
 
 
-def _mutation_group_to_dict(group) -> dict[str, Any]:
+def _mutation_group_to_dict(group: VaultActivityGroup) -> dict[str, Any]:
     return {
         "activity_id": group.activity_id,
         "activity_kind": group.activity_kind,
         "activity_label": group.activity_label,
+        "status": group.status,
+        "rollback_status": group.rollback_status,
         "task_id": group.task_id,
         "task_kind": group.task_kind,
         "task_source": group.task_source,
@@ -632,11 +654,14 @@ def _mutation_group_to_dict(group) -> dict[str, Any]:
         "vault_id": group.vault_id,
         "vault_name": group.vault_name,
         "mutation_count": group.mutation_count,
+        "operation_count": group.operation_count,
         "first_mutation_at": group.first_mutation_at.isoformat(),
         "last_mutation_at": group.last_mutation_at.isoformat(),
         "mutations": [
             {
                 "id": mutation.id,
+                "activity_id": mutation.activity_id,
+                "operation_id": mutation.operation_id,
                 "task_id": mutation.task_id,
                 "task_kind": mutation.task_kind,
                 "task_source": mutation.task_source,
@@ -646,7 +671,9 @@ def _mutation_group_to_dict(group) -> dict[str, Any]:
                 "step_id": mutation.step_id,
                 "path": mutation.path,
                 "related_path": mutation.related_path,
+                "target_kind": mutation.target_kind,
                 "operation": mutation.operation,
+                "status": mutation.status,
                 "event_sequence": mutation.event_sequence,
                 "before_exists": mutation.before_exists,
                 "after_exists": mutation.after_exists,

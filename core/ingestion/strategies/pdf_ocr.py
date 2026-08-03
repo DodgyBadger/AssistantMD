@@ -9,7 +9,9 @@ from core.ingestion.registry import extractor_registry
 from core.ingestion.strategies.mistral_ocr_common import extract_with_mistral_ocr
 
 
-def extract_pdf_ocr(raw: RawDocument, options: dict[str, Any] | None = None) -> ExtractedDocument:
+def extract_pdf_ocr(
+    raw: RawDocument, options: dict[str, Any] | None = None
+) -> ExtractedDocument:
     include_images_override = None
     if isinstance(options, dict) and "ocr_capture_images" in options:
         include_images_override = bool(options.get("ocr_capture_images"))

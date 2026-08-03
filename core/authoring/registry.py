@@ -35,7 +35,9 @@ class AuthoringCapabilityRegistry:
             )
         self._definitions[definition.name] = definition
 
-    def register_many(self, definitions: Iterable[AuthoringCapabilityDefinition]) -> None:
+    def register_many(
+        self, definitions: Iterable[AuthoringCapabilityDefinition]
+    ) -> None:
         """Register multiple capability definitions."""
         for definition in definitions:
             self.register(definition)

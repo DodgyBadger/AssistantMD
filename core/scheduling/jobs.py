@@ -15,7 +15,7 @@ logger = UnifiedLogger(tag="scheduler-jobs")
 RESERVED_JOB_IDS = SYSTEM_JOB_IDS
 
 
-def _get_job_snapshot(scheduler, job_id: str) -> dict[str, Any]:
+def _get_job_snapshot(scheduler: Any, job_id: str) -> dict[str, Any]:
     """Capture job metadata for validation events."""
     job = scheduler.get_job(job_id) if scheduler is not None else None
     if job is None:
@@ -90,7 +90,11 @@ def _log_scheduler_change(message: str, record: dict[str, Any]) -> None:
     )
 
 
-def create_job_args(global_id: str, data_root: str = None, file_path: str = None):
+def create_job_args(
+    global_id: str,
+    data_root: str | None = None,
+    file_path: str | None = None,
+) -> dict[str, Any]:
     """Create picklable job arguments for workflow execution.
 
     Returns lightweight, serializable arguments with flexible config dictionary.
@@ -104,16 +108,20 @@ def create_job_args(global_id: str, data_root: str = None, file_path: str = None
     """
     if data_root is None:
         runtime = get_runtime_context()
-        data_root = runtime.config.data_root
+        data_root = str(runtime.config.data_root)
 
     return {
-        'global_id': global_id,
-        'file_path': file_path,
-        'config': {
-            'data_root': str(data_root),
-        }
+        "global_id": global_id,
+        "file_path": file_path,
+        "config": {
+            "data_root": str(data_root),
+        },
     }
-async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[str, Any]:
+
+
+async def setup_scheduler_jobs(
+    scheduler: Any, manual_reload: bool = False
+) -> dict[str, Any]:
     """
     Set up or update scheduler jobs based on vault workflow configuration.
 
@@ -142,7 +150,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
     workflows = await workflow_loader.load_workflows(force_reload=manual_reload)
     enabled_workflows = workflow_loader.get_enabled_workflows()
 
-    vaults_discovered = len(set(workflow.vault for workflow in workflows))
+    vaults_discovered = len({workflow.vault for workflow in workflows})
     workflows_loaded = len(workflows)
     enabled_workflows_count = len(enabled_workflows)
     scheduler_jobs_synced = 0
@@ -185,7 +193,9 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                 if schedule_changed or workflow_changed:
                     scheduler.remove_job(existing_job.id)
 
-                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                    job_args = create_job_args(
+                        workflow.global_id, file_path=workflow.file_path
+                    )
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.add_job(
@@ -193,7 +203,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                         trigger=workflow.trigger,
                         args=[job_args],
                         id=workflow.scheduler_job_id,
-                        name=job_name
+                        name=job_name,
                     )
 
                     record = _workflow_schedule_record(
@@ -208,13 +218,13 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                         record,
                     )
                 else:
-                    job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                    job_args = create_job_args(
+                        workflow.global_id, file_path=workflow.file_path
+                    )
                     job_name = f"Workflow: {workflow.global_id}"
 
                     scheduler.modify_job(
-                        job_id=workflow.scheduler_job_id,
-                        args=[job_args],
-                        name=job_name
+                        job_id=workflow.scheduler_job_id, args=[job_args], name=job_name
                     )
 
                     record = _workflow_schedule_record(
@@ -227,7 +237,9 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
 
                 scheduler_jobs_synced += 1
             else:
-                job_args = create_job_args(workflow.global_id, file_path=workflow.file_path)
+                job_args = create_job_args(
+                    workflow.global_id, file_path=workflow.file_path
+                )
                 job_name = f"Workflow: {workflow.global_id}"
 
                 scheduler.add_job(
@@ -235,7 +247,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                     trigger=workflow.trigger,
                     args=[job_args],
                     id=workflow.scheduler_job_id,
-                    name=job_name
+                    name=job_name,
                 )
 
                 record = _workflow_schedule_record(
@@ -250,9 +262,7 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
                 scheduler_jobs_synced += 1
 
         all_scheduler_job_ids = {
-            job.id
-            for job in scheduler.get_jobs()
-            if job.id not in RESERVED_JOB_IDS
+            job.id for job in scheduler.get_jobs() if job.id not in RESERVED_JOB_IDS
         }
         enabled_job_ids = {
             workflow.scheduler_job_id
@@ -281,22 +291,29 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
         pass  # Scheduler not available - configurations loaded but jobs not updated
 
     if scheduler is not None:
-        logger.add_sink("validation").info(
+        summary_data = {
+            "event": "workflow_scheduler_sync_completed",
+            "manual_reload": manual_reload,
+            "vaults_discovered": vaults_discovered,
+            "workflows_loaded": workflows_loaded,
+            "enabled_workflows": enabled_workflows_count,
+            "scheduled_workflows_count": len(scheduled_workflow_records),
+            "unscheduled_enabled_workflows_count": len(unscheduled_enabled_records),
+            "disabled_workflows_count": len(disabled_workflow_records),
+            "scheduler_jobs_synced": scheduler_jobs_synced,
+            "created_count": created_count,
+            "replaced_count": replaced_count,
+            "unchanged_count": unchanged_count,
+            "removed_count": removed_count,
+        }
+        logger.info(
+            "Workflow scheduler sync completed",
+            data=summary_data,
+        )
+        logger.set_sinks(["validation"]).info(
             "Workflow scheduler sync completed",
             data={
-                "event": "workflow_scheduler_sync_completed",
-                "manual_reload": manual_reload,
-                "vaults_discovered": vaults_discovered,
-                "workflows_loaded": workflows_loaded,
-                "enabled_workflows": enabled_workflows_count,
-                "scheduled_workflows_count": len(scheduled_workflow_records),
-                "unscheduled_enabled_workflows_count": len(unscheduled_enabled_records),
-                "disabled_workflows_count": len(disabled_workflow_records),
-                "scheduler_jobs_synced": scheduler_jobs_synced,
-                "created_count": created_count,
-                "replaced_count": replaced_count,
-                "unchanged_count": unchanged_count,
-                "removed_count": removed_count,
+                **summary_data,
                 "loaded_workflows": loaded_workflow_records,
                 "scheduled_workflows": scheduled_workflow_records,
                 "unscheduled_enabled_workflows": unscheduled_enabled_records,
@@ -306,14 +323,14 @@ async def setup_scheduler_jobs(scheduler, manual_reload: bool = False) -> dict[s
 
     # Prepare results
     results = {
-        'vaults_discovered': vaults_discovered,
-        'workflows_loaded': workflows_loaded,
-        'enabled_workflows': enabled_workflows_count,
-        'scheduler_jobs_synced': scheduler_jobs_synced,
-        'scheduler_jobs_created': created_count,
-        'scheduler_jobs_replaced': replaced_count,
-        'scheduler_jobs_unchanged': unchanged_count,
-        'scheduler_jobs_removed': removed_count,
+        "vaults_discovered": vaults_discovered,
+        "workflows_loaded": workflows_loaded,
+        "enabled_workflows": enabled_workflows_count,
+        "scheduler_jobs_synced": scheduler_jobs_synced,
+        "scheduler_jobs_created": created_count,
+        "scheduler_jobs_replaced": replaced_count,
+        "scheduler_jobs_unchanged": unchanged_count,
+        "scheduler_jobs_removed": removed_count,
     }
 
     return results

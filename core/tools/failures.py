@@ -43,7 +43,9 @@ class FailureClassification:
         return payload
 
 
-def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> FailureClassification:
+def classify_exception(
+    exc: Exception, *, phase: str = "tool_execution"
+) -> FailureClassification:
     """Classify common network/API/tool exceptions into a stable failure envelope."""
     if isinstance(exc, UsageLimitExceeded):
         return FailureClassification(
@@ -185,7 +187,21 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
         )
 
     lowered = str(exc).lower()
-    if any(token in lowered for token in ("timeout", "temporarily", "rate limit", "too many requests")):
+    if "overloaded" in lowered:
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="provider_overloaded",
+            retryable=True,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Retry with backoff; use another model/provider if capacity pressure continues."
+            ),
+        )
+    if any(
+        token in lowered
+        for token in ("timeout", "temporarily", "rate limit", "too many requests")
+    ):
         return FailureClassification(
             error_type=type(exc).__name__,
             failure_kind="transient_provider",
@@ -194,7 +210,17 @@ def classify_exception(exc: Exception, *, phase: str = "tool_execution") -> Fail
             message=str(exc),
             suggested_action="Retry with backoff; reduce request scope if the failure repeats.",
         )
-    if any(token in lowered for token in ("api key", "unauthorized", "forbidden", "authentication")):
+    if any(
+        token in lowered
+        for token in (
+            "api key",
+            "unauthorized",
+            "forbidden",
+            "authentication",
+            "oauth",
+            "connected account",
+        )
+    ):
         return FailureClassification(
             error_type=type(exc).__name__,
             failure_kind="configuration",

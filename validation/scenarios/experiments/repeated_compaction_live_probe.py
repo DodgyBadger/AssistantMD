@@ -29,9 +29,9 @@ class RepeatedCompactionLiveProbeScenario(BaseScenario):
             method="PUT",
             data={"value": "gpt-mini"},
         )
-        assert model_response.status_code == 200, (
-            "Live compaction probe should switch default model to gpt-mini"
-        )
+        assert (
+            model_response.status_code == 200
+        ), "Live compaction probe should switch default model to gpt-mini"
 
         import core.chat.compaction as compaction
         from core.chat.chat_store import ChatStore
@@ -45,7 +45,9 @@ class RepeatedCompactionLiveProbeScenario(BaseScenario):
             vault.name,
             [
                 _user("Objective: prepare the Meridian donor briefing."),
-                ModelResponse(parts=[TextPart(content="Progress: drafted the briefing outline.")]),
+                ModelResponse(
+                    parts=[TextPart(content="Progress: drafted the briefing outline.")]
+                ),
                 _user("Constraint: include caveats about missing Q4 figures."),
                 _assistant("Next step: collect updated donor metrics."),
             ],
@@ -87,17 +89,17 @@ class RepeatedCompactionLiveProbeScenario(BaseScenario):
             compaction.get_compaction_keep_recent = original_keep_recent
 
         effective_messages = store.get_stored_messages(session_id, vault.name)
-        assert len(effective_messages) == 2, (
-            "Repeated live compaction should keep effective history compact"
-        )
+        assert (
+            len(effective_messages) == 2
+        ), "Repeated live compaction should keep effective history compact"
         assert first.status == "completed", "First live compaction should complete"
         assert second.status == "completed", "Second live compaction should complete"
-        assert effective_messages[0].role == "system", (
-            "Latest effective history should start with the compaction card"
-        )
-        assert "AssistantMD compacted chat history" in effective_messages[0].content_text, (
-            "Latest compaction card should use the standard marker"
-        )
+        assert (
+            effective_messages[0].role == "system"
+        ), "Latest effective history should start with the compaction card"
+        assert (
+            "AssistantMD compacted chat history" in effective_messages[0].content_text
+        ), "Latest compaction card should use the standard marker"
 
         (self.artifacts_dir / "latest_compaction_card.md").write_text(
             effective_messages[0].content_text,
@@ -131,7 +133,8 @@ def _quality_indicators(summary: str) -> dict[str, bool]:
         "mentions_donor": "donor" in lower,
         "mentions_metrics_or_figures": "metrics" in lower or "figures" in lower,
         "marks_q4_caveat_superseded": (
-            "q4 figures arrived" in lower or "no longer applicable" in lower
+            "q4 figures arrived" in lower
+            or "no longer applicable" in lower
             or ("decision updated" in lower and "q4" in lower)
         ),
         "preserves_missing_q4_as_active": "q4 financial figures are missing" in lower,

@@ -32,16 +32,18 @@ class _CodeExecutionFailingAgent:
         result = await tool.function(
             ctx,
             code=(
-                'await file_ops_safe(\n'
+                "await file_write(\n"
                 '    operation="write",\n'
                 '    path="notes/code-execution-write.md",\n'
                 '    content="created inside code_execution\\n",\n'
-                ')\n'
+                ")\n"
                 '"CODE_EXECUTION_WRITE_OK"\n'
             ),
         )
         if "CODE_EXECUTION_WRITE_OK" not in result:
-            raise RuntimeError(f"code_execution mutation failed before parent failure: {result}")
+            raise RuntimeError(
+                f"code_execution mutation failed before parent failure: {result}"
+            )
         raise RuntimeError("forced parent chat failure after code_execution mutation")
 
     async def run_stream_events(self, *args, **kwargs):
@@ -68,7 +70,7 @@ class CodeExecutionRollbackScenario(BaseScenario):
                 user_prompt="Use code_execution then fail.",
                 attached_image_count=0,
                 model="test",
-                tools=["code_execution", "file_ops_safe"],
+                tools=["code_execution", "file_write"],
             )
 
         original_prepare_chat_execution = chat_executor._prepare_chat_execution
@@ -81,7 +83,7 @@ class CodeExecutionRollbackScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Use code_execution then fail.",
                     "session_id": session_id,
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_write"],
                     "model": "test",
                 }
             )
@@ -104,7 +106,7 @@ class CodeExecutionRollbackScenario(BaseScenario):
             task_id = failed_event["data"]["task_id"]
             self.assert_event_contains(
                 events,
-                name="task_file_mutation_recorded",
+                name="vault_mutation_recorded",
                 expected={
                     "task_id": task_id,
                     "path": "notes/code-execution-write.md",

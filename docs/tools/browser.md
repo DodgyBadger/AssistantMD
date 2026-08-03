@@ -7,15 +7,14 @@ Open a page in a headless browser and extract compact content from the main page
 ## When To Use
 
 - the page is JavaScript-heavy
-- `tavily_extract` failed
-- `tavily_extract` returned thin or incomplete content
+- the configured `web_extract` strategy cannot render the page's dynamic content
 - you need a targeted selector-based extraction
 
 ## When Not To Use
 
 - you do not know the URL yet
 - a search tool would answer the question faster
-- `tavily_extract` is likely sufficient
+- `web_extract` is sufficient for the static page
 - you need broad exploratory browsing across many pages
 
 ## Arguments
@@ -67,3 +66,10 @@ Returns compact markdown text wrapped in `[BEGIN UNTRUSTED WEB DATA]` / `[END UN
 - avoid repeated selector guesses
 - downloads, local targets, and non-read HTTP methods are blocked
 - browser state is isolated per call
+- browser sessions are serialized by default and require configured cgroup
+  memory headroom before Chromium launches
+- a browser-specific per-turn call limit prevents repeated Chromium launches
+  from exhausting constrained installations
+- the standard browser-capable deployment profile requires at least 2 GB;
+  add `browser` to `disabled_tools` on the approximately 1 GB lightweight
+  profile

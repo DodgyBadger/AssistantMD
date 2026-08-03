@@ -20,10 +20,14 @@ class _RequestLimitAgent:
     """Fake agent that raises Pydantic AI's request-limit exception."""
 
     async def run(self, *args, **kwargs):
-        raise UsageLimitExceeded("The next request would exceed the request_limit of 150")
+        raise UsageLimitExceeded(
+            "The next request would exceed the request_limit of 150"
+        )
 
     async def run_stream_events(self, *args, **kwargs):
-        raise UsageLimitExceeded("The next request would exceed the request_limit of 150")
+        raise UsageLimitExceeded(
+            "The next request would exceed the request_limit of 150"
+        )
         yield None
 
 
@@ -90,20 +94,37 @@ class ChatUsageLimitsScenario(BaseScenario):
                 "Request-limit message should direct continuation toward durable goal state",
             )
             self.soft_assert_equal(
-                request_limit_error.get("details", {}).get("setting") if request_limit_error else None,
+                (
+                    request_limit_error.get("details", {}).get("setting")
+                    if request_limit_error
+                    else None
+                ),
                 "chat_model_requests_limit",
                 "Request-limit error should identify the controlling setting",
             )
             self.soft_assert_equal(
-                request_limit_error.get("details", {}).get("limit_kind") if request_limit_error else None,
+                (
+                    request_limit_error.get("details", {}).get("limit_kind")
+                    if request_limit_error
+                    else None
+                ),
                 "request_limit",
                 "Request-limit error should identify the Pydantic limit kind",
             )
 
-            detail = self.call_api(f"/api/chat/sessions/{request_limit_session}?vault_name={vault.name}")
-            self.soft_assert_equal(detail.status_code, 200, "Failed request-limit session detail should load")
+            detail = self.call_api(
+                f"/api/chat/sessions/{request_limit_session}?vault_name={vault.name}"
+            )
+            self.soft_assert_equal(
+                detail.status_code,
+                200,
+                "Failed request-limit session detail should load",
+            )
             latest_failure = detail.json().get("latest_failure")
-            self.soft_assert(latest_failure is not None, "Request-limit failure should persist recovery marker")
+            self.soft_assert(
+                latest_failure is not None,
+                "Request-limit failure should persist recovery marker",
+            )
             if latest_failure:
                 self.soft_assert_equal(
                     latest_failure.get("error_type"),
@@ -113,7 +134,10 @@ class ChatUsageLimitsScenario(BaseScenario):
                 recovery_message = _failure_recovery_message(latest_failure)
                 recovery_text = ""
                 if recovery_message:
-                    recovery_text = " ".join(str(getattr(part, "content", "")) for part in recovery_message.parts)
+                    recovery_text = " ".join(
+                        str(getattr(part, "content", ""))
+                        for part in recovery_message.parts
+                    )
                 self.soft_assert(
                     "goal_ops goals/checkpoints" in recovery_text,
                     "Recovery context should direct the next turn to durable goal checkpoints",
@@ -154,8 +178,14 @@ class ChatUsageLimitsScenario(BaseScenario):
                     "Streaming request-limit details should identify the setting",
                 )
 
-            stream_detail = self.call_api(f"/api/chat/sessions/{stream_session}?vault_name={vault.name}")
-            self.soft_assert_equal(stream_detail.status_code, 200, "Failed streaming session detail should load")
+            stream_detail = self.call_api(
+                f"/api/chat/sessions/{stream_session}?vault_name={vault.name}"
+            )
+            self.soft_assert_equal(
+                stream_detail.status_code,
+                200,
+                "Failed streaming session detail should load",
+            )
             self.soft_assert(
                 stream_detail.json().get("latest_failure") is not None,
                 "Streaming request-limit failure should persist recovery marker",

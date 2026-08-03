@@ -9,9 +9,13 @@ from pathlib import Path
 
 from core.database import get_system_database_path
 from core.logger import UnifiedLogger
-from core.vault_state.models import FileSnapshot, SnapshotSet, TaskFileMutation
+from core.vault_state.models import (
+    FileSnapshot,
+    SnapshotSet,
+    VaultActivity,
+    VaultMutation,
+)
 from core.vault_state.service import VaultStateService
-
 
 logger = UnifiedLogger(tag="vault-state-cleanup")
 
@@ -20,6 +24,7 @@ logger = UnifiedLogger(tag="vault-state-cleanup")
 class VaultStateCleanupResult:
     """Summary of one vault-state cleanup run."""
 
+    expired_activity_rows_deleted: int
     expired_mutation_rows_deleted: int
     expired_snapshot_rows_deleted: int
     snapshot_files_deleted: int
@@ -27,10 +32,11 @@ class VaultStateCleanupResult:
 
 
 def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanupResult:
-    """Delete expired task mutation rows and snapshot artifacts."""
+    """Delete expired vault activity, mutation, and snapshot artifacts."""
     cleanup_time = now or datetime.now(UTC)
     snapshot_base = _snapshot_base_root().resolve()
     service = VaultStateService()
+    expired_activity_rows_deleted = 0
     expired_mutation_rows_deleted = 0
     expired_snapshot_rows_deleted = 0
     snapshot_files_deleted = 0
@@ -39,36 +45,50 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
     with service.SessionFactory() as session:
         expired_mutations = [
             row
-            for row in session.query(TaskFileMutation).all()
+            for row in session.query(VaultMutation).all()
             if _is_expired(row.expires_at, cleanup_time)
         ]
-        for row in expired_mutations:
-            session.delete(row)
+        for mutation in expired_mutations:
+            session.delete(mutation)
         expired_mutation_rows_deleted = len(expired_mutations)
+        session.flush()
+
+        expired_activities = [
+            row
+            for row in session.query(VaultActivity).all()
+            if _is_expired(row.expires_at, cleanup_time)
+            and not session.query(VaultMutation.id)
+            .filter(VaultMutation.activity_id == row.activity_id)
+            .first()
+        ]
+        for activity in expired_activities:
+            session.delete(activity)
+        expired_activity_rows_deleted = len(expired_activities)
 
         expired_snapshots = [
             row
             for row in session.query(SnapshotSet).all()
             if _is_expired(row.expires_at, cleanup_time)
         ]
-        for row in expired_snapshots:
+        for snapshot in expired_snapshots:
             files_deleted, dirs_deleted = _delete_snapshot_root(
-                snapshot_root=Path(row.snapshot_root),
+                snapshot_root=Path(snapshot.snapshot_root),
                 snapshot_base=snapshot_base,
             )
             snapshot_files_deleted += files_deleted
             snapshot_dirs_deleted += dirs_deleted
             for file_snapshot in (
                 session.query(FileSnapshot)
-                .filter(FileSnapshot.snapshot_set_id == row.id)
+                .filter(FileSnapshot.snapshot_set_id == snapshot.id)
                 .all()
             ):
                 session.delete(file_snapshot)
-            session.delete(row)
+            session.delete(snapshot)
         expired_snapshot_rows_deleted = len(expired_snapshots)
         session.commit()
 
     result = VaultStateCleanupResult(
+        expired_activity_rows_deleted=expired_activity_rows_deleted,
         expired_mutation_rows_deleted=expired_mutation_rows_deleted,
         expired_snapshot_rows_deleted=expired_snapshot_rows_deleted,
         snapshot_files_deleted=snapshot_files_deleted,
@@ -78,6 +98,7 @@ def cleanup_expired_vault_state(now: datetime | None = None) -> VaultStateCleanu
         "vault_state_cleanup_completed",
         data={
             "event": "vault_state_cleanup_completed",
+            "expired_activity_rows_deleted": result.expired_activity_rows_deleted,
             "expired_mutation_rows_deleted": result.expired_mutation_rows_deleted,
             "expired_snapshot_rows_deleted": result.expired_snapshot_rows_deleted,
             "snapshot_files_deleted": result.snapshot_files_deleted,
@@ -110,7 +131,9 @@ def _is_expired(value: object, now: datetime) -> bool:
     return expires_at <= comparison_now
 
 
-def _delete_snapshot_root(*, snapshot_root: Path, snapshot_base: Path) -> tuple[int, int]:
+def _delete_snapshot_root(
+    *, snapshot_root: Path, snapshot_base: Path
+) -> tuple[int, int]:
     """Delete one snapshot root only when it lives under the managed snapshot base."""
     resolved_root = snapshot_root.resolve()
     try:

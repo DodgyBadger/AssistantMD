@@ -24,7 +24,6 @@ from core.logger import UnifiedLogger
 from core.settings import get_auto_cache_max_tokens
 from core.tools.utils import estimate_token_count
 
-
 logger = UnifiedLogger(tag="chat-executor")
 
 
@@ -33,12 +32,12 @@ class ToolEventSink(Protocol):
 
     def add_tool_event(
         self,
+        *,
         session_id: str,
         vault_name: str,
         tool_call_id: str,
         tool_name: str,
         event_type: str,
-        *,
         args: dict[str, Any] | None = None,
         result_text: str | None = None,
         result_metadata: dict[str, Any] | None = None,
@@ -58,7 +57,9 @@ def build_chat_tool_output_cache_capability(
     hooks = Hooks()
 
     @hooks.on.before_tool_execute
-    async def persist_tool_call(ctx: Any, *, call: Any, tool_def: Any, args: Any) -> Any:
+    async def persist_tool_call(
+        ctx: Any, *, call: Any, tool_def: Any, args: Any
+    ) -> Any:
         del ctx, tool_def
         event_sink.add_tool_event(
             session_id=session_id,
@@ -95,6 +96,8 @@ def build_chat_tool_output_cache_capability(
             return result
 
         text = tool_result_as_text(result)
+        result_metadata = _tool_result_metadata(result)
+        artifact_ref = _tool_result_artifact_ref(result_metadata)
         if not text:
             event_sink.add_tool_event(
                 session_id=session_id,
@@ -102,11 +105,14 @@ def build_chat_tool_output_cache_capability(
                 tool_call_id=call.tool_call_id,
                 tool_name=call.tool_name,
                 event_type="result",
+                result_metadata=result_metadata or None,
+                artifact_ref=artifact_ref,
             )
             return result
 
         token_count = estimate_token_count(text)
         if token_limit <= 0 or token_count <= token_limit:
+            metadata = {"token_count": token_count, **result_metadata}
             event_sink.add_tool_event(
                 session_id=session_id,
                 vault_name=vault_name,
@@ -114,7 +120,8 @@ def build_chat_tool_output_cache_capability(
                 tool_name=call.tool_name,
                 event_type="result",
                 result_text=text,
-                result_metadata={"token_count": token_count},
+                result_metadata=metadata,
+                artifact_ref=artifact_ref,
             )
             return result
 
@@ -220,10 +227,9 @@ def build_chat_tool_output_cache_capability(
 def _tool_result_has_multimodal_payload(result: Any) -> bool:
     if not isinstance(result, ToolReturn):
         return False
-    return (
-        _value_has_multimodal_payload(result.return_value)
-        or _value_has_multimodal_payload(result.content)
-    )
+    return _value_has_multimodal_payload(
+        result.return_value
+    ) or _value_has_multimodal_payload(result.content)
 
 
 def _value_has_multimodal_payload(value: Any) -> bool:
@@ -240,7 +246,7 @@ def _value_has_multimodal_payload(value: Any) -> bool:
     )
     if isinstance(value, multimodal_types):
         return True
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return any(_value_has_multimodal_payload(part) for part in value)
     return False
 
@@ -263,16 +269,34 @@ def _tool_return_value_as_text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         text_parts = [part for part in value if isinstance(part, str)]
         if text_parts:
             return "\n".join(text_parts)
-    if isinstance(value, (dict, list, tuple)):
+    if isinstance(value, dict | list | tuple):
         try:
             return json.dumps(value, ensure_ascii=False)
         except (TypeError, ValueError):
             pass
     return str(value)
+
+
+def _tool_result_metadata(result: Any) -> dict[str, Any]:
+    if not isinstance(result, ToolReturn) or not isinstance(result.metadata, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in result.metadata.items()
+        if isinstance(key, str)
+    }
+
+
+def _tool_result_artifact_ref(metadata: dict[str, Any]) -> str | None:
+    artifact_ref = metadata.get("artifact_ref")
+    if artifact_ref is None:
+        return None
+    value = str(artifact_ref).strip()
+    return value or None
 
 
 def _chat_cache_owner_id(*, vault_name: str, session_id: str) -> str:
@@ -289,7 +313,7 @@ def _should_preserve_vault_backed_tool_result(
     tool_name: str,
     args: dict[str, Any],
 ) -> bool:
-    if tool_name != "file_ops_safe":
+    if tool_name not in {"file_read", "file_ops_safe"}:
         return False
     operation = str(args.get("operation") or "").strip().lower()
     return operation == "read"
@@ -319,7 +343,7 @@ def _build_cached_tool_overflow_notice(
     token_limit: int,
     preview: str,
 ) -> str:
-    read_snippet = f'artifact = await read_cache(ref={cache_ref!r})'
+    read_snippet = f"artifact = await read_cache(ref={cache_ref!r})"
     return (
         f"Tool '{tool_name}' produced a large result ({token_count} estimated tokens > {token_limit}) "
         f"and it was stored in cache ref '{cache_ref}'. Preview:\n\n{preview}\n\n"

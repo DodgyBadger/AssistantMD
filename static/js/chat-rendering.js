@@ -254,13 +254,12 @@
 
             const title = document.createElement('div');
             title.className = 'text-sm font-medium';
-            title.textContent = latestFailure.retryable
-                ? 'Response interrupted before it finished.'
-                : 'Response failed before it finished.';
+            const failureCopy = latestFailureCopy(latestFailure);
+            title.textContent = failureCopy.title;
 
             const detail = document.createElement('div');
             detail.className = 'mt-1 text-xs opacity-80';
-            detail.textContent = latestFailure.error_type || latestFailure.failure_kind || 'Chat task failed';
+            detail.textContent = failureCopy.detail;
 
             panel.appendChild(title);
             panel.appendChild(detail);
@@ -285,6 +284,39 @@
             row.appendChild(panel);
             appendChatMessageNode(row, { forceScroll: false });
             icons.hydrateIconButtons(row);
+        }
+
+        function latestFailureCopy(latestFailure) {
+            if (latestFailure.failure_kind === 'provider_overloaded') {
+                return {
+                    title: 'The model service is temporarily overloaded.',
+                    detail: 'The provider could not complete this response. You can retry the interrupted turn.'
+                };
+            }
+            if (latestFailure.failure_kind === 'provider_unavailable') {
+                return {
+                    title: 'The model service is temporarily unavailable.',
+                    detail: 'The provider could not complete this response. You can retry the interrupted turn.'
+                };
+            }
+            if (latestFailure.failure_kind === 'rate_limited') {
+                return {
+                    title: 'The model service is temporarily rate-limited.',
+                    detail: 'Wait briefly, then retry the interrupted turn.'
+                };
+            }
+            if (['transient_network', 'transient_provider'].includes(latestFailure.failure_kind)) {
+                return {
+                    title: 'The connection to the model service was interrupted.',
+                    detail: 'You can retry the interrupted turn.'
+                };
+            }
+            return {
+                title: latestFailure.retryable
+                    ? 'Response interrupted before it finished.'
+                    : 'Response failed before it finished.',
+                detail: latestFailure.error_type || latestFailure.failure_kind || 'Chat task failed'
+            };
         }
 
         function groupToolEventsById(toolEvents) {
@@ -417,6 +449,7 @@
                     }
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
                     entry.detailResult = entry.result;
+                    entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
                 }
 
                 updateToolDetail(entry);
@@ -461,13 +494,25 @@
             });
         }
 
-        function renderAssistantHtml(bodyDiv, markdownContent = '') {
+        function renderAssistantHtml(bodyDiv, markdownContent = '', { softBreaks = false } = {}) {
             if (!bodyDiv) return;
             const content = (markdownContent || '').trim();
             const protectedContent = protectLatexForMarkdown(content);
-            const renderedHtml = content ? marked.parse(protectedContent.markdown) : '';
+            const renderedHtml = content
+                ? marked.parse(protectedContent.markdown, { breaks: softBreaks })
+                : '';
             const restoredHtml = restoreLatexPlaceholders(renderedHtml, protectedContent.segments);
-            bodyDiv.innerHTML = sanitizeAssistantHtml(restoredHtml);
+            const sanitizedHtml = sanitizeAssistantHtml(restoredHtml);
+            if (sanitizedHtml === null) {
+                bodyDiv.textContent = content;
+                return;
+            }
+            bodyDiv.innerHTML = sanitizedHtml;
+        }
+
+        function renderMarkdownPreview(container, markdownContent = '', options = {}) {
+            renderAssistantHtml(container, markdownContent, options);
+            postProcessAssistantBody(container, { decorateVaultTags: true });
         }
 
         function protectLatexForMarkdown(markdown) {
@@ -529,7 +574,7 @@
             if (!html) return '';
 
             if (!window.DOMPurify || typeof window.DOMPurify.sanitize !== 'function') {
-                return html;
+                return null;
             }
 
             return window.DOMPurify.sanitize(html, {
@@ -537,11 +582,74 @@
             });
         }
 
-        function postProcessAssistantBody(bodyDiv) {
+        function postProcessAssistantBody(bodyDiv, { decorateVaultTags = false } = {}) {
             if (!bodyDiv) return;
             enforceExternalLinkBehavior(bodyDiv);
             renderAssistantMath(bodyDiv);
             attachCodeCopyButtons(bodyDiv);
+            if (decorateVaultTags) {
+                decorateVaultMarkdownTags(bodyDiv);
+            }
+            callbacks.enhanceFileLinks?.(bodyDiv);
+        }
+
+        function decorateVaultMarkdownTags(container) {
+            const textNodes = [];
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    const parent = node.parentElement;
+                    if (!parent || parent.closest(
+                        'a, button, code, pre, textarea, .assistant-latex-segment, .vault-markdown-tag'
+                    )) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    return vaultTagMatches(node.textContent || '').length
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
+                },
+            });
+            while (walker.nextNode()) {
+                textNodes.push(walker.currentNode);
+            }
+            textNodes.forEach(decorateVaultTagTextNode);
+        }
+
+        function decorateVaultTagTextNode(node) {
+            const text = node.textContent || '';
+            const matches = vaultTagMatches(text);
+            if (!matches.length) return;
+
+            let cursor = 0;
+            const fragment = document.createDocumentFragment();
+            matches.forEach(({ start, end, value }) => {
+                if (start > cursor) {
+                    fragment.appendChild(document.createTextNode(text.slice(cursor, start)));
+                }
+                const tag = document.createElement('span');
+                tag.className = 'vault-markdown-tag';
+                tag.textContent = value;
+                fragment.appendChild(tag);
+                cursor = end;
+            });
+            if (cursor < text.length) {
+                fragment.appendChild(document.createTextNode(text.slice(cursor)));
+            }
+            node.parentNode?.replaceChild(fragment, node);
+        }
+
+        function vaultTagMatches(text) {
+            const matches = [];
+            const pattern =
+                /(^|[\s([{"'“‘>])#([\p{L}\p{M}\p{N}_-]+(?:\/[\p{L}\p{M}\p{N}_-]+)*)(?![\p{L}\p{M}\p{N}_/-])/gu;
+            for (const match of text.matchAll(pattern)) {
+                const tagBody = match[2] || '';
+                if (!/[\p{L}\p{M}_-]/u.test(tagBody)) continue;
+                const prefixLength = (match[1] || '').length;
+                const start = (match.index || 0) + prefixLength;
+                const value = `#${tagBody}`;
+                matches.push({ start, end: start + value.length, value });
+            }
+            return matches;
         }
 
         function renderAssistantMath(bodyDiv) {
@@ -611,7 +719,7 @@
                 role === 'user'
                     ? 'message-user'
                     : role === 'error'
-                    ? 'state-surface-error border'
+                    ? 'message-error'
                     : 'message-assistant prose prose-sm max-w-none'
             }`;
 
@@ -698,8 +806,12 @@
             bodyDiv.className = 'message-body prose prose-sm max-w-none';
             bodyDiv.innerHTML = '';
 
+            const artifactList = document.createElement('div');
+            artifactList.className = 'message-artifact-list';
+
             contentDiv.appendChild(progressDiv);
             contentDiv.appendChild(bodyDiv);
+            contentDiv.appendChild(artifactList);
             messageDiv.appendChild(contentDiv);
 
             appendChatMessageNode(messageDiv, { forceScroll: true });
@@ -711,6 +823,7 @@
                 indicator,
                 statusText,
                 bodyDiv,
+                artifactList,
                 thinkingDiv: null,
                 thinkingTextSpan: null,
                 thinkingToggle: null,
@@ -722,9 +835,7 @@
                 thinkingText: '',
                 collapseThinking: false,
                 thinkingExpanded: false,
-                draftText: '',
                 errorMessages: [],
-                hasTools: false,
                 toolSummary: null,
                 postProcessTimer: null,
                 archivedToolEvents: false
@@ -779,10 +890,23 @@
             if (!context || !delta) {
                 return;
             }
-            if (context.hasTools) {
-                context.fullText += delta;
-            } else {
-                context.draftText += delta;
+            const answerStarted = !context.fullText;
+            context.fullText += delta;
+            if (answerStarted && context.thinkingText) {
+                context.collapseThinking = true;
+                context.thinkingExpanded = false;
+            }
+            renderAssistantMarkdown(context);
+        }
+
+        function appendAssistantThinkingDelta(context, delta) {
+            if (!context || !delta) {
+                return;
+            }
+            context.thinkingText += delta;
+            if (context.fullText && !context.collapseThinking) {
+                context.collapseThinking = true;
+                context.thinkingExpanded = false;
             }
             renderAssistantMarkdown(context);
         }
@@ -800,13 +924,12 @@
         }
 
         function renderAssistantThinking(context) {
-            const thinking = [context.thinkingText, context.draftText]
-                .filter(Boolean)
-                .join('\n\n')
-                .trim();
+            const thinking = context.thinkingText.trim();
             if (!thinking && context.thinkingDiv) {
                 context.thinkingDiv.remove();
                 context.thinkingDiv = null;
+                context.thinkingTextSpan = null;
+                context.thinkingToggle = null;
                 return;
             }
             if (!thinking) {
@@ -826,9 +949,24 @@
         }
 
         function renderPlainAssistantThinking(context, text) {
+            if (context.thinkingTextSpan && !context.thinkingToggle) {
+                context.thinkingTextSpan.textContent = text;
+                return;
+            }
+            context.thinkingDiv.innerHTML = '';
             context.thinkingDiv.className = 'assistant-thinking';
-            context.thinkingDiv.textContent = text;
-            context.thinkingTextSpan = null;
+
+            const label = document.createElement('div');
+            label.className = 'assistant-thinking-label';
+            label.textContent = 'Reasoning';
+
+            const textSpan = document.createElement('div');
+            textSpan.className = 'assistant-thinking-text';
+            textSpan.textContent = text;
+
+            context.thinkingDiv.appendChild(label);
+            context.thinkingDiv.appendChild(textSpan);
+            context.thinkingTextSpan = textSpan;
             context.thinkingToggle = null;
         }
 
@@ -849,24 +987,29 @@
             const toggle = document.createElement('button');
             toggle.type = 'button';
             toggle.className = 'assistant-thinking-toggle';
-            toggle.title = 'Show thinking';
+            toggle.title = 'Show reasoning';
 
             const chevron = document.createElement('span');
             chevron.className = 'assistant-thinking-chevron';
             chevron.setAttribute('aria-hidden', 'true');
             chevron.textContent = '▸';
 
-            const textSpan = document.createElement('span');
+            const label = document.createElement('span');
+            label.className = 'assistant-thinking-label';
+            label.textContent = 'Reasoning';
+
+            const textSpan = document.createElement('div');
             textSpan.className = 'assistant-thinking-text';
 
             toggle.appendChild(chevron);
-            toggle.appendChild(textSpan);
+            toggle.appendChild(label);
             toggle.addEventListener('click', () => {
                 context.thinkingExpanded = !context.thinkingExpanded;
                 setThinkingExpanded(context, context.thinkingExpanded);
             });
 
             context.thinkingDiv.appendChild(toggle);
+            context.thinkingDiv.appendChild(textSpan);
             context.thinkingToggle = toggle;
             context.thinkingTextSpan = textSpan;
         }
@@ -878,7 +1021,7 @@
             context.thinkingDiv.classList.toggle('is-expanded', expanded);
             context.thinkingDiv.classList.toggle('is-collapsed', !expanded);
             context.thinkingToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-            context.thinkingToggle.title = expanded ? 'Hide thinking' : 'Show thinking';
+            context.thinkingToggle.title = expanded ? 'Hide reasoning' : 'Show reasoning';
             const chevron = context.thinkingToggle.querySelector('.assistant-thinking-chevron');
             if (chevron) {
                 chevron.textContent = expanded ? '▾' : '▸';
@@ -889,27 +1032,6 @@
             return String(text || '')
                 .replace(/([.!?]["')\]]?)(?=[A-Z])/g, '$1 ')
                 .replace(/[ \t]{2,}/g, ' ');
-        }
-
-        function promoteAssistantDraftToThinking(context) {
-            if (!context || !context.fullText) {
-                return;
-            }
-            context.draftText = context.draftText
-                ? `${context.draftText}\n\n${context.fullText}`
-                : context.fullText;
-            context.fullText = '';
-            renderAssistantMarkdown(context);
-        }
-
-        function promoteAssistantDraftToAnswer(context) {
-            if (!context || !context.draftText || context.hasTools) {
-                return;
-            }
-            context.fullText = context.fullText
-                ? `${context.fullText}\n\n${context.draftText}`
-                : context.draftText;
-            context.draftText = '';
         }
 
         function setAssistantStatus(context, label, state = 'thinking') {
@@ -931,10 +1053,6 @@
             let entry = context.toolStatusMap.get(toolId);
 
             if (payload.event === 'tool_call_started' || !entry) {
-                if (payload.event === 'tool_call_started') {
-                    context.hasTools = true;
-                    promoteAssistantDraftToThinking(context);
-                }
                 ensureToolCallsSection(context);
                 entry = createToolStatusEntry(context, toolId, payload);
                 if (payload.event === 'tool_call_started') {
@@ -951,6 +1069,7 @@
                         ? payload.result_detail
                         : payload.result;
                 }
+                entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
                 entry.events.push(payload);
                 updateToolDetail(entry);
 
@@ -992,8 +1111,12 @@
 
             context.toolList.classList.remove('hidden');
             context.toolList.appendChild(container);
+            const artifactContainer = document.createElement('div');
+            artifactContainer.className = 'tool-artifact-container';
+            context.artifactList.appendChild(artifactContainer);
             const entry = {
                 container,
+                artifactContainer,
                 summary,
                 line,
                 toolId,
@@ -1004,6 +1127,7 @@
                     : payload.arguments || null,
                 result: null,
                 detailResult: null,
+                artifactRef: payload.artifact_ref || '',
                 archived: Boolean(context.archivedToolEvents),
                 events: []
             };
@@ -1014,7 +1138,6 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
-            promoteAssistantDraftToAnswer(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1231,6 +1354,28 @@
                 entry.archived ? 'Archived by compaction.' : '',
                 hasArgs ? truncateToolTooltip(prunedArgs) : 'No args',
             ].filter(Boolean).join(' ');
+            if (
+                entry.toolName === 'propose_file_edits'
+                && entry.artifactRef
+                && entry.artifactContainer
+                && callbacks.renderEditProposalArtifact
+            ) {
+                callbacks.renderEditProposalArtifact(entry.artifactContainer, entry.artifactRef);
+            }
+        }
+
+        function artifactRefFromValue(value) {
+            if (!value) return '';
+            if (typeof value === 'object' && !Array.isArray(value)) {
+                return typeof value.artifact_ref === 'string' ? value.artifact_ref : '';
+            }
+            if (typeof value !== 'string') return '';
+            try {
+                const parsed = JSON.parse(value);
+                return parsed && typeof parsed.artifact_ref === 'string' ? parsed.artifact_ref : '';
+            } catch (error) {
+                return '';
+            }
         }
 
         function openToolCallDetails(entry) {
@@ -1488,7 +1633,6 @@
                     throw new Error('Fork response did not include a new session id.');
                 }
                 state.sessionId = forkSessionId;
-                state.isWorkspaceUnlocked = false;
                 await callbacks.fetchSessions(vault, forkSessionId);
                 await callbacks.loadSession(forkSessionId);
             } catch (error) {
@@ -1508,10 +1652,12 @@
             removeLoadingMessage,
             createAssistantStreamingMessage,
             appendAssistantDelta,
+            appendAssistantThinkingDelta,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,
             finalizeAssistantMessage,
+            renderMarkdownPreview,
         });
     }
 

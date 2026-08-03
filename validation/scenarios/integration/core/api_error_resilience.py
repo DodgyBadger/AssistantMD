@@ -16,7 +16,11 @@ class ApiErrorResilienceScenario(BaseScenario):
     async def test_scenario(self):
         import httpx
         from pydantic_ai.providers.openai import OpenAIProvider
-        from pydantic_ai.retries import AsyncTenacityTransport, TenacityTransport, wait_retry_after
+        from pydantic_ai.retries import (
+            AsyncTenacityTransport,
+            TenacityTransport,
+            wait_retry_after,
+        )
 
         from core.llm.model_factory import (
             _build_retrying_model_http_client,
@@ -84,6 +88,22 @@ class ApiErrorResilienceScenario(BaseScenario):
         self.soft_assert(
             not bad_classification.retryable,
             "Classification should mark permanent bad requests non-retryable",
+        )
+
+        overloaded = classify_exception(
+            RuntimeError(
+                "Our servers are currently overloaded. Please try again later."
+            ),
+            phase="agent_stream",
+        )
+        self.soft_assert_equal(
+            overloaded.failure_kind,
+            "provider_overloaded",
+            "Streamed provider overload errors should have a distinct failure classification",
+        )
+        self.soft_assert(
+            overloaded.retryable,
+            "Streamed provider overload errors should support manual retry",
         )
 
         self.soft_assert(
@@ -188,8 +208,12 @@ class ApiErrorResilienceScenario(BaseScenario):
         )
 
 
-def _http_status_error(status_code: int, *, retry_after: str | None = None) -> httpx.HTTPStatusError:
+def _http_status_error(
+    status_code: int, *, retry_after: str | None = None
+) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://api.provider.test/v1/chat")
     headers = {"Retry-After": retry_after} if retry_after else {}
     response = httpx.Response(status_code, headers=headers, request=request)
-    return httpx.HTTPStatusError("synthetic provider status failure", request=request, response=response)
+    return httpx.HTTPStatusError(
+        "synthetic provider status failure", request=request, response=response
+    )

@@ -413,6 +413,7 @@
                 if (deletedActiveSession) {
                     callbacks.clearPendingAttachments();
                     callbacks.renderChatEmptyState();
+                    callbacks.resetChatModeToDefault();
                 }
                 renderSelector();
                 renderSessionBrowserList();

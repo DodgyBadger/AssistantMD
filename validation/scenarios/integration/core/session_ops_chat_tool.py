@@ -24,14 +24,19 @@ class SessionOpsChatToolScenario(BaseScenario):
 
         await self.start_system()
 
+        from pydantic_ai.models.test import TestModel
+
         import core.chat.executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
         from core.chat.chat_store import ChatStore
         from core.memory.session_summary import SessionSummaryStore
-        from pydantic_ai.models.test import TestModel
 
-        store = SessionSummaryStore(system_root=str(self._get_system_controller()._system_root))
-        chat_store = ChatStore(system_root=str(self._get_system_controller()._system_root))
+        store = SessionSummaryStore(
+            system_root=str(self._get_system_controller()._system_root)
+        )
+        chat_store = ChatStore(
+            system_root=str(self._get_system_controller()._system_root)
+        )
 
         current_case = {"name": "upsert"}
 
@@ -54,9 +59,13 @@ class SessionOpsChatToolScenario(BaseScenario):
                     }
                 if current_case["name"] == "get":
                     return {"operation": "get_session_summary"}
-                raise AssertionError(f"Unexpected session_ops case: {current_case['name']}")
+                raise AssertionError(
+                    f"Unexpected session_ops case: {current_case['name']}"
+                )
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, tools, model, thinking
             binding = resolve_tool_binding(["session_ops"], vault_path=vault_path)
             return (
@@ -89,7 +98,9 @@ class SessionOpsChatToolScenario(BaseScenario):
                 "done",
                 "Summary chat should succeed",
             )
-            current = store.get_session_summary(vault_name=vault.name, session_id=session_id)
+            current = store.get_session_summary(
+                vault_name=vault.name, session_id=session_id
+            )
             self.soft_assert(
                 current is not None and current.summary == "Chat summary testing",
                 "session_ops should write a session summary for the active chat session",
@@ -115,7 +126,9 @@ class SessionOpsChatToolScenario(BaseScenario):
                     "metadata": current.metadata if current else {},
                 },
             )
-            self.soft_assert_equal(updated.status_code, 200, "Manual summary update should succeed")
+            self.soft_assert_equal(
+                updated.status_code, 200, "Manual summary update should succeed"
+            )
             updated_payload = updated.json()
             self.soft_assert_equal(
                 updated_payload.get("workspace_path"),
@@ -174,7 +187,8 @@ class SessionOpsChatToolScenario(BaseScenario):
             )
             listed_session = next(
                 (
-                    row for row in listed.get("sessions", [])
+                    row
+                    for row in listed.get("sessions", [])
                     if row.get("session_id") == session_id
                 ),
                 None,
@@ -223,7 +237,9 @@ class SessionOpsChatToolScenario(BaseScenario):
                 "session_ops list_sessions should support workspace subtree filtering",
             )
 
-            original_search_by_field = SessionSummaryStore.search_session_summaries_by_field
+            original_search_by_field = (
+                SessionSummaryStore.search_session_summaries_by_field
+            )
 
             async def _no_vector_matches(self, **kwargs):
                 del self, kwargs
@@ -269,7 +285,9 @@ class SessionOpsChatToolScenario(BaseScenario):
                     "workspace boost should be visible as search evidence",
                 )
             finally:
-                SessionSummaryStore.search_session_summaries_by_field = original_search_by_field
+                SessionSummaryStore.search_session_summaries_by_field = (
+                    original_search_by_field
+                )
 
             current_case["name"] = "get"
             fetched = await self.run_chat_task(
@@ -297,8 +315,12 @@ class SessionOpsChatToolScenario(BaseScenario):
                 method="DELETE",
                 params={"vault_name": vault.name},
             )
-            self.soft_assert_equal(deleted.status_code, 200, "Delete chat should succeed")
-            after_delete = store.get_session_summary(vault_name=vault.name, session_id=session_id)
+            self.soft_assert_equal(
+                deleted.status_code, 200, "Delete chat should succeed"
+            )
+            after_delete = store.get_session_summary(
+                vault_name=vault.name, session_id=session_id
+            )
             self.soft_assert(
                 after_delete is None,
                 "Deleting a chat session should delete the matching stored summary",

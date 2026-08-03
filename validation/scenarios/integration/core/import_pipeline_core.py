@@ -5,8 +5,8 @@ Creates a small PDF in AssistantMD/Import, runs the import scan via API,
 and asserts the rendered markdown output exists while the source file is removed.
 """
 
-import sys
 import sqlite3
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -44,7 +44,9 @@ class ImportPipelineScenario(BaseScenario):
         assert len(outputs) > 0, "Import scan should return at least one output path"
         sample_rel_path = outputs[0]
         assert sample_rel_path.endswith(".md"), "Import output should be markdown"
-        assert sample_rel_path.startswith("Imported/"), "Import output should be under Imported/"
+        assert sample_rel_path.startswith(
+            "Imported/"
+        ), "Import output should be under Imported/"
 
         # Source file should be removed after successful import
         assert not import_path.exists(), "Source file should be cleaned up"
@@ -57,41 +59,46 @@ class ImportPipelineScenario(BaseScenario):
         assert "mime: application/pdf" in sample_content
 
         vault_id = self._vault_id(vault.name)
-        assert self._manifest_row(vault_id, sample_rel_path, deleted=False), (
-            "Imported file should be tracked in vault state"
-        )
+        assert self._manifest_row(
+            vault_id, sample_rel_path, deleted=False
+        ), "Imported file should be tracked in vault state"
         assert self._manifest_row(
             vault_id,
             "AssistantMD/Import/sample.pdf",
             deleted=True,
         ), "Cleaned-up source file should be marked deleted in vault state"
 
-        activity_response = self.call_api(f"/api/vaults/{vault.name}/task-mutations")
-        assert activity_response.status_code == 200, "Vault Activity mutation API should respond"
+        activity_response = self.call_api(f"/api/vaults/{vault.name}/activity")
+        assert (
+            activity_response.status_code == 200
+        ), "Vault Activity mutation API should respond"
         groups = activity_response.json().get("groups") or []
         ingestion_group = next(
             (
                 group
                 for group in groups
-                if group.get("task_kind") == "ingestion"
+                if group.get("activity_kind") == "ingestion"
                 and group.get("task_source") == "api"
             ),
             None,
         )
-        assert ingestion_group is not None, "Import should be visible as API ingestion Vault Activity"
+        assert (
+            ingestion_group is not None
+        ), "Import should be visible as API ingestion Vault Activity"
         mutations = ingestion_group.get("mutations") or []
         observed = {
-            (mutation.get("operation"), mutation.get("path"))
-            for mutation in mutations
+            (mutation.get("operation"), mutation.get("path")) for mutation in mutations
         }
-        assert ("write", sample_rel_path) in observed, "Imported file write should be recorded"
+        assert (
+            "write",
+            sample_rel_path,
+        ) in observed, "Imported file write should be recorded"
         assert (
             "delete",
             "AssistantMD/Import/sample.pdf",
         ) in observed, "Source cleanup delete should be recorded"
         assert all(
-            mutation.get("event_sequence") is not None
-            for mutation in mutations
+            mutation.get("event_sequence") is not None for mutation in mutations
         ), "Import mutations should link to vault-state events"
 
         await self.stop_system()

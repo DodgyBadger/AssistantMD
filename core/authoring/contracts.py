@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+if TYPE_CHECKING:
+    from core.runtime.buffers import BufferStore
+    from core.utils.file_state import WorkflowFileStateManager
 
 BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
     {
@@ -52,6 +56,25 @@ class AuthoringFinishSignal(RuntimeError):
         return status, reason
 
 
+class AuthoringToolCallError(RuntimeError):
+    """Raised when a direct Monty tool call returns a structured failure."""
+
+    def __init__(
+        self,
+        *,
+        tool_name: str,
+        operation: str = "",
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.tool_name = str(tool_name or "unknown")
+        self.operation = str(operation or "")
+        self.reason = str(reason or "Tool call failed")
+        self.metadata = dict(metadata or {})
+        operation_label = f" operation '{self.operation}'" if self.operation else ""
+        super().__init__(f"{self.tool_name}{operation_label} failed: {self.reason}")
+
+
 @dataclass(frozen=True)
 class AuthoringCapabilityCall:
     """One sandbox-to-host capability invocation."""
@@ -66,7 +89,7 @@ class AuthoringExecutionContext:
     """Stable execution context passed to capability handlers."""
 
     workflow_id: str
-    host: "AuthoringHost"
+    host: AuthoringHost
 
 
 @dataclass(frozen=True)
@@ -99,7 +122,9 @@ class ContextMessage:
 
     def __post_init__(self) -> None:
         if not self.text:
-            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+            object.__setattr__(
+                self, "text", _role_content_to_text(self.role, self.content)
+            )
 
     def to_text(self) -> str:
         """Return a clean prompt-oriented representation."""
@@ -121,7 +146,9 @@ class HistoryMessage:
 
     def __post_init__(self) -> None:
         if not self.text:
-            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+            object.__setattr__(
+                self, "text", _role_content_to_text(self.role, self.content)
+            )
 
     def to_text(self) -> str:
         """Return clean message text without provider-native payload internals."""
@@ -149,7 +176,9 @@ class ToolExchange:
             object.__setattr__(
                 self,
                 "text",
-                _tool_exchange_to_text(self.tool_name, self.call_arguments, self.result_text),
+                _tool_exchange_to_text(
+                    self.tool_name, self.call_arguments, self.result_text
+                ),
             )
 
     def to_text(self) -> str:
@@ -203,7 +232,11 @@ class ToolExchangeBatch:
             object.__setattr__(
                 self,
                 "text",
-                "\n\n".join(exchange.text for exchange in self.exchanges if exchange.text.strip()),
+                "\n\n".join(
+                    exchange.text
+                    for exchange in self.exchanges
+                    if exchange.text.strip()
+                ),
             )
 
     def to_text(self) -> str:
@@ -267,7 +300,9 @@ class LatestMessage:
 
     def __post_init__(self) -> None:
         if not self.text and self.role:
-            object.__setattr__(self, "text", _role_content_to_text(self.role, self.content))
+            object.__setattr__(
+                self, "text", _role_content_to_text(self.role, self.content)
+            )
         if self.role and not self.exists:
             object.__setattr__(self, "exists", True)
 
@@ -296,7 +331,9 @@ class ScriptToolResult:
 class AssembleContextResult:
     """Validated structured context ready for a downstream chat call."""
 
-    messages: tuple[ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch, ...] = ()
+    messages: tuple[
+        ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch, ...
+    ] = ()
     instructions: tuple[str, ...] = ()
 
 
@@ -361,6 +398,14 @@ class FinishResult:
 @runtime_checkable
 class AuthoringHost(Protocol):
     """Host-side runtime state exposed to helper executors."""
+
+    vault_path: str | None
+    reference_date: datetime
+    week_start_day: int
+    run_buffers: BufferStore
+    session_buffers: BufferStore
+    state_manager: WorkflowFileStateManager | None
+    session_key: str | None
 
     def get_monty_inputs(self) -> dict[str, Any]: ...
 

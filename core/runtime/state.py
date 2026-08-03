@@ -91,4 +91,5 @@ def next_boot_id() -> int:
 
 class RuntimeStateError(Exception):
     """Raised when runtime context state is invalid or unavailable."""
+
     pass

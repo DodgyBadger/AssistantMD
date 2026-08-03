@@ -15,6 +15,34 @@ AssistantMD is designed as a **single-user application** running on your local m
 
 Keep these constraints in mind before putting the application on a public interface.
 
+## Vault File Uploads
+
+Vault Explorer uploads intentionally accept arbitrary file content because
+vaults may contain PDFs, images, office documents, and other user-owned
+artifacts. The upload boundary:
+
+- requires an existing configured vault and a safe vault-relative destination;
+- rejects absolute paths, `.`/`..` components, control characters, overlong
+  paths, and paths that resolve through symlinks outside the selected vault;
+- treats the multipart filename as display metadata only and uses the validated
+  API path as the destination;
+- accepts exactly one multipart file per request;
+- enforces `vault_upload_max_mb_per_file` and never overwrites an existing
+  destination; and
+- writes through vault mutation history.
+
+Uploaded content is not malware-scanned. AssistantMD does not execute uploaded
+files or render unknown binary types inline, but explicitly importing an
+untrusted PDF or image hands that content to the configured ingestion parser.
+Keep parser dependencies current and only import documents you are willing to
+process.
+
+The application-level size check is not a substitute for an edge request-body
+limit. In particular, a chunked multipart request may be spooled by the HTTP
+stack before the application can reject its file bytes, and repeated
+within-limit uploads can consume vault storage. Remote deployments should set
+request-size, rate, and storage limits at the authenticated reverse proxy.
+
 ## Prompt Injection
 
 ### The Risk
@@ -23,7 +51,7 @@ When AI models process web content using tools like search, extract or crawl, ma
 
 **Potential impact:**
 - Creation of incorrect or misleading content in your vault files
-- If using `file_ops_unsafe` tool, possible deletion or modification of files within the vault
+- A model with `file_write` enabled can delete or modify files within the vault
 
 ### Mitigation
 
@@ -47,14 +75,18 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 
 **4. External communication remains limited, not impossible**
 - The built-in web and browser tools are constrained to narrow retrieval-oriented behavior rather than arbitrary outbound actions.
+- `web_extract` and URL ingestion validate public-network targets at the initial
+  URL and every redirect. Provider strategies are explicit and do not silently
+  fall back to another network path.
 - The `browser` tool is restricted to public-network, read-oriented requests and cannot upload files or initiate downloads.
 - Residual risk still exists wherever the application is intentionally configured to communicate with external providers or websites.
 
 ### Best Practices
 
 - Review outputs from workflows and context templates that process web content
-- Use `file_ops_safe` tool by default - only enable `file_ops_unsafe` when you need write/delete capabilities
-- Be especially cautious when combining `file_ops_unsafe` with `browser` or other web tools on untrusted websites
+- Disable `file_write` app-wide when a deployment should not permit model-driven vault mutations
+- Use inline edit mode when you want to inspect interactive chat mutations before they execute
+- Be especially cautious when combining `file_write` with `browser` or other web tools on untrusted websites
 - Prefer the least powerful web tool that can do the job:
   - search when you need discovery
   - extract when you already know the page URL

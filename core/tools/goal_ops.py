@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai import RunContext
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.goals.store import GOAL_FIELD_UNSET, GoalOpsStore
@@ -24,7 +25,7 @@ class GoalOps(BaseTool):
     """Create, inspect, and update durable goal_ops records."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the goal_ops tool."""
 
         async def goal_ops(
@@ -37,7 +38,7 @@ class GoalOps(BaseTool):
             limit: int | str = "",
             workspace_path_hint: str = "",
             data: dict[str, Any] | None = None,
-        ):
+        ) -> str | ToolReturn:
             """Create, inspect, and update durable goal state.
 
             :param operation: Operation name.
@@ -80,6 +81,7 @@ class GoalOps(BaseTool):
                     tool_name="goal_ops",
                     message="goal_ops could not complete the requested operation",
                     classification=FailureClassification(
+                        error_type=type(exc).__name__,
                         failure_kind="permanent",
                         retryable=False,
                         phase="tool_execution",
@@ -102,6 +104,7 @@ class GoalOps(BaseTool):
                     tool_name="goal_ops",
                     message="goal_ops encountered an unexpected failure",
                     classification=FailureClassification(
+                        error_type=type(exc).__name__,
                         failure_kind="unknown",
                         retryable=False,
                         phase="tool_execution",
@@ -144,8 +147,8 @@ Full documentation:
             source = cls._infer_source(ctx)
             return store.create_goal(
                 vault_name=vault_name,
-                title=data.get("title"),
-                objective=data.get("objective"),
+                title=str(data.get("title") or ""),
+                objective=str(data.get("objective") or ""),
                 workspace_path_hint=data.get("workspace_path_hint"),
                 success_criteria=data.get("success_criteria"),
                 metadata=data.get("metadata"),
@@ -159,7 +162,9 @@ Full documentation:
             return store.update_goal(
                 goal_id=_goal_id(goal_id, data),
                 title=data.get("title") if "title" in data else GOAL_FIELD_UNSET,
-                objective=data.get("objective") if "objective" in data else GOAL_FIELD_UNSET,
+                objective=(
+                    data.get("objective") if "objective" in data else GOAL_FIELD_UNSET
+                ),
                 status=data.get("status") if "status" in data else GOAL_FIELD_UNSET,
                 workspace_path_hint=(
                     data.get("workspace_path_hint")
@@ -172,7 +177,9 @@ Full documentation:
                     else GOAL_FIELD_UNSET
                 ),
                 plan=data.get("plan") if "plan" in data else GOAL_FIELD_UNSET,
-                metadata=data.get("metadata") if "metadata" in data else GOAL_FIELD_UNSET,
+                metadata=(
+                    data.get("metadata") if "metadata" in data else GOAL_FIELD_UNSET
+                ),
                 reason=data.get("reason"),
             )
         if operation == "get_goal":
@@ -185,9 +192,11 @@ Full documentation:
                 workspace_path_hint=(
                     workspace_path_hint
                     if workspace_path_hint
-                    else data.get("workspace_path_hint")
-                    if "workspace_path_hint" in data
-                    else None
+                    else (
+                        data.get("workspace_path_hint")
+                        if "workspace_path_hint" in data
+                        else None
+                    )
                 ),
                 source_type=source_filter["source_type"],
                 source_id=source_filter["source_id"],
@@ -197,7 +206,7 @@ Full documentation:
         if operation == "checkpoint":
             return store.checkpoint(
                 goal_id=_goal_id(goal_id, data),
-                summary=data.get("summary"),
+                summary=str(data.get("summary") or ""),
                 current_state=data.get("current_state"),
                 next_actions=data.get("next_actions"),
                 open_questions=data.get("open_questions"),
@@ -269,13 +278,17 @@ Full documentation:
     @staticmethod
     def _infer_source(ctx: RunContext) -> dict[str, str | None]:
         deps = getattr(ctx, "deps", None)
-        authoring_workflow_id = str(getattr(deps, "authoring_workflow_id", "") or "").strip()
+        authoring_workflow_id = str(
+            getattr(deps, "authoring_workflow_id", "") or ""
+        ).strip()
         session_id = str(getattr(deps, "session_id", "") or "").strip()
         current_task = get_current_execution_task()
         source_task_id = current_task.task_id if current_task is not None else None
 
         if authoring_workflow_id:
-            source_type = "context" if "/context/" in authoring_workflow_id else "workflow"
+            source_type = (
+                "context" if "/context/" in authoring_workflow_id else "workflow"
+            )
             return {
                 "source_type": source_type,
                 "source_id": authoring_workflow_id,
@@ -297,7 +310,9 @@ Full documentation:
         }
 
     @staticmethod
-    def _resolve_list_source_filter(ctx: RunContext, data: dict[str, Any]) -> dict[str, str | None]:
+    def _resolve_list_source_filter(
+        ctx: RunContext, data: dict[str, Any]
+    ) -> dict[str, str | None]:
         source = _optional_filter_text(data.get("source"))
         if source is None:
             return {"source_type": None, "source_id": None}
@@ -305,13 +320,15 @@ Full documentation:
             deps = getattr(ctx, "deps", None)
             session_id = str(getattr(deps, "session_id", "") or "").strip()
             if not session_id:
-                raise ValueError("list_goals source='current_session' requires an active chat session")
+                raise ValueError(
+                    "list_goals source='current_session' requires an active chat session"
+                )
             return {"source_type": "chat", "source_id": session_id}
         if source == "session":
-            session_id = _optional_filter_text(data.get("session_id"))
-            if not session_id:
+            filtered_session_id = _optional_filter_text(data.get("session_id"))
+            if not filtered_session_id:
                 raise ValueError("list_goals source='session' requires data.session_id")
-            return {"source_type": "chat", "source_id": session_id}
+            return {"source_type": "chat", "source_id": filtered_session_id}
         raise ValueError("list_goals source must be one of: current_session, session")
 
 

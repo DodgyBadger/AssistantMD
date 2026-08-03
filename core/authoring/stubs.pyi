@@ -6,14 +6,12 @@ capability calls and reserved input variables are fully typed in sandbox code.
 
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Monty-supported builtins missing from ty's default sandbox scope
 # ---------------------------------------------------------------------------
 
 def getattr(obj: Any, name: str, default: Any = ...) -> Any: ...
 def hasattr(obj: Any, name: str) -> bool: ...
-
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -146,8 +144,14 @@ class FinishResult:
     status: str
     reason: str
 
-ContextInput = ContextMessage | HistoryMessage | ToolExchange | ToolExchangeBatch | dict[str, Any] | str
-
+ContextInput = (
+    ContextMessage
+    | HistoryMessage
+    | ToolExchange
+    | ToolExchangeBatch
+    | dict[str, Any]
+    | str
+)
 
 # ---------------------------------------------------------------------------
 # Reserved input variables
@@ -169,7 +173,6 @@ date: MontyDateTokens
 latest_message: LatestMessage
 workspace: Workspace
 
-
 # ---------------------------------------------------------------------------
 # Capabilities
 # ---------------------------------------------------------------------------
@@ -178,13 +181,16 @@ async def read_cache(
     *,
     ref: str,
 ) -> RetrievedItem: ...
-
 async def pending_files(
     *,
     operation: str,
-    items: ScriptToolResult | RetrievedItem | list[RetrievedItem] | tuple[RetrievedItem, ...],
+    items: (
+        ScriptToolResult
+        | RetrievedItem
+        | list[RetrievedItem]
+        | tuple[RetrievedItem, ...]
+    ),
 ) -> PendingFilesResult: ...
-
 async def retrieve_history(
     *,
     scope: str = "session",
@@ -192,31 +198,26 @@ async def retrieve_history(
     limit: int | str = "all",
     message_filter: str = "all",
 ) -> RetrievedHistoryResult: ...
-
 async def retrieve_sessions(
     *,
     selection: str = "pending_or_stale_summary",
     limit: int | str = "all",
 ) -> RetrievedSessionsResult: ...
-
 async def assemble_context(
     *,
     history: list[ContextInput] | tuple[ContextInput, ...] | None = None,
     context_messages: list[ContextInput] | tuple[ContextInput, ...] | None = None,
     instructions: str | None = None,
 ) -> AssembleContextResult: ...
-
 async def parse_markdown(
     *,
     value: RetrievedItem | str,
 ) -> ParsedMarkdown: ...
-
 async def finish(
     *,
     status: str = "completed",
     reason: str | None = None,
 ) -> FinishResult: ...
-
 async def import_content(
     *,
     source: str,

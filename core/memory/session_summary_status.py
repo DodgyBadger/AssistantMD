@@ -30,9 +30,7 @@ def session_summary_status(
 
     summary_updated_at = str(getattr(session_summary, "updated_at", "") or "")
     metadata = getattr(session_summary, "metadata", {}) or {}
-    summary_message_count = summary_message_count_from_metadata(
-        metadata
-    )
+    summary_message_count = summary_message_count_from_metadata(metadata)
     summary_history_revision = summary_history_revision_from_metadata(metadata)
     message_count_delta = (
         message_count - summary_message_count
@@ -45,9 +43,7 @@ def session_summary_status(
         else None
     )
     new_message_count = (
-        max(message_count_delta, 0)
-        if message_count_delta is not None
-        else None
+        max(message_count_delta, 0) if message_count_delta is not None else None
     )
     if history_revision_delta is not None:
         stale = history_revision_delta != 0

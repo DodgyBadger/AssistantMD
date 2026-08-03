@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-
 CHAT_TASK_TERMINAL_EVENTS = frozenset({"done", "cancelled", "error"})
 
 
@@ -107,11 +106,7 @@ class ChatTaskEventBuffer:
             stream = self._streams.get(task_id)
             if stream is None:
                 return []
-            return [
-                event
-                for event in stream.events
-                if event.sequence > after_sequence
-            ]
+            return [event for event in stream.events if event.sequence > after_sequence]
 
     async def is_terminal(self, task_id: str) -> bool:
         """Return whether a task stream has received a terminal event."""
@@ -158,9 +153,7 @@ class ChatTaskEventBuffer:
                 stream = _ChatTaskEventStream(task_id=task_id)
                 self._streams[task_id] = stream
             events = [
-                event
-                for event in stream.events
-                if event.sequence > after_sequence
+                event for event in stream.events if event.sequence > after_sequence
             ]
             terminal_seen = (
                 stream.terminal_sequence is not None

@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import keyword
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic_monty import Monty, run_monty_async
 
-from core.authoring.helper_catalog import create_builtin_registry
 from core.authoring.contracts import (
-    AuthoringFinishSignal,
     AuthoringExecutionContext,
+    AuthoringFinishSignal,
     AuthoringHost,
+    AuthoringToolCallError,
+    ScriptToolResult,
 )
+from core.authoring.helper_catalog import create_builtin_registry
 from core.authoring.helpers.runtime_common import (
     coerce_tool_return_value_text,
     invoke_bound_tool,
@@ -24,8 +26,7 @@ from core.authoring.helpers.runtime_common import (
 from core.authoring.registry import AuthoringCapabilityRegistry
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.logger import UnifiedLogger
-from core.settings.store import get_tools_config
-
+from core.settings.store import get_enabled_tools_config
 
 logger = UnifiedLogger(tag="authoring-monty")
 
@@ -83,7 +84,7 @@ async def run_authoring_monty(
     effective_inputs = {**reserved_inputs, **(inputs or {})}
     capture = _PrintCapture()
 
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_monty_execution_started",
         data={
             "workflow_id": workflow_id,
@@ -101,7 +102,9 @@ async def run_authoring_monty(
             script_name=script_name,
             inputs=sorted(effective_inputs) if effective_inputs else None,
             type_check=type_check,
-            type_check_stubs=_build_type_check_stubs(direct_tool_stubs) if type_check else None,
+            type_check_stubs=(
+                _build_type_check_stubs(direct_tool_stubs) if type_check else None
+            ),
         )
         for dataclass_type in host.get_monty_dataclasses():
             runner.register_dataclass(dataclass_type)
@@ -120,7 +123,7 @@ async def run_authoring_monty(
             else:
                 raise
     except Exception as exc:
-        logger.add_sink("validation").error(
+        logger.set_sinks(["validation"]).error(
             "authoring_monty_execution_failed",
             data={
                 "workflow_id": workflow_id,
@@ -133,7 +136,7 @@ async def run_authoring_monty(
             f"Monty execution failed for '{workflow_id}': {exc}"
         ) from exc
 
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_monty_execution_completed",
         data={
             "workflow_id": workflow_id,
@@ -165,7 +168,7 @@ def _build_direct_tool_functions(
     host = context.host
     tool_names = [
         name
-        for name in sorted(get_tools_config())
+        for name in sorted(get_enabled_tools_config())
         if name not in _EXCLUDED_DIRECT_TOOL_NAMES
     ]
     if not tool_names:
@@ -214,12 +217,26 @@ def _build_direct_tool_functions(
                     session_buffers=host.session_buffers,
                     session_id=getattr(host, "session_key", None),
                     chat_session_id=getattr(host, "chat_session_id", None),
-                    vault_name=str(context.workflow_id).split("/", 1)[0]
-                    if "/" in str(context.workflow_id)
-                    else None,
+                    vault_name=(
+                        str(context.workflow_id).split("/", 1)[0]
+                        if "/" in str(context.workflow_id)
+                        else None
+                    ),
                     authoring_workflow_id=str(context.workflow_id),
                     message_history=getattr(host, "message_history", None),
-                    prefer_message_history=bool(getattr(host, "prefer_message_history", False)),
+                    prefer_message_history=bool(
+                        getattr(host, "prefer_message_history", False)
+                    ),
+                )
+                tool_result = normalize_tool_result(
+                    _spec.name,
+                    result,
+                    vault_path=host.vault_path or "",
+                )
+                _raise_for_failed_tool_result(
+                    tool_name=_spec.name,
+                    arguments=kwargs,
+                    tool_result=tool_result,
                 )
             except Exception as exc:
                 logger.warning(
@@ -234,11 +251,6 @@ def _build_direct_tool_functions(
                     },
                 )
                 raise
-            tool_result = normalize_tool_result(
-                _spec.name,
-                result,
-                vault_path=host.vault_path or "",
-            )
             logger.set_sinks(["validation"]).info(
                 "authoring_direct_tool_completed",
                 data={
@@ -257,9 +269,30 @@ def _build_direct_tool_functions(
         _direct_tool_function.__name__ = function_name
         _direct_tool_function.__doc__ = f"Direct Monty wrapper for tool '{spec.name}'."
         external_functions[function_name] = _direct_tool_function
-        stub_lines.append(f"async def {function_name}(**kwargs: Any) -> ScriptToolResult: ...")
+        stub_lines.append(
+            f"async def {function_name}(**kwargs: Any) -> ScriptToolResult: ..."
+        )
 
     return external_functions, "\n".join(stub_lines)
+
+
+def _raise_for_failed_tool_result(
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    tool_result: ScriptToolResult,
+) -> None:
+    metadata = dict(tool_result.metadata or {})
+    status = str(metadata.get("status") or "").strip().lower()
+    if status not in {"error", "failed"}:
+        return
+    reason = coerce_tool_return_value_text(tool_result.return_value).strip()
+    raise AuthoringToolCallError(
+        tool_name=tool_name,
+        operation=str(metadata.get("operation") or arguments.get("operation") or ""),
+        reason=reason or str(metadata.get("error_type") or status),
+        metadata=metadata,
+    )
 
 
 def _sanitize_tool_name(name: str) -> str:

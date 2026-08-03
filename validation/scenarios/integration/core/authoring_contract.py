@@ -35,27 +35,33 @@ class AuthoringContractScenario(BaseScenario):
         self.assert_event_contains(
             startup_events,
             name="workflow_loaded",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success"
+            },
         )
 
         self.set_date("2026-04-06")
 
         checkpoint = self.event_checkpoint()
         result = await self.run_workflow(vault, "authoring_contract_success")
-        self.soft_assert_equal(result.status, "completed", "Contract success workflow should complete")
+        self.soft_assert_equal(
+            result.status, "completed", "Contract success workflow should complete"
+        )
         events = self.events_since(checkpoint)
 
         self.assert_event_contains(
             events,
             name="authoring_monty_execution_started",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success"
+            },
         )
         self.assert_event_contains(
             events,
             name="authoring_direct_tool_started",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -63,7 +69,7 @@ class AuthoringContractScenario(BaseScenario):
             name="authoring_direct_tool_completed",
             expected={
                 "workflow_id": "AuthoringContractVault/authoring_contract_success",
-                "tool": "file_ops_safe",
+                "tool": "file_read",
             },
         )
         self.assert_event_contains(
@@ -102,7 +108,9 @@ class AuthoringContractScenario(BaseScenario):
         self.assert_event_contains(
             events,
             name="authoring_parse_markdown_started",
-            expected={"workflow_id": "AuthoringContractVault/authoring_contract_success"},
+            expected={
+                "workflow_id": "AuthoringContractVault/authoring_contract_success"
+            },
         )
         self.assert_event_contains(
             events,
@@ -151,19 +159,46 @@ class AuthoringContractScenario(BaseScenario):
         )
 
         contract_output = vault / "outputs" / "contract-success.md"
-        self.soft_assert(contract_output.exists(), "Expected contract success output file")
+        self.soft_assert(
+            contract_output.exists(), "Expected contract success output file"
+        )
         if contract_output.exists():
             content = contract_output.read_text(encoding="utf-8")
-            self.soft_assert("SEED_CONTENT" in content, "Expected retrieved file content in output")
-            self.soft_assert("RETURN_VALUE_CLEAN=True" in content, "Expected clean file return_value contract")
-            self.soft_assert("CONTENT_NONE=True" in content, "Expected file read content side-channel to be empty")
+            self.soft_assert(
+                "SEED_CONTENT" in content, "Expected retrieved file content in output"
+            )
+            self.soft_assert(
+                "RETURN_VALUE_CLEAN=True" in content,
+                "Expected clean file return_value contract",
+            )
+            self.soft_assert(
+                "CONTENT_NONE=True" in content,
+                "Expected file read content side-channel to be empty",
+            )
             self.soft_assert("ITEMS=1" in content, "Expected file read item projection")
-            self.soft_assert("IMAGE_RETURN_LIST=True" in content, "Expected image read multimodal return_value")
-            self.soft_assert("IMAGE_CONTENT_NONE=True" in content, "Expected image read content side-channel to be empty")
-            self.soft_assert("MARKDOWN_IMAGE_RETURN_LIST=True" in content, "Expected markdown image interleaved return_value")
-            self.soft_assert("MARKDOWN_IMAGE_CONTENT_NONE=True" in content, "Expected markdown image content side-channel to be empty")
-            self.soft_assert("ASSEMBLED=3" in content, "Expected assembled context count in output")
-            self.soft_assert("HISTORY_ITEMS=0" in content, "Expected retrieve_history output in contract file")
+            self.soft_assert(
+                "IMAGE_RETURN_LIST=True" in content,
+                "Expected image read multimodal return_value",
+            )
+            self.soft_assert(
+                "IMAGE_CONTENT_NONE=True" in content,
+                "Expected image read content side-channel to be empty",
+            )
+            self.soft_assert(
+                "MARKDOWN_IMAGE_RETURN_LIST=True" in content,
+                "Expected markdown image interleaved return_value",
+            )
+            self.soft_assert(
+                "MARKDOWN_IMAGE_CONTENT_NONE=True" in content,
+                "Expected markdown image content side-channel to be empty",
+            )
+            self.soft_assert(
+                "ASSEMBLED=3" in content, "Expected assembled context count in output"
+            )
+            self.soft_assert(
+                "HISTORY_ITEMS=0" in content,
+                "Expected retrieve_history output in contract file",
+            )
 
         delegate_output = vault / "outputs" / "delegate-success.md"
         self.soft_assert(delegate_output.exists(), "Expected delegate output file")
@@ -176,10 +211,22 @@ class AuthoringContractScenario(BaseScenario):
         self.soft_assert(parsed_output.exists(), "Expected markdown parse output file")
         if parsed_output.exists():
             parsed_content = parsed_output.read_text(encoding="utf-8")
-            self.soft_assert("Skill Example" in parsed_content, "Expected parsed frontmatter name in output")
-            self.soft_assert("AI In Fiction" in parsed_content, "Expected parsed section heading in output")
-            self.soft_assert("python" in parsed_content, "Expected parsed code block language in output")
-            self.soft_assert("../images/test_image.jpg" in parsed_content, "Expected parsed image ref in output")
+            self.soft_assert(
+                "Skill Example" in parsed_content,
+                "Expected parsed frontmatter name in output",
+            )
+            self.soft_assert(
+                "AI In Fiction" in parsed_content,
+                "Expected parsed section heading in output",
+            )
+            self.soft_assert(
+                "python" in parsed_content,
+                "Expected parsed code block language in output",
+            )
+            self.soft_assert(
+                "../images/test_image.jpg" in parsed_content,
+                "Expected parsed image ref in output",
+            )
 
         await self.stop_system()
         self.teardown_scenario()
@@ -196,19 +243,18 @@ description: Deterministic authoring contract success workflow
 
 ```python
 async def _write_replace(path, content):
-    existing = await file_ops_safe(operation="read", path=path)
+    existing = await file_read(operation="read", path=path)
     if existing.metadata.get("status") == "completed":
-        await file_ops_unsafe(operation="truncate", path=path, confirm_path=path)
-        await file_ops_safe(operation="append", path=path, content=content)
+        await file_write(operation="write", path=path, content=content, overwrite=True)
     else:
-        await file_ops_safe(operation="write", path=path, content=content)
+        await file_write(operation="write", path=path, content=content)
 
 
-source = await file_ops_safe(operation="read", path="notes/seed.md")
+source = await file_read(operation="read", path="notes/seed.md")
 source_text = source.return_value
-image_read = await file_ops_safe(operation="read", path="images/test_image.jpg")
-markdown_image_read = await file_ops_safe(operation="read", path="notes/structured.md")
-listing = await file_ops_safe(operation="list", path="notes")
+image_read = await file_read(operation="read", path="images/test_image.jpg")
+markdown_image_read = await file_read(operation="read", path="notes/structured.md")
+listing = await file_read(operation="list", path="notes")
 history = await retrieve_history(scope="session", limit="all")
 assembled = await assemble_context(
     instructions="Keep the response concise.",
@@ -218,9 +264,9 @@ assembled = await assemble_context(
     ],
     context_messages=[{"role": "system", "content": "Validation context"}],
 )
-structured = await file_ops_safe(operation="read", path="notes/structured.md")
+structured = await file_read(operation="read", path="notes/structured.md")
 parsed = await parse_markdown(value=STRUCTURED_NOTE_PLACEHOLDER)
-task_listing = await file_ops_safe(operation="list", path="tasks")
+task_listing = await file_read(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=task_listing)
 await pending_files(operation="complete", items=(pending.items[0],))
 
@@ -300,7 +346,9 @@ print("hello")
 """
 
 
-AUTHORING_CONTRACT_SUCCESS_WORKFLOW = AUTHORING_CONTRACT_SUCCESS_WORKFLOW_TEMPLATE.replace(
-    "STRUCTURED_NOTE_PLACEHOLDER",
-    repr(STRUCTURED_NOTE),
+AUTHORING_CONTRACT_SUCCESS_WORKFLOW = (
+    AUTHORING_CONTRACT_SUCCESS_WORKFLOW_TEMPLATE.replace(
+        "STRUCTURED_NOTE_PLACEHOLDER",
+        repr(STRUCTURED_NOTE),
+    )
 )

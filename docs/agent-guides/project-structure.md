@@ -5,7 +5,9 @@
 - `validation/`: scenario framework, runners, templates, and run artifacts (`validation/runs/`).
 - `static/`: frontend assets (`index.html`, `app.js`, Tailwind input/output CSS).
 - `docs/`: setup, usage, and architecture references.
-- `docker/`: container build context and Python project config (`pyproject.toml`, `uv.lock`).
+- `docker/`: production container definition.
+- `pyproject.toml` and `uv.lock`: Python dependencies and shared tool
+  configuration.
 
 ## Module Placement Rules
 - Keep side-effect-heavy logic in `core/` services.

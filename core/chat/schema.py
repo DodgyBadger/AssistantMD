@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
-
 
 DB_NAME = "chat_sessions"
 MIGRATION_NAMESPACE = "chat_sessions"
@@ -103,6 +104,69 @@ def ensure_chat_sessions_schema(
             ON chat_tool_events(session_id, vault_name, tool_call_id)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_edit_proposals (
+                artifact_ref TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                proposal_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                applied_at DATETIME,
+                FOREIGN KEY (session_id, vault_name)
+                    REFERENCES chat_sessions(session_id, vault_name)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_edit_proposals_session
+            ON chat_edit_proposals(session_id, vault_name, created_at)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_deferred_reviews (
+                artifact_ref TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                vault_name TEXT NOT NULL,
+                originating_task_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                requests_json TEXT NOT NULL,
+                resume_messages_json TEXT NOT NULL,
+                resume_config_json TEXT,
+                review_context_json TEXT,
+                result_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                submitted_at DATETIME,
+                resumed_task_id TEXT,
+                error_json TEXT,
+                FOREIGN KEY (session_id, vault_name)
+                    REFERENCES chat_sessions(session_id, vault_name)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_chat_deferred_reviews_session
+            ON chat_deferred_reviews(session_id, vault_name, created_at)
+            """
+        )
+        _ensure_column(
+            conn,
+            "chat_deferred_reviews",
+            "resume_config_json",
+            "TEXT",
+        )
+        _ensure_column(
+            conn,
+            "chat_deferred_reviews",
+            "review_context_json",
+            "TEXT",
+        )
         _deduplicate_session_ids(conn)
         conn.execute(
             """
@@ -113,13 +177,15 @@ def ensure_chat_sessions_schema(
         _migrate_compaction_checkpoints(conn)
         conn.commit()
         if apply_migrations:
-            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS)
+            apply_sqlite_migrations(
+                conn, namespace=MIGRATION_NAMESPACE, migrations=CHAT_SESSION_MIGRATIONS
+            )
             conn.commit()
     finally:
         conn.close()
 
 
-def _migrate_compaction_checkpoints(conn) -> None:
+def _migrate_compaction_checkpoints(conn: sqlite3.Connection) -> None:
     """Add append-only chat compaction checkpoint storage."""
     conn.execute(
         """
@@ -156,7 +222,20 @@ def _migrate_compaction_checkpoints(conn) -> None:
     )
 
 
-def _deduplicate_session_ids(conn) -> None:
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    """Add a column to an existing SQLite table when it is missing."""
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {str(row[1]) for row in rows}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _deduplicate_session_ids(conn: sqlite3.Connection) -> None:
     """Ensure historical composite-key sessions have globally unique IDs."""
     duplicate_rows = conn.execute(
         """
@@ -209,8 +288,12 @@ def _deduplicate_session_ids(conn) -> None:
             )
 
 
-def _deduplicated_session_id(conn, *, session_id: str, vault_name: str, index: int) -> str:
-    vault_part = vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+def _deduplicated_session_id(
+    conn: sqlite3.Connection, *, session_id: str, vault_name: str, index: int
+) -> str:
+    vault_part = (
+        vault_name.strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+    )
     base = f"{session_id}__{vault_part or 'vault'}"
     candidate = base if index == 1 else f"{base}_{index}"
     suffix = index

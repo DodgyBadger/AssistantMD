@@ -93,7 +93,7 @@ history_result = await retrieve_history(scope="session", limit="all")
 history = list(history_result.items)
 
 # `soul.md` is optional. It is a good place for broad assistant tone and stance.
-soul_result = await file_ops_safe(operation="read", path="AssistantMD/soul.md")
+soul_result = await file_read(operation="read", path="AssistantMD/soul.md")
 soul_instructions = (
     soul_result.return_value.strip()
     if soul_result.metadata.get("status") == "completed"
@@ -113,12 +113,12 @@ def split_parent_filename(path):
 async def read_convention_file(path):
     # First try the exact path. If that fails, list the parent folder and accept
     # a single case-insensitive filename match such as README.md vs readme.md.
-    exact_result = await file_ops_safe(operation="read", path=path)
+    exact_result = await file_read(operation="read", path=path)
     if exact_result.metadata.get("status") == "completed":
         return path, exact_result
 
     parent, filename = split_parent_filename(path)
-    listing = await file_ops_safe(operation="list", path=parent)
+    listing = await file_read(operation="list", path=parent)
     if listing.metadata.get("status") != "completed":
         return path, exact_result
 
@@ -133,7 +133,7 @@ async def read_convention_file(path):
         return path, exact_result
 
     matched_path = matches[0]
-    matched_result = await file_ops_safe(operation="read", path=matched_path)
+    matched_result = await file_read(operation="read", path=matched_path)
     if matched_result.metadata.get("status") == "completed":
         return matched_path, matched_result
     return path, exact_result
@@ -206,7 +206,7 @@ if workspace.exists:
             )
 
 
-USER_NOTES_skill_result = await file_ops_safe(
+USER_NOTES_skill_result = await file_read(
     operation="frontmatter",
     path="AssistantMD/Skills/save_user_note.md",
     keys="USER_NOTES_file,USER_NOTES_char_limit",
@@ -217,7 +217,7 @@ USER_NOTES_char_limit = parse_positive_int(
     DEFAULT_USER_NOTES_CHAR_LIMIT,
 )
 
-USER_NOTES_result = await file_ops_safe(operation="read", path=USER_NOTES_file)
+USER_NOTES_result = await file_read(operation="read", path=USER_NOTES_file)
 USER_NOTES_instructions = ""
 if USER_NOTES_result.metadata.get("status") == "completed":
     # User notes are editable memory. They should guide the agent, but they are
@@ -257,12 +257,12 @@ def skill_name_from_path(path):
     return filename[:-3] if filename.endswith(".md") else filename
 
 
-flat_skills_result = await file_ops_safe(
+flat_skills_result = await file_read(
     operation="frontmatter",
     path="AssistantMD/Skills",
     keys="name,description",
 )
-folder_skills_result = await file_ops_safe(
+folder_skills_result = await file_read(
     operation="frontmatter",
     path="AssistantMD/Skills/*/SKILL.md",
     keys="name,description",

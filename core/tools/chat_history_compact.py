@@ -19,7 +19,6 @@ from core.runtime.state import get_runtime_context
 
 from .base import BaseTool
 
-
 logger = UnifiedLogger(tag="chat-history-compact-tool")
 
 
@@ -27,7 +26,7 @@ class ChatHistoryCompact(BaseTool):
     """Check or compact the active chat session history."""
 
     @classmethod
-    def get_tool(cls, vault_path: str | None = None):
+    def get_tool(cls, vault_path: str | None = None) -> Tool:
         """Get the chat history compaction tool."""
 
         async def chat_history_compact(
@@ -58,7 +57,9 @@ class ChatHistoryCompact(BaseTool):
                 return "operation must be either 'status' or 'compact'."
 
             runtime = get_runtime_context()
-            effective_vault_path = vault_path or str(runtime.config.data_root / vault_name)
+            effective_vault_path = vault_path or str(
+                runtime.config.data_root / vault_name
+            )
             logger.info(
                 "tool_invoked",
                 data={"tool": "chat_history_compact", "operation": "compact"},

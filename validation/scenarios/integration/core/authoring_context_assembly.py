@@ -32,6 +32,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
         await self.start_system()
 
         from core.authoring.runtime import WorkflowAuthoringHost, run_authoring_monty
+
         session_id = "context_assembly_session"
         workflow_id = f"{vault.name}/chat/{session_id}"
         now = datetime(2026, 4, 7, 12, 0, 0)
@@ -48,7 +49,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         args={"path": "notes/trig.md"},
                         tool_call_id="call-read-trig",
                     )
@@ -58,7 +59,7 @@ class AuthoringContextAssemblyScenario(BaseScenario):
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="file_ops_safe",
+                        tool_name="file_read",
                         content="Trig notes file contents",
                         tool_call_id="call-read-trig",
                     )
@@ -119,7 +120,15 @@ class AuthoringContextAssemblyScenario(BaseScenario):
         )
         self.soft_assert_equal(
             output["roles"],
-            ["system", "user", "assistant", "tool_exchange", "user", "assistant", "user"],
+            [
+                "system",
+                "user",
+                "assistant",
+                "tool_exchange",
+                "user",
+                "assistant",
+                "user",
+            ],
             "Expected assembled context ordering to preserve instructions and history",
         )
         self.soft_assert_equal(
@@ -175,7 +184,7 @@ for message in assembled.messages:
         for item in history_payload.items
     ),
     "tool_exchange_rendered": any(
-        "tool_exchange: file_ops_safe" in item.text
+        "tool_exchange: file_read" in item.text
         and "Trig notes file contents" in item.text
         for item in history_payload.items
     ),

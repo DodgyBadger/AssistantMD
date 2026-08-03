@@ -24,8 +24,7 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
             tools = payload.get("tools", [])
             tool_names = {tool.get("name") for tool in tools}
             tool_descriptions = {
-                tool.get("name"): str(tool.get("description") or "")
-                for tool in tools
+                tool.get("name"): str(tool.get("description") or "") for tool in tools
             }
 
             self.soft_assert(
@@ -37,12 +36,20 @@ class ChatToolMetadataVisibilityScenario(BaseScenario):
                 "Chat metadata should expose session_ops",
             )
             self.soft_assert(
-                "browser" in tool_descriptions.get("tavily_extract", ""),
-                "tavily_extract metadata should tell users/models to fall back to browser",
+                "web_search" in tool_names,
+                "Chat metadata should expose stable web_search",
             )
             self.soft_assert(
-                "tavily_extract fails" in tool_descriptions.get("browser", ""),
-                "browser metadata should identify tavily_extract failure fallback",
+                "web_extract" in tool_names,
+                "Chat metadata should expose stable web_extract",
+            )
+            self.soft_assert(
+                "web_crawl" in tool_names,
+                "Chat metadata should expose stable web_crawl",
+            )
+            self.soft_assert(
+                "dynamic" in tool_descriptions.get("browser", "").lower(),
+                "Browser metadata should identify its dynamic-page role",
             )
         finally:
             await self.stop_system()

@@ -6,7 +6,7 @@ This document describes how AssistantMD handles image inputs alongside markdown 
 
 - Direct image inputs via `@input file:...`
 - Embedded image refs inside markdown inputs
-- `file_ops_safe(read)` behavior for image and markdown-with-images reads
+- `file_read(read)` behavior for image and markdown-with-images reads
 - Model capability gating and attachment/fallback policy
 
 ## Core Decisions
@@ -14,7 +14,7 @@ This document describes how AssistantMD handles image inputs alongside markdown 
 - `@input` image policy modes are `images=auto|ignore` only.
 - Remote `http(s)` image refs are refs-only by default (no implicit download/attach).
 - Text token protection and multimodal attachment limits are separate policy layers.
-- `file_ops_safe` remains the primary read tool; no LLM-controlled per-call image-policy override.
+- `file_read` remains the primary read tool; no LLM-controlled per-call image-policy override.
 
 ## Key Components
 
@@ -22,7 +22,8 @@ This document describes how AssistantMD handles image inputs alongside markdown 
 - `core/chunking/prompt_builder.py`: assembles interleaved prompt payloads.
 - `core/chunking/image_refs.py`: resolves refs and applies normalized fallback markers.
 - `core/utils/image_inputs.py`: shared marker formatting and image attachment helpers.
-- `core/tools/file_ops_safe.py`: image-aware read path for tools.
+- `core/vault_state/file_operations.py`: shared image-aware read path for tools.
+- `core/tools/file_read.py`: model-facing read tool adapter.
 - `core/llm/model_utils.py`: model `vision` capability checks.
 
 ## Data Flow
@@ -34,7 +35,7 @@ This document describes how AssistantMD handles image inputs alongside markdown 
 3. Direct image inputs and embedded local refs are attached only when policy + capability gates pass.
 4. If attachment is not allowed, image refs are preserved as explicit markers.
 
-### `file_ops_safe(read)`
+### `file_read(read)`
 
 - Reading an image returns multimodal `ToolReturn` content.
 - Reading markdown-with-images uses the same chunking/policy pipeline as `@input`.

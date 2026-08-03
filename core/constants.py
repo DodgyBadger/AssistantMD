@@ -10,31 +10,37 @@ helpers or RuntimeConfig rather than adding env-derived values here.
 
 from __future__ import annotations
 
-
 # File to mark directories as excluded from vault discovery
-VAULT_IGNORE_FILE = '.vaultignore'
+VAULT_IGNORE_FILE = ".vaultignore"
 
 # Vault subdirectory structure
 ASSISTANTMD_ROOT_DIR = "AssistantMD"
-AUTHORING_DIR = "Authoring"        # Unified authoring directory (workflows + context templates)
-SKILLS_DIR = "Skills"              # User-defined skill files
+AUTHORING_DIR = (
+    "Authoring"  # Unified authoring directory (workflows + context templates)
+)
+SKILLS_DIR = "Skills"  # User-defined skill files
 CHAT_SESSIONS_DIR = "Chat_Sessions"
 WORKFLOW_LOGS_DIR = "Logs"
 IMPORT_DIR = "Import"
 IMPORT_ATTACHMENTS_DIR = "_attachments"
 
 # Assistant timeout validation bounds
-TIMEOUT_MIN = 30        # Minimum timeout in seconds
-TIMEOUT_MAX = 3600      # Maximum timeout in seconds (1 hour)
+TIMEOUT_MIN = 30  # Minimum timeout in seconds
+TIMEOUT_MAX = 3600  # Maximum timeout in seconds (1 hour)
 
 # Valid week start days for weekly pattern resolution
 VALID_WEEK_DAYS = [
-    'monday', 'tuesday', 'wednesday', 'thursday',
-    'friday', 'saturday', 'sunday'
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
 ]
 
 # Default schedule when none specified
-DEFAULT_SCHEDULE = 'cron: 0 6 * * *'
+DEFAULT_SCHEDULE = "cron: 0 6 * * *"
 
 # Default worker count for APScheduler
 DEFAULT_MAX_SCHEDULER_WORKERS = 1
@@ -98,13 +104,11 @@ UNTRUSTED_WEB_DATA_END = "[END UNTRUSTED WEB DATA]"
 WEB_SOURCE_TOOL_NAMES = frozenset(
     {
         "browser",
-        "tavily_crawl",
-        "tavily_extract",
-        "web_search_duckduckgo",
-        "web_search_tavily",
+        "web_crawl",
+        "web_extract",
+        "web_search",
     }
 )
-
 
 # ==============================================================================
 # LLM Prompts and Instructions
@@ -117,13 +121,16 @@ Do this by prioritizing grounded accuracy and operational parsimony.
 Research and knowledge lives inside the user's collection of markdown files, called a vault.
 
 FLIGHT CARD (MUST)
-- If a tool is needed to answer the user or complete a task, on first use, read its doc with file_ops_safe.read at __virtual_docs__/tools/<tool>.md.
-- Use file_ops_safe.search on __virtual_docs__ only if you do not know the tool doc filename or the direct read fails.
+- If a tool is needed to answer the user or complete a task, on first use, read its doc with file_read.read at __virtual_docs__/tools/<tool>.md.
+- Use file_read.search on __virtual_docs__ only if you do not know the tool doc filename or the direct read fails.
 - On any tool error, stop and read the doc before a single corrected retry.
 - Cache refs are mandatory: if a tool returns a cache ref, use code_execution → await read_cache(ref="...") and parse locally. Do not re-run the originating tool.
 - All tools: Pass named parameters (no positional args).
 - Always use code_execution tool for solving math and formulas to ensure accuracy.
 - Keep outputs compact; include short source refs; avoid raw dumps.
+- When referencing vault files or directories in user-facing text, always write the full vault-relative path with an @ prefix so the UI can open it, for example @Projects/Example/README.md or @Projects/Example/. Even when a workspace is active, do not shorten a reference to only its basename or a workspace-relative path. Plain text is preferred; inline code is acceptable. Avoid fenced code blocks for reference lists.
+- In inline edit mode, use `file_write` so proposed file changes are shown for inline review. For multiple independent changes, issue separate `file_write` calls in the same response so each change can be reviewed individually. Sequence dependent changes across turns.
+- `file_write(operation="write")` is create-only by default. When the user asks to update or rewrite a file that is known to exist, set `overwrite=true` on the first call. Use `replace_text` or `edit_line` for narrower exact edits.
 - Never write to AssistantMD/ unless explicitly requested.
 
 Task Decision Tree
@@ -135,10 +142,11 @@ Task Decision Tree
 - If a run stops because of a model-request, tool-call, timeout, or network limit, treat the prior user request as unfinished and resume from durable state: `goal_ops`, vault activity, changed files, saved artifacts, and session history.
 
 Environment
-- The chat UI supports markdown and latex. Use markdown for structure and link when referencing other files.
+- The chat UI supports markdown and latex. Use markdown for structure. For vault file references, use @vault-relative/path.md text rather than markdown links.
 - Use latex where appropriate for maths expressions / equations. Use strict backslash delimiters only: \\(...\\) for inline math and \\[...\\] for display math. Do not use dollar-sign math delimiters.
 - Do not format simple dollar values as math.
 - The vault is the working directory; all relative paths resolve from its root.
+- File references in chat should be vault-root relative, include the extension when known, and use forward slashes. Preferred syntax: @Projects/Example/README.md.
 - Path resolution: if a path has no extension, try .md; if not found, try as a folder; then inspect the directory.
 """
 
@@ -224,6 +232,11 @@ and should not be restated.
 Do not include compaction or related session-hygiene requests as objectives,
 progress, decisions, or next steps in the recovery card.
 """.strip()
+
+INLINE_EDIT_DENIAL_MESSAGE = (
+    "The user denied this file operation. Do not retry the same operation or propose it again "
+    "unless the user explicitly asks."
+)
 
 
 SESSION_SUMMARY_INTENT_PROMPT = """

@@ -19,10 +19,11 @@ class ChatCacheMultiPassScenario(BaseScenario):
 
         await self.start_system()
 
+        from pydantic_ai.models.test import TestModel
+
         import core.chat.executor as chat_executor
         from core.authoring.shared.tool_binding import resolve_tool_binding
         from core.logger import UnifiedLogger
-        from pydantic_ai.models.test import TestModel
 
         session_id = "chat_cache_multi_pass_session"
         tool_logger = UnifiedLogger(tag="chat-cache-multi-pass-tool")
@@ -46,22 +47,24 @@ class ChatCacheMultiPassScenario(BaseScenario):
                 if call_index["value"] == 2:
                     return {
                         "code": (
-                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
-                            'text = artifact.return_value\n'
+                            'artifact = await file_read(operation="read", path="notes/repeated.md")\n'
+                            "text = artifact.return_value\n"
                             "text[:80]"
                         )
                     }
                 if call_index["value"] == 3:
                     return {
                         "code": (
-                            'artifact = await file_ops_safe(operation="read", path="notes/repeated.md")\n'
-                            'text = artifact.return_value\n'
+                            'artifact = await file_read(operation="read", path="notes/repeated.md")\n'
+                            "text = artifact.return_value\n"
                             'str(text.count("OVERFLOW_SEGMENT"))'
                         )
                     }
                 raise AssertionError("Unexpected code_execution phase")
 
-        def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+        def _patched_prepare_agent_config(
+            vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+        ):
             del vault_name, tools, model, thinking
             call_index["value"] += 1
             binding = resolve_tool_binding(
@@ -87,21 +90,28 @@ class ChatCacheMultiPassScenario(BaseScenario):
         def _passthrough_history_processor(**kwargs):
             async def processor(messages):
                 return messages
+
             return processor
 
         original_prepare_agent_config = chat_executor._prepare_agent_config
         original_get_history = chat_executor._CHAT_STORE.get_history
-        original_build_history_processor = chat_executor.build_context_manager_history_processor
+        original_build_history_processor = (
+            chat_executor.build_context_manager_history_processor
+        )
         chat_executor._prepare_agent_config = _patched_prepare_agent_config
         chat_executor._CHAT_STORE.get_history = lambda _sid, _vault: None
-        chat_executor.build_context_manager_history_processor = _passthrough_history_processor
+        chat_executor.build_context_manager_history_processor = (
+            _passthrough_history_processor
+        )
         try:
             update_setting = self.call_api(
                 "/api/system/settings/general/auto_cache_max_tokens",
                 method="PUT",
                 data={"value": "50"},
             )
-            assert update_setting.status_code == 200, "Scenario should lower chat overflow threshold"
+            assert (
+                update_setting.status_code == 200
+            ), "Scenario should lower chat overflow threshold"
 
             checkpoint = self.event_checkpoint()
 
@@ -114,24 +124,28 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "model": "test",
                 },
             )
-            assert first["start_response"].status_code == 200, "Initial oversized tool call should start"
-            assert first["terminal_event"].get("event") == "done", (
-                "Initial oversized tool call should succeed"
-            )
+            assert (
+                first["start_response"].status_code == 200
+            ), "Initial oversized tool call should start"
+            assert (
+                first["terminal_event"].get("event") == "done"
+            ), "Initial oversized tool call should succeed"
 
             second = await self.run_chat_task(
                 {
                     "vault_name": vault.name,
                     "prompt": "Inspect the repeated note and show the beginning.",
                     "session_id": session_id,
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
-            assert second["start_response"].status_code == 200, "First local exploration pass should start"
-            assert second["terminal_event"].get("event") == "done", (
-                "First local exploration pass should succeed"
-            )
+            assert (
+                second["start_response"].status_code == 200
+            ), "First local exploration pass should start"
+            assert (
+                second["terminal_event"].get("event") == "done"
+            ), "First local exploration pass should succeed"
             second_text = second["text"]
             self.soft_assert(
                 "OVERFLOW_SEGMENT" in second_text,
@@ -143,14 +157,16 @@ class ChatCacheMultiPassScenario(BaseScenario):
                     "vault_name": vault.name,
                     "prompt": "Inspect the same repeated note again and count the repeated token.",
                     "session_id": session_id,
-                    "tools": ["code_execution", "file_ops_safe"],
+                    "tools": ["code_execution", "file_read"],
                     "model": "test",
                 },
             )
-            assert third["start_response"].status_code == 200, "Second local exploration pass should start"
-            assert third["terminal_event"].get("event") == "done", (
-                "Second local exploration pass should succeed"
-            )
+            assert (
+                third["start_response"].status_code == 200
+            ), "Second local exploration pass should start"
+            assert (
+                third["terminal_event"].get("event") == "done"
+            ), "Second local exploration pass should succeed"
             third_text = third["text"]
             self.soft_assert(
                 "1200" in third_text,
@@ -158,8 +174,12 @@ class ChatCacheMultiPassScenario(BaseScenario):
             )
 
             events = self.events_since(checkpoint)
-            overflow_events = self.find_events(events, name="tool_invoked", tool="overflow_probe")
-            local_events = self.find_events(events, name="tool_invoked", tool="code_execution")
+            overflow_events = self.find_events(
+                events, name="tool_invoked", tool="overflow_probe"
+            )
+            local_events = self.find_events(
+                events, name="tool_invoked", tool="code_execution"
+            )
             self.soft_assert_equal(
                 len(overflow_events),
                 1,
@@ -173,6 +193,8 @@ class ChatCacheMultiPassScenario(BaseScenario):
         finally:
             chat_executor._prepare_agent_config = original_prepare_agent_config
             chat_executor._CHAT_STORE.get_history = original_get_history
-            chat_executor.build_context_manager_history_processor = original_build_history_processor
+            chat_executor.build_context_manager_history_processor = (
+                original_build_history_processor
+            )
             await self.stop_system()
             self.teardown_scenario()

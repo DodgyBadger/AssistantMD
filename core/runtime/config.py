@@ -7,7 +7,7 @@ validation, defaults, and path management.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 from core.constants import DEFAULT_MAX_SCHEDULER_WORKERS
 
@@ -34,9 +34,9 @@ class RuntimeConfig:
     max_scheduler_workers: int = DEFAULT_MAX_SCHEDULER_WORKERS
     enable_api: bool = True
     log_level: str = "INFO"
-    features: Dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         # Convert string paths to Path objects
         if isinstance(self.data_root, str):
@@ -49,7 +49,7 @@ class RuntimeConfig:
             self.data_root.mkdir(parents=True, exist_ok=True)
             self.system_root.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            raise RuntimeConfigError(f"Cannot create required directories: {e}")
+            raise RuntimeConfigError(f"Cannot create required directories: {e}") from e
 
         # Validate scheduler workers
         if self.max_scheduler_workers < 1:
@@ -58,7 +58,9 @@ class RuntimeConfig:
         # Validate log level
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if self.log_level.upper() not in valid_levels:
-            raise RuntimeConfigError(f"Invalid log_level '{self.log_level}'. Must be one of: {valid_levels}")
+            raise RuntimeConfigError(
+                f"Invalid log_level '{self.log_level}'. Must be one of: {valid_levels}"
+            )
 
     @classmethod
     def for_production(cls, data_root: str, system_root: str) -> "RuntimeConfig":
@@ -68,7 +70,7 @@ class RuntimeConfig:
             system_root=Path(system_root),
             max_scheduler_workers=DEFAULT_MAX_SCHEDULER_WORKERS,
             enable_api=True,
-            log_level="INFO"
+            log_level="INFO",
         )
 
     @classmethod
@@ -83,10 +85,11 @@ class RuntimeConfig:
             features={
                 "validation": True,
                 "validation_artifacts_dir": str(run_path / "artifacts"),
-            }
+            },
         )
 
 
 class RuntimeConfigError(Exception):
     """Raised when runtime configuration is invalid."""
+
     pass

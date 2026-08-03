@@ -9,6 +9,11 @@
 - Review the final diff for accidental scope growth.
 - Separate refactor-only edits from behavior changes when practical.
 - Confirm docs and validation changes match the implementation.
+- For any production Python change, run and report the complete
+  [Production Python Quality Gate](coding-standards.md#production-python-quality-gate).
+  A commit is not ready while any of those commands reports a finding.
+- Review new `noqa`, `type: ignore`, `Any`, casts, and checker-configuration
+  changes; confirm each is narrow and justified at a real boundary.
 - Write a focused commit message using [Git and Review Workflow](git-and-review.md).
 - Note any unrun checks or maintainer-owned validation requests in the handoff.
 
@@ -17,6 +22,7 @@
 - Writing commit subjects that describe files instead of behavior.
 - Forgetting to mention validation ownership or remaining maintainer actions.
 - Skipping a final duplication and cleanliness pass before committing.
+- Relying only on checks scoped to changed files.
 
 ## Phase Exit
 Move to [Cleanup Before Merge](cleanup-before-merge.md) when the commit shape is set and only merge-readiness checks remain.

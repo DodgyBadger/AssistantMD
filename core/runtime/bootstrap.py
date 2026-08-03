@@ -11,27 +11,30 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from core.authoring.template_discovery import WorkflowLoader
+from core.authoring.template_discovery import WorkflowLoader, seed_system_templates
+from core.ingestion.service import IngestionService
+from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.settings import validate_settings
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
+from core.vault_state.activity import handle_task_terminal_for_activity
 from core.vault_state.rollback import handle_task_terminal_for_rollback
-from core.ingestion.service import IngestionService
-from core.ingestion.worker import IngestionWorker
-from core.authoring.template_discovery import seed_system_templates
+from core.workflow_runs import WorkflowRunStore
+
+from . import state as runtime_state
+
 # Note: Job setup now handled via runtime_context.reload_workflows()
 from .background import RuntimeBackgroundSpawner
 from .config import RuntimeConfig, RuntimeConfigError
 from .context import RuntimeContext
 from .execution_tasks import TaskCoordinator
+from .paths import set_bootstrap_roots
+from .state import clear_runtime_context, set_runtime_context
 from .task_runner import ExecutionTaskRunner
 from .workflow_governor import WorkflowGovernor
-from .state import set_runtime_context, clear_runtime_context
-from .paths import set_bootstrap_roots
-from . import state as runtime_state
 
 
 async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
@@ -70,7 +73,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Validate configuration before continuing bootstrap
         config_status = validate_settings()
         if not config_status.is_healthy:
-            error_messages = [f"{issue.name}: {issue.message}" for issue in config_status.errors]
+            error_messages = [
+                f"{issue.name}: {issue.message}" for issue in config_status.errors
+            ]
             logger.error(
                 "Critical configuration validation failed",
                 metadata={"errors": error_messages},
@@ -82,7 +87,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
         os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
-        os.environ.setdefault("SECRETS_PATH", str(Path(config.system_root) / "secrets.yaml"))
+        os.environ.setdefault(
+            "SECRETS_PATH", str(Path(config.system_root) / "secrets.yaml")
+        )
 
         migration_status = run_system_migrations(config.system_root, backup=True)
         logger.info(
@@ -90,17 +97,14 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             data={
                 "pending_after": migration_status.pending_count,
                 "backups_created": sum(
-                    1
-                    for target in migration_status.targets
-                    if target.backup_path
+                    1 for target in migration_status.targets if target.backup_path
                 ),
             },
         )
 
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(
-            _data_root=str(config.data_root),
-            _allow_direct_instantiation=True
+            _data_root=str(config.data_root), _allow_direct_instantiation=True
         )
 
         # Initialize ingestion service
@@ -114,20 +118,23 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         )
         try:
             general_settings = get_general_settings()
-            ingestion_interval = int(
-                general_settings.get("ingestion_worker_interval_seconds").value
-            )
+            interval_setting = general_settings.get("ingestion_worker_interval_seconds")
+            if interval_setting is not None:
+                ingestion_interval = int(interval_setting.value)
             try:
-                ingestion_max_concurrent = int(
-                    general_settings.get("ingestion_worker_batch_size").value
-                )
+                batch_setting = general_settings.get("ingestion_worker_batch_size")
+                if batch_setting is not None:
+                    ingestion_max_concurrent = int(batch_setting.value)
             except Exception:
                 pass
         except Exception:
             pass
 
         task_coordinator = TaskCoordinator(
-            terminal_observers=[handle_task_terminal_for_rollback],
+            terminal_observers=[
+                handle_task_terminal_for_rollback,
+                handle_task_terminal_for_activity,
+            ],
         )
         background_tasks: set[asyncio.Task] = set()
         background_spawner = RuntimeBackgroundSpawner(
@@ -150,8 +157,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Initialize scheduler with job store and worker configuration
         jobstores = {"default": job_store}
         scheduler = AsyncIOScheduler(
-            jobstores=jobstores,
-            max_workers=config.max_scheduler_workers
+            jobstores=jobstores, max_workers=config.max_scheduler_workers
         )
 
         # Start scheduler paused to allow job synchronization.
@@ -170,9 +176,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 scheduler.shutdown(wait=False)
             except Exception:
                 pass
-            job_store = create_job_store(
-                system_root=str(config.system_root), wipe=True
-            )
+            job_store = create_job_store(system_root=str(config.system_root), wipe=True)
             scheduler = AsyncIOScheduler(
                 jobstores={"default": job_store},
                 max_workers=config.max_scheduler_workers,
@@ -183,9 +187,11 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Create runtime context with all initialized services
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
+        workflow_run_store = WorkflowRunStore(str(config.system_root))
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             task_runner=task_runner,
+            workflow_run_store=workflow_run_store,
         )
         runtime_context = RuntimeContext(
             config=config,
@@ -198,6 +204,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             task_coordinator=task_coordinator,
             task_runner=task_runner,
             workflow_governor=workflow_governor,
+            workflow_run_store=workflow_run_store,
             background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,
@@ -246,7 +253,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Attempt cleanup of any partially initialized services
         try:
-            if 'scheduler' in locals() and scheduler and scheduler.running:
+            if "scheduler" in locals() and scheduler and scheduler.running:
                 scheduler.shutdown(wait=False)
         except Exception as cleanup_error:
             logger.error(f"Error during bootstrap cleanup: {cleanup_error}")
@@ -256,9 +263,11 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
 class RuntimeBootstrapError(Exception):
     """Base exception for runtime bootstrap failures."""
+
     pass
 
 
 class RuntimeStartupError(RuntimeBootstrapError):
     """Raised when service initialization fails during bootstrap."""
+
     pass

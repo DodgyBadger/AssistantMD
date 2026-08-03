@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from pydantic_ai.capabilities import HistoryProcessor
 
@@ -13,7 +14,6 @@ from core.authoring.context_manager import (
 )
 from core.logger import UnifiedLogger
 from core.settings.store import get_general_settings
-
 
 logger = UnifiedLogger(tag="chat-executor")
 
@@ -26,7 +26,9 @@ def build_chat_context_capability(
     model_alias: str,
     context_template: str | None,
     workspace_path: str = "",
-    history_processor_factory: Callable[..., Any] = build_context_manager_history_processor,
+    history_processor_factory: Callable[
+        ..., Any
+    ] = build_context_manager_history_processor,
 ) -> HistoryProcessor[Any] | None:
     """Build a context-template history processor capability when available."""
     template_candidates = build_context_template_candidates(context_template)

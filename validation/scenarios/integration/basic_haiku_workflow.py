@@ -22,7 +22,9 @@ class BasicHaikuWorkflowScenario(BaseScenario):
         # === SETUP ===
         vault = self.create_vault("HaikuVault")
 
-        self.create_file(vault, "AssistantMD/Authoring/haiku_writer.md", HAIKU_WRITER_WORKFLOW)
+        self.create_file(
+            vault, "AssistantMD/Authoring/haiku_writer.md", HAIKU_WRITER_WORKFLOW
+        )
         self.copy_files("validation/templates/files/test_image.jpg", vault, "images")
         self.create_file(vault, "notes/haiku_seed.md", HAIKU_SEED_NOTE)
 
@@ -85,7 +87,7 @@ description: Haiku writing workflow
 ```python
 \"\"\"Write one haiku from the seed note and save it to today's output file.\"\"\"
 
-source = await file_ops_safe(operation="read", path="notes/haiku_seed.md")
+source = await file_read(operation="read", path="notes/haiku_seed.md")
 note_content = source.return_value
 
 draft = await delegate(
@@ -97,7 +99,7 @@ draft = await delegate(
     model="gpt-mini",
 )
 
-await file_ops_safe(
+await file_write(
     operation="write",
     path=f"haiku-{date.today()}.md",
     content=draft.return_value,

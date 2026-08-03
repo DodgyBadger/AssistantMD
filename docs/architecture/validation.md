@@ -60,6 +60,11 @@ Validation events are intended to be a low-maintenance behavioral contract. They
 
 Use `logger.set_sinks(["validation"]).info(...)` when you want **only** the validation artifact, or `logger.add_sink("validation").info(...)` when you want validation artifacts alongside the default sinks. The validation sink accepts any key/value pairs you want to capture. You can optionally set a stable event name by passing `data={"event": "my_event", ...}`; otherwise the log message becomes the event name.
 
+Validation CLI, runner, base-scenario, and system-controller loggers default to
+validation artifacts and Logfire. They must not use the persistent System
+Activity sink. Application code exercised by a scenario still writes its normal
+activity events under that scenario's run-local `system/` root.
+
 ```python
 logger = UnifiedLogger(tag="step-workflow")
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
 
 from core.chunking.prompt_builder import PromptInput, build_input_files_prompt
 from core.constants import WORKFLOW_SYSTEM_INSTRUCTION
@@ -32,7 +33,7 @@ def normalize_run_on_days(value: Any) -> list[str]:
     if isinstance(value, str):
         candidate = value.strip().lower()
         return [candidate] if candidate else []
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
         days: list[str] = []
         for item in value:
             if isinstance(item, str):

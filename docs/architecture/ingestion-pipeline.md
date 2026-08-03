@@ -17,9 +17,15 @@ Examples:
 - PDF import (`pdf_mode=markdown`): source importer loads PDF bytes, then strategies (for example `pdf_text`, then `pdf_ocr`) run in order until one succeeds.
 - Image import: source importer loads image bytes, strategy `image_ocr` extracts text via OCR.
 
+URL transport and HTML conversion are implemented as shared primitives under
+`core/web/`. URL ingestion adapts those results into `RawDocument` and
+`ExtractedDocument`; it does not call the model-facing `web_extract` tool.
+Conversely, `web_extract` does not create ingestion jobs or vault artifacts.
+
 ## Entry Points
 
-API entrypoints call service helpers in `api/services.py`:
+API entrypoints call service helpers exported by `api.services` and implemented
+in `api/services/ingestion.py`:
 
 - `/import/scan` -> `scan_import_folder(...)`
 - `/import/url` -> `import_url_direct(...)`
@@ -91,6 +97,13 @@ Default strategy order:
 - PDF markdown mode: from `ingestion_pdf_default_strategies`, fallback `pdf_text`, `pdf_ocr`
 - Image files: from `ingestion_image_default_strategies`, fallback `image_ocr`
 
+URL fetching uses the independently configured
+`ingestion_url_fetch_strategy` (`curl` by default). This setting is separate
+from `web_extract_strategy`, so choosing a remote provider for agent extraction
+does not reroute durable URL imports. The shared curl transport validates the
+initial URL and every redirect against the public-network policy and enforces
+timeouts and response-size limits.
+
 Shared OCR config keys:
 
 - `ingestion_ocr_model`
@@ -140,14 +153,16 @@ Behavior:
 
 - Registry-backed importer matching limits scan imports to supported types.
 - Duplicate queued/processing jobs for the same source are skipped during folder scan.
-- URL ingestion logs backend/timeouts and records detailed failure metadata.
+- URL ingestion logs its selected fetch strategy and timeout context. Logged
+  URL identities omit credentials, query strings, and fragments; the durable
+  job retains the complete source URL needed for execution.
 - Worker executes ingestion pipeline via `asyncio.to_thread(...)` to avoid blocking the event loop.
 - Ingestion output writes and source cleanup are audited as task file mutations
   when the job runs through the API or scheduler worker.
 
 ## Primary Code
 
-- `api/services.py`
+- `api/services/ingestion.py`
 - `core/ingestion/service.py`
 - `core/ingestion/task_execution.py`
 - `core/ingestion/worker.py`

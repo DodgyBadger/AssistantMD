@@ -4,20 +4,25 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, Type
+from typing import Any, cast
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Tool
 from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
 from core.settings.secrets_store import secret_has_value
-from core.settings.store import ToolConfig, get_tools_config
+from core.settings.store import (
+    ToolConfig,
+    get_enabled_tool_names,
+    get_enabled_tools_config,
+)
 from core.tools.base import BaseTool
 from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
-
+from core.web.config import get_web_tool_strategy_requirements
 
 logger = UnifiedLogger(tag="workflow-tool-binding")
 
@@ -25,15 +30,15 @@ logger = UnifiedLogger(tag="workflow-tool-binding")
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    params: Dict[str, str]
-    tool_class: Type
-    tool_function: object
+    params: dict[str, str]
+    tool_class: type[BaseTool]
+    tool_function: Tool
     week_start_day: int = 0
 
 
 @dataclass(frozen=True)
 class ToolBindingResult:
-    tool_functions: list[object]
+    tool_functions: list[Tool]
     tool_instructions: str
     tool_specs: list[ToolSpec]
 
@@ -59,7 +64,7 @@ def validate_tool_binding_value(value: Any) -> bool:
     items = _parse_tools(normalized)
     if not items:
         return False
-    available_tools = set(get_tools_config().keys())
+    available_tools = set(get_enabled_tool_names())
     return all(item[0] in available_tools for item in items)
 
 
@@ -68,15 +73,18 @@ def resolve_tool_binding(
     *,
     vault_path: str,
     week_start_day: int = 0,
+    approval_tool_names: set[str] | None = None,
 ) -> ToolBindingResult:
     """Resolve workflow tools from DSL text or SDK literals."""
     normalized_value = _normalize_tool_value(value, allow_empty=False)
     if DirectiveValueParser.is_empty(normalized_value):
-        raise ValueError("Tools directive requires explicit value - tools disabled by default for security")
+        raise ValueError(
+            "Tools directive requires explicit value - tools disabled by default for security"
+        )
 
     normalized = DirectiveValueParser.normalize_string(normalized_value, to_lower=True)
     if normalized in ["true", "yes", "1", "on", "all"]:
-        tool_names = list(get_tools_config().keys())
+        tool_names = list(get_enabled_tool_names())
     elif normalized in ["false", "no", "0", "off", "none"]:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
     else:
@@ -86,11 +94,22 @@ def resolve_tool_binding(
             if name not in tool_names:
                 tool_names.append(name)
 
-    configs = get_tools_config()
-    tool_classes: list[Type] = []
-    tool_functions: list[object] = []
+    configs = get_enabled_tools_config()
+    disabled_or_unknown = [
+        tool_name for tool_name in tool_names if tool_name not in configs
+    ]
+    if disabled_or_unknown:
+        available_tools = ", ".join(configs.keys())
+        requested = ", ".join(disabled_or_unknown)
+        raise ValueError(
+            f"Tool(s) unavailable or disabled: {requested}. Available enabled tools: {available_tools}"
+        )
+
+    tool_classes: list[type[BaseTool]] = []
+    tool_functions: list[Tool] = []
     tool_specs: list[ToolSpec] = []
     skipped_tools: list[tuple[str, list[str]]] = []
+    invalid_tools: list[tuple[str, str]] = []
 
     for tool_name in tool_names:
         config = configs.get(tool_name)
@@ -98,6 +117,23 @@ def resolve_tool_binding(
             continue
 
         required_secrets = config.required_secret_keys()
+        try:
+            _strategy_name, strategy_secrets = get_web_tool_strategy_requirements(
+                tool_name
+            )
+        except Exception as exc:
+            reason = str(exc)
+            invalid_tools.append((tool_name, reason))
+            logger.warning(
+                "Tool skipped due to invalid strategy configuration",
+                data={
+                    "tool": tool_name,
+                    "error_type": type(exc).__name__,
+                    "error": reason,
+                },
+            )
+            continue
+        required_secrets = list(dict.fromkeys([*required_secrets, *strategy_secrets]))
         missing_secrets = [key for key in required_secrets if not secret_has_value(key)]
         if missing_secrets:
             skipped_tools.append((tool_name, missing_secrets))
@@ -115,6 +151,9 @@ def resolve_tool_binding(
                 tool_function,
                 tool_name=tool_name,
                 tool_instructions=tool_class.get_instructions(),
+                requires_approval=(
+                    True if tool_name in (approval_tool_names or set()) else None
+                ),
             )
             tool_functions.append(wrapped_tool)
             tool_specs.append(
@@ -134,7 +173,16 @@ def resolve_tool_binding(
         skipped_messages = [
             f"{name} (missing {', '.join(missing)})" for name, missing in skipped_tools
         ]
-        note = "NOTE: The following tools were unavailable and skipped: " + "; ".join(skipped_messages)
+        note = "NOTE: The following tools were unavailable and skipped: " + "; ".join(
+            skipped_messages
+        )
+        tool_instructions = (tool_instructions + "\n\n" + note).strip()
+    if invalid_tools:
+        invalid_messages = [f"{name} ({reason})" for name, reason in invalid_tools]
+        note = (
+            "NOTE: The following tools had invalid configuration and were skipped: "
+            + "; ".join(invalid_messages)
+        )
         tool_instructions = (tool_instructions + "\n\n" + note).strip()
 
     return ToolBindingResult(
@@ -149,8 +197,8 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
     if not results:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
 
-    specs_by_name: Dict[str, ToolSpec] = {}
-    fallback_functions: list[object] = []
+    specs_by_name: dict[str, ToolSpec] = {}
+    fallback_functions: list[Tool] = []
     notes: list[str] = []
 
     for result in results:
@@ -168,7 +216,11 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
                     fallback_functions.append(fn)
 
     tool_specs = list(specs_by_name.values())
-    tool_functions = [spec.tool_function for spec in tool_specs] if tool_specs else fallback_functions
+    tool_functions = (
+        [spec.tool_function for spec in tool_specs]
+        if tool_specs
+        else fallback_functions
+    )
     tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
 
     if notes:
@@ -177,7 +229,11 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
             if note not in unique_notes:
                 unique_notes.append(note)
         note_block = "\n".join(unique_notes)
-        tool_instructions = (tool_instructions + "\n\n" + note_block).strip() if tool_instructions else note_block
+        tool_instructions = (
+            (tool_instructions + "\n\n" + note_block).strip()
+            if tool_instructions
+            else note_block
+        )
 
     return ToolBindingResult(
         tool_functions=tool_functions,
@@ -214,7 +270,7 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
         if allow_empty:
             return ""
         raise ValueError("Tools value cannot be empty")
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         parts: list[str] = []
         for item in value:
             if not isinstance(item, str):
@@ -234,26 +290,32 @@ def _normalize_tool_value(value: Any, *, allow_empty: bool) -> str:
     raise ValueError("Tools value cannot be empty")
 
 
-def _get_tool_configs() -> Dict[str, ToolConfig]:
-    return get_tools_config()
+def _get_tool_configs() -> dict[str, ToolConfig]:
+    return cast(dict[str, ToolConfig], get_enabled_tools_config())
 
 
-def _load_tool_class(tool_name: str) -> Type:
+def _load_tool_class(tool_name: str) -> type[BaseTool]:
     configs = _get_tool_configs()
     if tool_name not in configs:
         available_tools = ", ".join(configs.keys())
-        raise ValueError(f"Unknown tool '{tool_name}'. Available tools: {available_tools}")
+        raise ValueError(
+            f"Unknown tool '{tool_name}'. Available tools: {available_tools}"
+        )
 
     config = configs[tool_name]
     try:
         module = importlib.import_module(config.module)
     except ImportError as exc:
-        raise ValueError(f"Could not import module '{config.module}' for tool '{tool_name}': {exc}") from exc
+        raise ValueError(
+            f"Could not import module '{config.module}' for tool '{tool_name}': {exc}"
+        ) from exc
 
     for _name, obj in inspect.getmembers(module, inspect.isclass):
         if obj != BaseTool and issubclass(obj, BaseTool):
             return obj
-    raise ValueError(f"No BaseTool subclass found in module '{config.module}' for tool '{tool_name}'")
+    raise ValueError(
+        f"No BaseTool subclass found in module '{config.module}' for tool '{tool_name}'"
+    )
 
 
 def _tokenize_tools(value: str) -> list[str]:
@@ -289,61 +351,71 @@ def _parse_tools(value: str) -> list[str]:
         if not base:
             continue
         if "(" in base or ")" in base:
-            raise ValueError("Tool parameters are no longer supported in tools declarations")
+            raise ValueError(
+                "Tool parameters are no longer supported in tools declarations"
+            )
         parsed.append(base.lower())
     return parsed
 
 
 def _wrap_tool_function(
-    tool,
+    tool: Tool,
     *,
     tool_name: str,
     tool_instructions: str | None = None,
-):
-    original_func = tool.function
+    requires_approval: bool | None = None,
+) -> Tool:
+    original_func = cast(Callable[..., Any], tool.function)
     original_takes_ctx = getattr(tool, "takes_ctx", False)
 
-    async def _call_async(ctx: RunContext, **kwargs):
+    async def _call_async(ctx: RunContext[Any], **kwargs: Any) -> ToolReturn:
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+                tool_instructions
+                or f"No usage instructions available for tool '{tool_name}'.",
             )
-        try:
-            if original_takes_ctx:
-                result = await original_func(ctx, **kwargs)
-            else:
-                result = await original_func(**kwargs)
-        except TypeError as exc:
+        binding_error = _tool_argument_binding_error(
+            original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
+        )
+        if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, exc, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error, tool_instructions),
                 status="error",
                 error_type="invalid_parameters",
             )
+        if original_takes_ctx:
+            result = await original_func(ctx, **kwargs)
+        else:
+            result = await original_func(**kwargs)
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
-    def _call_sync(ctx: RunContext, **kwargs):
+    def _call_sync(ctx: RunContext[Any], **kwargs: Any) -> ToolReturn:
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions or f"No usage instructions available for tool '{tool_name}'.",
+                tool_instructions
+                or f"No usage instructions available for tool '{tool_name}'.",
             )
-        try:
-            if original_takes_ctx:
-                result = original_func(ctx, **kwargs)
-            else:
-                result = original_func(**kwargs)
-        except TypeError as exc:
+        binding_error = _tool_argument_binding_error(
+            original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
+        )
+        if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, exc, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error, tool_instructions),
                 status="error",
                 error_type="invalid_parameters",
             )
+        if original_takes_ctx:
+            result = original_func(ctx, **kwargs)
+        else:
+            result = original_func(**kwargs)
         return _to_tool_return(tool_name, wrap_web_tool_result(tool_name, result))
 
     wrapper = _call_async if inspect.iscoroutinefunction(original_func) else _call_sync
+    untyped_wrapper: Any = wrapper
     try:
         sig = inspect.signature(original_func)
         params_list = list(sig.parameters.values())
@@ -354,7 +426,7 @@ def _wrap_tool_function(
                 annotation=RunContext,
             )
             params_list = [ctx_param] + params_list
-        wrapper.__signature__ = sig.replace(parameters=params_list)
+        untyped_wrapper.__signature__ = sig.replace(parameters=params_list)
     except (ValueError, TypeError):
         pass
 
@@ -366,14 +438,40 @@ def _wrap_tool_function(
     wrapper.__annotations__ = annotations
 
     return type(tool)(
-        wrapper,
+        cast(Any, wrapper),
         takes_ctx=True,
         name=getattr(tool, "name", None) or tool_name,
         description=getattr(tool, "description", None),
+        requires_approval=(
+            bool(requires_approval)
+            if requires_approval is not None
+            else getattr(tool, "requires_approval", False)
+        ),
     )
 
 
-def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
+def _tool_argument_binding_error(
+    function: Callable[..., Any],
+    *,
+    original_takes_ctx: bool,
+    ctx: RunContext,
+    kwargs: dict[str, Any],
+) -> TypeError | None:
+    """Return call-shape errors without masking TypeError raised inside a tool."""
+    try:
+        signature = inspect.signature(function)
+        if original_takes_ctx:
+            signature.bind(ctx, **kwargs)
+        else:
+            signature.bind(**kwargs)
+    except TypeError as exc:
+        return exc
+    except (ValueError, RuntimeError):
+        return None
+    return None
+
+
+def _has_meaningful_tool_args(kwargs: dict[str, Any]) -> bool:
     """Return True when the tool call includes at least one non-empty user argument."""
     if not kwargs:
         return False
@@ -382,14 +480,18 @@ def _has_meaningful_tool_args(kwargs: Dict[str, Any]) -> bool:
             continue
         if isinstance(value, str) and not value.strip():
             continue
-        if isinstance(value, (list, tuple, dict, set)) and not value:
+        if isinstance(value, list | tuple | dict | set) and not value:
             continue
         return True
     return False
 
 
-def _format_tool_type_error(tool_name: str, exc: Exception, instructions: str | None) -> str:
-    prefix = f"Invalid parameters for tool '{tool_name}': {exc}. Use named parameters only."
+def _format_tool_type_error(
+    tool_name: str, exc: Exception, instructions: str | None
+) -> str:
+    prefix = (
+        f"Invalid parameters for tool '{tool_name}': {exc}. Use named parameters only."
+    )
     if instructions:
         return f"{prefix}\n\n{instructions}"
     return prefix
@@ -404,16 +506,20 @@ def _to_tool_return(
 ) -> ToolReturn:
     """Normalize bound tool calls to a Pydantic ToolReturn envelope."""
     if isinstance(result, ToolReturn):
-        metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
-        metadata.setdefault("status", status)
-        metadata.setdefault("tool_name", tool_name)
-        metadata.setdefault("return_type", _return_value_type(result.return_value))
+        existing_metadata = (
+            dict(result.metadata) if isinstance(result.metadata, dict) else {}
+        )
+        existing_metadata.setdefault("status", status)
+        existing_metadata.setdefault("tool_name", tool_name)
+        existing_metadata.setdefault(
+            "return_type", _return_value_type(result.return_value)
+        )
         if error_type:
-            metadata.setdefault("error_type", error_type)
+            existing_metadata.setdefault("error_type", error_type)
         return ToolReturn(
             return_value=result.return_value,
             content=result.content,
-            metadata=metadata,
+            metadata=existing_metadata,
         )
 
     metadata: dict[str, Any] = {
@@ -431,6 +537,6 @@ def _return_value_type(value: Any) -> str:
         return "none"
     if isinstance(value, str):
         return "text"
-    if isinstance(value, (dict, list, tuple)):
+    if isinstance(value, dict | list | tuple):
         return "json"
     return type(value).__name__

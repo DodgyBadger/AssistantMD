@@ -6,10 +6,11 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
 
 from core.logger import UnifiedLogger
-
+from core.runtime.state import RuntimeStateError, get_runtime_context
+from core.workflow_runs import WorkflowRunStore
 
 _job_history: dict[str, dict[str, Any]] = {}
 _lock = Lock()
@@ -20,7 +21,7 @@ def attach_scheduler_history_listener(scheduler: Any) -> None:
     """Attach the process-local scheduler job history listener."""
     scheduler.add_listener(
         lambda event: record_scheduler_job_event(event, scheduler=scheduler),
-        EVENT_JOB_EXECUTED | EVENT_JOB_ERROR,
+        EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED,
     )
 
 
@@ -31,7 +32,15 @@ def record_scheduler_job_event(event: Any, *, scheduler: Any | None = None) -> N
         return
 
     exception = getattr(event, "exception", None)
-    status = "error" if exception else "completed"
+    missed = getattr(event, "code", None) == EVENT_JOB_MISSED
+    result = getattr(event, "retval", None)
+    status = (
+        "missed"
+        if missed
+        else str(
+            getattr(result, "status", "") or ("error" if exception else "completed")
+        )
+    )
     row = {
         "last_run_time": datetime.now(UTC),
         "last_status": status,
@@ -40,6 +49,12 @@ def record_scheduler_job_event(event: Any, *, scheduler: Any | None = None) -> N
     with _lock:
         _job_history[str(job_id)] = row
 
+    _record_durable_scheduler_outcome(
+        event,
+        scheduler=scheduler,
+        status=status,
+        missed=missed,
+    )
     _log_scheduler_terminal_event(event, scheduler=scheduler, status=status)
 
 
@@ -75,9 +90,25 @@ def _log_scheduler_terminal_event(
             scheduled_run_time = str(scheduled_run_time)
 
     logger.add_sink("validation").info(
-        "Scheduler job completed" if exception is None else "Scheduler job failed",
+        (
+            "Scheduler job missed"
+            if status == "missed"
+            else (
+                "Scheduler job completed"
+                if exception is None
+                else "Scheduler job failed"
+            )
+        ),
         data={
-            "event": "scheduler_job_executed" if exception is None else "scheduler_job_error",
+            "event": (
+                "scheduler_job_missed"
+                if status == "missed"
+                else (
+                    "scheduler_job_executed"
+                    if exception is None
+                    else "scheduler_job_error"
+                )
+            ),
             "job_id": job_id,
             "job_name": job_name,
             "workflow_id": workflow_id,
@@ -89,6 +120,82 @@ def _log_scheduler_terminal_event(
             **result_fields,
         },
     )
+
+
+def _record_durable_scheduler_outcome(
+    event: Any,
+    *,
+    scheduler: Any | None,
+    status: str,
+    missed: bool,
+) -> None:
+    """Persist scheduler outcomes that did not already finish in the governor."""
+    job_id = str(getattr(event, "job_id", ""))
+    job_name = _get_job_name(scheduler, job_id)
+    workflow_id = _workflow_id_from_job(job_id, job_name)
+    if workflow_id is None:
+        return
+
+    scheduled_run_time = _scheduled_run_time(event)
+    event_key = (
+        f"{job_id}:{'missed' if missed else 'error'}:{scheduled_run_time or 'unknown'}"
+    )
+    store = _get_workflow_run_store()
+    if not missed:
+        exception = getattr(event, "exception", None)
+        if exception is None:
+            return
+        if getattr(exception, "assistantmd_workflow_run_id", None):
+            return
+        reason = f"{type(exception).__name__}: {exception}"
+        store.record_terminal_run(
+            workflow_id=workflow_id,
+            workflow_name=_workflow_name(workflow_id) or workflow_id,
+            vault_name=_workflow_vault(workflow_id),
+            source="scheduler",
+            status="failed",
+            reason=reason,
+            message=str(exception),
+            scheduler_job_id=job_id,
+            scheduler_event_key=event_key,
+            scheduled_run_time=scheduled_run_time,
+        )
+        return
+
+    store.record_terminal_run(
+        workflow_id=workflow_id,
+        workflow_name=_workflow_name(workflow_id) or workflow_id,
+        vault_name=_workflow_vault(workflow_id),
+        source="scheduler",
+        status="missed",
+        reason="scheduler_job_missed",
+        message=f"Scheduled workflow '{workflow_id}' did not run",
+        scheduler_job_id=job_id,
+        scheduler_event_key=event_key,
+        scheduled_run_time=scheduled_run_time,
+    )
+
+
+def _get_workflow_run_store() -> WorkflowRunStore:
+    """Resolve the runtime-owned workflow store, with bootstrap-safe fallback."""
+    try:
+        return get_runtime_context().workflow_run_store
+    except RuntimeStateError:
+        return WorkflowRunStore()
+
+
+def _scheduled_run_time(event: Any) -> str | None:
+    value = getattr(event, "scheduled_run_time", None)
+    if value is None:
+        return None
+    try:
+        return str(value.isoformat())
+    except Exception:
+        return str(value)
+
+
+def _workflow_vault(workflow_id: str) -> str:
+    return workflow_id.split("/", 1)[0] if "/" in workflow_id else "unknown"
 
 
 def _get_job_name(scheduler: Any | None, job_id: str) -> str | None:
@@ -127,7 +234,9 @@ def _workflow_result_fields(result: Any) -> dict[str, Any]:
     return {
         "workflow_status": getattr(result, "status", None),
         "workflow_reason": getattr(result, "reason", None),
-        "workflow_execution_time_seconds": getattr(result, "execution_time_seconds", None),
+        "workflow_execution_time_seconds": getattr(
+            result, "execution_time_seconds", None
+        ),
         "workflow_output_files": getattr(result, "output_files", None),
         "workflow_message": getattr(result, "message", None),
     }

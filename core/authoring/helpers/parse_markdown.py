@@ -13,7 +13,6 @@ from core.authoring.helpers.common import build_capability
 from core.authoring.shared.markdown_parse import parse_markdown_content
 from core.logger import UnifiedLogger
 
-
 logger = UnifiedLogger(tag="authoring-host")
 
 
@@ -34,7 +33,7 @@ async def execute(
     context: AuthoringExecutionContext,
 ) -> ParsedMarkdown:
     source = _parse_source(call)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_parse_markdown_started",
         data={
             "workflow_id": context.workflow_id,
@@ -42,7 +41,7 @@ async def execute(
         },
     )
     parsed = parse_markdown_content(source)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_parse_markdown_completed",
         data={
             "workflow_id": context.workflow_id,
@@ -75,7 +74,7 @@ def _contract() -> dict[str, object]:
         "signature": "parse_markdown(*, value: RetrievedItem | str)",
         "summary": (
             "Parse markdown content into a stable structured object. Accepts either a "
-            "RetrievedItem from retrieve(type=\"file\", ...) or a raw markdown string."
+            'RetrievedItem from retrieve(type="file", ...) or a raw markdown string.'
         ),
         "arguments": {
             "value": {

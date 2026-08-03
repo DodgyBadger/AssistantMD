@@ -5,27 +5,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.tools.file_ops_unsafe import FileOpsUnsafe
+from core.vault_state.file_operations import (
+    edit_vault_line_operation,
+    overwrite_vault_file_operation,
+    replace_text_vault_file_operation,
+)
 from validation.core.base_scenario import BaseScenario
 
 
 class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
-    """Validate unsafe text mutations use markdown-first extensionless resolution."""
+    """Validate file writes use markdown-first extensionless resolution."""
 
     async def test_scenario(self):
         vault = self.create_vault("FileOpsExtensionlessTextMutationsVault")
         self.create_file(vault, "notes/edit-target.md", "first\nreplace me\nlast\n")
         self.create_file(vault, "notes/no-extension", "alpha\n")
-        self.create_file(vault, "notes/crlf-target.md", "first\r\nreplace me\r\nlast\r\n")
+        self.create_file(
+            vault, "notes/crlf-target.md", "first\r\nreplace me\r\nlast\r\n"
+        )
 
         await self.start_system()
 
-        edited = FileOpsUnsafe._edit_line(
-            "notes/edit-target",
-            2,
-            "replace me",
-            "changed",
-            str(vault),
+        edited = edit_vault_line_operation(
+            vault_path=str(vault),
+            path="notes/edit-target",
+            line_number=2,
+            old_text="replace me",
+            new_text="changed",
         )
         self.soft_assert_equal(
             edited.metadata.get("status"),
@@ -47,12 +53,12 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
             "first\nchanged\nlast\n",
             "edit_line should mutate the markdown file selected by extensionless resolution",
         )
-        crlf_edit = FileOpsUnsafe._edit_line(
-            "notes/crlf-target.md",
-            2,
-            "replace me",
-            "changed",
-            str(vault),
+        crlf_edit = edit_vault_line_operation(
+            vault_path=str(vault),
+            path="notes/crlf-target.md",
+            line_number=2,
+            old_text="replace me",
+            new_text="changed",
         )
         self.soft_assert_equal(
             crlf_edit.metadata.get("status"),
@@ -65,12 +71,12 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
             "edit_line should preserve CRLF line endings when replacing a line",
         )
 
-        replaced = FileOpsUnsafe._replace_text(
-            "notes/edit-target",
-            "changed",
-            "done",
-            1,
-            str(vault),
+        replaced = replace_text_vault_file_operation(
+            vault_path=str(vault),
+            path="notes/edit-target",
+            old_text="changed",
+            new_text="done",
+            count=1,
         )
         self.soft_assert_equal(
             replaced.metadata.get("path"),
@@ -83,10 +89,10 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
             "replace_text should mutate the markdown file selected by extensionless resolution",
         )
 
-        truncated = FileOpsUnsafe._truncate_file(
-            "notes/edit-target",
-            "notes/edit-target",
-            str(vault),
+        truncated = overwrite_vault_file_operation(
+            vault_path=str(vault),
+            path="notes/edit-target",
+            content="",
         )
         self.soft_assert_equal(
             truncated.metadata.get("path"),
@@ -99,12 +105,12 @@ class FileOpsExtensionlessTextMutationsScenario(BaseScenario):
             "truncate should clear the markdown file selected by extensionless resolution",
         )
 
-        fallback = FileOpsUnsafe._replace_text(
-            "notes/no-extension",
-            "alpha",
-            "beta",
-            1,
-            str(vault),
+        fallback = replace_text_vault_file_operation(
+            vault_path=str(vault),
+            path="notes/no-extension",
+            old_text="alpha",
+            new_text="beta",
+            count=1,
         )
         self.soft_assert_equal(
             fallback.metadata.get("path"),

@@ -2,6 +2,26 @@
 
 Use Logfire when runtime traces can answer a question faster than reproducing the issue locally.
 
+## MCP Connection
+
+The devcontainer setup registers the EU Logfire MCP endpoint automatically. OAuth
+authentication is interactive and may need to be repeated after rebuilding the
+container:
+
+```bash
+codex mcp login logfire
+```
+
+If the server registration is missing, restore it and authenticate:
+
+```bash
+codex mcp add logfire --url https://logfire-eu.pydantic.dev/mcp
+codex mcp login logfire
+```
+
+Restart or reload the Codex session after registering or authenticating so the
+Logfire tools are exposed to the active session.
+
 ## Query Basics
 
 - Call `query_schema_reference` before `query_run`.
@@ -62,8 +82,8 @@ FROM records
 WHERE trace_id = 'TRACE_ID_HERE'
   AND (
     span_name LIKE 'running tool:%'
-    OR attributes->'input_data'->>'name' IN ('delegate', 'file_ops_safe')
-    OR attributes->'result'->>'name' IN ('delegate', 'file_ops_safe')
+    OR attributes->'input_data'->>'name' IN ('delegate', 'file_read', 'file_write')
+    OR attributes->'result'->>'name' IN ('delegate', 'file_read', 'file_write')
   )
 ORDER BY start_timestamp ASC
 LIMIT 200

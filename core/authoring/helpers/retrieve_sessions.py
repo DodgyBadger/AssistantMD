@@ -15,7 +15,6 @@ from core.logger import UnifiedLogger
 from core.memory.session_summary import SessionSummaryStore
 from core.memory.session_summary_status import session_summary_status
 
-
 logger = UnifiedLogger(tag="authoring-host")
 
 PENDING_OR_STALE_SUMMARY_SELECTION = "pending_or_stale_summary"
@@ -37,7 +36,7 @@ async def execute(
     selection, limit = _parse_call(call)
     vault_name = _vault_name_from_workflow_id(context.workflow_id)
     active_session_id = getattr(context.host, "chat_session_id", None)
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_sessions_started",
         data={
             "workflow_id": context.workflow_id,
@@ -88,7 +87,7 @@ async def execute(
         )
 
     items.sort(key=lambda item: str(item.metadata.get("last_activity_at") or ""))
-    limited_items = tuple(items if limit == "all" else items[:limit])
+    limited_items = tuple(items if limit == "all" else items[: int(limit)])
     result = RetrievedSessionsResult(
         selection=selection,
         status="ok",
@@ -99,7 +98,7 @@ async def execute(
             "limit": limit,
         },
     )
-    logger.add_sink("validation").info(
+    logger.set_sinks(["validation"]).info(
         "authoring_retrieve_sessions_completed",
         data={
             "workflow_id": context.workflow_id,
@@ -114,11 +113,15 @@ async def execute(
 def _parse_call(call: AuthoringCapabilityCall) -> tuple[str, int | str]:
     if call.args:
         raise ValueError("retrieve_sessions only supports keyword arguments")
-    selection = str(
-        call.kwargs.get("selection") or PENDING_OR_STALE_SUMMARY_SELECTION
-    ).strip().lower()
+    selection = (
+        str(call.kwargs.get("selection") or PENDING_OR_STALE_SUMMARY_SELECTION)
+        .strip()
+        .lower()
+    )
     if selection != PENDING_OR_STALE_SUMMARY_SELECTION:
-        raise ValueError("retrieve_sessions selection must be 'pending_or_stale_summary'")
+        raise ValueError(
+            "retrieve_sessions selection must be 'pending_or_stale_summary'"
+        )
     return selection, _parse_limit(call.kwargs.get("limit", "all"))
 
 
@@ -140,10 +143,14 @@ def _parse_limit(value: int | str) -> int | str:
 
 def _vault_name_from_workflow_id(workflow_id: str) -> str:
     if "/" not in workflow_id:
-        raise ValueError(f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}")
+        raise ValueError(
+            f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}"
+        )
     vault_name, _ = workflow_id.split("/", 1)
     if not vault_name:
-        raise ValueError(f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}")
+        raise ValueError(
+            f"Invalid workflow_id format. Expected 'vault/name', got: {workflow_id}"
+        )
     return vault_name
 
 

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel
 
 
 class ImportScanRequest(BaseModel):
     vault: str
     queue_only: bool = False
-    strategies: Optional[List[str]] = None  # Optional per-run strategy override
-    capture_ocr_images: Optional[bool] = None  # Optional per-run OCR image capture override
-    pdf_mode: Optional[str] = None  # Optional per-run PDF mode override: markdown|page_images
+    strategies: list[str] | None = None  # Optional per-run strategy override
+    capture_ocr_images: bool | None = (
+        None  # Optional per-run OCR image capture override
+    )
+    pdf_mode: str | None = (
+        None  # Optional per-run PDF mode override: markdown|page_images
+    )
 
 
 class ImportJobInfo(BaseModel):
@@ -18,13 +20,13 @@ class ImportJobInfo(BaseModel):
     source_uri: str
     vault: str
     status: str
-    error: Optional[str] = None
-    outputs: Optional[list[str]] = None
+    error: str | None = None
+    outputs: list[str] | None = None
 
 
 class ImportScanResponse(BaseModel):
-    jobs_created: List[ImportJobInfo]
-    skipped: List[str]
+    jobs_created: list[ImportJobInfo]
+    skipped: list[str]
 
 
 class ImportUrlRequest(BaseModel):
@@ -38,5 +40,5 @@ class ImportUrlResponse(BaseModel):
     source_uri: str
     vault: str
     status: str
-    error: Optional[str] = None
-    outputs: Optional[list[str]] = None
+    error: str | None = None
+    outputs: list[str] | None = None

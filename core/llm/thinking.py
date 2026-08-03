@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
-
-ThinkingEffort: TypeAlias = Literal["minimal", "low", "medium", "high", "xhigh"]
-ThinkingValue: TypeAlias = bool | ThinkingEffort | None
+type ThinkingEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
+type ThinkingValue = bool | ThinkingEffort | None
 
 _THINKING_EFFORTS: set[str] = {"minimal", "low", "medium", "high", "xhigh"}
 _TRUE_VALUES: set[str] = {"true", "1", "yes", "on"}
 _FALSE_VALUES: set[str] = {"false", "0", "no", "off"}
-_DEFAULT_VALUES: set[str] = {"", "default", "provider_default", "inherit", "null", "none"}
+_DEFAULT_VALUES: set[str] = {
+    "",
+    "default",
+    "provider_default",
+    "inherit",
+    "null",
+    "none",
+}
 
 
-def normalize_thinking_value(raw_value: Any, *, source_name: str = "thinking") -> ThinkingValue:
+def normalize_thinking_value(
+    raw_value: Any, *, source_name: str = "thinking"
+) -> ThinkingValue:
     """Normalize a user/config provided thinking value."""
     if raw_value is None:
         return None
@@ -45,4 +53,3 @@ def thinking_value_to_label(value: ThinkingValue) -> str:
     if value is False:
         return "off"
     return value
-

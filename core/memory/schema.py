@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
-
 
 DB_NAME = "session_summaries"
 MIGRATION_NAMESPACE = "session_summaries"
@@ -103,14 +104,18 @@ def ensure_session_summary_schema(
         _create_session_summaries_fts(conn)
         conn.commit()
         if apply_migrations:
-            apply_sqlite_migrations(conn, namespace=MIGRATION_NAMESPACE, migrations=SESSION_SUMMARY_MIGRATIONS)
+            apply_sqlite_migrations(
+                conn,
+                namespace=MIGRATION_NAMESPACE,
+                migrations=SESSION_SUMMARY_MIGRATIONS,
+            )
         _backfill_session_summaries_fts(conn)
         conn.commit()
     finally:
         conn.close()
 
 
-def _drop_obsolete_summary_tables(conn) -> None:
+def _drop_obsolete_summary_tables(conn: sqlite3.Connection) -> None:
     """Remove abandoned prototype tables from session_summaries.db."""
     for table_name in (
         "workstream_artifacts",
@@ -121,7 +126,7 @@ def _drop_obsolete_summary_tables(conn) -> None:
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 
-def _migrate_source_summary(conn) -> None:
+def _migrate_source_summary(conn: sqlite3.Connection) -> None:
     """Add source_summary and rebuild the FTS table."""
     columns = _table_columns(conn, "session_summaries")
     if "source_summary" not in columns:
@@ -129,7 +134,7 @@ def _migrate_source_summary(conn) -> None:
     _rebuild_session_summaries_fts(conn)
 
 
-def _migrate_source_summary_out_of_retrieval(conn) -> None:
+def _migrate_source_summary_out_of_retrieval(conn: sqlite3.Connection) -> None:
     """Remove source_summary from retrieval indexes while preserving the field."""
     _rebuild_session_summaries_fts(conn)
     vector_table_exists = conn.execute(
@@ -149,7 +154,7 @@ def _migrate_source_summary_out_of_retrieval(conn) -> None:
         )
 
 
-def _migrate_workspace_path(conn) -> None:
+def _migrate_workspace_path(conn: sqlite3.Connection) -> None:
     """Add workspace path storage for workspace-filtered retrieval."""
     columns = _table_columns(conn, "session_summaries")
     if "workspace_path" not in columns:
@@ -162,7 +167,7 @@ def _migrate_workspace_path(conn) -> None:
     )
 
 
-def _create_session_summaries_fts(conn) -> None:
+def _create_session_summaries_fts(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS session_summaries_fts USING fts5(
@@ -180,13 +185,13 @@ def _create_session_summaries_fts(conn) -> None:
     )
 
 
-def _rebuild_session_summaries_fts(conn) -> None:
+def _rebuild_session_summaries_fts(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS session_summaries_fts")
     _create_session_summaries_fts(conn)
     _insert_session_summaries_fts_rows(conn)
 
 
-def _backfill_session_summaries_fts(conn) -> None:
+def _backfill_session_summaries_fts(conn: sqlite3.Connection) -> None:
     """Populate the FTS table for existing summary rows when first introduced."""
     summary_count = conn.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]
     fts_count = conn.execute("SELECT COUNT(*) FROM session_summaries_fts").fetchone()[0]
@@ -195,7 +200,7 @@ def _backfill_session_summaries_fts(conn) -> None:
     _insert_session_summaries_fts_rows(conn)
 
 
-def _insert_session_summaries_fts_rows(conn) -> None:
+def _insert_session_summaries_fts_rows(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO session_summaries_fts (
@@ -211,6 +216,6 @@ def _insert_session_summaries_fts_rows(conn) -> None:
     )
 
 
-def _table_columns(conn, table_name: str) -> set[str]:
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row[1]) for row in rows}

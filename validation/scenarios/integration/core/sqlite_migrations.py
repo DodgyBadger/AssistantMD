@@ -36,24 +36,46 @@ class SQLiteMigrationsScenario(BaseScenario):
                 ),
             )
 
-            first = apply_sqlite_migrations(conn, namespace="validation", migrations=migrations)
-            self.soft_assert_equal(first.applied, (1, 2), "Migrations should apply in version order")
-            self.soft_assert_equal(first.skipped, (), "First migration run should not skip versions")
+            first = apply_sqlite_migrations(
+                conn, namespace="validation", migrations=migrations
+            )
+            self.soft_assert_equal(
+                first.applied, (1, 2), "Migrations should apply in version order"
+            )
+            self.soft_assert_equal(
+                first.skipped, (), "First migration run should not skip versions"
+            )
 
-            values = [row[0] for row in conn.execute("SELECT value FROM probe").fetchall()]
-            self.soft_assert_equal(values, ["applied"], "Applied migration should mutate the target DB")
+            values = [
+                row[0] for row in conn.execute("SELECT value FROM probe").fetchall()
+            ]
+            self.soft_assert_equal(
+                values, ["applied"], "Applied migration should mutate the target DB"
+            )
 
-            second = apply_sqlite_migrations(conn, namespace="validation", migrations=migrations)
-            self.soft_assert_equal(second.applied, (), "Second migration run should not reapply versions")
-            self.soft_assert_equal(second.skipped, (1, 2), "Second migration run should skip applied versions")
+            second = apply_sqlite_migrations(
+                conn, namespace="validation", migrations=migrations
+            )
+            self.soft_assert_equal(
+                second.applied, (), "Second migration run should not reapply versions"
+            )
+            self.soft_assert_equal(
+                second.skipped,
+                (1, 2),
+                "Second migration run should skip applied versions",
+            )
 
             try:
                 apply_sqlite_migrations(
                     conn,
                     namespace="validation",
                     migrations=(
-                        SQLiteMigration(version=1, name="one", apply=lambda connection: None),
-                        SQLiteMigration(version=1, name="duplicate", apply=lambda connection: None),
+                        SQLiteMigration(
+                            version=1, name="one", apply=lambda connection: None
+                        ),
+                        SQLiteMigration(
+                            version=1, name="duplicate", apply=lambda connection: None
+                        ),
                     ),
                 )
             except ValueError as exc:
@@ -74,16 +96,25 @@ class SQLiteMigrationsScenario(BaseScenario):
                     namespace="validation",
                     migrations=(
                         *migrations,
-                        SQLiteMigration(version=3, name="failing_migration", apply=fail_after_insert),
+                        SQLiteMigration(
+                            version=3, name="failing_migration", apply=fail_after_insert
+                        ),
                     ),
                 )
             except RuntimeError as exc:
-                self.soft_assert_equal(str(exc), "intentional migration failure", "Failure should propagate")
+                self.soft_assert_equal(
+                    str(exc),
+                    "intentional migration failure",
+                    "Failure should propagate",
+                )
             else:
                 raise AssertionError("Failing migration should raise")
 
             values_after_failure = [
-                row[0] for row in conn.execute("SELECT value FROM probe ORDER BY rowid").fetchall()
+                row[0]
+                for row in conn.execute(
+                    "SELECT value FROM probe ORDER BY rowid"
+                ).fetchall()
             ]
             self.soft_assert_equal(
                 values_after_failure,

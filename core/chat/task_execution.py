@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic_ai import (
     AgentRunResultEvent,
+    DeferredToolRequests,
+    DeferredToolResults,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
     PartDeltaEvent,
@@ -27,6 +29,15 @@ from core.authoring.context_manager import ContextTemplateExecutionError
 from core.chat import executor as chat_executor
 from core.chat.chat_store import ChatStore
 from core.chat.compaction import chat_session_history_lock
+from core.chat.deferred_reviews import (
+    DeferredReviewError,
+    StoredDeferredReview,
+    capture_deferred_review_context,
+    create_deferred_review,
+    has_pending_deferred_review,
+    mark_deferred_review_terminal,
+    summarize_deferred_review,
+)
 from core.chat.task_events import ChatTaskEventBuffer
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
@@ -39,10 +50,13 @@ from core.runtime.execution_tasks import (
     chat_task_label,
 )
 from core.runtime.state import get_runtime_context
-from core.runtime.task_runner import ExecutionGatePolicy, ExecutionTaskHooks, ExecutionTaskSpec
+from core.runtime.task_runner import (
+    ExecutionGatePolicy,
+    ExecutionTaskHooks,
+    ExecutionTaskSpec,
+)
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
-
 
 _CHAT_STORE = ChatStore()
 
@@ -117,10 +131,16 @@ async def start_chat_turn_retry_task(
         raise ValueError("The latest unfinished chat turn is not marked retryable.")
 
     accepted_sequence_index = marker.get("accepted_user_sequence_index")
+    if not isinstance(accepted_sequence_index, int | str):
+        raise ValueError(
+            "The unfinished turn marker does not identify an accepted user message."
+        )
     try:
         accepted_sequence_index = int(accepted_sequence_index)
     except (TypeError, ValueError) as exc:
-        raise ValueError("The unfinished turn marker does not identify an accepted user message.") from exc
+        raise ValueError(
+            "The unfinished turn marker does not identify an accepted user message."
+        ) from exc
 
     stored_messages = _CHAT_STORE.get_stored_messages(
         session_id,
@@ -136,15 +156,22 @@ async def start_chat_turn_retry_task(
         None,
     )
     if accepted_message is None:
-        raise ValueError("The accepted user message for the unfinished turn was not found.")
+        raise ValueError(
+            "The accepted user message for the unfinished turn was not found."
+        )
     prompt = chat_executor._user_prompt_text(accepted_message.message)
     if not prompt:
-        raise ValueError("The accepted user message for the unfinished turn is not retryable.")
+        raise ValueError(
+            "The accepted user message for the unfinished turn is not retryable."
+        )
 
     model = str(marker.get("model") or "").strip()
     if not model:
-        raise ValueError("The unfinished turn marker does not include a model to retry.")
+        raise ValueError(
+            "The unfinished turn marker does not include a model to retry."
+        )
     tools = [str(tool) for tool in marker.get("tools") or ()]
+    chat_mode = chat_executor.normalize_chat_mode(marker.get("chat_mode"))
     message_history = [
         message.message
         for message in stored_messages
@@ -175,6 +202,7 @@ async def start_chat_turn_retry_task(
         model=model,
         thinking=None,
         context_template=None,
+        chat_mode=chat_mode,
         message_history_override=message_history,
     )
     started = await start_prepared_chat_stream_task(
@@ -211,6 +239,116 @@ async def start_chat_turn_retry_task(
     return started
 
 
+async def start_deferred_review_resume_task(
+    *,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    review: StoredDeferredReview,
+    deferred_tool_results: DeferredToolResults,
+    tools: list[str],
+    model: str,
+    thinking: chat_executor.ThinkingValue | None = None,
+    context_template: str | None = None,
+    chat_mode: chat_executor.ChatMode = chat_executor.NORMAL_CHAT_MODE,
+    event_buffer: ChatTaskEventBuffer | None = None,
+) -> ChatStreamTaskStart:
+    """Queue a resumed chat task behind other work in the same session."""
+    runtime = get_runtime_context()
+    buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+
+    async def _mark_terminal(status: str, error: BaseException | None = None) -> None:
+        try:
+            mark_deferred_review_terminal(
+                vault_name=vault_name,
+                session_id=session_id,
+                artifact_ref=review.artifact_ref,
+                status=status,
+                error=(
+                    {"error_type": type(error).__name__, "message": str(error)}
+                    if error is not None
+                    else None
+                ),
+            )
+        except DeferredReviewError:
+            chat_executor.logger.warning(
+                "Deferred review terminal state could not be recorded",
+                data={"artifact_ref": review.artifact_ref, "status": status},
+            )
+
+    async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
+        async def _run_in_session_gate() -> None:
+            await runtime.task_coordinator.mark_started(tracked_task.task_id)
+            prepared = await chat_executor._prepare_deferred_review_resume_execution(
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                tools=tools,
+                model=model,
+                message_history=review.resume_messages,
+                deferred_tool_results=deferred_tool_results,
+                thinking=thinking,
+                context_template=context_template,
+                chat_mode=chat_mode,
+            )
+            await _run_prepared_chat_stream_task(
+                task=tracked_task,
+                prepared=prepared,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                event_buffer=buffer,
+                persist_user_request=False,
+            )
+            await _mark_terminal("completed")
+
+        await runtime.task_runner.run_with_gate(
+            tracked_task,
+            ExecutionGatePolicy(
+                key=chat_session_scope(session_id),
+                queued_status="queued",
+                clear_metadata={"queue_position": 0, "waiting_for_task_id": None},
+            ),
+            _run_in_session_gate,
+        )
+
+    task = await runtime.task_runner.start_background(
+        ExecutionTaskSpec(
+            kind=ExecutionTaskKind.CHAT,
+            scope=chat_session_scope(session_id),
+            source=ExecutionTaskSource.API,
+            label=chat_task_label(session_id),
+            metadata={
+                "vault": vault_name,
+                "session_id": session_id,
+                "streaming": True,
+                "model": model,
+                "tools": list(tools),
+                "deferred_review_artifact_ref": review.artifact_ref,
+                "queued_by_session": True,
+            },
+        ),
+        _run,
+        hooks=ExecutionTaskHooks(
+            on_cancelled=lambda task_id: _mark_review_cancelled(
+                buffer, task_id, _mark_terminal
+            ),
+            on_failed=lambda _task_id, exc: _mark_terminal("failed", exc),
+        ),
+        start_immediately=False,
+    )
+    return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _mark_review_cancelled(
+    event_buffer: ChatTaskEventBuffer,
+    task_id: str,
+    mark_terminal: Callable[[str], Awaitable[None]],
+) -> None:
+    await _append_cancelled_if_open(event_buffer, task_id)
+    await mark_terminal("cancelled")
+
+
 async def start_chat_stream_task(
     *,
     vault_name: str,
@@ -221,11 +359,18 @@ async def start_chat_stream_task(
     session_id: str,
     tools: list[str],
     model: str,
+    display_prompt: str | None = None,
     thinking: chat_executor.ThinkingValue | None = None,
     context_template: str | None = None,
+    chat_mode: chat_executor.ChatMode = chat_executor.NORMAL_CHAT_MODE,
     event_buffer: ChatTaskEventBuffer | None = None,
 ) -> ChatStreamTaskStart:
     """Preflight and start a streaming chat run in a background execution task."""
+    chat_executor.persist_chat_session_mode(
+        vault_name=vault_name,
+        session_id=session_id,
+        chat_mode=chat_mode,
+    )
     prepared = await chat_executor._prepare_chat_execution(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -237,6 +382,8 @@ async def start_chat_stream_task(
         model=model,
         thinking=thinking,
         context_template=context_template,
+        chat_mode=chat_mode,
+        display_prompt=display_prompt,
     )
     return await start_prepared_chat_stream_task(
         prepared=prepared,
@@ -257,8 +404,10 @@ async def start_queued_chat_stream_task(
     session_id: str,
     tools: list[str],
     model: str,
+    display_prompt: str | None = None,
     thinking: chat_executor.ThinkingValue | None = None,
     context_template: str | None = None,
+    chat_mode: chat_executor.ChatMode = chat_executor.NORMAL_CHAT_MODE,
     event_buffer: ChatTaskEventBuffer | None = None,
 ) -> ChatStreamTaskStart:
     """Start a streaming chat task that waits behind earlier tasks in its session."""
@@ -268,6 +417,15 @@ async def start_queued_chat_stream_task(
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
             try:
+                if has_pending_deferred_review(
+                    vault_name=vault_name, session_id=session_id
+                ):
+                    raise chat_executor.ChatReviewPendingError(session_id=session_id)
+                chat_executor.persist_chat_session_mode(
+                    vault_name=vault_name,
+                    session_id=session_id,
+                    chat_mode=chat_mode,
+                )
                 prepared = await chat_executor._prepare_chat_execution(
                     vault_name=vault_name,
                     vault_path=vault_path,
@@ -279,10 +437,14 @@ async def start_queued_chat_stream_task(
                     model=model,
                     thinking=thinking,
                     context_template=context_template,
+                    chat_mode=chat_mode,
+                    display_prompt=display_prompt,
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - preflight failure is reported to subscribers
                 await _publish_deferred_preflight_failure(
                     task_id=tracked_task.task_id,
                     exc=exc,
@@ -292,6 +454,7 @@ async def start_queued_chat_stream_task(
                     tools=tools,
                     model=model,
                     context_template=context_template,
+                    chat_mode=chat_mode,
                     event_buffer=buffer,
                 )
                 return
@@ -357,11 +520,13 @@ async def _append_cancelled_if_open(
             "cancelled",
             {
                 "event": "cancelled",
-                "choices": [{
-                    "delta": {},
-                    "index": 0,
-                    "finish_reason": "cancelled",
-                }],
+                "choices": [
+                    {
+                        "delta": {},
+                        "index": 0,
+                        "finish_reason": "cancelled",
+                    }
+                ],
             },
         )
     except RuntimeError:
@@ -385,6 +550,7 @@ async def _publish_deferred_preflight_failure(
     tools: list[str],
     model: str,
     context_template: str | None,
+    chat_mode: chat_executor.ChatMode,
     event_buffer: ChatTaskEventBuffer,
 ) -> None:
     """Mark and publish a preflight failure from a deferred chat task."""
@@ -401,11 +567,14 @@ async def _publish_deferred_preflight_failure(
         prompt_length=len(prompt),
         context_template=context_template,
         workspace_path=workspace_path,
+        extra={"chat_mode": chat_executor.normalize_chat_mode(chat_mode)},
         exc=exc,
     )
     payload = _preflight_error_event_data(exc)
     await event_buffer.append(task_id, "error", payload)
-    await runtime.task_coordinator.mark_failed(task_id, reason=f"{type(exc).__name__}: {exc}")
+    await runtime.task_coordinator.mark_failed(
+        task_id, reason=f"{type(exc).__name__}: {exc}"
+    )
 
 
 def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
@@ -414,12 +583,11 @@ def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
         return _error_event_data(f"\n\nError: {str(exc)}", exc.details)
     if isinstance(exc, chat_executor.ChatContextTemplateError):
         return _error_event_data(f"\n\nTemplate error: {str(exc)}", exc.details)
+    if isinstance(exc, chat_executor.ChatReviewPendingError):
+        return _error_event_data(f"\n\nReview pending: {str(exc)}", exc.details)
     if isinstance(
         exc,
-        (
-            chat_executor.ChatToolCallLimitError,
-            chat_executor.ChatModelRequestLimitError,
-        ),
+        chat_executor.ChatToolCallLimitError | chat_executor.ChatModelRequestLimitError,
     ):
         return _error_event_data(
             f"\n\n{chat_executor._usage_limit_display_label(exc)} reached: {str(exc)}",
@@ -440,6 +608,8 @@ def _preflight_error_event_data(exc: Exception) -> dict[str, Any]:
 
 def _is_user_correctable_preflight_error(exc: Exception) -> bool:
     """Return whether a preflight exception message is safe and actionable."""
+    if isinstance(exc, chat_executor.ChatReviewPendingError):
+        return True
     if not isinstance(exc, ValueError):
         return False
     message = str(exc)
@@ -476,6 +646,7 @@ async def _run_prepared_chat_stream_task(
     should_mark_started = task is None
     full_response = ""
     final_result = None
+    deferred_review = None
     tool_activity: dict[str, dict[str, Any]] = {}
     session_buffer_store = get_session_buffer_store(session_id)
     run_deps = chat_executor.ChatRunDeps(
@@ -492,7 +663,9 @@ async def _run_prepared_chat_stream_task(
         if should_mark_started:
             await runtime.task_coordinator.mark_started(task.task_id)
         if persist_user_request:
-            async with chat_session_history_lock(session_id=session_id, vault_name=vault_name):
+            async with chat_session_history_lock(
+                session_id=session_id, vault_name=vault_name
+            ):
                 _CHAT_STORE.add_messages(
                     session_id,
                     vault_name,
@@ -513,7 +686,9 @@ async def _run_prepared_chat_stream_task(
             workspace_path=prepared.workspace_path,
             extra={
                 "history_message_count": len(prepared.message_history or []),
-                "prompt_for_history_tokens": estimate_token_count(prepared.prompt_for_history),
+                "prompt_for_history_tokens": estimate_token_count(
+                    prepared.prompt_for_history
+                ),
                 "task_id": task.task_id,
                 "retry": not persist_user_request,
             },
@@ -523,6 +698,7 @@ async def _run_prepared_chat_stream_task(
             async for event in prepared.agent.run_stream_events(
                 prepared.user_prompt,
                 message_history=prepared.message_history,
+                deferred_tool_results=prepared.deferred_tool_results,
                 deps=run_deps,
                 usage_limits=chat_executor._chat_usage_limits(),
             ):
@@ -552,12 +728,12 @@ async def _run_prepared_chat_stream_task(
                             _delta_event_data(delta_text),
                         )
                     elif isinstance(event.delta, ThinkingPartDelta):
-                        delta_text = event.delta.content_delta
-                        if delta_text:
+                        thinking_delta = event.delta.content_delta
+                        if thinking_delta:
                             await event_buffer.append(
                                 task.task_id,
                                 "thinking_delta",
-                                _thinking_delta_event_data(delta_text),
+                                _thinking_delta_event_data(thinking_delta),
                             )
 
                 elif isinstance(event, FunctionToolCallEvent):
@@ -584,6 +760,7 @@ async def _run_prepared_chat_stream_task(
                     final_result = event.result
 
             if final_result:
+                deferred_requests = getattr(final_result, "output", None)
                 async with chat_session_history_lock(
                     session_id=session_id,
                     vault_name=vault_name,
@@ -599,8 +776,25 @@ async def _run_prepared_chat_stream_task(
                         session_id=session_id,
                         vault_name=vault_name,
                     )
+                    if isinstance(deferred_requests, DeferredToolRequests):
+                        deferred_review = create_deferred_review(
+                            vault_name=vault_name,
+                            session_id=session_id,
+                            originating_task_id=task.task_id,
+                            requests=deferred_requests,
+                            resume_messages=list(final_result.all_messages()),
+                            resume_config=prepared.resume_config(),
+                            review_context=capture_deferred_review_context(
+                                vault_path=vault_path,
+                                requests=deferred_requests,
+                            ),
+                        )
                 chat_executor._log_chat_lifecycle(
-                    "Streaming chat execution completed",
+                    (
+                        "Streaming chat execution paused for inline review"
+                        if deferred_review is not None
+                        else "Streaming chat execution completed"
+                    ),
                     vault_name=vault_name,
                     session_id=session_id,
                     model=prepared.model,
@@ -614,19 +808,42 @@ async def _run_prepared_chat_stream_task(
                     extra={
                         **chat_executor._summarize_tool_activity(tool_activity),
                         "response_length": len(full_response),
+                        **(
+                            {
+                                "deferred_review_artifact_ref": deferred_review.artifact_ref,
+                                "deferred_review_count": deferred_review.review_count,
+                            }
+                            if deferred_review is not None
+                            else {}
+                        ),
                     },
                 )
+                if deferred_review is not None:
+                    await event_buffer.append(
+                        task.task_id,
+                        "review_required",
+                        {
+                            "event": "review_required",
+                            **summarize_deferred_review(deferred_review),
+                        },
+                    )
 
             await event_buffer.append(
                 task.task_id,
                 "done",
                 {
                     "event": "done",
-                    "choices": [{
-                        "delta": {},
-                        "index": 0,
-                        "finish_reason": "stop",
-                    }],
+                    "choices": [
+                        {
+                            "delta": {},
+                            "index": 0,
+                            "finish_reason": (
+                                "tool_review_required"
+                                if deferred_review is not None
+                                else "stop"
+                            ),
+                        }
+                    ],
                     "tool_summary": tool_activity,
                 },
             )
@@ -652,16 +869,20 @@ async def _run_prepared_chat_stream_task(
                 "cancelled",
                 {
                     "event": "cancelled",
-                    "choices": [{
-                        "delta": {},
-                        "index": 0,
-                        "finish_reason": "cancelled",
-                    }],
+                    "choices": [
+                        {
+                            "delta": {},
+                            "index": 0,
+                            "finish_reason": "cancelled",
+                        }
+                    ],
                 },
             )
             raise
         except chat_executor.ChatCapabilityError as exc:
-            chat_executor.logger.warning("Streaming capability mismatch", data=exc.details)
+            chat_executor.logger.warning(
+                "Streaming capability mismatch", data=exc.details
+            )
             chat_executor._record_latest_turn_failure(
                 session_id=session_id,
                 vault_name=vault_name,
@@ -670,6 +891,7 @@ async def _run_prepared_chat_stream_task(
                 streaming=True,
                 model=prepared.model,
                 tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
             )
             await event_buffer.append(
                 task.task_id,
@@ -697,6 +919,7 @@ async def _run_prepared_chat_stream_task(
                 streaming=True,
                 model=prepared.model,
                 tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
             )
             await event_buffer.append(
                 task.task_id,
@@ -705,7 +928,9 @@ async def _run_prepared_chat_stream_task(
             )
             raise
         except chat_executor.ChatContextTemplateError as exc:
-            chat_executor.logger.warning("Streaming context template failure", data=exc.details)
+            chat_executor.logger.warning(
+                "Streaming context template failure", data=exc.details
+            )
             chat_executor._record_latest_turn_failure(
                 session_id=session_id,
                 vault_name=vault_name,
@@ -714,6 +939,7 @@ async def _run_prepared_chat_stream_task(
                 streaming=True,
                 model=prepared.model,
                 tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
             )
             await event_buffer.append(
                 task.task_id,
@@ -749,6 +975,7 @@ async def _run_prepared_chat_stream_task(
                 streaming=True,
                 model=prepared.model,
                 tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
             )
             await event_buffer.append(
                 task.task_id,
@@ -776,7 +1003,10 @@ async def _run_prepared_chat_stream_task(
                 attached_image_count=prepared.attached_image_count,
                 context_template=prepared.context_template,
                 workspace_path=prepared.workspace_path,
-                extra=chat_executor._summarize_tool_activity(tool_activity),
+                extra={
+                    **chat_executor._summarize_tool_activity(tool_activity),
+                    "task_id": task.task_id,
+                },
                 exc=exc,
             )
             chat_executor._record_latest_turn_failure(
@@ -787,18 +1017,19 @@ async def _run_prepared_chat_stream_task(
                 streaming=True,
                 model=prepared.model,
                 tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
             )
             await event_buffer.append(
                 task.task_id,
                 "error",
                 _error_event_data(
-                    "\n\nError: An unexpected error occurred",
+                    _stream_failure_display_message(classification.failure_kind),
                     classification.to_metadata(),
                 ),
             )
             raise
 
-    if final_result:
+    if final_result and deferred_review is None:
         await chat_executor._try_auto_compact_after_turn(
             session_id=session_id,
             vault_name=vault_name,
@@ -820,7 +1051,7 @@ async def stream_chat_task_sse(
     try:
         while True:
             if pending_event is None:
-                pending_event = asyncio.create_task(iterator.__anext__())
+                pending_event = asyncio.ensure_future(iterator.__anext__())
             try:
                 event = await asyncio.wait_for(
                     asyncio.shield(pending_event),
@@ -846,11 +1077,13 @@ async def stream_chat_task_sse(
 def _delta_event_data(delta_text: str) -> dict[str, Any]:
     return {
         "event": "delta",
-        "choices": [{
-            "delta": {"content": delta_text},
-            "index": 0,
-            "finish_reason": None,
-        }],
+        "choices": [
+            {
+                "delta": {"content": delta_text},
+                "index": 0,
+                "finish_reason": None,
+            }
+        ],
     }
 
 
@@ -864,13 +1097,40 @@ def _thinking_delta_event_data(delta_text: str) -> dict[str, Any]:
 def _error_event_data(message: str, details: dict[str, Any]) -> dict[str, Any]:
     return {
         "event": "error",
-        "choices": [{
-            "delta": {"content": message},
-            "index": 0,
-            "finish_reason": "error",
-        }],
+        "choices": [
+            {
+                "delta": {"content": message},
+                "index": 0,
+                "finish_reason": "error",
+            }
+        ],
         "details": details,
     }
+
+
+def _stream_failure_display_message(failure_kind: str) -> str:
+    """Return concise user-facing copy for a classified stream failure."""
+    if failure_kind == "provider_overloaded":
+        return (
+            "\n\nThe model service is temporarily overloaded. "
+            "You can retry this interrupted turn."
+        )
+    if failure_kind == "provider_unavailable":
+        return (
+            "\n\nThe model service is temporarily unavailable. "
+            "You can retry this interrupted turn."
+        )
+    if failure_kind == "rate_limited":
+        return (
+            "\n\nThe model service is temporarily rate-limited. "
+            "You can retry this interrupted turn shortly."
+        )
+    if failure_kind in {"transient_network", "transient_provider"}:
+        return (
+            "\n\nThe connection to the model service was interrupted. "
+            "You can retry this interrupted turn."
+        )
+    return "\n\nError: An unexpected error occurred"
 
 
 async def _publish_tool_call_started(
@@ -954,6 +1214,9 @@ async def _publish_tool_call_finished(
         "tool_name": tool_name,
         "result": chat_executor._normalize_tool_result(result_content),
     }
+    artifact_ref = _artifact_ref_from_tool_result(result_content)
+    if artifact_ref:
+        payload["artifact_ref"] = artifact_ref
     if tool_name == "code_execution":
         payload["result_detail"] = chat_executor._normalize_tool_detail(result_content)
     result_text = tool_result_as_text(result_content)
@@ -966,8 +1229,26 @@ async def _publish_tool_call_finished(
             "tool_call_id": tool_id,
             "tool_name": tool_name,
             "result_length": len(result_text),
-            "result_token_estimate": estimate_token_count(result_text) if result_text else 0,
+            "result_token_estimate": (
+                estimate_token_count(result_text) if result_text else 0
+            ),
             "memory_rss_bytes": chat_executor._get_process_rss_bytes(),
         },
     )
     await event_buffer.append(task_id, "tool_call_finished", payload)
+
+
+def _artifact_ref_from_tool_result(result_content: Any) -> str | None:
+    if not isinstance(result_content, str):
+        return None
+    try:
+        payload = json.loads(result_content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    artifact_ref = payload.get("artifact_ref")
+    if artifact_ref is None:
+        return None
+    value = str(artifact_ref).strip()
+    return value or None

@@ -6,22 +6,19 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Literal, Optional
-
+from typing import Literal
 
 ChunkKind = Literal["text", "image_ref"]
 
-_IMAGE_TOKEN_PATTERN = re.compile(
-    r"!\[([^\]]*)\]\(([^)]+)\)|!\[\[([^\]]+)\]\]"
-)
+_IMAGE_TOKEN_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)|!\[\[([^\]]+)\]\]")
 
 
 @dataclass(frozen=True)
 class MarkdownChunk:
     kind: ChunkKind
     text: str = ""
-    image_ref: Optional[str] = None
-    alt_text: Optional[str] = None
+    image_ref: str | None = None
+    alt_text: str | None = None
     start: int = 0
     end: int = 0
 
@@ -44,7 +41,7 @@ def _normalize_markdown_target(raw_target: str) -> str:
     return target
 
 
-def parse_markdown_chunks(markdown_text: str) -> List[MarkdownChunk]:
+def parse_markdown_chunks(markdown_text: str) -> list[MarkdownChunk]:
     """
     Parse markdown into ordered text and image-ref chunks.
 
@@ -55,7 +52,7 @@ def parse_markdown_chunks(markdown_text: str) -> List[MarkdownChunk]:
     if not markdown_text:
         return []
 
-    chunks: List[MarkdownChunk] = []
+    chunks: list[MarkdownChunk] = []
     cursor = 0
     for match in _IMAGE_TOKEN_PATTERN.finditer(markdown_text):
         start, end = match.span()
@@ -110,4 +107,3 @@ def parse_markdown_chunks(markdown_text: str) -> List[MarkdownChunk]:
             )
 
     return chunks
-

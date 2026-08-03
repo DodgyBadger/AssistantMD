@@ -10,8 +10,9 @@ from typing import Any
 
 from core.utils.frontmatter import parse_simple_frontmatter
 
-
-_PYTHON_BLOCK_PATTERN = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
+_PYTHON_BLOCK_PATTERN = re.compile(
+    r"```python\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -36,9 +37,13 @@ def parse_authoring_template_text(content: str) -> AuthoringTemplateSource:
     frontmatter, body = parse_simple_frontmatter(content, require_frontmatter=False)
     matches = list(_PYTHON_BLOCK_PATTERN.finditer(body))
     if not matches:
-        raise ValueError("Authoring template must include exactly one fenced ```python``` block")
+        raise ValueError(
+            "Authoring template must include exactly one fenced ```python``` block"
+        )
     if len(matches) > 1:
-        raise ValueError("Authoring template supports exactly one fenced ```python``` block")
+        raise ValueError(
+            "Authoring template supports exactly one fenced ```python``` block"
+        )
 
     match = matches[0]
     code = match.group(1).strip()

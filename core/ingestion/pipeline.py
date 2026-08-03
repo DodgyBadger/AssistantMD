@@ -2,16 +2,17 @@
 Orchestrates ingestion jobs through importer, extractor, renderer, and storage.
 """
 
+from collections.abc import Callable
 from typing import Any
 
-from core.ingestion.models import RawDocument, ExtractedDocument, RenderOptions
+from core.ingestion.models import ExtractedDocument, RawDocument, RenderOptions
 
 
 def run_pipeline(
     raw: RawDocument,
-    extractor_fn: Any,
-    renderer_fn: Any,
-    storage_fn: Any,
+    extractor_fn: Callable[[RawDocument], ExtractedDocument],
+    renderer_fn: Callable[[ExtractedDocument, RenderOptions], Any],
+    storage_fn: Callable[[Any], list[str]],
     render_options: RenderOptions,
 ) -> list[str]:
     """

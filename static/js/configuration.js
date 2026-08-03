@@ -6,10 +6,13 @@
  */
 
 (function configurationModule(window, document) {
+    const ACTIVITY_LOG_LEVELS = ['critical', 'error', 'warning', 'warn', 'info', 'debug', 'fatal'];
     const state = {
         initialized: false,
         hasLoadedOnce: false,
         isLoadingLog: false,
+        activityLogRequestId: 0,
+        activityLogAbortController: null,
         isLoadingSettings: false,
         isLoadingModels: false,
         isSavingModel: false,
@@ -36,9 +39,12 @@
         importResults: null,
         importUrlResult: null,
         activityLogEntries: [],
+        activityLogNextCursor: null,
+        activityLogTotalMatching: 0,
+        activityLogAvailableTags: [],
         activityLogFilters: {
             query: '',
-            levels: ['error', 'warning', 'info', 'debug'],
+            levels: [...ACTIVITY_LOG_LEVELS],
             tags: [],
             latestFirst: true
         },
@@ -87,6 +93,7 @@
         refreshMetadata: null,
         refreshStatus: null
     };
+    let activityLogSearchTimer = null;
 
     const elements = {
         activityLogViewer: null,
@@ -104,6 +111,7 @@
         activityLogTagOptions: null,
         activityLogLatestFirst: null,
         activityLogCount: null,
+        activityLogLoadOlderBtn: null,
 
         settingsFeedback: null,
         settingsFilter: null,
@@ -202,6 +210,7 @@
         elements.activityLogTagOptions = document.getElementById('activity-log-tag-options');
         elements.activityLogLatestFirst = document.getElementById('activity-log-latest-first');
         elements.activityLogCount = document.getElementById('activity-log-count');
+        elements.activityLogLoadOlderBtn = document.getElementById('load-older-activity-log');
 
         elements.settingsFeedback = document.getElementById('settings-feedback');
         elements.settingsFilter = document.getElementById('settings-filter');
@@ -256,12 +265,13 @@
 
     function bindEvents() {
         elements.refreshActivityLogBtn?.addEventListener('click', () => refreshActivityLog());
-        elements.activityLogSearch?.addEventListener('input', handleActivityLogFilterChange);
+        elements.activityLogSearch?.addEventListener('input', handleActivityLogSearchInput);
         elements.activityLogLevelTrigger?.addEventListener('click', () => setActivityLogFilterMenuOpen('level', !state.activityLogFilterMenus.level));
         elements.activityLogLevelOptions?.addEventListener('change', handleActivityLogFilterChange);
         elements.activityLogTagTrigger?.addEventListener('click', () => setActivityLogFilterMenuOpen('tag', !state.activityLogFilterMenus.tag));
         elements.activityLogTagOptions?.addEventListener('change', handleActivityLogFilterChange);
         elements.activityLogLatestFirst?.addEventListener('change', handleActivityLogFilterChange);
+        elements.activityLogLoadOlderBtn?.addEventListener('click', () => refreshActivityLog({ append: true }));
         document.addEventListener('click', handleActivityLogDocumentClick);
 
         elements.settingsList?.addEventListener('click', handleSettingsTableClick);
@@ -318,8 +328,28 @@
         };
     }
 
-    async function refreshActivityLog(limitBytes = 65_536) {
-        if (!elements.activityLogViewer || state.isLoadingLog) return;
+    async function refreshActivityLog({ append = false } = {}) {
+        if (!elements.activityLogViewer) return;
+        if (append && state.isLoadingLog) return;
+        if (append && !state.activityLogNextCursor) return;
+        if (
+            !state.activityLogFilters.levels.length
+            || (state.activityLogAvailableTags.length && !state.activityLogFilters.tags.length)
+        ) {
+            state.activityLogEntries = [];
+            state.activityLogNextCursor = null;
+            state.activityLogTotalMatching = 0;
+            renderActivityLog();
+            return;
+        }
+
+        if (!append && state.activityLogAbortController) {
+            state.activityLogAbortController.abort();
+        }
+        const requestId = state.activityLogRequestId + 1;
+        const abortController = new AbortController();
+        state.activityLogRequestId = requestId;
+        state.activityLogAbortController = abortController;
 
         state.isLoadingLog = true;
         const refreshBtn = elements.refreshActivityLogBtn;
@@ -330,26 +360,51 @@
             setIconButtonLabel(refreshBtn, 'Refreshing activity log...');
         }
 
-        elements.activityLogViewer.textContent = 'Loading system log…';
+        if (!append) {
+            elements.activityLogViewer.textContent = 'Loading system log…';
+        }
 
         try {
-            const response = await fetch(`api/system/activity-log?limit_bytes=${limitBytes}`);
+            const params = new URLSearchParams({ limit: '200' });
+            if (append) params.set('cursor', state.activityLogNextCursor);
+            state.activityLogFilters.levels.forEach((level) => params.append('level', level));
+            state.activityLogFilters.tags.forEach((tag) => params.append('tag', tag));
+            if (state.activityLogFilters.query) params.set('search', state.activityLogFilters.query);
+
+            const response = await fetch(`api/system/activity-log?${params.toString()}`, {
+                signal: abortController.signal
+            });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
             const data = await response.json();
+            if (requestId !== state.activityLogRequestId) return;
             state.activityLog = data;
-
-            state.activityLogEntries = parseActivityLogEntries(data.content || '');
+            const received = Array.isArray(data.entries)
+                ? data.entries.map(normalizeActivityLogEntry)
+                : [];
+            if (append) {
+                const knownIds = new Set(state.activityLogEntries.map((entry) => entry.id).filter(Boolean));
+                state.activityLogEntries.push(...received.filter((entry) => !entry.id || !knownIds.has(entry.id)));
+            } else {
+                state.activityLogEntries = received;
+                state.activityLogTotalMatching = Number(data.total_matching || received.length);
+            }
+            state.activityLogNextCursor = data.next_cursor || null;
+            state.activityLogAvailableTags = Array.isArray(data.available_tags) ? data.available_tags : [];
             populateActivityLogFilters();
             renderActivityLog();
         } catch (error) {
-            elements.activityLogViewer.textContent = `Failed to load activity log: ${error.message}`;
+            if (error.name !== 'AbortError' && requestId === state.activityLogRequestId) {
+                elements.activityLogViewer.textContent = `Failed to load activity log: ${error.message}`;
+            }
         } finally {
+            if (requestId !== state.activityLogRequestId) return;
             if (refreshBtn) {
                 refreshBtn.disabled = false;
                 setIconButtonLabel(refreshBtn, prevLabel);
             }
             state.isLoadingLog = false;
+            state.activityLogAbortController = null;
         }
     }
 
@@ -995,57 +1050,20 @@
         }[char]));
     }
 
-    function parseActivityLogEntries(content) {
-        return (content || '')
-            .split(/\r?\n/)
-            .map((line, index) => parseActivityLogLine(line, index))
-            .filter(Boolean);
+    function normalizeActivityLogEntry(record) {
+        const data = record && typeof record.data === 'object' && record.data !== null ? record.data : {};
+        return {
+            id: record.id || '',
+            timestamp: record.timestamp || '',
+            level: String(record.level || '').toLowerCase(),
+            tag: record.tag || '',
+            message: record.message || '',
+            data,
+            bootId: record.boot_id ?? null
+        };
     }
 
-    function parseActivityLogLine(line, index) {
-        const trimmed = (line || '').trim();
-        if (!trimmed) return null;
-
-        try {
-            const record = JSON.parse(trimmed);
-            const data = record && typeof record.data === 'object' && record.data !== null ? record.data : {};
-            const searchText = [
-                record.timestamp,
-                record.level,
-                record.tag,
-                record.message,
-                JSON.stringify(data)
-            ].filter(Boolean).join(' ').toLowerCase();
-
-            return {
-                index,
-                raw: trimmed,
-                parsed: true,
-                timestamp: record.timestamp || '',
-                level: String(record.level || '').toLowerCase(),
-                tag: record.tag || '',
-                message: record.message || '',
-                data,
-                bootId: record.boot_id ?? null,
-                searchText
-            };
-        } catch {
-            return {
-                index,
-                raw: trimmed,
-                parsed: false,
-                timestamp: '',
-                level: '',
-                tag: '',
-                message: trimmed,
-                data: {},
-                bootId: null,
-                searchText: trimmed.toLowerCase()
-            };
-        }
-    }
-
-    function handleActivityLogFilterChange() {
+    function handleActivityLogFilterChange(event) {
         state.activityLogFilters = {
             query: (elements.activityLogSearch?.value || '').trim().toLowerCase(),
             levels: getCheckedActivityLogFilterValues(elements.activityLogLevelOptions),
@@ -1053,7 +1071,24 @@
             latestFirst: Boolean(elements.activityLogLatestFirst?.checked)
         };
         updateActivityLogFilterSummaries();
-        renderActivityLog();
+        if (event?.target === elements.activityLogLatestFirst) {
+            renderActivityLog();
+            return;
+        }
+        if (!state.activityLogFilters.levels.length || (state.activityLogAvailableTags.length && !state.activityLogFilters.tags.length)) {
+            state.activityLogEntries = [];
+            state.activityLogNextCursor = null;
+            state.activityLogTotalMatching = 0;
+            renderActivityLog();
+            return;
+        }
+        refreshActivityLog();
+    }
+
+    function handleActivityLogSearchInput() {
+        state.activityLogFilters.query = (elements.activityLogSearch?.value || '').trim().toLowerCase();
+        if (activityLogSearchTimer) window.clearTimeout(activityLogSearchTimer);
+        activityLogSearchTimer = window.setTimeout(() => refreshActivityLog(), 300);
     }
 
     function populateActivityLogFilters() {
@@ -1065,7 +1100,7 @@
     function renderActivityLogLevelOptions() {
         if (!elements.activityLogLevelOptions) return;
 
-        const levels = ['error', 'warning', 'info', 'debug'];
+        const levels = ACTIVITY_LOG_LEVELS;
         const selected = new Set(Array.isArray(state.activityLogFilters.levels) ? state.activityLogFilters.levels : levels);
         elements.activityLogLevelOptions.innerHTML = levels
             .map((level) => renderActivityLogCheckbox('level', level, formatActivityLogLevelLabel(level), selected.has(level)))
@@ -1079,7 +1114,7 @@
         const previousOptions = Array.from(elements.activityLogTagOptions.querySelectorAll('input[type="checkbox"]')).map((input) => input.value);
         const previousSelected = getCheckedActivityLogFilterValues(elements.activityLogTagOptions);
         const previousWasAll = previousOptions.length === 0 || previousSelected.length === previousOptions.length;
-        const tags = [...new Set(state.activityLogEntries.map((entry) => entry.tag).filter(Boolean))].sort();
+        const tags = [...new Set(state.activityLogAvailableTags)].sort();
         const selected = previousWasAll ? new Set(tags) : new Set(previousSelected.filter((tag) => tags.includes(tag)));
 
         elements.activityLogTagOptions.innerHTML = tags.length
@@ -1109,11 +1144,11 @@
         updateActivityLogFilterSummary(
             elements.activityLogLevelSummary,
             state.activityLogFilters.levels,
-            ['error', 'warning', 'info', 'debug'],
+            ACTIVITY_LOG_LEVELS,
             'All levels',
             'No levels'
         );
-        const allTags = [...new Set(state.activityLogEntries.map((entry) => entry.tag).filter(Boolean))].sort();
+        const allTags = [...new Set(state.activityLogAvailableTags)].sort();
         updateActivityLogFilterSummary(
             elements.activityLogTagSummary,
             state.activityLogFilters.tags,
@@ -1139,7 +1174,10 @@
     function formatActivityLogLevelLabel(level) {
         return {
             error: 'Error',
+            critical: 'Critical',
+            fatal: 'Fatal',
             warning: 'Warning',
+            warn: 'Warn',
             info: 'Info',
             debug: 'Debug'
         }[level] || level;
@@ -1183,11 +1221,14 @@
 
         const entries = getFilteredActivityLogEntries();
         if (elements.activityLogCount) {
-            const total = state.activityLogEntries.length;
+            const total = state.activityLogTotalMatching;
             const shown = entries.length;
-            const truncated = state.activityLog?.truncated ? ' Loaded from truncated log window.' : '';
-            elements.activityLogCount.textContent = `${shown} of ${total} entries shown.${truncated}`;
+            const earliest = state.activityLog?.earliest_retained_timestamp
+                ? ` Retained since ${formatActivityLogTimestamp(state.activityLog.earliest_retained_timestamp)}.`
+                : '';
+            elements.activityLogCount.textContent = `${shown} of ${total} matching entries loaded.${earliest}`;
         }
+        elements.activityLogLoadOlderBtn?.classList.toggle('hidden', !state.activityLogNextCursor);
 
         if (!state.activityLogEntries.length) {
             elements.activityLogViewer.innerHTML = '<div class="p-3 text-txt-secondary">No activity log entries loaded.</div>';
@@ -1205,14 +1246,9 @@
 
     function getFilteredActivityLogEntries() {
         const filters = state.activityLogFilters;
-        let entries = state.activityLogEntries.filter((entry) => {
-            if (!filters.levels.includes(entry.level)) return false;
-            if (entry.tag && !filters.tags.includes(entry.tag)) return false;
-            if (filters.query && !entry.searchText.includes(filters.query)) return false;
-            return true;
-        });
+        let entries = state.activityLogEntries;
 
-        if (filters.latestFirst) {
+        if (!filters.latestFirst) {
             entries = [...entries].reverse();
         }
         return entries;

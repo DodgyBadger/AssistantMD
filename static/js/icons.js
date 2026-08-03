@@ -67,6 +67,13 @@
                 <path d="M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
             </svg>
         `.trim(),
+        MORE_HORIZONTAL_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5" fill="currentColor"></circle>
+                <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
+                <circle cx="19" cy="12" r="1.5" fill="currentColor"></circle>
+            </svg>
+        `.trim(),
         EDIT_ICON_SVG: `
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M12 20h9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -77,6 +84,19 @@
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M2.06 12.35a1 1 0 0 1 0-.7C3.6 7.72 7.5 5 12 5s8.4 2.72 9.94 6.65a1 1 0 0 1 0 .7C20.4 16.28 16.5 19 12 19s-8.4-2.72-9.94-6.65" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
                 <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle>
+            </svg>
+        `.trim(),
+        HISTORY_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M12 7v5l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+        `.trim(),
+        RESTORE_ICON_SVG: `
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                <path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
             </svg>
         `.trim(),
         FOLDER_ICON_SVG: `
@@ -227,6 +247,7 @@
         folder: icons.FOLDER_ICON_SVG,
         import: icons.IMPORT_ICON_SVG,
         link: icons.LINK_ICON_SVG,
+        more: icons.MORE_HORIZONTAL_ICON_SVG,
         play: icons.PLAY_ICON_SVG,
         plus: icons.PLUS_ICON_SVG,
         refresh: icons.REFRESH_ICON_SVG,

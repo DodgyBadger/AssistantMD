@@ -1,6 +1,7 @@
 """Integration scenario for manually retrying interrupted chat turns."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,9 +33,10 @@ class ChatManualRetryScenario(BaseScenario):
 
         await self.start_system()
 
+        from pydantic_ai.models.test import TestModel
+
         import core.chat.executor as chat_executor
         from core.chat.task_execution import CHAT_TASK_EVENT_BUFFER
-        from pydantic_ai.models.test import TestModel
 
         async def _prepared_failure(*args, **kwargs):
             return PreparedChatExecution(
@@ -61,26 +63,32 @@ class ChatManualRetryScenario(BaseScenario):
                     "model": "test",
                 }
             )
-            assert failed_result["terminal_event"].get("event") == "error", (
-                "Interrupted chat should emit an error event"
-            )
+            assert (
+                failed_result["terminal_event"].get("event") == "error"
+            ), "Interrupted chat should emit an error event"
 
             failed_detail = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
             )
-            assert failed_detail.status_code == 200, "Failed chat session detail should load"
+            assert (
+                failed_detail.status_code == 200
+            ), "Failed chat session detail should load"
             latest_failure = failed_detail.json().get("latest_failure")
-            assert latest_failure is not None, "Interrupted chat should expose a failure marker"
-            assert latest_failure.get("failure_kind") == "transient_network", (
-                "Interrupted provider streams should be retryable network failures"
-            )
-            assert latest_failure.get("retryable") is True, (
-                "Interrupted provider streams should be manually retryable"
-            )
+            assert (
+                latest_failure is not None
+            ), "Interrupted chat should expose a failure marker"
+            assert (
+                latest_failure.get("failure_kind") == "transient_network"
+            ), "Interrupted provider streams should be retryable network failures"
+            assert (
+                latest_failure.get("retryable") is True
+            ), "Interrupted provider streams should be manually retryable"
 
             captured_retry_history: list[tuple[str, str]] = []
 
-            def _patched_prepare_agent_config(vault_name, vault_path, tools, model, thinking=None):
+            def _patched_prepare_agent_config(
+                vault_name, vault_path, tools, model, thinking=None, chat_mode=None
+            ):
                 del vault_name, vault_path, tools, model, thinking
                 return ("Answer briefly.", "", TestModel(), [])
 
@@ -100,7 +108,9 @@ class ChatManualRetryScenario(BaseScenario):
                 method="POST",
                 data={"vault_name": vault.name},
             )
-            assert retry_start.status_code == 200, "Manual retry should start a chat task"
+            assert (
+                retry_start.status_code == 200
+            ), "Manual retry should start a chat task"
             retry_payload = retry_start.json()
             task_id = retry_payload.get("task", {}).get("task_id")
             assert task_id, "Manual retry response should include a task id"
@@ -129,7 +139,9 @@ class ChatManualRetryScenario(BaseScenario):
                     await asyncio.sleep(0.01)
 
             await asyncio.wait_for(_collect_retry_events(), timeout=10)
-            assert retry_events[-1].get("event") == "done", "Manual retry should complete"
+            assert (
+                retry_events[-1].get("event") == "done"
+            ), "Manual retry should complete"
             assert retry_text, "Manual retry should stream assistant text"
             assert all(
                 item != ("user", "Retry this interrupted request.")
@@ -143,23 +155,33 @@ class ChatManualRetryScenario(BaseScenario):
             retried_detail = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
             )
-            assert retried_detail.status_code == 200, "Retried chat session detail should load"
+            assert (
+                retried_detail.status_code == 200
+            ), "Retried chat session detail should load"
             payload = retried_detail.json()
-            assert payload.get("latest_failure") is None, (
-                "Successful manual retry should clear the failure marker"
-            )
+            assert (
+                payload.get("latest_failure") is None
+            ), "Successful manual retry should clear the failure marker"
             messages = payload.get("messages", [])
-            user_messages = [message for message in messages if message.get("role") == "user"]
-            assistant_messages = [message for message in messages if message.get("role") == "assistant"]
-            assert len(user_messages) == 1, "Manual retry should not duplicate the user message"
-            assert len(assistant_messages) == 1, "Manual retry should persist one assistant response"
+            user_messages = [
+                message for message in messages if message.get("role") == "user"
+            ]
+            assistant_messages = [
+                message for message in messages if message.get("role") == "assistant"
+            ]
+            assert (
+                len(user_messages) == 1
+            ), "Manual retry should not duplicate the user message"
+            assert (
+                len(assistant_messages) == 1
+            ), "Manual retry should persist one assistant response"
 
             activity_log = self.call_api("/api/system/activity-log")
             assert activity_log.status_code == 200, "Activity log fetch should succeed"
-            content = activity_log.json()["content"]
-            assert '"event": "chat_manual_retry_started"' in content, (
-                "Activity log should include manual retry start evidence"
-            )
+            content = json.dumps(activity_log.json()["entries"])
+            assert (
+                '"event": "chat_manual_retry_started"' in content
+            ), "Activity log should include manual retry start evidence"
         finally:
             chat_executor._prepare_chat_execution = original_prepare_chat_execution
             chat_executor._prepare_agent_config = original_prepare_agent_config

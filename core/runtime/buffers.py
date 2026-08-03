@@ -9,29 +9,29 @@ Mental model:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from core.runtime.state import has_runtime_context, get_runtime_context
+from core.runtime.state import get_runtime_context, has_runtime_context
 
-
-_fallback_session_buffers: Dict[str, "BufferStore"] = {}
+_fallback_session_buffers: dict[str, BufferStore] = {}
 
 
 @dataclass
 class BufferEntry:
     """Single variable entry stored inside the buffer."""
+
     content: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class BufferStore:
     """Simple in-memory container for named variables."""
 
     def __init__(self) -> None:
-        self._buffers: Dict[str, BufferEntry] = {}
+        self._buffers: dict[str, BufferEntry] = {}
 
     def put(
         self,
@@ -39,13 +39,13 @@ class BufferStore:
         content: str,
         *,
         mode: str = "replace",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         if not name or not name.strip():
             raise ValueError("Variable name is required")
         if mode not in {"replace", "append"}:
             raise ValueError("Buffer mode must be 'replace' or 'append'")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         meta = metadata or {}
         if name in self._buffers and mode == "append":
             entry = self._buffers[name]
@@ -60,12 +60,12 @@ class BufferStore:
             updated_at=now,
         )
 
-    def get(self, name: str) -> Optional[BufferEntry]:
+    def get(self, name: str) -> BufferEntry | None:
         if not name:
             return None
         return self._buffers.get(name)
 
-    def list(self) -> Dict[str, Dict[str, Any]]:
+    def list(self) -> dict[str, dict[str, Any]]:
         return {
             name: {
                 "size": len(entry.content or ""),

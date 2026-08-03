@@ -4,9 +4,10 @@ Build ordered prompt payloads from @input file data with markdown image support.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import Any
 
 from pydantic_ai.messages import UserContent
 
@@ -17,6 +18,7 @@ from core.utils.image_inputs import (
     format_missing_image_marker,
     format_remote_image_ref_marker,
 )
+
 from .image_refs import evaluate_markdown_image_policy, resolve_local_image_path
 from .markdown import MarkdownChunk, parse_markdown_chunks
 from .policy import ChunkingPolicy, default_chunking_policy
@@ -30,27 +32,31 @@ class InputFilesPromptBuildResult:
     prompt_text: str
     attached_image_count: int = 0
     attached_image_bytes: int = 0
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _normalize_input_file_lists(input_file_data: Any) -> list[list[dict[str, Any]]]:
     if not input_file_data:
         return []
-    if isinstance(input_file_data, list) and input_file_data and isinstance(input_file_data[0], dict):
+    if (
+        isinstance(input_file_data, list)
+        and input_file_data
+        and isinstance(input_file_data[0], dict)
+    ):
         return [input_file_data]
     if isinstance(input_file_data, list):
         return [item for item in input_file_data if isinstance(item, list)]
     return []
 
 
-def _append_text(parts: List[UserContent], text_lines: List[str], value: str) -> None:
+def _append_text(parts: list[UserContent], text_lines: list[str], value: str) -> None:
     if not value:
         return
     parts.append(value)
     text_lines.append(value)
 
 
-def _resolve_source_markdown_path(file_data: dict[str, Any]) -> Optional[str]:
+def _resolve_source_markdown_path(file_data: dict[str, Any]) -> str | None:
     source_path = str(file_data.get("source_path") or "").strip()
     if source_path:
         return source_path
@@ -76,8 +82,10 @@ def _is_image_file(file_data: dict[str, Any]) -> bool:
     return SUPPORTED_READ_FILE_TYPES.get(Path(source_path).suffix.lower()) == "image"
 
 
-def _resolve_input_file_path(file_data: dict[str, Any], vault_path: str) -> Optional[Path]:
-    raw_path = str(file_data.get("source_path") or file_data.get("filepath") or "").strip()
+def _resolve_input_file_path(file_data: dict[str, Any], vault_path: str) -> Path | None:
+    raw_path = str(
+        file_data.get("source_path") or file_data.get("filepath") or ""
+    ).strip()
     if not raw_path:
         return None
     candidate = Path(raw_path)
@@ -106,12 +114,12 @@ def build_input_files_prompt(
     input_file_data: Any,
     vault_path: str,
     has_empty_directive: bool = False,
-    base_prompt: Optional[str] = None,
-    supports_vision: Optional[bool] = None,
+    base_prompt: str | None = None,
+    supports_vision: bool | None = None,
     default_images_policy: str = "auto",
-    policy: Optional[ChunkingPolicy] = None,
+    policy: ChunkingPolicy | None = None,
     include_file_framing: bool = True,
-    auto_cache_max_tokens: Optional[int] = None,
+    auto_cache_max_tokens: int | None = None,
 ) -> InputFilesPromptBuildResult:
     """
     Build prompt payload from @input directive data while preserving markdown image order.
@@ -123,9 +131,9 @@ def build_input_files_prompt(
         else auto_cache_max_tokens
     )
     file_lists = _normalize_input_file_lists(input_file_data)
-    parts: List[UserContent] = []
-    text_lines: List[str] = []
-    warnings: List[str] = []
+    parts: list[UserContent] = []
+    text_lines: list[str] = []
+    warnings: list[str] = []
     attached_count = 0
     attached_bytes = 0
     seen_images: set[str] = set()
@@ -135,11 +143,13 @@ def build_input_files_prompt(
         _append_text(parts, text_lines, base_prompt)
 
     if not file_lists and not has_empty_directive:
-        prompt = parts[0] if len(parts) == 1 and isinstance(parts[0], str) else parts
+        early_prompt: PromptInput = (
+            parts[0] if len(parts) == 1 and isinstance(parts[0], str) else parts
+        )
         if not parts:
-            prompt = ""
+            early_prompt = ""
         return InputFilesPromptBuildResult(
-            prompt=prompt,
+            prompt=early_prompt,
             prompt_text="".join(text_lines),
             attached_image_count=0,
             attached_image_bytes=0,
@@ -161,7 +171,9 @@ def build_input_files_prompt(
             manifest = item.get("manifest")
             if manifest:
                 if include_file_framing:
-                    _append_text(parts, text_lines, f"--- ROUTED INPUTS ---\n{manifest}\n")
+                    _append_text(
+                        parts, text_lines, f"--- ROUTED INPUTS ---\n{manifest}\n"
+                    )
                 continue
 
             filepath = str(item.get("filepath") or "unknown")
@@ -173,7 +185,9 @@ def build_input_files_prompt(
             if refs_only:
                 missing_suffix = ""
                 if not found:
-                    missing_suffix = f" (missing: {item.get('error', 'File not found')})"
+                    missing_suffix = (
+                        f" (missing: {item.get('error', 'File not found')})"
+                    )
                 if include_file_framing:
                     _append_text(
                         parts,
@@ -229,13 +243,13 @@ def build_input_files_prompt(
                 _append_text(parts, text_lines, f"{content}\n")
                 continue
 
-            markdown_chunks: List[MarkdownChunk] = parse_markdown_chunks(content)
+            markdown_chunks: list[MarkdownChunk] = parse_markdown_chunks(content)
             if not markdown_chunks:
                 _append_text(parts, text_lines, f"{content}\n")
                 continue
 
             source_markdown_path = _resolve_source_markdown_path(item) or filepath
-            decision = evaluate_markdown_image_policy(
+            markdown_decision = evaluate_markdown_image_policy(
                 file_content=content,
                 markdown_chunks=markdown_chunks,
                 source_markdown_path=source_markdown_path,
@@ -243,11 +257,16 @@ def build_input_files_prompt(
                 auto_cache_max_tokens=effective_auto_cache_limit,
                 policy=effective_policy,
             )
-            if not decision.attach_images:
-                _append_text(parts, text_lines, f"{decision.normalized_text or content}\n")
-                if decision.reason:
+            if not markdown_decision.attach_images:
+                _append_text(
+                    parts,
+                    text_lines,
+                    f"{markdown_decision.normalized_text or content}\n",
+                )
+                if markdown_decision.reason:
                     warnings.append(
-                        f"Skipped image attachments for '{filepath}': {decision.reason}."
+                        f"Skipped image attachments for '{filepath}': "
+                        f"{markdown_decision.reason}."
                     )
                 continue
 

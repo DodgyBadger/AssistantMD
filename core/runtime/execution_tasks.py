@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from contextvars import ContextVar
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 from core.logger import UnifiedLogger
 
@@ -113,7 +114,9 @@ def goal_task_metadata(
     return metadata
 
 
-def goal_context_from_metadata(metadata: dict[str, Any] | None) -> tuple[str | None, str | None]:
+def goal_context_from_metadata(
+    metadata: dict[str, Any] | None,
+) -> tuple[str | None, str | None]:
     """Extract optional goal context from execution task metadata."""
     if not isinstance(metadata, dict):
         return None, None
@@ -374,7 +377,9 @@ class TaskCoordinator:
                     snapshot,
                     extra={"reason": reason, "ignored_reason": "task_terminal"},
                 )
-                return ExecutionTaskCancellationResult(snapshot=snapshot, effective=False)
+                return ExecutionTaskCancellationResult(
+                    snapshot=snapshot, effective=False
+                )
             record.cancel_requested = True
             record.latest_event = reason
             handle = record.handle
@@ -495,7 +500,9 @@ class TaskCoordinator:
         for task in active_tasks:
             await self.cancel_task(task.task_id, reason=reason)
 
-    async def mark_unfinished_cancelled(self, *, reason: str = "runtime_shutdown") -> None:
+    async def mark_unfinished_cancelled(
+        self, *, reason: str = "runtime_shutdown"
+    ) -> None:
         """Mark any remaining non-terminal task records cancelled."""
         active_tasks = await self.list_tasks(include_terminal=False)
         for task in active_tasks:
@@ -611,7 +618,11 @@ class TaskCoordinator:
             "status": snapshot.status,
             "cancel_requested": snapshot.cancel_requested,
             "terminal_reason": snapshot.terminal_reason,
-            "last_heartbeat_at": snapshot.last_heartbeat_at.isoformat() if snapshot.last_heartbeat_at else None,
+            "last_heartbeat_at": (
+                snapshot.last_heartbeat_at.isoformat()
+                if snapshot.last_heartbeat_at
+                else None
+            ),
             "heartbeat_status": snapshot.heartbeat_status,
         }
         goal_id, step_id = goal_context_from_metadata(snapshot.metadata)
@@ -621,7 +632,12 @@ class TaskCoordinator:
             data["step_id"] = step_id
         if extra:
             data.update(extra)
-        self._logger.add_sink("validation").info(
+        log = (
+            self._logger.set_sinks(["validation"])
+            if event in {"execution_task_metadata_updated", "execution_task_heartbeat"}
+            else self._logger.add_sink("validation")
+        )
+        log.info(
             event,
             data=data,
         )
@@ -639,7 +655,9 @@ class TaskCoordinator:
                         "task_id": snapshot.task_id,
                         "kind": snapshot.kind,
                         "status": snapshot.status,
-                        "observer": getattr(observer, "__name__", observer.__class__.__name__),
+                        "observer": getattr(
+                            observer, "__name__", observer.__class__.__name__
+                        ),
                         "error_type": type(exc).__name__,
                         "error": str(exc),
                     },

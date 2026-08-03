@@ -67,14 +67,18 @@ class PendingHybridScenario(BaseScenario):
 
         # Simulate workflow self-edit: change a file but keep mtime before processed_at
         task1 = task_files[0]
-        task1.write_text(task1.read_text(encoding="utf-8") + "self-edit\n", encoding="utf-8")
-        os.utime(task1, times=(original_mtimes[str(task1)], original_mtimes[str(task1)]))
+        task1.write_text(
+            task1.read_text(encoding="utf-8") + "self-edit\n", encoding="utf-8"
+        )
+        os.utime(
+            task1, times=(original_mtimes[str(task1)], original_mtimes[str(task1)])
+        )
 
         checkpoint = self.event_checkpoint()
         result = await self.run_workflow(vault, "pending_hybrid")
-        assert result.status == "completed", (
-            "Second run should succeed without re-queuing self-edited file"
-        )
+        assert (
+            result.status == "completed"
+        ), "Second run should succeed without re-queuing self-edited file"
         events = self.events_since(checkpoint)
         self.assert_event_contains(
             events,
@@ -86,7 +90,9 @@ class PendingHybridScenario(BaseScenario):
         )
 
         # Simulate user edit after processing; should re-queue
-        task1.write_text(task1.read_text(encoding="utf-8") + "user-edit\n", encoding="utf-8")
+        task1.write_text(
+            task1.read_text(encoding="utf-8") + "user-edit\n", encoding="utf-8"
+        )
         os.utime(task1, None)  # bump mtime to now
 
         checkpoint = self.event_checkpoint()
@@ -119,6 +125,7 @@ class PendingHybridScenario(BaseScenario):
         await self.stop_system()
         self.teardown_scenario()
 
+
 # === WORKFLOW TEMPLATE ===
 
 PENDING_HYBRID_WORKFLOW = """---
@@ -130,7 +137,7 @@ description: Pending hybrid validation
 ## Run
 
 ```python
-listed = await file_ops_safe(operation="list", path="tasks")
+listed = await file_read(operation="list", path="tasks")
 pending = await pending_files(operation="get", items=listed)
 if pending.items:
     await pending_files(operation="complete", items=pending.items)

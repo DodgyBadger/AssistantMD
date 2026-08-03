@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
 
@@ -12,11 +15,17 @@ class VaultRecord(Base):
 
     __tablename__ = "vaults"
 
-    vault_id = Column(String, primary_key=True, nullable=False)
-    current_name = Column(String, nullable=False)
-    first_seen_at = Column(DateTime(timezone=True), nullable=False)
-    last_seen_at = Column(DateTime(timezone=True), nullable=False)
-    missing_since = Column(DateTime(timezone=True), nullable=True)
+    vault_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    current_name: Mapped[str] = mapped_column(String, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    missing_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class VaultFile(Base):
@@ -24,19 +33,27 @@ class VaultFile(Base):
 
     __tablename__ = "vault_files"
 
-    vault_id = Column(String, primary_key=True, nullable=False)
-    path = Column(String, primary_key=True, nullable=False)
-    vault_name = Column(String, nullable=False)
-    artifact_class = Column(String, nullable=False)
-    size = Column(Integer, nullable=False)
-    mtime_ns = Column(Integer, nullable=False)
-    content_hash = Column(String, nullable=False)
-    kind = Column(String, nullable=False)
-    change_sequence = Column(Integer, nullable=False)
-    first_seen_at = Column(DateTime(timezone=True), nullable=False)
-    last_seen_at = Column(DateTime(timezone=True), nullable=False)
-    changed_at = Column(DateTime(timezone=True), nullable=False)
-    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    vault_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    path: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    vault_name: Mapped[str] = mapped_column(String, nullable=False)
+    artifact_class: Mapped[str] = mapped_column(String, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mtime_ns: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    change_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class VaultFileEvent(Base):
@@ -44,68 +61,115 @@ class VaultFileEvent(Base):
 
     __tablename__ = "vault_file_events"
 
-    sequence = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    vault_id = Column(String, nullable=False)
-    vault_name = Column(String, nullable=False)
-    path = Column(String, nullable=False)
-    event_type = Column(String, nullable=False)
-    content_hash = Column(String, nullable=True)
-    artifact_class = Column(String, nullable=True)
-    observed_at = Column(DateTime(timezone=True), nullable=False)
-    metadata_json = Column(Text, nullable=True)
+    sequence: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
+    )
+    vault_id: Mapped[str] = mapped_column(String, nullable=False)
+    vault_name: Mapped[str] = mapped_column(String, nullable=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    artifact_class: Mapped[str | None] = mapped_column(String, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class TaskFileMutation(Base):
-    """Task-scoped vault file mutation audit row."""
+class VaultActivity(Base):
+    """One durable attributed unit of vault work."""
 
-    __tablename__ = "task_file_mutations"
+    __tablename__ = "vault_activities"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    task_id = Column(String, nullable=False)
-    task_kind = Column(String, nullable=True)
-    task_source = Column(String, nullable=True)
-    task_scope = Column(String, nullable=True)
-    task_label = Column(String, nullable=True)
-    goal_id = Column(String, nullable=True)
-    step_id = Column(String, nullable=True)
-    vault_id = Column(String, nullable=False)
-    vault_name = Column(String, nullable=False)
-    path = Column(String, nullable=False)
-    related_path = Column(String, nullable=True)
-    operation = Column(String, nullable=False)
-    event_sequence = Column(Integer, nullable=True)
-    before_exists = Column(Boolean, nullable=False)
-    before_hash = Column(String, nullable=True)
-    before_snapshot_id = Column(Integer, nullable=True)
-    after_exists = Column(Boolean, nullable=False)
-    after_hash = Column(String, nullable=True)
-    after_snapshot_id = Column(Integer, nullable=True)
-    snapshot_ref = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    activity_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    vault_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    vault_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    step_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    rollback_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class VaultMutation(Base):
+    """One path-level mutation linked to a durable vault activity."""
+
+    __tablename__ = "vault_mutations"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
+    )
+    activity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    operation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    related_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_kind: Mapped[str] = mapped_column(String, nullable=False)
+    operation: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    event_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    before_exists: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    before_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    before_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    after_exists: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    after_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    after_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SnapshotSet(Base):
-    """A task-scoped moment when one or more file snapshots were captured."""
+    """An activity- or task-scoped file snapshot capture point."""
 
     __tablename__ = "snapshot_sets"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    task_id = Column(String, nullable=False)
-    task_kind = Column(String, nullable=True)
-    task_source = Column(String, nullable=True)
-    task_scope = Column(String, nullable=True)
-    task_label = Column(String, nullable=True)
-    vault_id = Column(String, nullable=False)
-    vault_name = Column(String, nullable=False)
-    purpose = Column(String, nullable=False)
-    scope_kind = Column(String, nullable=True)
-    scope_id = Column(String, nullable=True)
-    snapshot_root = Column(String, nullable=False)
-    status = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    rolled_back_at = Column(DateTime(timezone=True), nullable=True)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
+    )
+    activity_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    vault_id: Mapped[str] = mapped_column(String, nullable=False)
+    vault_name: Mapped[str] = mapped_column(String, nullable=False)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    scope_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    scope_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    snapshot_root: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rolled_back_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class FileSnapshot(Base):
@@ -113,15 +177,22 @@ class FileSnapshot(Base):
 
     __tablename__ = "file_snapshots"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
-    snapshot_set_id = Column(Integer, nullable=False)
-    task_id = Column(String, nullable=False)
-    vault_id = Column(String, nullable=False)
-    vault_name = Column(String, nullable=False)
-    path = Column(String, nullable=False)
-    source = Column(String, nullable=False)
-    exists = Column("file_exists", Boolean, nullable=False)
-    content_hash = Column(String, nullable=True)
-    snapshot_ref = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, nullable=False
+    )
+    snapshot_set_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    activity_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    vault_id: Mapped[str] = mapped_column(String, nullable=False)
+    vault_name: Mapped[str] = mapped_column(String, nullable=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    exists: Mapped[bool] = mapped_column("file_exists", Boolean, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    snapshot_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

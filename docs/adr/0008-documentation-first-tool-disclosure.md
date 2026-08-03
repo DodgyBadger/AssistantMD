@@ -14,7 +14,7 @@ channels make tool behavior harder to predict.
 
 Keep always-present tool descriptions concise. Put rich tool and authoring
 documentation in markdown under the virtual docs mount, readable through
-`file_ops_safe`. Prefer targeted documentation reads over large no-argument tool
+`file_read`. Prefer targeted documentation reads over large no-argument tool
 responses or special metadata endpoints as the normal LLM-facing discovery path.
 
 ## Rationale

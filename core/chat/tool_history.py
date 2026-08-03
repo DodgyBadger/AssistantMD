@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
 
-_MODEL_MESSAGE_ADAPTER = TypeAdapter(ModelMessage)
+_MODEL_MESSAGE_ADAPTER: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,9 @@ def analyze_tool_history(messages: Sequence[ModelMessage]) -> ToolHistoryIntegri
     )
 
 
-def analyze_tool_history_payloads(payloads: Sequence[dict[str, Any]]) -> ToolHistoryIntegrity:
+def analyze_tool_history_payloads(
+    payloads: Sequence[dict[str, Any]],
+) -> ToolHistoryIntegrity:
     """Analyze JSON/dict message payloads for tool-call/return integrity."""
     messages: list[ModelMessage] = []
     issues: list[ToolHistoryIssue] = []

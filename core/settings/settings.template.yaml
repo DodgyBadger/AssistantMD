@@ -19,19 +19,30 @@ settings:
     description: "Default context script name for chat sessions (vault scripts override system scripts by name)."
     category: "Chat"
     restart_required: false
-  default_chat_tools:
-    value:
-      - web_search_duckduckgo
-      - browser
-      - file_ops_safe
-      - file_ops_unsafe
-      - code_execution
-      - delegate
-      - chat_history_compact
-      - session_ops
-      - goal_ops
-    description: "List of tool names enabled by default in the chat UI."
+  default_chat_mode:
+    value: normal
+    description: "Default mode for new chat sessions. Use normal or inline_edit."
     category: "Chat"
+    restart_required: false
+  disabled_tools:
+    value: []
+    description: "App-wide tool names to disable. All registered tools not listed here are available to chat, delegates, workflows, and scripts."
+    category: "Chat"
+    restart_required: false
+  web_search_strategy:
+    value: duckduckgo
+    description: "Strategy used by web_search. Built-in options: duckduckgo or tavily."
+    category: "Browser and API"
+    restart_required: false
+  web_extract_strategy:
+    value: curl
+    description: "Strategy used by web_extract. Built-in options: curl or tavily."
+    category: "Browser and API"
+    restart_required: false
+  web_crawl_strategy:
+    value: tavily
+    description: "Strategy used by web_crawl. Currently supported: tavily."
+    category: "Browser and API"
     restart_required: false
   chat_tool_calls_limit:
     value: 0
@@ -104,9 +115,24 @@ settings:
     description: "Selector wait timeout in seconds for the browser extraction tool."
     category: "Browser and API"
     restart_required: false
+  browser_max_concurrent_sessions:
+    value: 1
+    description: "Maximum Chromium sessions allowed at once. Keep at 1 on the standard 2 GB deployment profile."
+    category: "Browser and API"
+    restart_required: false
+  browser_max_calls_per_turn:
+    value: 4
+    description: "Maximum browser calls in one execution task. 0 disables this browser-specific circuit breaker."
+    category: "Browser and API"
+    restart_required: false
+  browser_min_memory_headroom_mb:
+    value: 512
+    description: "Minimum cgroup memory headroom required before launching Chromium. 0 disables launch admission checks."
+    category: "Browser and API"
+    restart_required: false
   max_output_tokens:
     value: 0
-    description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_ops writes."
+    description: "Maximum output tokens for model responses. 0 = provider default. Increase if you experience errors on file_write calls."
     category: "Models"
     restart_required: false
   auto_cache_max_tokens:
@@ -131,12 +157,17 @@ settings:
     restart_required: false
   file_search_timeout_seconds:
     value: 10
-    description: "Timeout in seconds for file_ops_safe search operations."
+    description: "Timeout in seconds for file_read search operations."
     category: "Files"
     restart_required: false
-  file_ops_safe_list_max_results:
+  file_list_max_results:
     value: 200
-    description: "Maximum number of results returned by file_ops_safe list operations. 0 = disabled."
+    description: "Maximum number of results returned by file_read list operations. 0 = disabled."
+    category: "Files"
+    restart_required: false
+  vault_upload_max_mb_per_file:
+    value: 100
+    description: "Maximum size in MB for one Vault Explorer file upload. 0 disables Vault Explorer uploads."
     category: "Files"
     restart_required: false
   vault_state_enabled:
@@ -236,9 +267,9 @@ settings:
     description: "Vault-relative path where imports are written."
     category: "Import"
     restart_required: false
-  ingestion_url_fetch_backend:
+  ingestion_url_fetch_strategy:
     value: "curl"
-    description: "URL ingestion backend. Currently only curl is supported. DO NOT CHANGE."
+    description: "URL transport strategy used by ingestion. Currently supported: curl."
     category: "Import"
     restart_required: false
   ingestion_url_connect_timeout_seconds:
@@ -406,42 +437,34 @@ providers:
     user_editable: true
 
 tools:
-  web_search_tavily:
-    module: core.tools.web_search_tavily
-    description: "Web search using Tavily. API key required."
-    requires_secrets:
-      - TAVILY_API_KEY
-    user_editable: false
-  web_search_duckduckgo:
-    module: core.tools.web_search_duckduckgo
-    description: "Web search using DuckDuckGo"
+  web_search:
+    module: core.tools.web_search
+    description: "Search the web using the configured strategy"
     requires_secrets: []
     user_editable: false
-  file_ops_safe:
-    module: core.tools.file_ops_safe
-    description: "Read, write, append, list, search"
+  web_extract:
+    module: core.tools.web_extract
+    description: "Extract readable content from known URLs using the configured strategy"
     requires_secrets: []
     user_editable: false
-  file_ops_unsafe:
-    module: core.tools.file_ops_unsafe
-    description: "Edit, delete, move/overwrite (use with caution)"
+  web_crawl:
+    module: core.tools.web_crawl
+    description: "Crawl related website pages using the configured strategy"
     requires_secrets: []
     user_editable: false
-  tavily_extract:
-    module: core.tools.tavily_extract
-    description: "Extract content from specific URLs. If this fails, returns thin content, or reports no content extracted, retry the same URL with browser. API key required."
-    requires_secrets:
-      - TAVILY_API_KEY
+  file_read:
+    module: core.tools.file_read
+    description: "Read, list, search, and inspect frontmatter in the current vault"
+    requires_secrets: []
     user_editable: false
-  tavily_crawl:
-    module: core.tools.tavily_crawl
-    description: "Crawl and extract content from multiple pages. API key required."
-    requires_secrets:
-      - TAVILY_API_KEY
+  file_write:
+    module: core.tools.file_write
+    description: "Create, append, edit lines, replace text, move, delete, and create folders in the current vault"
+    requires_secrets: []
     user_editable: false
   browser:
     module: core.tools.browser
-    description: "Browser-based page extraction using Playwright. Use as the fallback for a known URL when tavily_extract fails, returns thin content, or reports no content extracted."
+    description: "Browser-based extraction for dynamic pages that require Chromium"
     requires_secrets: []
     user_editable: false
   workflow_run:
