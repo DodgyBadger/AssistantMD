@@ -10,24 +10,16 @@ focused work environment. Chat with an assistant, browse and edit
 files, review proposed changes, and automate recurring work without moving
 between separate applications.
 
-Each area of your vault can support a different kind of work. Workspace
-orientation, local playbooks, reusable skills, workflows, and configurable
-context help adapt the assistant to the task without requiring you to build and
-manage separate agents.
+Any folder in a vault can be selected as the workspace for a chat session,
+giving the assistant focused project context . Add a `README.md` or `playbook.md`
+to the workspace to describe the project and guide how the assistant works there.
 
 Your Markdown files remain the durable source of truth: readable, portable, and
 useful with or without AssistantMD.
 
-Any folder in a vault can be selected as the workspace for a chat session,
-giving the assistant focused project context without restricting access to the
-rest of the vault. Add a `README.md` or `playbook.md` to describe the project
-and guide how the assistant works there.
-
-https://github.com/user-attachments/assets/5504eff3-3c5b-4a6d-9482-d1d15a8d76e1
-
 ## Features
 
-- Mounted vaults are isolated from each other.
+- Vaults are isolated from each other.
 - Supports many API model providers as well as experimental OpenAI OAuth (ChatGPT / Codex subscription).
 - Tuned for long-running tasks, tool-heavy agents, and deep work sessions.
 - Browse, preview, edit, upload, move, and organize vault files in the Vault Explorer.
@@ -42,9 +34,10 @@ https://github.com/user-attachments/assets/5504eff3-3c5b-4a6d-9482-d1d15a8d76e1
 - Search, extract, and crawl web content with configurable retrieval strategies.
 - Durable workflow history and searchable System Activity for operational visibility.
 - Extensive settings for customizing runtime behavior.
-- Smaller risk surface by focusing agent collaboration inside your vault instead of broad integrations.
 
-And last but not least, **composability**. AssistantMD gives you a set of building blocks to shape agent behavior: chat for direct collaboration, skills for reusable procedures, workflows for repeatable or scheduled automation, context assembly for deciding what the agent sees, and session summaries for recalling prior work. Start with the default setup; it will get you pretty far. See the [Build Guide](docs/use/build-guide.md) for the full details; once AssistantMD is running, the chat agent can help you adapt the setup.
+And last but not least, **composability**. AssistantMD gives you a set of building blocks to shape agent behavior as much as you want. The default composition will get you pretty far
+by editing only markdown files. If that doesn't provide enough flexibility, you can create
+your own python workflow and context assembly scripts. See the [Build Guide](docs/use/build-guide.md) for full details. Once AssistantMD is running, the chat agent can help you adapt the setup.
 
 ## Documentation
 
@@ -58,7 +51,7 @@ And last but not least, **composability**. AssistantMD gives you a set of buildi
 ## Requirements
 
 - Docker Engine or Docker Desktop
-- At least one LLM API key or endpoint
+- At least one LLM API key or OpenAI subscription
 - Comfort with the terminal
 
 ## Roadmap

@@ -14,7 +14,27 @@
                 : '';
 
             if (elements.workspacePickerBtn) {
+                const workspacePath = input.value.trim();
+                const workspaceMissing = hasWorkspace && state.workspaceExists === false;
                 elements.workspacePickerBtn.disabled = state.isLoading;
+                elements.workspacePickerBtn.classList.toggle('has-workspace', hasWorkspace);
+                elements.workspacePickerBtn.classList.toggle(
+                    'has-missing-workspace',
+                    workspaceMissing
+                );
+                elements.workspacePickerBtn.title = workspaceMissing
+                    ? `Choose replacement workspace\nWorkspace folder not found: ${workspacePath}`
+                    : hasWorkspace
+                        ? `Change workspace folder\nWorkspace: ${workspacePath}`
+                        : 'Choose workspace folder';
+                elements.workspacePickerBtn.setAttribute(
+                    'aria-label',
+                    workspaceMissing
+                        ? `Choose replacement for missing workspace ${workspacePath}`
+                        : hasWorkspace
+                            ? `Change workspace from ${workspacePath}`
+                            : 'Choose workspace folder'
+                );
             }
             if (elements.workspaceClearBtn) {
                 elements.workspaceClearBtn.classList.toggle('hidden', !hasWorkspace);
