@@ -23,16 +23,23 @@ ALLOWED_DIRECT_MUTATION_FILES = {
 }
 
 ALLOWED_DIRECT_MUTATION_CALLS = {
-    (Path("api/services.py"), "scan_import_folder", "import_root.mkdir"),
-    (Path("api/services.py"), "_enqueue_import_scan_jobs", "import_root.mkdir"),
-    (Path("api/services.py"), "update_system_settings", "path.write_text"),
     (
-        Path("api/services.py"),
+        Path("api/services/ingestion.py"),
+        "_enqueue_import_scan_jobs",
+        "import_root.mkdir",
+    ),
+    (
+        Path("api/services/configuration.py"),
+        "update_system_settings",
+        "path.write_text",
+    ),
+    (
+        Path("api/services/configuration.py"),
         "repair_settings_from_template",
         "active_path.write_text",
     ),
     (
-        Path("api/services.py"),
+        Path("api/services/workflows.py"),
         "_write_system_workflow_file_content",
         "temp_path.write_text",
     ),
