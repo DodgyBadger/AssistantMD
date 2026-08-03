@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -119,14 +120,14 @@ class VaultExplorerUploadScenario(BaseScenario):
                 self._stream.write(content[:4])
                 raise OSError("simulated interrupted upload write")
 
-        original_path_open = Path.open
+        original_io_open = io.open
 
         def fail_partial_upload(path, mode="r", *args, **kwargs):
-            if path == partial_path and mode == "xb":
+            if Path(path) == partial_path and mode == "xb":
                 return FailingBinaryDestination()
-            return original_path_open(path, mode, *args, **kwargs)
+            return original_io_open(path, mode, *args, **kwargs)
 
-        with patch.object(Path, "open", fail_partial_upload):
+        with patch.object(io, "open", fail_partial_upload):
             interrupted = client.post(
                 f"/api/vaults/{vault.name}/files/upload",
                 params={"path": partial_path.name},
