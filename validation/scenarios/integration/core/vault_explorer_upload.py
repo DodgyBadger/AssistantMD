@@ -107,6 +107,7 @@ class VaultExplorerUploadScenario(BaseScenario):
         )
 
         partial_path = vault / "partial-write.pdf"
+        partial_path_resolved = partial_path.resolve()
 
         class FailingBinaryDestination:
             def __enter__(self):
@@ -123,7 +124,7 @@ class VaultExplorerUploadScenario(BaseScenario):
         original_io_open = io.open
 
         def fail_partial_upload(path, mode="r", *args, **kwargs):
-            if Path(path) == partial_path and mode == "xb":
+            if Path(path).resolve() == partial_path_resolved and mode == "xb":
                 return FailingBinaryDestination()
             return original_io_open(path, mode, *args, **kwargs)
 
