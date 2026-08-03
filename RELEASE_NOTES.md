@@ -1,7 +1,7 @@
 # Release Notes
 
 
-## 2026-07-10 - v0.7.0
+## 2026-08-02 - v0.7.0
 
 ### Vault explorer and inline editing
 
