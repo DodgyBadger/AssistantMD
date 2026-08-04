@@ -24,6 +24,7 @@ from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 
 from .api_client import APIClient, APIResponse
+from .paths import resolve_validation_root
 from .system_controller import SystemController
 from .time_controller import TimeController
 from .vault_manager import VaultManager
@@ -69,8 +70,10 @@ class BaseScenario(ABC):
 
         # Create run directory for this scenario
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_path = Path(
-            f"/app/validation/runs/{timestamp}_{self.scenario_name.lower()}"
+        self.run_path = (
+            resolve_validation_root()
+            / "runs"
+            / f"{timestamp}_{self.scenario_name.lower()}"
         )
         self.run_path.mkdir(parents=True, exist_ok=True)
 
@@ -123,7 +126,7 @@ class BaseScenario(ABC):
         """Copy files/directories from source to vault.
 
         Args:
-            source_path: Path relative to /app root
+            source_path: Path relative to the configured application root
             vault: Target vault
             dest_dir: Optional subdirectory within vault
             dest_filename: Optional filename to rename single file (allows overwriting)

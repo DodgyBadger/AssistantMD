@@ -10,6 +10,8 @@ from pathlib import Path
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR, CHAT_SESSIONS_DIR
 from core.logger import UnifiedLogger
 
+from .paths import resolve_validation_app_root
+
 
 class VaultManager:
     """Manages vault creation and file operations for validation scenarios."""
@@ -22,7 +24,7 @@ class VaultManager:
 
         # Track created vaults for security
         self.created_vaults: dict[str, Path] = {}
-        self.app_root = Path("/app")
+        self.app_root = resolve_validation_app_root()
 
     def create_vault(self, name: str) -> Path:
         """Create minimal empty vault structure."""
@@ -48,7 +50,8 @@ class VaultManager:
         """Copy files/directories from source to vault.
 
         Args:
-            source_path: Path relative to /app root (e.g., 'validation/templates/files/test_image.jpg')
+            source_path: Path relative to the configured application root
+                (e.g., 'validation/templates/files/test_image.jpg')
             vault: Target vault (must be a vault created by this manager)
             dest_dir: Optional subdirectory within vault (e.g., 'AssistantMD/Workflows')
             dest_filename: Optional filename to rename single file (allows overwriting)

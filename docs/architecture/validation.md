@@ -41,6 +41,18 @@ For process guidance on validation-driven implementation, see [Testing and Valid
 
 See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
 
+### Filesystem roots
+
+The validation harness discovers the application root from its installed
+checkout, so the CLI works both from a UV virtual environment and from the
+devcontainer's `/app` mount. Set `VALIDATION_APP_ROOT` to override the checkout
+root used for fixtures and default runtime paths. Set `VALIDATION_ROOT` when
+scenario discovery and run evidence live somewhere other than
+`<application-root>/validation`.
+
+Explicit `CONTAINER_DATA_ROOT`, `CONTAINER_SYSTEM_ROOT`, and `SECRETS_PATH`
+values remain authoritative.
+
 
 ## Working with secrets during validation
 

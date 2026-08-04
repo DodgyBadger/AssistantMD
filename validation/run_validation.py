@@ -14,15 +14,15 @@ from pathlib import Path
 # Add project root to path FIRST
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.runtime.paths import (
-    resolve_bootstrap_data_root,
-    resolve_bootstrap_system_root,
-    set_bootstrap_roots,
+from core.runtime.paths import set_bootstrap_roots
+from validation.core.paths import (
+    resolve_validation_data_root,
+    resolve_validation_system_root,
 )
 
 # Prime bootstrap roots for validation CLI before importing path-dependent modules
-_BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
-_BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
+_BOOTSTRAP_DATA_ROOT = resolve_validation_data_root()
+_BOOTSTRAP_SYSTEM_ROOT = resolve_validation_system_root()
 set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 
 from core.logger import UnifiedLogger  # noqa: E402
@@ -140,7 +140,7 @@ def run_scenarios(args):
                 print(f"   Recommendation: {recommendation}")
 
         # scenarios manage their own evidence in runs directory
-        print("   Evidence: Check /app/validation/runs/ for scenario artifacts")
+        print(f"   Evidence: Check {runner.runs_dir}/ for scenario artifacts")
 
     # Additional V2-specific reporting
     if validation_run.error_scenarios > 0 or validation_run.failed_scenarios > 0:

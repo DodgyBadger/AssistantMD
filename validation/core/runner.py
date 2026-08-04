@@ -23,6 +23,8 @@ from dataclasses import dataclass
 
 from core.logger import UnifiedLogger
 
+from .paths import resolve_validation_root
+
 
 @dataclass
 class ScenarioResult:
@@ -53,8 +55,10 @@ logger = UnifiedLogger(tag="validation-runner", default_sinks=["validation", "lo
 class ValidationRunner:
     """Validation execution engine with scenario-based testing."""
 
-    def __init__(self, validation_root: str = "/app/validation"):
-        self.validation_root = Path(validation_root)
+    def __init__(self, validation_root: str | Path | None = None):
+        self.validation_root = (
+            Path(validation_root) if validation_root else resolve_validation_root()
+        )
         self.scenarios_dir = self.validation_root / "scenarios"
         self.runs_dir = self.validation_root / "runs"
         self.runs_dir.mkdir(parents=True, exist_ok=True)

@@ -48,7 +48,8 @@ class WorkflowExecutionService:
         Initialize workflow execution service.
 
         Args:
-            test_vaults_path: Root path for all test vaults (e.g., /app/validation/runs/123_scenario/test_vaults)
+            test_vaults_path: Root path for all test vaults, typically under
+                validation/runs/<scenario>/test_vaults
         """
         self.test_vaults_path = test_vaults_path
         self.logger = UnifiedLogger(tag="workflow-execution-service")
