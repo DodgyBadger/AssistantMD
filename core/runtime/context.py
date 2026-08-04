@@ -13,12 +13,16 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.authoring.template_discovery import WorkflowLoader
+from core.chat.chat_store import ChatStore
+from core.chat.session_access import ChatSessionAccessService
+from core.identity import AuthorizationService
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
+from core.runtime.task_access import ExecutionTaskAccessService
 from core.runtime.task_runner import ExecutionTaskRunner
 from core.runtime.workflow_governor import WorkflowGovernor
 from core.scheduling.jobs import setup_scheduler_jobs
@@ -48,6 +52,8 @@ class RuntimeContext:
         ingestion: IngestionService
         ingestion_worker: IngestionWorker
         task_coordinator: Process-local execution task tracker
+        execution_task_access: Authority-mediated execution task access
+        chat_session_access: Authority-mediated durable session access
         workflow_governor: Workflow execution policy layer
         workflow_run_store: Durable workflow execution history
     """
@@ -60,6 +66,10 @@ class RuntimeContext:
     ingestion_worker: IngestionWorker
     ingestion_interval: int
     task_coordinator: TaskCoordinator
+    authorization: AuthorizationService
+    execution_task_access: ExecutionTaskAccessService
+    chat_store: ChatStore
+    chat_session_access: ChatSessionAccessService
     task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
     workflow_run_store: WorkflowRunStore

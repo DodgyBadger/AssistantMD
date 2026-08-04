@@ -17,8 +17,12 @@ Use stable `local-user` and `system` principals. Interactive API requests resolv
 to `local-user`, while scheduled and system maintenance work uses `system`.
 Chat sessions persist an immutable owner. Every execution task captures explicit
 authority when created and installs it in context-local state while its worker
-runs. Authorization checks live behind shared identity-domain functions rather
-than task metadata or transport-provided identifiers.
+runs. The API router installs interactive authority once for each request.
+Runtime-owned session and task access services mediate principal-owned resource
+access through the context-local authority; the process-global runtime context
+does not store mutable current-principal state. Authorization policy lives
+behind shared identity-domain services rather than task metadata,
+transport-provided identifiers, or repeated endpoint checks.
 
 Principal IDs are persistence contracts. Public API payloads remain unchanged;
 the single-user resolver and ownership fields are internal foundations.
@@ -28,6 +32,8 @@ the single-user resolver and ownership fields are internal foundations.
 - Existing sessions migrate deterministically to `local-user`.
 - Background and nested work retain the authority captured at creation.
 - Tooling can resolve future principal-owned connections without FastAPI state.
+- New API endpoints inherit request authority automatically, while resource
+  services remain responsible for owner-scoped access decisions.
 - Multi-user authentication, vault grants, connection storage, and user
   administration remain separate features.
 - Task source and execution authority remain distinct concepts.

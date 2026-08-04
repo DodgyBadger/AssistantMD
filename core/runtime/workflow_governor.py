@@ -11,7 +11,6 @@ from core.authoring.workflow_execution import (
     execute_workflow_by_id,
 )
 from core.identity import (
-    LOCAL_USER_AUTHORITY,
     SYSTEM_AUTHORITY,
     ExecutionAuthority,
     get_current_execution_authority,
@@ -56,8 +55,6 @@ def _authority_for_workflow_source(
         return current
     if source in {ExecutionTaskSource.SCHEDULER, ExecutionTaskSource.SYSTEM}:
         return SYSTEM_AUTHORITY
-    if source == ExecutionTaskSource.API:
-        return LOCAL_USER_AUTHORITY
     raise RuntimeError(
         f"Workflow source '{source}' requires an active execution authority."
     )

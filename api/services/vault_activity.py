@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from core.runtime.state import get_runtime_context
 from core.vault_state.activity_rollback import (
     ActivityRollbackPlan,
     ActivityRollbackUnavailable,
@@ -26,7 +27,7 @@ from ..models import (
     VaultMutationInfo,
     VaultStateCleanupResponse,
 )
-from .shared import chat_store, get_vault_path
+from .shared import get_vault_path
 
 
 @dataclass(frozen=True)
@@ -221,7 +222,11 @@ def vault_activity_group_info(group: VaultActivityGroup) -> VaultActivityGroupIn
     """Project one durable activity group into its API representation."""
     chat_session = None
     if group.activity_kind == "chat" and group.chat_session_id:
-        chat_session = chat_store.get_session(group.chat_session_id, group.vault_name)
+        candidate = get_runtime_context().chat_session_access.get_session_by_id(
+            group.chat_session_id
+        )
+        if candidate is not None and candidate.vault_name == group.vault_name:
+            chat_session = candidate
     return VaultActivityGroupInfo(
         activity_id=group.activity_id,
         activity_kind=group.activity_kind,

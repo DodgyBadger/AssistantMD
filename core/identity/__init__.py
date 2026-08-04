@@ -2,6 +2,7 @@
 
 from .authorization import (
     AuthorizationError,
+    AuthorizationService,
     require_execution_task_access,
     require_session_access,
 )
@@ -26,6 +27,7 @@ from .models import (
 __all__ = [
     "ExecutionAuthority",
     "AuthorizationError",
+    "AuthorizationService",
     "LOCAL_USER_AUTHORITY",
     "LOCAL_USER_PRINCIPAL",
     "LOCAL_USER_PRINCIPAL_ID",

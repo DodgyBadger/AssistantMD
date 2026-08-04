@@ -83,7 +83,11 @@ class SessionOpsSessionProbeScenario(BaseScenario):
                 ),
             ],
         )
-        chat_store.ensure_session("riparian-grant-session", vault_name)
+        chat_store.ensure_session(
+            "riparian-grant-session",
+            vault_name,
+            owner_principal_id="local-user",
+        )
         chat_store.add_messages(
             "unsummarized-session",
             vault_name,

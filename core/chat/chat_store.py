@@ -23,7 +23,7 @@ from pydantic_ai.messages import (
 )
 
 from core.database import connect_sqlite_from_system_db
-from core.identity import LOCAL_USER_PRINCIPAL_ID, normalize_principal_id
+from core.identity import normalize_principal_id
 from core.logger import UnifiedLogger
 from core.settings import get_persist_model_reasoning_parts
 
@@ -221,7 +221,7 @@ class ChatStore:
         session_id: str,
         vault_name: str,
         *,
-        owner_principal_id: str = LOCAL_USER_PRINCIPAL_ID,
+        owner_principal_id: str,
     ) -> StoredChatSession:
         """Create or touch a session bound to one vault, returning its summary."""
         conn = self._connect()
@@ -1410,14 +1410,20 @@ class ChatStore:
         *,
         session_id: str,
         vault_name: str,
-        owner_principal_id: str = LOCAL_USER_PRINCIPAL_ID,
+        owner_principal_id: str | None = None,
     ) -> None:
-        owner_principal_id = normalize_principal_id(owner_principal_id)
         existing = conn.execute(
             "SELECT owner_principal_id FROM chat_sessions WHERE session_id = ?",
             (session_id,),
         ).fetchone()
-        if existing is not None and str(existing[0]) != owner_principal_id:
+        if existing is None and owner_principal_id is None:
+            raise ValueError(
+                f"Owner principal is required to create chat session '{session_id}'."
+            )
+        normalized_owner = normalize_principal_id(
+            owner_principal_id if owner_principal_id is not None else str(existing[0])
+        )
+        if existing is not None and str(existing[0]) != normalized_owner:
             raise ValueError(
                 f"Chat session '{session_id}' belongs to a different principal."
             )
@@ -1428,7 +1434,7 @@ class ChatStore:
             ON CONFLICT(session_id, vault_name)
             DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP
             """,
-            (session_id, vault_name, owner_principal_id),
+            (session_id, vault_name, normalized_owner),
         )
 
     @staticmethod

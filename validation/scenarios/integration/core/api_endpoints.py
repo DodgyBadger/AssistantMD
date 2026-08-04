@@ -16,6 +16,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.identity import LOCAL_USER_AUTHORITY
 from core.llm.openai_oauth import (
     OPENAI_OAUTH_CLIENT_ID,
     OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
@@ -534,6 +535,7 @@ class ApiEndpointsScenario(BaseScenario):
         await get_runtime_context().workflow_governor.execute_workflow(
             global_id=f"{vault.name}/status_probe",
             source=ExecutionTaskSource.API,
+            authority=LOCAL_USER_AUTHORITY,
         )
 
         # Execution task status endpoints expose the completed workflow task.
@@ -600,6 +602,7 @@ class ApiEndpointsScenario(BaseScenario):
         await get_runtime_context().workflow_governor.execute_workflow(
             global_id=f"{vault.name}/skipped_probe",
             source=ExecutionTaskSource.API,
+            authority=LOCAL_USER_AUTHORITY,
         )
 
         skipped_tasks_response = self.call_api("/api/tasks")

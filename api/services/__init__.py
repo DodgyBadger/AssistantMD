@@ -289,7 +289,6 @@ from .maintenance import (
     refresh_system_authoring_templates,
     run_system_database_migrations,
 )
-from .shared import chat_store as _chat_store
 from .shared import (
     get_vault_path as _get_vault_path,
 )

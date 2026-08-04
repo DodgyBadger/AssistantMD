@@ -8,7 +8,7 @@ from core.authoring.template_discovery import (
     list_system_workflow_templates,
 )
 from core.constants import ASSISTANTMD_ROOT_DIR
-from core.identity import ExecutionAuthority, Principal
+from core.identity import require_current_execution_authority
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSnapshot,
@@ -165,7 +165,6 @@ async def update_workflow_file(
     *,
     content: str,
     expected_sha256: str | None = None,
-    principal: Principal,
 ) -> WorkflowFileResponse:
     """Replace workflow source content and reload workflow definitions."""
     normalized_id = str(global_id or "").strip()
@@ -187,7 +186,7 @@ async def update_workflow_file(
             scope=workflow_vault_scope(vault_name),
             source=ExecutionTaskSource.API,
             label=f"edit_workflow:{normalized_id}",
-            authority=ExecutionAuthority.from_principal(principal),
+            authority=require_current_execution_authority(),
             metadata={
                 "workflow_id": normalized_id,
                 "vault": vault_name,
@@ -467,7 +466,6 @@ async def execute_workflow_manually(
     expect_failure: bool = False,
     *,
     vault_name: str | None = None,
-    principal: Principal,
 ) -> dict[str, Any]:
     """
     Start a specific workflow manually.
@@ -504,7 +502,7 @@ async def execute_workflow_manually(
                 source=ExecutionTaskSource.API,
                 expect_failure=expect_failure,
                 background_tasks=runtime.background_tasks,
-                authority=ExecutionAuthority.from_principal(principal),
+                authority=require_current_execution_authority(),
             )
         except Exception as workflow_error:
             if isinstance(workflow_error, ValueError):

@@ -149,8 +149,16 @@ class SessionOpsChatToolScenario(BaseScenario):
 
             sibling_session_id = "session_ops_chat_tool_sibling"
             child_session_id = "session_ops_chat_tool_child"
-            chat_store.ensure_session(sibling_session_id, vault.name)
-            chat_store.ensure_session(child_session_id, vault.name)
+            chat_store.ensure_session(
+                sibling_session_id,
+                vault.name,
+                owner_principal_id="local-user",
+            )
+            chat_store.ensure_session(
+                child_session_id,
+                vault.name,
+                owner_principal_id="local-user",
+            )
             store.upsert_session_summary(
                 vault_name=vault.name,
                 session_id=sibling_session_id,

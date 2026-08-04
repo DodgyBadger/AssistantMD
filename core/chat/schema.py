@@ -38,7 +38,7 @@ def ensure_chat_sessions_schema(
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 session_id TEXT NOT NULL,
                 vault_name TEXT NOT NULL,
-                owner_principal_id TEXT NOT NULL DEFAULT 'local-user',
+                owner_principal_id TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_activity_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 title TEXT,

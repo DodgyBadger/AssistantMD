@@ -12,6 +12,9 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.authoring.template_discovery import WorkflowLoader, seed_system_templates
+from core.chat.chat_store import ChatStore
+from core.chat.session_access import ChatSessionAccessService
+from core.identity import AuthorizationService
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
@@ -33,6 +36,7 @@ from .context import RuntimeContext
 from .execution_tasks import TaskCoordinator
 from .paths import set_bootstrap_roots
 from .state import clear_runtime_context, set_runtime_context
+from .task_access import ExecutionTaskAccessService
 from .task_runner import ExecutionTaskRunner
 from .workflow_governor import WorkflowGovernor
 
@@ -188,6 +192,13 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         boot_id = runtime_state.next_boot_id()
         started_at = datetime.now(UTC)
         workflow_run_store = WorkflowRunStore(str(config.system_root))
+        authorization = AuthorizationService()
+        chat_store = ChatStore(str(config.system_root))
+        chat_session_access = ChatSessionAccessService(chat_store, authorization)
+        execution_task_access = ExecutionTaskAccessService(
+            task_coordinator,
+            authorization,
+        )
         workflow_governor = WorkflowGovernor(
             task_coordinator=task_coordinator,
             task_runner=task_runner,
@@ -202,6 +213,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             ingestion_worker=ingestion_worker,
             ingestion_interval=ingestion_interval,
             task_coordinator=task_coordinator,
+            authorization=authorization,
+            execution_task_access=execution_task_access,
+            chat_store=chat_store,
+            chat_session_access=chat_session_access,
             task_runner=task_runner,
             workflow_governor=workflow_governor,
             workflow_run_store=workflow_run_store,

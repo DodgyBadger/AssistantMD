@@ -14,6 +14,7 @@ from core.identity import (
     LOCAL_USER_AUTHORITY,
     LOCAL_USER_PRINCIPAL_ID,
     SYSTEM_AUTHORITY,
+    ExecutionAuthority,
     get_current_execution_authority,
     require_current_execution_authority,
     use_execution_authority,
@@ -74,9 +75,73 @@ class PrincipalExecutionAuthorityScenario(BaseScenario):
             LOCAL_USER_PRINCIPAL_ID,
             "A rejected owner rebind should not modify the stored owner",
         )
+        ownerless_creation_rejected = False
+        try:
+            store.replace_session_messages(
+                "ownerless-session",
+                "PrincipalVault",
+                [],
+            )
+        except ValueError:
+            ownerless_creation_rejected = True
+        self.soft_assert(
+            ownerless_creation_rejected,
+            "Raw store paths should reject ownerless session creation",
+        )
 
         await self.start_system()
         runtime = get_runtime_context()
+        missing_session_authority_rejected = False
+        try:
+            runtime.chat_session_access.list_sessions("PrincipalVault")
+        except RuntimeError:
+            missing_session_authority_rejected = True
+        self.soft_assert(
+            missing_session_authority_rejected,
+            "Runtime session access should fail without request or task authority",
+        )
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            runtime_session = runtime.chat_session_access.ensure_session(
+                "runtime-owned-session",
+                "PrincipalVault",
+            )
+        self.soft_assert_equal(
+            runtime_session.owner_principal_id,
+            LOCAL_USER_PRINCIPAL_ID,
+            "The session gateway should assign the active authority as owner",
+        )
+        with use_execution_authority(ExecutionAuthority("different-user")):
+            concealed_session = runtime.chat_session_access.get_session_by_id(
+                runtime_session.session_id
+            )
+        self.soft_assert_equal(
+            concealed_session,
+            None,
+            "Session access should conceal records owned by another principal",
+        )
+
+        missing_access_authority_rejected = False
+        try:
+            await runtime.execution_task_access.list_tasks()
+        except RuntimeError:
+            missing_access_authority_rejected = True
+        self.soft_assert(
+            missing_access_authority_rejected,
+            "Runtime task access should fail without request or task authority",
+        )
+
+        task_list_response = self.call_api("/api/tasks")
+        self.soft_assert_equal(
+            task_list_response.status_code,
+            200,
+            "The API router should install interactive authority for task access",
+        )
+        self.soft_assert_equal(
+            get_current_execution_authority(),
+            None,
+            "Request authority should reset after the API response",
+        )
+
         lifecycle_checkpoint = self.event_checkpoint()
         observed: list[str | None] = []
         task = await runtime.task_runner.start_background(
@@ -99,6 +164,13 @@ class PrincipalExecutionAuthorityScenario(BaseScenario):
             observed,
             [LOCAL_USER_PRINCIPAL_ID],
             "Detached workers should observe the captured authority",
+        )
+        with use_execution_authority(ExecutionAuthority("different-user")):
+            concealed_task = await runtime.execution_task_access.get_task(task.task_id)
+        self.soft_assert_equal(
+            concealed_task,
+            None,
+            "Task access should conceal work owned by another principal",
         )
         lifecycle_events = [
             event
@@ -195,10 +267,14 @@ class PrincipalExecutionAuthorityScenario(BaseScenario):
             None,
             "Nested and threaded execution should reset authority context",
         )
-        self.soft_assert_equal(
-            _authority_for_workflow_source(ExecutionTaskSource.API).principal_id,
-            LOCAL_USER_PRINCIPAL_ID,
-            "API workflows should default to the interactive principal",
+        missing_workflow_authority_rejected = False
+        try:
+            _authority_for_workflow_source(ExecutionTaskSource.API)
+        except RuntimeError:
+            missing_workflow_authority_rejected = True
+        self.soft_assert(
+            missing_workflow_authority_rejected,
+            "API workflows should fail without request or task authority",
         )
         self.soft_assert_equal(
             _authority_for_workflow_source(ExecutionTaskSource.SCHEDULER).principal_id,

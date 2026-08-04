@@ -21,6 +21,8 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Create and register global `RuntimeContext`.
 - Manage scheduler lifecycle and workflow reload delegation.
 - Track process-local execution tasks for chat, workflows, ingestion, and history compaction.
+- Own authority-mediated access services for durable chat sessions and
+  process-local execution tasks.
 - Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
 - Own the durable workflow run store used by workflow execution and status.
@@ -48,6 +50,12 @@ Global runtime context helpers live in `core/runtime/state.py`:
 - `clear_runtime_context()`
 
 `RuntimeStateError` is raised when runtime access is attempted before bootstrap/context setup.
+
+`RuntimeContext` owns shared authorization policy and resource-access services,
+but it does not store a mutable current principal. Interactive requests and
+execution workers install authority in context-local state, keeping concurrent
+requests and tasks isolated while allowing runtime-owned services to fail closed
+when authority is absent.
 
 ## Path Resolution Model
 
@@ -119,7 +127,8 @@ failures remain in System Activity.
 ## Execution Task Coordination
 
 Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
-`ExecutionTaskRunner`, and `WorkflowGovernor`.
+`ExecutionTaskRunner`, `WorkflowGovernor`, `ExecutionTaskAccessService`, and
+`ChatSessionAccessService`.
 
 `TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. Observers run from terminal lifecycle transitions after live worker coroutines have unwound. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
@@ -128,6 +137,17 @@ Interactive work currently uses `local-user`; scheduler and system maintenance
 use `system`. The coordinator installs this authority through a context-local
 binding so tools and nested runtime work can use the originating identity
 without depending on FastAPI request state.
+
+The API router installs `local-user` authority for the complete request scope.
+Task and session API adapters use the runtime-owned access services rather than
+the raw coordinator or owner-unaware session discovery. Raw infrastructure
+remains available to bootstrap, migrations, lifecycle coordination, and
+explicit system execution paths.
+
+CI enforces this API boundary with
+`scripts/check_principal_resource_routing.py`. The guard rejects raw task
+lookup/list/cancel calls and raw chat-store imports or principal-sensitive
+access outside the explicit chat-session orchestration allowlist.
 
 `RuntimeBackgroundSpawner` schedules detached runtime work onto the runtime loop
 and registers background handles in the runtime shutdown task set.

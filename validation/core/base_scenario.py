@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import yaml
 
+from core.identity import LOCAL_USER_AUTHORITY
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
@@ -236,6 +237,7 @@ class BaseScenario(ABC):
                 await get_runtime_context().workflow_governor.execute_workflow(
                     global_id=f"{vault.name}/{workflow_name}",
                     source=ExecutionTaskSource.API,
+                    authority=LOCAL_USER_AUTHORITY,
                     step_name=step_name,
                     expect_failure=expect_failure,
                 )

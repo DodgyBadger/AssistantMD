@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
-from core.identity import ExecutionAuthority, Principal
+from core.identity import ExecutionAuthority, require_current_execution_authority
 from core.ingestion.jobs import IngestionJob, find_job_for_source
 from core.ingestion.models import JobStatus, SourceKind
 from core.ingestion.registry import importer_registry
@@ -23,8 +23,6 @@ async def scan_import_folder(
     strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
     pdf_mode: str | None = None,
-    *,
-    principal: Principal,
 ) -> tuple[list[IngestionJob], list[str]]:
     """Enqueue supported import-folder files and optionally process them."""
     runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
@@ -42,7 +40,7 @@ async def scan_import_folder(
                 ingest_service,
                 job.id,
                 vault,
-                authority=ExecutionAuthority.from_principal(principal),
+                authority=require_current_execution_authority(),
             )
             refreshed_jobs.append(ingest_service.get_job(job.id) or job)
         jobs_created = refreshed_jobs
@@ -133,8 +131,6 @@ async def import_url_direct(
     vault: str,
     url: str,
     clean_html: bool = True,
-    *,
-    principal: Principal,
 ) -> IngestionJob:
     """Import one URL immediately as API-attributed ingestion."""
     runtime = get_runtime_context()
@@ -151,7 +147,7 @@ async def import_url_direct(
         ingest_service,
         job.id,
         vault,
-        authority=ExecutionAuthority.from_principal(principal),
+        authority=require_current_execution_authority(),
     )
     refreshed_job = ingest_service.get_job(job.id) or job
     outputs = refreshed_job.outputs

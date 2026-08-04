@@ -132,6 +132,9 @@ jobs:
       - name: Check vault mutation routing
         run: python scripts/check_vault_mutation_routing.py
 
+      - name: Check principal resource routing
+        run: python scripts/check_principal_resource_routing.py
+
       - name: Install uv
         uses: astral-sh/setup-uv@v2
 

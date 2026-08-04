@@ -2,10 +2,45 @@
 
 ## Status
 
-Implemented and hardened on `dev/execution-principal-foundation`. The identity,
-ownership, runtime propagation, interactive entrypoint propagation, and targeted
-branch matrix pass focused validation and the production Python quality gate.
-Maintainer full-suite validation remains required before merge.
+Foundation implemented on `dev/execution-principal-foundation`. Durable
+ownership, explicit task authority, and task-local propagation pass the primary
+focused scenario. Router-wide request authority and runtime-owned execution-task
+mediation are implemented and pass focused API/task validation. Runtime-owned
+chat-session mediation now covers interactive discovery, creation, listing, and
+session API operations. Interactive service signatures no longer repeat
+principal parameters, API workflow execution fails without scoped authority,
+and raw session creation requires an explicit owner. Focused migration,
+session-tool, workflow, and broad API scenarios pass. Maintainer full-suite
+validation remains required before merge. CI now enforces mediated principal
+resource routing with an AST guard and explicit infrastructure allowlists.
+
+## Target Authorization Architecture
+
+Follow the standard separation between authentication context and resource
+authorization:
+
+1. The API router resolves the interactive principal once and installs its
+   authority for the complete request scope.
+2. Scheduler and system adapters capture `system` authority explicitly.
+3. The task runner reinstalls the authority captured in `ExecutionTaskSpec` for
+   the complete worker scope; queued work never depends on ambient request state.
+4. `RuntimeContext` owns shared authorized resource services, but never stores a
+   mutable current principal. The current authority remains context-local so
+   concurrent requests and tasks cannot overwrite each other.
+5. API, tool, and workflow code accesses principal-owned sessions and tasks
+   through runtime-owned authorization services. Raw stores and the raw task
+   coordinator remain infrastructure for bootstrap, migrations, and explicit
+   system maintenance.
+6. Resource authorization is performed once at the resource service boundary,
+   not repeated independently in every endpoint. Owner-scoped persistence
+   operations or authorized resource handles should carry the decision through
+   the rest of the operation.
+7. Missing request/task authority fails closed. There is no implicit
+   `local-user` fallback in domain or workflow services.
+
+Uvicorn/FastAPI request setup establishes who is acting; it cannot authorize a
+specific session or task because the resource is resolved later. Resource
+services provide complete mediation for those later decisions.
 
 ## Objective
 
@@ -353,6 +388,24 @@ or provider ownership as if they already exist.
 10. Run targeted scenarios, smoke checks, and static quality gates; request full
     validation results from maintainers.
 
+### Centralized mediation hardening
+
+11. Install interactive authority once through a router-wide request-scope
+    dependency and remove repeated endpoint-level principal plumbing.
+12. Add runtime-owned authorized session and execution-task services; keep the
+    current authority context-local rather than mutable on `RuntimeContext`.
+13. Route session/task API operations through those services and restrict raw
+    store/coordinator access to infrastructure and explicit system paths.
+14. Remove implicit interactive authority and owner defaults from internal
+    construction boundaries.
+15. Extend the primary scenario with request-scope isolation, missing-authority,
+    unauthorized-resource, and authorized-gateway assertions.
+16. Run affected scenarios and the production Python quality gate, then request
+    maintainer `integration/core` results.
+17. Enforce the mediated API boundary in CI with an AST guard modeled on the
+    vault-mutation routing check; keep infrastructure exceptions explicit and
+    narrow.
+
 ## Follow-On Enabled by This Slice
 
 The MCP effort can define every connection with an owner from its first commit:
@@ -372,6 +425,8 @@ secrets remain separate follow-on efforts.
 
 ## Next Phase
 
-Proceed to Feature Development using the validation-first order above. Do not
-start MCP implementation until this slice's targeted authority and migration
-scenarios pass and maintainers confirm the relevant full-validation result.
+Proceed to Feature Development for the centralized mediation hardening steps.
+Do not start MCP implementation until request/task authority fails closed,
+principal-owned resources are mediated by runtime-owned services, targeted
+authority and migration scenarios pass, and maintainers confirm the relevant
+full-validation result.
