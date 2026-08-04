@@ -410,8 +410,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
         finally:
             migration_conn.close()
         assert [row[0] for row in migration_rows] == [
-            1
-        ], "Chat checkpoint migration is recorded in schema_migrations"
+            1,
+            2,
+        ], "Chat migrations are recorded in schema_migrations"
 
         assert (
             second_compact_response.status_code == 200

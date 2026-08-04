@@ -156,4 +156,9 @@ Execution task events use the validation sink and stable event names:
 - `execution_task_skipped`
 - `workflow_task_heartbeat`
 
-Payloads include task identity fields (`task_id`, `kind`, `scope`, `source`, `label`), status, cancellation state, and terminal reason. These events are part of the scenario validation surface.
+Payloads include task identity fields (`task_id`, `kind`, `scope`, `source`,
+`label`, `principal_id`), status, cancellation state, and terminal reason. Each
+task captures explicit execution authority when it is created. Queued,
+background, gated, and nested execution installs that authority in a
+context-local binding for the lifetime of the worker. These events are part of
+the scenario validation surface.

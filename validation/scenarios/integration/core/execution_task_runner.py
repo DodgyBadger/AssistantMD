@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.identity import SYSTEM_AUTHORITY
 from core.runtime.execution_tasks import ExecutionTaskKind, ExecutionTaskSource
 from core.runtime.task_runner import (
     ExecutionGatePolicy,
@@ -31,6 +32,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:completed",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-completed",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "completed"},
             ),
             _complete_task,
@@ -54,6 +56,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:inline",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-inline",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "inline"},
             ),
             lambda task: _complete_inline_task(task, inline_task_ids),
@@ -78,6 +81,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:cancelled",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-cancelled",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "cancelled"},
             ),
             lambda task: _wait_until_cancelled(task, cancel_started),
@@ -110,6 +114,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:failed",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-failed",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "failed"},
             ),
             _fail_task,
@@ -143,6 +148,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:timed-out",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-timed-out",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "timed_out"},
                 timeout_seconds=0.01,
                 timeout_reason="validation_timeout",
@@ -189,6 +195,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:gate",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-gate-first",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "gate_first"},
             ),
             lambda task: runtime.task_runner.run_with_gate(
@@ -204,6 +211,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:gate",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-gate-second",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "gate_second"},
             ),
             lambda task: runtime.task_runner.run_with_gate(
@@ -278,6 +286,7 @@ class ExecutionTaskRunnerScenario(BaseScenario):
                 scope="runner:shutdown",
                 source=ExecutionTaskSource.SYSTEM,
                 label="runner-shutdown",
+                authority=SYSTEM_AUTHORITY,
                 metadata={"probe": "shutdown"},
             ),
             lambda task: _wait_for_shutdown_cleanup(

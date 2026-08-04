@@ -23,6 +23,7 @@ from pydantic_ai.messages import (
 )
 
 from core.database import connect_sqlite_from_system_db
+from core.identity import LOCAL_USER_PRINCIPAL_ID, normalize_principal_id
 from core.logger import UnifiedLogger
 from core.settings import get_persist_model_reasoning_parts
 
@@ -99,6 +100,7 @@ class StoredChatSession:
 
     session_id: str
     vault_name: str
+    owner_principal_id: str
     created_at: str
     last_activity_at: str
     title: str | None = None
@@ -214,11 +216,22 @@ class ChatStore:
         finally:
             conn.close()
 
-    def ensure_session(self, session_id: str, vault_name: str) -> StoredChatSession:
+    def ensure_session(
+        self,
+        session_id: str,
+        vault_name: str,
+        *,
+        owner_principal_id: str = LOCAL_USER_PRINCIPAL_ID,
+    ) -> StoredChatSession:
         """Create or touch a session bound to one vault, returning its summary."""
         conn = self._connect()
         try:
-            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
+            self._upsert_session(
+                conn,
+                session_id=session_id,
+                vault_name=vault_name,
+                owner_principal_id=owner_principal_id,
+            )
             conn.commit()
         finally:
             conn.close()
@@ -317,7 +330,7 @@ class ChatStore:
             conn.execute("PRAGMA foreign_keys = ON")
             source = conn.execute(
                 """
-                SELECT metadata_json
+                SELECT metadata_json, owner_principal_id
                 FROM chat_sessions
                 WHERE session_id = ? AND vault_name = ?
                 """,
@@ -354,13 +367,15 @@ class ChatStore:
                 INSERT INTO chat_sessions (
                     session_id,
                     vault_name,
+                    owner_principal_id,
                     title,
                     metadata_json
-                ) VALUES (?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     new_session_id,
                     vault_name,
+                    str(source[1]),
                     title or None,
                     json.dumps(source_metadata, ensure_ascii=False, sort_keys=True),
                 ),
@@ -773,7 +788,7 @@ class ChatStore:
             if limit is None:
                 rows = conn.execute(
                     """
-                    SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                    SELECT session_id, vault_name, owner_principal_id, created_at, last_activity_at, title, metadata_json
                     FROM chat_sessions
                     WHERE vault_name = ?
                     ORDER BY last_activity_at DESC, created_at DESC, session_id DESC
@@ -783,7 +798,7 @@ class ChatStore:
             else:
                 rows = conn.execute(
                     """
-                    SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                    SELECT session_id, vault_name, owner_principal_id, created_at, last_activity_at, title, metadata_json
                     FROM chat_sessions
                     WHERE vault_name = ?
                     ORDER BY last_activity_at DESC, created_at DESC, session_id DESC
@@ -798,12 +813,13 @@ class ChatStore:
             StoredChatSession(
                 session_id=str(session_id),
                 vault_name=str(session_vault_name),
+                owner_principal_id=str(owner_principal_id),
                 created_at=str(created_at or ""),
                 last_activity_at=str(last_activity_at or ""),
                 title=None if title is None else str(title),
                 metadata_json=None if metadata_json is None else str(metadata_json),
             )
-            for session_id, session_vault_name, created_at, last_activity_at, title, metadata_json in rows
+            for session_id, session_vault_name, owner_principal_id, created_at, last_activity_at, title, metadata_json in rows
         ]
 
     def get_session(self, session_id: str, vault_name: str) -> StoredChatSession | None:
@@ -812,7 +828,7 @@ class ChatStore:
         try:
             row = conn.execute(
                 """
-                SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                SELECT session_id, vault_name, owner_principal_id, created_at, last_activity_at, title, metadata_json
                 FROM chat_sessions
                 WHERE session_id = ? AND vault_name = ?
                 """,
@@ -825,6 +841,7 @@ class ChatStore:
         (
             session_id_value,
             session_vault_name,
+            owner_principal_id,
             created_at,
             last_activity_at,
             title,
@@ -833,6 +850,7 @@ class ChatStore:
         return StoredChatSession(
             session_id=str(session_id_value),
             vault_name=str(session_vault_name),
+            owner_principal_id=str(owner_principal_id),
             created_at=str(created_at or ""),
             last_activity_at=str(last_activity_at or ""),
             title=None if title is None else str(title),
@@ -845,7 +863,7 @@ class ChatStore:
         try:
             row = conn.execute(
                 """
-                SELECT session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                SELECT session_id, vault_name, owner_principal_id, created_at, last_activity_at, title, metadata_json
                 FROM chat_sessions
                 WHERE session_id = ?
                 """,
@@ -858,6 +876,7 @@ class ChatStore:
         (
             session_id_value,
             session_vault_name,
+            owner_principal_id,
             created_at,
             last_activity_at,
             title,
@@ -866,6 +885,7 @@ class ChatStore:
         return StoredChatSession(
             session_id=str(session_id_value),
             vault_name=str(session_vault_name),
+            owner_principal_id=str(owner_principal_id),
             created_at=str(created_at or ""),
             last_activity_at=str(last_activity_at or ""),
             title=None if title is None else str(title),
@@ -1386,16 +1406,29 @@ class ChatStore:
 
     @staticmethod
     def _upsert_session(
-        conn: sqlite3.Connection, *, session_id: str, vault_name: str
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        vault_name: str,
+        owner_principal_id: str = LOCAL_USER_PRINCIPAL_ID,
     ) -> None:
+        owner_principal_id = normalize_principal_id(owner_principal_id)
+        existing = conn.execute(
+            "SELECT owner_principal_id FROM chat_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if existing is not None and str(existing[0]) != owner_principal_id:
+            raise ValueError(
+                f"Chat session '{session_id}' belongs to a different principal."
+            )
         conn.execute(
             """
-            INSERT INTO chat_sessions (session_id, vault_name)
-            VALUES (?, ?)
+            INSERT INTO chat_sessions (session_id, vault_name, owner_principal_id)
+            VALUES (?, ?, ?)
             ON CONFLICT(session_id, vault_name)
             DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP
             """,
-            (session_id, vault_name),
+            (session_id, vault_name, owner_principal_id),
         )
 
     @staticmethod

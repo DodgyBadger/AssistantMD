@@ -16,6 +16,11 @@ from core.chat.deferred_reviews import (
     get_pending_deferred_review,
 )
 from core.chat.workspace import normalize_workspace_path
+from core.identity import (
+    ExecutionAuthority,
+    Principal,
+    require_session_access,
+)
 from core.memory.session_summary import SessionSummary, SessionSummaryStore
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -80,13 +85,14 @@ class ChatSessionVaultMismatch(ValueError):
 
 
 def resolve_chat_session_for_request(
-    *, requested_session_id: str | None, vault_name: str
+    *, requested_session_id: str | None, vault_name: str, principal: Principal
 ) -> str:
     """Return a session ID that is durably bound to the requested vault."""
     session_id = (requested_session_id or "").strip()
     if session_id:
         existing_session = _chat_store.get_session_by_id(session_id)
         if existing_session is not None:
+            require_session_access(principal, existing_session)
             if existing_session.vault_name != vault_name:
                 logger.warning(
                     "Rejected chat session vault mismatch",
@@ -101,9 +107,17 @@ def resolve_chat_session_for_request(
                     requested_vault=vault_name,
                     bound_vault=existing_session.vault_name,
                 )
-            _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+            _chat_store.ensure_session(
+                session_id=session_id,
+                vault_name=vault_name,
+                owner_principal_id=principal.principal_id,
+            )
             return session_id
-        _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+        _chat_store.ensure_session(
+            session_id=session_id,
+            vault_name=vault_name,
+            owner_principal_id=principal.principal_id,
+        )
         return session_id
 
     base_session_id = generate_session_id(vault_name)
@@ -112,7 +126,11 @@ def resolve_chat_session_for_request(
     while _chat_store.get_session_by_id(generated_session_id) is not None:
         suffix += 1
         generated_session_id = f"{base_session_id}_{suffix}"
-    _chat_store.ensure_session(session_id=generated_session_id, vault_name=vault_name)
+    _chat_store.ensure_session(
+        session_id=generated_session_id,
+        vault_name=vault_name,
+        owner_principal_id=principal.principal_id,
+    )
     return generated_session_id
 
 
@@ -809,6 +827,7 @@ async def compact_chat_session_history(
     session_id: str,
     *,
     focus: str | None,
+    principal: Principal,
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
     runtime = get_runtime_context()
@@ -818,6 +837,7 @@ async def compact_chat_session_history(
             scope=chat_session_scope(session_id),
             source=ExecutionTaskSource.API,
             label=compaction_task_label(session_id),
+            authority=ExecutionAuthority.from_principal(principal),
             metadata={"vault": vault_name, "session_id": session_id},
         ),
         lambda _task: compact_chat_history(

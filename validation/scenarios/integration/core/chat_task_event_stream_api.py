@@ -19,6 +19,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
@@ -69,6 +70,15 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("ChatTaskEventStreamApiVault")
         await self.start_system()
+        store = ChatStore()
+        for session_id in (
+            "chat_task_event_stream_api_session",
+            "chat_task_event_pruner_session",
+            "chat_task_event_disconnect_session",
+        ):
+            store.ensure_session(
+                session_id, vault.name, owner_principal_id="local-user"
+            )
 
         completed = await start_prepared_chat_stream_task(
             prepared=PreparedChatExecution(

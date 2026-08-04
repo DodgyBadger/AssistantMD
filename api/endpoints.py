@@ -5,7 +5,7 @@ API endpoint implementations for the AssistantMD system.
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 from starlette.datastructures import FormData, UploadFile
@@ -25,6 +25,7 @@ from core.chat.task_execution import (
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
+from core.identity import Principal
 from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
@@ -126,6 +127,7 @@ from .models import (
     WorkflowLoadErrorsResponse,
     WorkflowRunHistoryResponse,
 )
+from .principal import resolve_request_principal
 from .services import (
     ChatSessionVaultMismatch,
     cancel_chat_session_task,
@@ -460,6 +462,7 @@ async def _parse_single_vault_upload(
 async def _start_chat_task_request(
     chat_request: ChatTaskRequest,
     image_uploads: list[UploadedImageAttachment],
+    principal: Principal,
 ) -> ChatTaskStartResponse:
     """Start task-owned streaming chat execution."""
     vault_path = str(resolve_vault_root(chat_request.vault_name))
@@ -468,6 +471,7 @@ async def _start_chat_task_request(
         session_id = resolve_chat_session_for_request(
             requested_session_id=chat_request.session_id,
             vault_name=chat_request.vault_name,
+            principal=principal,
         )
         if chat_request.workspace_path is not None:
             set_chat_session_workspace(
@@ -703,11 +707,14 @@ async def chat_task_events(
 
 
 @router.post("/chat/tasks", response_model=ChatTaskStartResponse)
-async def start_chat_task(request: Request) -> ChatTaskStartResponse | JSONResponse:
+async def start_chat_task(
+    request: Request,
+    principal: Principal = Depends(resolve_request_principal),
+) -> ChatTaskStartResponse | JSONResponse:
     """Start task-owned streaming chat execution and return its task snapshot."""
     try:
         chat_request, image_uploads = await _parse_chat_task_payload(request)
-        return await _start_chat_task_request(chat_request, image_uploads)
+        return await _start_chat_task_request(chat_request, image_uploads, principal)
     except Exception as e:
         if isinstance(e, APIException):
             logger.warning(
@@ -787,7 +794,10 @@ async def update_general_setting(
 
 
 @router.post("/import/scan", response_model=ImportScanResponse)
-async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONResponse:
+async def import_scan(
+    request: ImportScanRequest,
+    principal: Principal = Depends(resolve_request_principal),
+) -> ImportScanResponse | JSONResponse:
     try:
         jobs, skipped = await scan_import_folder(
             vault=request.vault,
@@ -795,6 +805,7 @@ async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONRe
             strategies=request.strategies,
             capture_ocr_images=request.capture_ocr_images,
             pdf_mode=request.pdf_mode,
+            principal=principal,
         )
         job_infos = [
             ImportJobInfo(
@@ -813,12 +824,16 @@ async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONRe
 
 
 @router.post("/import/url", response_model=ImportUrlResponse)
-async def import_url(request: ImportUrlRequest) -> ImportUrlResponse | JSONResponse:
+async def import_url(
+    request: ImportUrlRequest,
+    principal: Principal = Depends(resolve_request_principal),
+) -> ImportUrlResponse | JSONResponse:
     try:
         job = await import_url_direct(
             vault=request.vault,
             url=request.url,
             clean_html=request.clean_html,
+            principal=principal,
         )
         return ImportUrlResponse(
             id=job.id,
@@ -1196,6 +1211,7 @@ async def vault_snapshot_content(snapshot_id: int) -> FileResponse | JSONRespons
 @router.post("/workflows/execute", response_model=ExecuteWorkflowResponse)
 async def execute_workflow(
     request: ExecuteWorkflowRequest,
+    principal: Principal = Depends(resolve_request_principal),
 ) -> ExecuteWorkflowResponse | JSONResponse:
     """
     Execute a specific workflow manually.
@@ -1205,6 +1221,7 @@ async def execute_workflow(
             request.global_id,
             request.expect_failure,
             vault_name=request.vault_name,
+            principal=principal,
         )
         response = ExecuteWorkflowResponse(**result)
         return response
@@ -1234,7 +1251,9 @@ async def workflow_file(global_id: str) -> WorkflowFileResponse | JSONResponse:
 
 @router.put("/workflows/file", response_model=WorkflowFileResponse)
 async def save_workflow_file(
-    global_id: str, request: WorkflowFileUpdateRequest
+    global_id: str,
+    request: WorkflowFileUpdateRequest,
+    principal: Principal = Depends(resolve_request_principal),
 ) -> WorkflowFileResponse | JSONResponse:
     """Replace workflow file content and reload workflows."""
     try:
@@ -1242,6 +1261,7 @@ async def save_workflow_file(
             global_id,
             content=request.content,
             expected_sha256=request.expected_sha256,
+            principal=principal,
         )
     except Exception as e:
         return create_error_response(e)
@@ -1554,12 +1574,14 @@ async def submit_deferred_review_artifact(
     session_id: str,
     artifact_ref: str,
     request: DeferredReviewSubmitRequest,
+    principal: Principal = Depends(resolve_request_principal),
 ) -> DeferredReviewSubmitResponse | JSONResponse:
     """Submit deferred inline review decisions and resume the chat run."""
     try:
         resolved_session_id = resolve_chat_session_for_request(
             requested_session_id=session_id,
             vault_name=vault_name,
+            principal=principal,
         )
         return await submit_chat_deferred_review(
             vault_name=vault_name,
@@ -1744,10 +1766,17 @@ async def fork_chat_session_endpoint(
 
 @router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
 async def retry_chat_session_turn_endpoint(
-    session_id: str, request: ChatSessionRetryRequest
+    session_id: str,
+    request: ChatSessionRetryRequest,
+    principal: Principal = Depends(resolve_request_principal),
 ) -> ChatTaskStartResponse | JSONResponse:
     """Retry the latest retryable unfinished chat turn for one session."""
     try:
+        resolve_chat_session_for_request(
+            requested_session_id=session_id,
+            vault_name=request.vault_name,
+            principal=principal,
+        )
         try:
             await get_active_chat_task(session_id)
         except APIException as exc:
@@ -1814,7 +1843,9 @@ async def chat_history_compaction_status_endpoint(
     "/chat/sessions/{session_id}/compact", response_model=ChatHistoryCompactionResponse
 )
 async def compact_chat_history_endpoint(
-    session_id: str, request: ChatHistoryCompactionRequest
+    session_id: str,
+    request: ChatHistoryCompactionRequest,
+    principal: Principal = Depends(resolve_request_principal),
 ) -> ChatHistoryCompactionResponse | JSONResponse:
     """Compact one persisted chat session into a summary plus recent turns."""
     try:
@@ -1824,6 +1855,7 @@ async def compact_chat_history_endpoint(
             vault_path,
             session_id,
             focus=request.focus,
+            principal=principal,
         )
     except Exception as e:
         return create_error_response(e)

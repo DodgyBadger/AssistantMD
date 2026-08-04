@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from core.identity import ExecutionAuthority, use_execution_authority
 from core.logger import UnifiedLogger
 
 
@@ -135,6 +136,7 @@ class ExecutionTaskSnapshot:
     scope: str
     source: str
     label: str
+    principal_id: str
     status: str
     created_at: datetime
     started_at: datetime | None = None
@@ -167,6 +169,7 @@ class _ExecutionTaskRecord:
     scope: str
     source: str
     label: str
+    authority: ExecutionAuthority
     status: ExecutionTaskStatus
     created_at: datetime
     started_at: datetime | None = None
@@ -187,6 +190,7 @@ class _ExecutionTaskRecord:
             scope=self.scope,
             source=self.source,
             label=self.label,
+            principal_id=self.authority.principal_id,
             status=self.status.value,
             created_at=self.created_at,
             started_at=self.started_at,
@@ -225,6 +229,7 @@ class TaskCoordinator:
         scope: str,
         source: str,
         label: str,
+        authority: ExecutionAuthority,
         metadata: dict[str, Any] | None = None,
         start_immediately: bool = True,
     ) -> AsyncIterator[ExecutionTaskSnapshot]:
@@ -240,6 +245,7 @@ class TaskCoordinator:
             scope=scope,
             source=source,
             label=label,
+            authority=authority,
             handle=current,
             metadata=metadata,
         )
@@ -251,7 +257,8 @@ class TaskCoordinator:
             raise RuntimeError(f"Execution task disappeared: {task_id}")
         token = _CURRENT_EXECUTION_TASK.set(snapshot)
         try:
-            yield snapshot
+            with use_execution_authority(authority):
+                yield snapshot
         except asyncio.CancelledError:
             await self.mark_cancelled(task_id, reason="cancelled")
             raise
@@ -270,6 +277,7 @@ class TaskCoordinator:
         scope: str,
         source: str,
         label: str,
+        authority: ExecutionAuthority,
         metadata: dict[str, Any] | None = None,
     ) -> ExecutionTaskSnapshot:
         """Create a queued task record before an asyncio handle exists."""
@@ -280,6 +288,7 @@ class TaskCoordinator:
             scope=scope,
             source=source,
             label=label,
+            authority=authority,
             handle=None,
             metadata=metadata,
         )
@@ -318,7 +327,8 @@ class TaskCoordinator:
 
         token = _CURRENT_EXECUTION_TASK.set(snapshot)
         try:
-            yield snapshot
+            with use_execution_authority(record.authority):
+                yield snapshot
         except asyncio.CancelledError:
             await self.mark_cancelled(task_id, reason="cancelled")
             raise
@@ -516,6 +526,7 @@ class TaskCoordinator:
         scope: str,
         source: str,
         label: str,
+        authority: ExecutionAuthority,
         handle: asyncio.Task[Any] | None,
         metadata: dict[str, Any] | None,
     ) -> None:
@@ -526,6 +537,7 @@ class TaskCoordinator:
             scope=scope,
             source=str(source),
             label=label,
+            authority=authority,
             status=ExecutionTaskStatus.QUEUED,
             created_at=now,
             last_heartbeat_at=now,
@@ -615,6 +627,7 @@ class TaskCoordinator:
             "scope": snapshot.scope,
             "source": snapshot.source,
             "label": snapshot.label,
+            "principal_id": snapshot.principal_id,
             "status": snapshot.status,
             "cancel_requested": snapshot.cancel_requested,
             "terminal_reason": snapshot.terminal_reason,

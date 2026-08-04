@@ -26,7 +26,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            10,
+            11,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -72,8 +72,16 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 self._migration_versions(conn, "chat_sessions"),
-                [1],
+                [1, 2],
                 "Chat migration version should be recorded",
+            )
+            owner = conn.execute(
+                "SELECT owner_principal_id FROM chat_sessions WHERE session_id = 'legacy'"
+            ).fetchone()
+            self.soft_assert_equal(
+                owner[0] if owner else None,
+                "local-user",
+                "Legacy chat sessions should be assigned to the local user",
             )
 
         with sqlite3.connect(system_root / "session_summaries.db") as conn:
@@ -136,6 +144,12 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
                     metadata_json TEXT,
                     PRIMARY KEY (session_id, vault_name)
                 )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (session_id, vault_name)
+                VALUES ('legacy', 'MigrationVault')
                 """
             )
 

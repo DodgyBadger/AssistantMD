@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.identity import LOCAL_USER_AUTHORITY, use_execution_authority
 from core.runtime.state import get_runtime_context
 from core.tools.workflow_run import WorkflowRun
 from validation.core.base_scenario import BaseScenario
@@ -29,7 +30,10 @@ class WorkflowRunAsyncScenario(BaseScenario):
         await self.start_system()
 
         tool = WorkflowRun.get_tool(str(vault))
-        start_out = await tool.function(operation="start", workflow_name="async_probe")
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            start_out = await tool.function(
+                operation="start", workflow_name="async_probe"
+            )
         start_data = self._parse_kv_response(start_out)
         task_id = start_data.get("task_id", "")
         self.soft_assert_equal(

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
+from core.identity import ExecutionAuthority, Principal
 from core.ingestion.jobs import IngestionJob, find_job_for_source
 from core.ingestion.models import JobStatus, SourceKind
 from core.ingestion.registry import importer_registry
@@ -22,6 +23,8 @@ async def scan_import_folder(
     strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
     pdf_mode: str | None = None,
+    *,
+    principal: Principal,
 ) -> tuple[list[IngestionJob], list[str]]:
     """Enqueue supported import-folder files and optionally process them."""
     runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
@@ -34,7 +37,13 @@ async def scan_import_folder(
     if not queue_only and jobs_created:
         refreshed_jobs: list[IngestionJob] = []
         for job in jobs_created:
-            await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
+            await _process_ingestion_job_for_api(
+                runtime,
+                ingest_service,
+                job.id,
+                vault,
+                authority=ExecutionAuthority.from_principal(principal),
+            )
             refreshed_jobs.append(ingest_service.get_job(job.id) or job)
         jobs_created = refreshed_jobs
 
@@ -121,7 +130,11 @@ def _enqueue_import_scan_jobs(
 
 
 async def import_url_direct(
-    vault: str, url: str, clean_html: bool = True
+    vault: str,
+    url: str,
+    clean_html: bool = True,
+    *,
+    principal: Principal,
 ) -> IngestionJob:
     """Import one URL immediately as API-attributed ingestion."""
     runtime = get_runtime_context()
@@ -133,7 +146,13 @@ async def import_url_direct(
         mime_hint="text/html",
         options={"extractor_options": {"clean_html": clean_html}},
     )
-    await _process_ingestion_job_for_api(runtime, ingest_service, job.id, vault)
+    await _process_ingestion_job_for_api(
+        runtime,
+        ingest_service,
+        job.id,
+        vault,
+        authority=ExecutionAuthority.from_principal(principal),
+    )
     refreshed_job = ingest_service.get_job(job.id) or job
     outputs = refreshed_job.outputs
     logger.info(
@@ -153,6 +172,8 @@ async def _process_ingestion_job_for_api(
     ingest_service: IngestionService,
     job_id: int,
     vault: str,
+    *,
+    authority: ExecutionAuthority,
 ) -> None:
     """Process one API-triggered ingestion job under execution task context."""
     try:
@@ -162,6 +183,7 @@ async def _process_ingestion_job_for_api(
             job_id=job_id,
             vault=vault,
             source=ExecutionTaskSource.API,
+            authority=authority,
         )
     except Exception:
         # process_job persists status/error; callers inspect the refreshed job.

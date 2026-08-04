@@ -123,6 +123,12 @@ Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
 
 `TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. Observers run from terminal lifecycle transitions after live worker coroutines have unwound. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
+Execution tasks also carry a principal authority distinct from their source.
+Interactive work currently uses `local-user`; scheduler and system maintenance
+use `system`. The coordinator installs this authority through a context-local
+binding so tools and nested runtime work can use the originating identity
+without depending on FastAPI request state.
+
 `RuntimeBackgroundSpawner` schedules detached runtime work onto the runtime loop
 and registers background handles in the runtime shutdown task set.
 

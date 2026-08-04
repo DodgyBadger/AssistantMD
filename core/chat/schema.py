@@ -6,6 +6,7 @@ import sqlite3
 
 from core.database import connect_sqlite_from_system_db
 from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
+from core.identity import LOCAL_USER_PRINCIPAL_ID
 
 DB_NAME = "chat_sessions"
 MIGRATION_NAMESPACE = "chat_sessions"
@@ -15,6 +16,11 @@ CHAT_SESSION_MIGRATIONS = (
         version=1,
         name="add_compaction_checkpoints",
         apply=lambda conn: _migrate_compaction_checkpoints(conn),
+    ),
+    SQLiteMigration(
+        version=2,
+        name="add_session_owner_principal",
+        apply=lambda conn: _migrate_session_owners(conn),
     ),
 )
 
@@ -32,6 +38,7 @@ def ensure_chat_sessions_schema(
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 session_id TEXT NOT NULL,
                 vault_name TEXT NOT NULL,
+                owner_principal_id TEXT NOT NULL DEFAULT 'local-user',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_activity_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 title TEXT,
@@ -175,6 +182,7 @@ def ensure_chat_sessions_schema(
             """
         )
         _migrate_compaction_checkpoints(conn)
+        _migrate_session_owners(conn)
         conn.commit()
         if apply_migrations:
             apply_sqlite_migrations(
@@ -233,6 +241,30 @@ def _ensure_column(
     existing = {str(row[1]) for row in rows}
     if column_name not in existing:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _migrate_session_owners(conn: sqlite3.Connection) -> None:
+    """Assign legacy sessions to the implicit local user."""
+    _ensure_column(
+        conn,
+        "chat_sessions",
+        "owner_principal_id",
+        f"TEXT NOT NULL DEFAULT '{LOCAL_USER_PRINCIPAL_ID}'",
+    )
+    conn.execute(
+        """
+        UPDATE chat_sessions
+        SET owner_principal_id = ?
+        WHERE owner_principal_id IS NULL OR TRIM(owner_principal_id) = ''
+        """,
+        (LOCAL_USER_PRINCIPAL_ID,),
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner_activity
+        ON chat_sessions(owner_principal_id, last_activity_at)
+        """
+    )
 
 
 def _deduplicate_session_ids(conn: sqlite3.Connection) -> None:

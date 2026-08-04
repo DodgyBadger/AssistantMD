@@ -10,6 +10,12 @@ from core.authoring.workflow_execution import (
     WorkflowExecutionResult,
     execute_workflow_by_id,
 )
+from core.identity import (
+    LOCAL_USER_AUTHORITY,
+    SYSTEM_AUTHORITY,
+    ExecutionAuthority,
+    get_current_execution_authority,
+)
 from core.logger import UnifiedLogger
 from core.settings import (
     get_max_concurrent_workflows,
@@ -35,6 +41,26 @@ from .task_runner import (
 )
 
 WorkflowSource = ExecutionTaskSource
+
+
+def _authority_for_workflow_source(
+    source: WorkflowSource,
+    *,
+    authority: ExecutionAuthority | None = None,
+) -> ExecutionAuthority:
+    """Resolve authority at a workflow execution entrypoint."""
+    if authority is not None:
+        return authority
+    current = get_current_execution_authority()
+    if current is not None:
+        return current
+    if source in {ExecutionTaskSource.SCHEDULER, ExecutionTaskSource.SYSTEM}:
+        return SYSTEM_AUTHORITY
+    if source == ExecutionTaskSource.API:
+        return LOCAL_USER_AUTHORITY
+    raise RuntimeError(
+        f"Workflow source '{source}' requires an active execution authority."
+    )
 
 
 class WorkflowGovernor:
@@ -65,9 +91,11 @@ class WorkflowGovernor:
         expect_failure: bool = False,
         include_load_errors: bool = False,
         task_id: str | None = None,
+        authority: ExecutionAuthority | None = None,
     ) -> WorkflowExecutionResult:
         """Execute one workflow after waiting for its vault and global lanes."""
         vault_name, workflow_name = self._split_workflow_identity(global_id)
+        authority = _authority_for_workflow_source(source, authority=authority)
         source_value = str(source)
         active_task_id = task_id or ""
         task_context = (
@@ -78,6 +106,7 @@ class WorkflowGovernor:
                 scope=workflow_vault_scope(vault_name),
                 source=source,
                 label=global_id,
+                authority=authority,
                 metadata={
                     "workflow_id": global_id,
                     "vault": vault_name,
@@ -281,6 +310,7 @@ class WorkflowGovernor:
                             scope=workflow_vault_scope(vault_name),
                             source=source,
                             label=global_id,
+                            authority=authority,
                             metadata={},
                             timeout_seconds=timeout,
                             timeout_reason=f"workflow_task_timeout:{timeout:g}s",
@@ -489,10 +519,12 @@ class WorkflowGovernor:
         expect_failure: bool = False,
         include_load_errors: bool = False,
         background_tasks: set[asyncio.Task] | None = None,
+        authority: ExecutionAuthority | None = None,
     ) -> ExecutionTaskSnapshot:
         """Start one workflow in the background and return its execution task."""
         del background_tasks
         vault_name, _workflow_name = self._split_workflow_identity(global_id)
+        authority = _authority_for_workflow_source(source, authority=authority)
 
         async def _run(task: ExecutionTaskSnapshot) -> None:
             try:
@@ -503,6 +535,7 @@ class WorkflowGovernor:
                     expect_failure=expect_failure,
                     include_load_errors=include_load_errors,
                     task_id=task.task_id,
+                    authority=authority,
                 )
             except asyncio.CancelledError:
                 raise
@@ -515,6 +548,7 @@ class WorkflowGovernor:
                 scope=workflow_vault_scope(vault_name),
                 source=source,
                 label=global_id,
+                authority=authority,
                 metadata={
                     "workflow_id": global_id,
                     "vault": vault_name,

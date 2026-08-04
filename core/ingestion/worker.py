@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 
+from core.identity import SYSTEM_AUTHORITY
 from core.ingestion.jobs import get_job, list_jobs
 from core.ingestion.models import JobStatus
 from core.logger import UnifiedLogger
@@ -58,6 +59,7 @@ class IngestionWorker:
                 scope=ingestion_vault_scope(vault),
                 source=ExecutionTaskSource.SCHEDULER,
                 label=ingestion_task_label(job_id),
+                authority=SYSTEM_AUTHORITY,
                 metadata={"job_id": job_id, "vault": vault},
             ),
             lambda _task: asyncio.to_thread(self.process_job_fn, job_id),

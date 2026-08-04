@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat.schema import ensure_chat_sessions_schema
+from core.identity import LOCAL_USER_AUTHORITY
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
@@ -387,6 +388,7 @@ class VaultStateMutationRecorderScenario(BaseScenario):
         caught = None
         runtime = get_runtime_context()
         async with runtime.task_coordinator.track_current_task(
+            authority=LOCAL_USER_AUTHORITY,
             kind=ExecutionTaskKind.WORKFLOW.value,
             scope=workflow_vault_scope(vault.name),
             source=ExecutionTaskSource.API.value,

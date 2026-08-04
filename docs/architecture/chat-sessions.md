@@ -142,6 +142,15 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
 
 See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation semantics.
 
+## Session ownership
+
+Every durable chat session has one immutable `owner_principal_id`. Interactive
+requests currently resolve to the built-in `local-user` principal, and existing
+session rows are assigned to that principal by the chat database migration.
+Session touches never rewrite ownership, and forks retain the source session's
+owner. Ownership is an internal authorization contract and is not exposed in
+the current chat-session API models.
+
 ## History compaction
 
 Chat history compaction records a replay checkpoint whose default effective
