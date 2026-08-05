@@ -78,15 +78,6 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare container-style paths
-        run: |
-          if [ -e /app ]; then
-            sudo rm -rf /app
-          fi
-          sudo ln -s "$GITHUB_WORKSPACE" /app
-          sudo mkdir -p /app/system /app/data
-          sudo chown -R "$USER":"$USER" /app/system /app/data
-
       - name: Install validation system dependencies
         run: |
           sudo apt-get update

@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
+RUNTIME_ROOT="${ASSISTANTMD_DEV_RUNTIME_ROOT:-${REPO_ROOT}/.runtime}"
+DATA_ROOT="${CONTAINER_DATA_ROOT:-${RUNTIME_ROOT}/data}"
+SYSTEM_ROOT="${CONTAINER_SYSTEM_ROOT:-${RUNTIME_ROOT}/system}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/dev <command> [options]
+
+Commands:
+  setup [--browser]    Create or repair .venv, install dependencies, and build CSS
+  run [options]        Start the development server with checkout-local state
+  check                Run Ruff, Black, and MyPy
+  scenario <selector>  Run one validation scenario selector
+  doctor               Diagnose required tools and the checkout environment
+  help                 Show this help
+
+Run options:
+  -p, --port <port>       Listen on this port (default: 8000)
+  -a, --address <address> Listen on this address (default: 127.0.0.1)
+      --public            Listen on 0.0.0.0; shorthand for --address 0.0.0.0
+  -h, --help              Show run-specific help
+  --                       Pass remaining arguments to Uvicorn
+
+Environment:
+  ASSISTANTMD_DEV_RUNTIME_ROOT  Override the default .runtime directory
+  CONTAINER_DATA_ROOT          Override the development vault root
+  CONTAINER_SYSTEM_ROOT        Override the development system-state root
+  ASSISTANTMD_DEV_HOST         Development server host (default: 127.0.0.1)
+  ASSISTANTMD_DEV_PORT         Development server port (default: 8000)
+EOF
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+require_command() {
+  local command_name="$1"
+  local install_hint="$2"
+  command -v "${command_name}" >/dev/null 2>&1 || die "${command_name} is required. ${install_hint}"
+}
+
+require_node_22() {
+  local node_major
+  node_major="$(node -p 'process.versions.node.split(".")[0]')"
+  [ "${node_major}" = "22" ] || die "Node.js 22 is required; found $(node --version)."
+}
+
+validate_port() {
+  local port="$1"
+  if ! [[ "${port}" =~ ^[0-9]+$ ]] || [ "${port}" -lt 1 ] || [ "${port}" -gt 65535 ]; then
+    die "Port must be an integer between 1 and 65535; received '${port}'."
+  fi
+}
+
+ensure_runtime_roots() {
+  mkdir -p "${DATA_ROOT}" "${SYSTEM_ROOT}"
+}
+
+require_environment() {
+  if [ ! -x "${VENV_PYTHON}" ]; then
+    die "The checkout environment is missing or broken. Run scripts/dev setup."
+  fi
+  if ! "${VENV_PYTHON}" -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 13))'; then
+    die "The checkout environment is not using Python 3.13. Run scripts/dev setup."
+  fi
+}
+
+setup_environment() {
+  local with_browser=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --browser)
+        with_browser=true
+        ;;
+      *)
+        die "Unknown setup option: $1"
+        ;;
+    esac
+    shift
+  done
+
+  require_command uv "Install it from https://docs.astral.sh/uv/getting-started/installation/."
+  require_command node "Install Node.js 22 before running the full application setup."
+  require_command npm "Install npm with Node.js 22 before running the full application setup."
+  require_node_22
+
+  cd "${REPO_ROOT}"
+  echo "Ensuring UV-managed Python 3.13 is available..."
+  uv python install 3.13
+
+  echo "Creating or repairing the checkout-local Python environment..."
+  UV_LINK_MODE=copy uv sync \
+    --python 3.13 \
+    --frozen \
+    --all-extras \
+    --no-install-project
+
+  echo "Installing frontend dependencies from package-lock.json..."
+  npm ci --include=dev
+
+  echo "Building static CSS..."
+  npm run build:css
+
+  ensure_runtime_roots
+
+  if [ "${with_browser}" = true ]; then
+    echo "Installing Playwright Chromium and required host libraries..."
+    uv run python -m playwright install --with-deps chromium
+  fi
+
+  "${VENV_PYTHON}" -c 'import logfire, sys; assert sys.version_info[:2] == (3, 13)'
+  echo "Development environment is ready."
+  echo "Python: $("${VENV_PYTHON}" -V 2>&1)"
+  echo "Runtime data: ${DATA_ROOT}"
+  echo "Runtime system: ${SYSTEM_ROOT}"
+  echo "Start AssistantMD with: scripts/dev run"
+}
+
+run_server() {
+  local address="${ASSISTANTMD_DEV_HOST:-127.0.0.1}"
+  local address_option_set=false
+  local port="${ASSISTANTMD_DEV_PORT:-8000}"
+  local -a uvicorn_args=()
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -p|--port)
+        [ "$#" -ge 2 ] || die "$1 requires a port number."
+        port="$2"
+        shift 2
+        ;;
+      -a|--address)
+        [ "$#" -ge 2 ] || die "$1 requires an address."
+        [ "${address_option_set}" = false ] || die "Specify only one of --address or --public."
+        [ -n "$2" ] || die "$1 requires a non-empty address."
+        address="$2"
+        address_option_set=true
+        shift 2
+        ;;
+      --public)
+        [ "${address_option_set}" = false ] || die "Specify only one of --address or --public."
+        address="0.0.0.0"
+        address_option_set=true
+        shift
+        ;;
+      -h|--help)
+        usage
+        return
+        ;;
+      --)
+        shift
+        uvicorn_args=("$@")
+        break
+        ;;
+      *)
+        die "Unknown run option: $1. Put advanced Uvicorn arguments after --."
+        ;;
+    esac
+  done
+
+  validate_port "${port}"
+  require_command uv "Install it from https://docs.astral.sh/uv/getting-started/installation/."
+  require_environment
+  ensure_runtime_roots
+  cd "${REPO_ROOT}"
+  export CONTAINER_DATA_ROOT="${DATA_ROOT}"
+  export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
+  exec uv run uvicorn main:app \
+    --host "${address}" \
+    --port "${port}" \
+    --reload \
+    "${uvicorn_args[@]}"
+}
+
+run_checks() {
+  require_command uv "Install it from https://docs.astral.sh/uv/getting-started/installation/."
+  require_environment
+  cd "${REPO_ROOT}"
+  uv run ruff check .
+  uv run black --check .
+  uv run mypy api core
+}
+
+run_scenarios() {
+  [ "$#" -eq 1 ] || die "Provide exactly one scenario selector."
+  require_command uv "Install it from https://docs.astral.sh/uv/getting-started/installation/."
+  require_environment
+  cd "${REPO_ROOT}"
+  uv run python validation/run_validation.py run "$@"
+}
+
+doctor() {
+  local browser_path
+  local failures=0
+  cd "${REPO_ROOT}"
+  echo "Repository: ${REPO_ROOT}"
+
+  for command_name in git uv node npm curl rg cc; do
+    if command -v "${command_name}" >/dev/null 2>&1; then
+      echo "OK: ${command_name} -> $(command -v "${command_name}")"
+    else
+      echo "MISSING: ${command_name}"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    if [ "$(node -p 'process.versions.node.split(".")[0]')" = "22" ]; then
+      echo "OK: $(node --version)"
+    else
+      echo "BROKEN: Node.js 22 is required; found $(node --version)"
+      failures=$((failures + 1))
+    fi
+  fi
+
+  if [ -x "${VENV_PYTHON}" ]; then
+    echo "OK: venv python -> ${VENV_PYTHON}"
+    if "${VENV_PYTHON}" -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 13))'; then
+      echo "OK: $("${VENV_PYTHON}" -V 2>&1)"
+    else
+      echo "BROKEN: .venv does not use Python 3.13"
+      failures=$((failures + 1))
+    fi
+    if "${VENV_PYTHON}" -c 'import logfire' >/dev/null 2>&1; then
+      echo "OK: logfire import"
+    else
+      echo "BROKEN: logfire is not importable from .venv"
+      failures=$((failures + 1))
+    fi
+    if browser_path="$("${VENV_PYTHON}" - <<'PY'
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as playwright:
+    path = Path(playwright.chromium.executable_path)
+    print(path if path.exists() else "")
+PY
+)"; then
+      if [ -n "${browser_path}" ]; then
+        echo "OK: Playwright Chromium -> ${browser_path}"
+      else
+        echo "OPTIONAL: Playwright Chromium is not installed; run scripts/dev setup --browser when needed"
+      fi
+    else
+      echo "BROKEN: playwright is not usable from .venv"
+      failures=$((failures + 1))
+    fi
+  else
+    echo "BROKEN: ${VENV_PYTHON} is missing or not executable"
+    failures=$((failures + 1))
+  fi
+
+  echo "Runtime data: ${DATA_ROOT}"
+  echo "Runtime system: ${SYSTEM_ROOT}"
+
+  if [ "${failures}" -ne 0 ]; then
+    echo "Doctor found ${failures} blocking issue(s). Run scripts/dev setup after installing missing host tools." >&2
+    return 1
+  fi
+  echo "Development environment checks passed."
+}
+
+command_name="${1:-help}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "${command_name}" in
+  setup)
+    setup_environment "$@"
+    ;;
+  run)
+    run_server "$@"
+    ;;
+  check)
+    [ "$#" -eq 0 ] || die "The check command does not accept arguments."
+    run_checks
+    ;;
+  scenario)
+    run_scenarios "$@"
+    ;;
+  doctor)
+    [ "$#" -eq 0 ] || die "The doctor command does not accept arguments."
+    doctor
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    die "Unknown command: ${command_name}"
+    ;;
+esac

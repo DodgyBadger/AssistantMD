@@ -42,6 +42,7 @@ your own python workflow and context assembly scripts. See the [Build Guide](doc
 ## Documentation
 
 - **[Installation Guide](docs/setup/installation.md)**
+- **[Development Setup](docs/setup/development.md)**
 - **[Build Guide](docs/use/build-guide.md)** — start here for the composable building blocks and default setup
 - **[Authoring Reference](docs/use/authoring.md)** — workflow scripts and context assembly scripts
 - **[Security Considerations](docs/setup/security.md)**

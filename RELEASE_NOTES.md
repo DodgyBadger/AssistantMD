@@ -11,6 +11,15 @@
 - This release has no visible app changes and does not change routes or API
   request and response payloads.
 
+### Development setup
+
+- Development is supported on both general-purpose hosts and the devcontainer
+  through one `scripts/dev` workflow. Each checkout uses a pinned Python 3.13
+  UV environment and isolated local runtime state.
+- Setup can repair stale virtual environments, prepare frontend dependencies,
+  optionally install Playwright Chromium, run the development server, diagnose
+  prerequisites, and invoke focused validation scenarios.
+
 
 ## 2026-08-02 - v0.7.0
 

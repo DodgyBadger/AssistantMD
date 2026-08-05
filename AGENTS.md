@@ -16,7 +16,9 @@ Fail fast so we can see and then fix bugs.
 - Planning output is required: planning work must end with a root-level markdown implementation plan, either by creating a new file or updating the existing one for that effort.
 - Documentation should describe the current contract only. Do not document behavior as “instead of the old way” or teach migrations inside product docs unless the task explicitly calls for migration guidance.
 - Never commit real API keys or populated `system/secrets.yaml`.
-- Treat `/app/data` and `/app/system` as persistent runtime state during local testing.
+- Treat the configured data and system roots as persistent runtime state during
+  local testing. `scripts/dev run` defaults them to `.runtime/data` and
+  `.runtime/system`; production containers use `/app/data` and `/app/system`.
 - Commit message expectations live in [Git and Review Workflow](docs/agent-guides/git-and-review.md).
 
 ## Choose the Current Phase

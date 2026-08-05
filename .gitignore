@@ -81,9 +81,6 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-.python-version
-
 # pipenv
 #   According to PDM, this file is managed by PDM.
 #   According to Poetry, this file is managed by Poetry.
@@ -103,6 +100,7 @@ celerybeat.pid
 .env
 system/secrets.yaml
 .venv
+.runtime/
 env/
 venv/
 ENV/

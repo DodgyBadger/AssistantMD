@@ -6,7 +6,7 @@ authors = [
     { name = "AssistantMD Team" }
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "uvicorn[standard]>=0.22.0",
     "pydantic>=2.0.0",

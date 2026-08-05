@@ -20,7 +20,7 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.defaultInterpreterPath": "/app/.venv/bin/python",
         "python.terminal.activateEnvironment": false,
         "terminal.integrated.shell.linux": "/bin/bash"
       },
@@ -38,12 +38,10 @@
   },
 
   "containerEnv": {
-    "CONTAINER_DATA_ROOT": "/app/data",
-    "CONTAINER_SYSTEM_ROOT": "/app/system",
     "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"
   },
 
-  // Run setup once after container creation (avoid rerunning on every reopen)
+  // Use the same checkout-local bootstrap supported on bare metal.
   "postCreateCommand": "bash .devcontainer/setup.sh"
   ,
 

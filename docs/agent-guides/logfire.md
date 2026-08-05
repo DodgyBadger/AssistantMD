@@ -4,9 +4,9 @@ Use Logfire when runtime traces can answer a question faster than reproducing th
 
 ## MCP Connection
 
-The devcontainer setup registers the EU Logfire MCP endpoint automatically. OAuth
-authentication is interactive and may need to be repeated after rebuilding the
-container:
+The Logfire MCP connection is optional and separate from the application Python
+environment. OAuth authentication is interactive and may need to be repeated
+after replacing a development host or container:
 
 ```bash
 codex mcp login logfire
