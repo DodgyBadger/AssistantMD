@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from core.chat.chat_store import ChatStore
+from core.identity import LOCAL_USER_PRINCIPAL_ID
 from core.memory.session_summary import SessionSummaryStore
 from validation.core.base_scenario import BaseScenario
 
@@ -149,6 +150,11 @@ class RetrieveSessionsHelperScenario(BaseScenario):
         title: str,
         message_count: int = 2,
     ) -> None:
+        chat_store.ensure_session(
+            session_id,
+            vault_name,
+            owner_principal_id=LOCAL_USER_PRINCIPAL_ID,
+        )
         messages = []
         for index in range(message_count):
             if index % 2 == 0:

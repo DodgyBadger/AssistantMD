@@ -14,6 +14,7 @@ from core.chat.task_execution import (
     start_queued_chat_stream_task,
 )
 from core.chat.workspace import normalize_workspace_path
+from core.identity import ExecutionAuthority, use_execution_authority
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
 from core.runtime.execution_tasks import ExecutionTaskCancellationResult
 from core.runtime.state import get_runtime_context
@@ -40,7 +41,11 @@ class ChatSurfaceRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTaskStart:
+async def start_chat_surface_task(
+    request: ChatSurfaceRequest,
+    *,
+    authority: ExecutionAuthority,
+) -> ChatStreamTaskStart:
     """Start a queued chat task from a normalized external surface request."""
     _validate_surface_request(request)
     runtime = get_runtime_context()
@@ -55,12 +60,17 @@ async def start_chat_surface_task(request: ChatSurfaceRequest) -> ChatStreamTask
         source_name=f"{request.surface} thinking",
     )
     workspace_path = normalize_workspace_path(request.workspace_path)
-    if request.workspace_path is not None:
-        _CHAT_STORE.set_session_workspace(
-            session_id=request.session_id,
-            vault_name=request.vault_name,
-            workspace_path=workspace_path or None,
+    with use_execution_authority(authority):
+        runtime.chat_session_access.ensure_session(
+            request.session_id,
+            request.vault_name,
         )
+        if request.workspace_path is not None:
+            _CHAT_STORE.set_session_workspace(
+                session_id=request.session_id,
+                vault_name=request.vault_name,
+                workspace_path=workspace_path or None,
+            )
     started = await start_queued_chat_stream_task(
         vault_name=request.vault_name,
         vault_path=vault_path,

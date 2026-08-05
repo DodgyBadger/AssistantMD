@@ -139,6 +139,9 @@ binding so tools and nested runtime work can use the originating identity
 without depending on FastAPI request state.
 
 The API router installs `local-user` authority for the complete request scope.
+Non-web chat surface adapters receive explicit authority from their transport
+integration, create or access the session through the runtime-owned access
+service, and capture that same authority on the resulting execution task.
 Task and session API adapters use the runtime-owned access services rather than
 the raw coordinator or owner-unaware session discovery. Raw infrastructure
 remains available to bootstrap, migrations, lifecycle coordination, and

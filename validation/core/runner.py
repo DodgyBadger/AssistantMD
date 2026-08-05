@@ -19,35 +19,10 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from dataclasses import dataclass
-
 from core.logger import UnifiedLogger
 
 from .paths import resolve_validation_root
-
-
-@dataclass
-class ScenarioResult:
-    scenario_name: str
-    status: str
-    execution_time: float
-    error_message: str | None = None
-    error_classification: str | None = None
-    evidence_path: str | None = None
-
-
-@dataclass
-class ValidationRun:
-    run_id: str
-    start_time: datetime
-    end_time: datetime
-    total_scenarios: int
-    passed_scenarios: int
-    failed_scenarios: int
-    error_scenarios: int
-    success_rate: float
-    scenario_results: list
-
+from .results import ErrorClassification, ScenarioResult, ValidationRun
 
 logger = UnifiedLogger(tag="validation-runner", default_sinks=["validation", "logfire"])
 
@@ -123,12 +98,12 @@ class ValidationRunner:
         # Normalize path separators for cross-platform support
         scenario_name = scenario_name.replace("\\", "/")
 
-        # Build file path from scenario name
-        scenario_file = self.scenarios_dir / f"{scenario_name}.py"
-        if not scenario_file.exists():
-            raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
-
         try:
+            # Build file path from scenario name
+            scenario_file = self.scenarios_dir / f"{scenario_name}.py"
+            if not scenario_file.exists():
+                raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
+
             # Convert scenario name to module name (e.g., "integration/basic_haiku" -> "validation.scenarios.integration.basic_haiku")
             module_name = f"validation.scenarios.{scenario_name.replace('/', '.')}"
             module = importlib.import_module(module_name)
@@ -195,15 +170,13 @@ class ValidationRunner:
 
             scenario_result = ScenarioResult(
                 scenario_name=scenario_name,
-                status=error_classification["status"],
+                status=error_classification.status,
                 execution_time=execution_time,
                 evidence_path=evidence_path,
                 error_message=error_msg,
+                error_classification=error_classification,
+                stack_trace=stack_trace,
             )
-
-            scenario_result.error_classification = error_classification
-            scenario_result.stack_trace = stack_trace
-
             return scenario_result
 
     def _format_scenario_error(self, exception: Exception, scenario_name: str) -> str:
@@ -255,55 +228,55 @@ class ValidationRunner:
 
     def _classify_error(
         self, exception: Exception, scenario_name: str
-    ) -> dict[str, str]:
+    ) -> ErrorClassification:
         """Classify errors using V1 logic."""
         exception_type = type(exception).__name__
 
         if exception_type in ["AssertionError"]:
-            return {
-                "type": "SCENARIO FAILURE",
-                "status": "failed",
-                "severity": "low",
-                "recommendation": "Review scenario assertions and expected outputs",
-                "emoji": "❌",
-            }
+            return ErrorClassification(
+                type="SCENARIO FAILURE",
+                status="failed",
+                severity="low",
+                recommendation="Review scenario assertions and expected outputs",
+                emoji="❌",
+            )
         if exception_type in ["FileNotFoundError", "PermissionError", "OSError"]:
-            return {
-                "type": "FRAMEWORK ERROR",
-                "status": "framework_error",
-                "severity": "medium",
-                "recommendation": "Check test setup - file paths, permissions, or test environment",
-                "emoji": "💥",
-            }
+            return ErrorClassification(
+                type="FRAMEWORK ERROR",
+                status="framework_error",
+                severity="medium",
+                recommendation="Check test setup - file paths, permissions, or test environment",
+                emoji="💥",
+            )
         elif exception_type in ["ImportError", "ModuleNotFoundError"]:
-            return {
-                "type": "FRAMEWORK ERROR",
-                "status": "framework_error",
-                "severity": "medium",
-                "recommendation": "Check test imports and dependencies",
-                "emoji": "💥",
-            }
+            return ErrorClassification(
+                type="FRAMEWORK ERROR",
+                status="framework_error",
+                severity="medium",
+                recommendation="Check test imports and dependencies",
+                emoji="💥",
+            )
         elif exception_type in [
             "ValueError",
             "TypeError",
             "AttributeError",
             "KeyError",
         ]:
-            return {
-                "type": "SYSTEM ERROR",
-                "status": "system_bug",
-                "severity": "high",
-                "recommendation": "Review stack trace to identify system code that needs error handling",
-                "emoji": "🚨",
-            }
+            return ErrorClassification(
+                type="SYSTEM ERROR",
+                status="system_bug",
+                severity="high",
+                recommendation="Review stack trace to identify system code that needs error handling",
+                emoji="🚨",
+            )
         else:
-            return {
-                "type": "UNEXPECTED ERROR",
-                "status": "error",
-                "severity": "medium",
-                "recommendation": f"Investigate {exception_type} in system code",
-                "emoji": "❓",
-            }
+            return ErrorClassification(
+                type="UNEXPECTED ERROR",
+                status="error",
+                severity="medium",
+                recommendation=f"Investigate {exception_type} in system code",
+                emoji="❓",
+            )
 
     def _cleanup_old_runs(self, keep_count: int = 10):
         """Clean up old validation runs, keeping only the most recent ones based on timestamp in directory name."""
@@ -352,10 +325,15 @@ class ValidationRunner:
         except Exception as e:
             logger.warning(f"Failed to cleanup old validation runs: {e}")
 
-    def run_scenarios(self, scenario_names: list[str] | None = None) -> ValidationRun:
+    def run_scenarios(
+        self,
+        scenario_names: list[str] | None = None,
+        *,
+        requested_scenarios: list[str] | None = None,
+    ) -> ValidationRun:
         """Run V2 validation scenarios."""
         run_start = datetime.now()
-        run_id = run_start.strftime("%Y%m%d_%H%M%S")
+        run_id = run_start.strftime("%Y%m%d_%H%M%S_%f")
 
         # Clean up old runs before starting new ones (keep 9 + 1 new = 10 total)
         self._cleanup_old_runs(keep_count=9)
@@ -395,6 +373,8 @@ class ValidationRunner:
             error_scenarios=errors,
             success_rate=success_rate,
             scenario_results=scenario_results,
+            requested_scenarios=list(requested_scenarios or scenario_names),
+            expanded_scenarios=list(scenario_names),
         )
 
         return validation_run

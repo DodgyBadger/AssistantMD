@@ -19,6 +19,7 @@ from core.chat.surface_adapter import (
     start_chat_surface_task,
     subscribe_chat_surface_events,
 )
+from core.identity import LOCAL_USER_AUTHORITY, LOCAL_USER_PRINCIPAL_ID
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
@@ -116,7 +117,8 @@ class ChatSurfaceAdapterScenario(BaseScenario):
                     tools=[],
                     workspace_path="Projects\\Surface/./Inbox",
                     metadata={"sender": "validation-user"},
-                )
+                ),
+                authority=LOCAL_USER_AUTHORITY,
             )
             completed_events = await self._collect_events(completed.task.task_id)
             completed_task = await self._wait_for_task_terminal(completed.task.task_id)
@@ -131,7 +133,8 @@ class ChatSurfaceAdapterScenario(BaseScenario):
                         prompt="surface prompt",
                         model="test",
                         workspace_path="../outside",
-                    )
+                    ),
+                    authority=LOCAL_USER_AUTHORITY,
                 )
             except ValueError as exc:
                 invalid_workspace_error = exc
@@ -145,7 +148,8 @@ class ChatSurfaceAdapterScenario(BaseScenario):
                     prompt="cancel surface prompt",
                     model="test",
                     tools=[],
-                )
+                ),
+                authority=LOCAL_USER_AUTHORITY,
             )
             running_task = await self._wait_for_task_status(
                 cancelled.task.task_id, "running"
@@ -165,6 +169,20 @@ class ChatSurfaceAdapterScenario(BaseScenario):
             completed_task.status if completed_task else None,
             "completed",
             "Surface-started chat task should complete",
+        )
+        self.soft_assert_equal(
+            completed_task.principal_id if completed_task else None,
+            LOCAL_USER_PRINCIPAL_ID,
+            "Surface-started chat tasks should retain the caller's authority",
+        )
+        surface_session = chat_executor._CHAT_STORE.get_session(
+            "telegram-session",
+            vault.name,
+        )
+        self.soft_assert_equal(
+            surface_session.owner_principal_id if surface_session else None,
+            LOCAL_USER_PRINCIPAL_ID,
+            "Surface-created chat sessions should be owned by the caller",
         )
         self.soft_assert_equal(
             completed_task.metadata.get("surface") if completed_task else None,

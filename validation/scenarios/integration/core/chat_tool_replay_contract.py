@@ -26,11 +26,17 @@ class ChatToolReplayContractScenario(BaseScenario):
         await self.start_system()
 
         from core.chat.chat_store import ChatStore
+        from core.identity import LOCAL_USER_PRINCIPAL_ID
         from core.runtime.state import get_runtime_context
 
         runtime = get_runtime_context()
         store = ChatStore(system_root=str(runtime.config.system_root))
         session_id = "chat_tool_replay_contract_session"
+        store.ensure_session(
+            session_id,
+            vault.name,
+            owner_principal_id=LOCAL_USER_PRINCIPAL_ID,
+        )
 
         store.add_messages(
             session_id,

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 
 from core.chat.chat_store import ChatStore
+from core.identity import LOCAL_USER_PRINCIPAL_ID
 from validation.core.base_scenario import BaseScenario
 
 
@@ -21,6 +22,11 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
         store = ChatStore(system_root=str(self._get_system_controller()._system_root))
 
         default_session_id = "reasoning-default"
+        store.ensure_session(
+            default_session_id,
+            vault.name,
+            owner_principal_id=LOCAL_USER_PRINCIPAL_ID,
+        )
         store.add_messages(
             default_session_id,
             vault.name,
@@ -79,6 +85,11 @@ class ChatReasoningHistoryPolicyScenario(BaseScenario):
         )
 
         opt_in_session_id = "reasoning-opt-in"
+        store.ensure_session(
+            opt_in_session_id,
+            vault.name,
+            owner_principal_id=LOCAL_USER_PRINCIPAL_ID,
+        )
         store.add_messages(
             opt_in_session_id,
             vault.name,

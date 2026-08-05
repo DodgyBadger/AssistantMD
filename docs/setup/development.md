@@ -166,7 +166,15 @@ scripts/dev scenario integration/core/api_error_resilience
 ```
 
 Maintainers own the full scenario-validation suite. Contributors and coding
-agents should run focused scenarios for the behavior they change.
+agents should run focused scenarios for the behavior they change. Validation
+runs end with a failure-focused summary and write durable indexes to
+`validation/runs/reports/latest.md` and `validation/runs/reports/latest.json`.
+Pass `--show-passed` to the validation CLI when individual successful scenarios
+are useful:
+
+```bash
+uv run python validation/run_validation.py run integration/core --show-passed
+```
 
 Show all commands:
 

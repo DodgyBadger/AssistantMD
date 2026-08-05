@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat.schema import ensure_chat_sessions_schema
-from core.identity import LOCAL_USER_AUTHORITY
+from core.identity import LOCAL_USER_AUTHORITY, LOCAL_USER_PRINCIPAL_ID
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
@@ -458,13 +458,15 @@ class VaultStateMutationRecorderScenario(BaseScenario):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO chat_sessions (
-                    session_id, vault_name, created_at, last_activity_at, title, metadata_json
+                    session_id, vault_name, owner_principal_id,
+                    created_at, last_activity_at, title, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "validation-session",
                     vault_name,
+                    LOCAL_USER_PRINCIPAL_ID,
                     "2026-05-06 17:00:00",
                     "2026-05-06 17:05:00",
                     "Validation Chat Title",

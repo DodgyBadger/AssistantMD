@@ -19,6 +19,11 @@
 - Setup can repair stale virtual environments, prepare frontend dependencies,
   optionally install Playwright Chromium, run the development server, diagnose
   prerequisites, and invoke focused validation scenarios.
+- Validation runs now finish with a failure-focused digest containing direct
+  evidence links and rerun commands, and retain Markdown and JSON run indexes
+  so failures remain easy to find after terminal output has scrolled away.
+- Checkout-local development now exposes built-in tool documentation through
+  the same virtual docs mount used by container deployments.
 
 
 ## 2026-08-02 - v0.7.0
