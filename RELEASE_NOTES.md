@@ -1,5 +1,16 @@
 # Release Notes
 
+## v0.7.1
+
+### Backend authorization foundation
+
+- Chat sessions now have durable internal ownership, and queued or background
+  work retains the authority under which it was created.
+- Shared backend authorization boundaries reduce the risk that new API services
+  bypass access checks.
+- This release has no visible app changes and does not change routes or API
+  request and response payloads.
+
 
 ## 2026-08-02 - v0.7.0
 

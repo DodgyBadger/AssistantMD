@@ -6,8 +6,8 @@ Accepted.
 
 ## Context
 
-AssistantMD currently presents a single-user product, but principal-owned MCP
-and provider connections require a stable identity and authorization boundary.
+AssistantMD currently presents a single-user product, but future principal-owned
+resources require a stable identity and authorization boundary.
 Task source values such as `api`, `tool`, and `scheduler` describe how work
 began; they do not identify the actor authorized to use a resource.
 
@@ -31,7 +31,7 @@ the single-user resolver and ownership fields are internal foundations.
 
 - Existing sessions migrate deterministically to `local-user`.
 - Background and nested work retain the authority captured at creation.
-- Tooling can resolve future principal-owned connections without FastAPI state.
+- Tooling can resolve future principal-owned resources without FastAPI state.
 - New API endpoints inherit request authority automatically, while resource
   services remain responsible for owner-scoped access decisions.
 - Multi-user authentication, vault grants, connection storage, and user
@@ -42,4 +42,3 @@ the single-user resolver and ownership fields are internal foundations.
 
 - Current contracts: `docs/architecture/chat-sessions.md`,
   `docs/architecture/execution-tasks.md`, `docs/architecture/runtime.md`
-- Implementation plan: `execution-principal-foundation-plan.md`
