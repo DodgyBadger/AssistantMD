@@ -8,6 +8,9 @@
   work retains the authority under which it was created.
 - Shared backend authorization boundaries reduce the risk that new API services
   bypass access checks.
+- Ownership-sensitive session operations consistently conceal inaccessible
+  session identifiers, including create-or-touch requests, preventing those
+  identifiers from being used to probe ownership.
 - This release has no visible app changes and does not change routes or API
   request and response payloads.
 

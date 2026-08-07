@@ -48,8 +48,13 @@ class ChatSessionAccessService:
         """Create or touch a session owned by the active authority."""
         authority = require_current_execution_authority()
         existing = self._store.get_session_by_id(session_id)
-        if existing is not None:
-            self._authorization.require_session_access(authority, existing)
+        if existing is not None and not self._authorization.can_access_session(
+            authority, existing
+        ):
+            # Session reads deliberately conceal resources owned by another
+            # principal. Preserve that contract on the create-or-touch path so
+            # caller-selected IDs cannot be used as an ownership oracle.
+            raise LookupError(f"Chat session not found: {session_id}")
         return self._store.ensure_session(
             session_id=session_id,
             vault_name=vault_name,

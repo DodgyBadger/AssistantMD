@@ -23,8 +23,11 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 Interactive session operations are mediated by the runtime-owned
 `ChatSessionAccessService`. The service requires active authority, filters
 session discovery/listing by immutable owner, and assigns the active principal
-when creating a session. API session operations resolve access once at their
-service boundary before using the raw store for the remainder of that operation.
+when creating a session. Foreign session identifiers are concealed as missing
+for both lookup and create-or-touch operations so those identifiers cannot be
+used as an ownership oracle. API session operations resolve access once at
+their service boundary before using the raw store for the remainder of that
+operation.
 
 The main tables are:
 
