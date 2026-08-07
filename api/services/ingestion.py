@@ -5,6 +5,7 @@ from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.identity import ExecutionAuthority, require_current_execution_authority
+from core.ingestion.import_service import ContentImportService
 from core.ingestion.jobs import IngestionJob, find_job_for_source
 from core.ingestion.models import JobStatus, SourceKind
 from core.ingestion.registry import importer_registry
@@ -66,9 +67,8 @@ def _enqueue_import_scan_jobs(
 ) -> tuple[RuntimeContext, IngestionService, list[IngestionJob], list[str]]:
     """Create ingestion jobs for supported files in a vault import folder."""
     runtime = get_runtime_context()
-    import_root = (
-        Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
-    )
+    vault_root = Path(runtime.config.data_root) / vault
+    import_root = vault_root / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
     legacy_import_root = (
         Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
     )
@@ -97,11 +97,18 @@ def _enqueue_import_scan_jobs(
             if item.suffix.lower() not in supported_exts:
                 skipped.append(item.name)
                 continue
+            source_uri = item.relative_to(vault_root).as_posix()
             existing_job = find_job_for_source(
-                source_uri=item.name,
+                source_uri=source_uri,
                 vault=vault,
                 statuses=[JobStatus.QUEUED.value, JobStatus.PROCESSING.value],
             )
+            if existing_job is None:
+                existing_job = find_job_for_source(
+                    source_uri=item.name,
+                    vault=vault,
+                    statuses=[JobStatus.QUEUED.value, JobStatus.PROCESSING.value],
+                )
             if existing_job:
                 skipped.append(item.name)
                 continue
@@ -116,11 +123,11 @@ def _enqueue_import_scan_jobs(
 
             jobs_created.append(
                 ingest_service.enqueue_job(
-                    source_uri=item.name,
+                    source_uri=source_uri,
                     vault=vault,
                     source_type=SourceKind.FILE.value,
                     mime_hint=None,
-                    options=job_options,
+                    options={**job_options, "consume_source": True},
                 )
             )
 
@@ -135,13 +142,14 @@ async def import_url_direct(
     """Import one URL immediately as API-attributed ingestion."""
     runtime = get_runtime_context()
     ingest_service = runtime.ingestion
-    job = ingest_service.enqueue_job(
-        source_uri=url,
-        vault=vault,
-        source_type=SourceKind.URL.value,
-        mime_hint="text/html",
-        options={"extractor_options": {"clean_html": clean_html}},
+    import_service = ContentImportService(str(Path(runtime.config.data_root) / vault))
+    submitted = import_service.submit(
+        sources=url,
+        options={"clean_html": clean_html},
     )
+    job = ingest_service.get_job(submitted[0].job_id)
+    if job is None:
+        raise RuntimeError("URL import job was not created")
     await _process_ingestion_job_for_api(
         runtime,
         ingest_service,

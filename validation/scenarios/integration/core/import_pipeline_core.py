@@ -9,8 +9,13 @@ import sqlite3
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.identity import SYSTEM_AUTHORITY
+from core.ingestion.models import SourceKind
+from core.ingestion.task_execution import process_ingestion_job_in_task
+from core.runtime.execution_tasks import ExecutionTaskSource
+from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 
 
@@ -100,6 +105,36 @@ class ImportPipelineScenario(BaseScenario):
         assert all(
             mutation.get("event_sequence") is not None for mutation in mutations
         ), "Import mutations should link to vault-state events"
+
+        # A source selected elsewhere in the vault is preserved after import.
+        research_path = vault / "Research" / "preserved.pdf"
+        research_path.parent.mkdir(parents=True, exist_ok=True)
+        research_path.write_bytes(self.make_pdf("Preserved source validation"))
+        runtime = get_runtime_context()
+        preserved_job = runtime.ingestion.enqueue_job(
+            source_uri="Research/preserved.pdf",
+            vault=vault.name,
+            source_type=SourceKind.FILE.value,
+            mime_hint=None,
+            options={"consume_source": False},
+        )
+        await process_ingestion_job_in_task(
+            task_coordinator=runtime.task_coordinator,
+            process_job_fn=runtime.ingestion.process_job,
+            job_id=preserved_job.id,
+            vault=vault.name,
+            source=ExecutionTaskSource.API,
+            authority=SYSTEM_AUTHORITY,
+        )
+        preserved_result = runtime.ingestion.get_job(preserved_job.id)
+        assert preserved_result is not None
+        assert preserved_result.status == "completed"
+        assert research_path.exists(), "Non-inbox source must be preserved"
+        preserved_outputs = preserved_result.outputs or []
+        assert len(preserved_outputs) == 1
+        preserved_output = vault / preserved_outputs[0]
+        assert preserved_output.exists()
+        assert "Preserved source validation" in preserved_output.read_text()
 
         await self.stop_system()
         self.teardown_scenario()

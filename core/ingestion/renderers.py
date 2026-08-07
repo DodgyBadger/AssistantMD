@@ -46,9 +46,24 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
             if display_source_path is None:
                 display_source_path = options.source_filename
 
+    is_remote_source = bool(
+        options.source_uri
+        and options.source_uri.lower().startswith(("http://", "https://"))
+    )
+    source_value = (
+        options.source_uri
+        if is_remote_source
+        else os.path.basename(options.source_filename or "")
+    )
+    effective_source = options.effective_source_uri
     frontmatter: dict[str, object | None] = {
-        "source": os.path.basename(options.source_filename or ""),
-        "source_path": display_source_path,
+        "source": source_value,
+        "source_path": None if is_remote_source else display_source_path,
+        "final_url": (
+            effective_source
+            if is_remote_source and effective_source != options.source_uri
+            else None
+        ),
         "mime": doc.mime,
         "strategy": doc.strategy_id,
         "fetched_at": datetime.utcnow().isoformat(),

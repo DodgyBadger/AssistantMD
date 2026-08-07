@@ -10,7 +10,7 @@ This subsystem builds agents, resolves model aliases, binds settings-backed tool
 - `core/authoring/shared/tool_binding.py`
 - `core/tools/`
 
-Configured built-in tools include vault inspection (`file_read`), vault mutations (`file_write`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), goal tracking (`goal_ops`), session lookup and summarization (`session_ops`), and web retrieval (`web_search`, `web_extract`, `web_crawl`, and `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
+Configured built-in tools include vault inspection (`file_read`), vault mutations (`file_write`), durable content ingestion (`content_import`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), goal tracking (`goal_ops`), session lookup and summarization (`session_ops`), and web retrieval (`web_search`, `web_extract`, `web_crawl`, and `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
 
 ## Responsibilities
 

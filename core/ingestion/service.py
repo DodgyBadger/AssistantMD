@@ -107,7 +107,8 @@ class IngestionService:
             ingestion_settings = self._get_ingestion_settings()
 
             data_root = Path(get_data_root())
-            import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
+            vault_root = (data_root / vault).resolve()
+            import_root = vault_root / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
             legacy_import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / "import"
             import_root.mkdir(parents=True, exist_ok=True)
 
@@ -136,15 +137,29 @@ class IngestionService:
                     timeout=url_cfg.get("read_timeout_seconds", 10),
                     connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
                     strategy=url_cfg.get("fetch_strategy", "curl"),
+                    max_bytes=url_cfg.get("max_response_bytes", 5 * 1024 * 1024),
+                )
+                self.logger.info(
+                    "ingestion_remote_classified",
+                    data={
+                        **log_context,
+                        "event": "ingestion_remote_classified",
+                        "status": "completed",
+                        "source": sanitize_url_for_log(job.source_uri),
+                        "detected_mime": raw_doc.mime,
+                        "evidence": raw_doc.meta.get("classification_evidence"),
+                        "effective_url": sanitize_url_for_log(
+                            str(raw_doc.meta.get("effective_url") or job.source_uri)
+                        ),
+                    },
                 )
             else:
-                source_path = Path(job.source_uri)
-                if not source_path.is_absolute():
-                    source_path = import_root / source_path
-                if not source_path.exists() and legacy_import_root.exists():
-                    alt_path = legacy_import_root / Path(job.source_uri)
-                    if alt_path.exists():
-                        source_path = alt_path
+                source_path = self._resolve_file_source(
+                    source_uri=job.source_uri,
+                    vault_root=vault_root,
+                    import_root=import_root,
+                    legacy_import_root=legacy_import_root,
+                )
                 if not source_path.exists():
                     raise FileNotFoundError(f"Source file not found: {source_path}")
 
@@ -158,6 +173,27 @@ class IngestionService:
                     return
 
                 raw_doc = importer_fn(source_path)
+
+            self.logger.info(
+                "ingestion_source_resolved",
+                data={
+                    **log_context,
+                    "event": "ingestion_source_resolved",
+                    "status": "completed",
+                    "source_kind": job.source_type,
+                    "source": (
+                        sanitize_url_for_log(job.source_uri)
+                        if job.source_type == SourceKind.URL.value
+                        else job.source_uri
+                    ),
+                    "source_disposition": (
+                        "consume"
+                        if bool((job.options or {}).get("consume_source"))
+                        else "preserve"
+                    ),
+                    "detected_mime": raw_doc.mime,
+                },
+            )
 
             suffix = source_path.suffix.lower() if source_path else ""
             options: dict[str, Any] = (
@@ -174,7 +210,7 @@ class IngestionService:
                     import_root=import_root,
                 )
 
-            if suffix == ".pdf" and pdf_mode == "page_images":
+            if raw_doc.mime == "application/pdf" and pdf_mode == "page_images":
                 outputs = self._render_pdf_page_images(
                     raw_doc=raw_doc,
                     vault=vault,
@@ -186,7 +222,11 @@ class IngestionService:
                     dpi=150,
                 )
                 update_job_outputs(job_id, outputs)
-                self._cleanup_source_file(source_path=source_path, vault=vault)
+                self._cleanup_source_file_if_requested(
+                    job=job,
+                    source_path=source_path,
+                    vault=vault,
+                )
                 self.mark_completed(job_id)
                 self.logger.info(
                     "ingestion_job_completed",
@@ -200,7 +240,12 @@ class IngestionService:
                 )
                 return
 
-            strategies = self._get_strategies(job, suffix, ingestion_settings)
+            strategies = self._get_strategies(
+                job,
+                suffix,
+                raw_doc.mime,
+                ingestion_settings,
+            )
             extractor_opts = (
                 options.get("extractor_options", {})
                 if isinstance(options, dict)
@@ -245,6 +290,12 @@ class IngestionService:
                 title=raw_doc.suggested_title,
                 vault=vault,
                 source_filename=str(source_path) if source_path else job.source_uri,
+                source_uri=job.source_uri,
+                effective_source_uri=(
+                    str(raw_doc.meta.get("effective_url"))
+                    if raw_doc.meta.get("effective_url")
+                    else None
+                ),
                 relative_dir=relative_dir,
                 path_pattern=ingestion_settings.get("output_base_dir", "Imported/"),
             )
@@ -254,6 +305,11 @@ class IngestionService:
             outputs = default_storage(rendered, render_options)
 
             update_job_outputs(job_id, outputs)
+            self._cleanup_source_file_if_requested(
+                job=job,
+                source_path=source_path,
+                vault=vault,
+            )
             self.mark_completed(job_id)
             self.logger.info(
                 "ingestion_job_completed",
@@ -305,6 +361,38 @@ class IngestionService:
             self.mark_failed(job_id, str(exc))
             raise
 
+    def _resolve_file_source(
+        self,
+        *,
+        source_uri: str,
+        vault_root: Path,
+        import_root: Path,
+        legacy_import_root: Path,
+    ) -> Path:
+        raw_path = Path(source_uri)
+        if raw_path.is_absolute():
+            raise ValueError("Ingestion file source must be vault-relative")
+
+        candidate = (vault_root / raw_path).resolve()
+        try:
+            candidate.relative_to(vault_root)
+        except ValueError as exc:
+            raise ValueError("Ingestion file source escapes the vault") from exc
+
+        if candidate.exists():
+            return candidate
+
+        # Compatibility for queued jobs created before sources were persisted as
+        # vault-relative paths.
+        if raw_path.parent == Path("."):
+            inbox_candidate = (import_root / raw_path).resolve()
+            if inbox_candidate.exists():
+                return inbox_candidate
+            legacy_candidate = (legacy_import_root / raw_path).resolve()
+            if legacy_candidate.exists():
+                return legacy_candidate
+        return candidate
+
     def _compute_relative_import_dir(self, source_path: Path, import_root: Path) -> str:
         try:
             source_parent = source_path.parent.resolve()
@@ -320,8 +408,14 @@ class IngestionService:
             return ""
         return ""
 
-    def _cleanup_source_file(self, source_path: Path | None, vault: str) -> None:
-        if source_path is None:
+    def _cleanup_source_file_if_requested(
+        self,
+        *,
+        job: IngestionJob,
+        source_path: Path | None,
+        vault: str,
+    ) -> None:
+        if source_path is None or not bool((job.options or {}).get("consume_source")):
             return
         try:
             data_root = Path(get_data_root())
@@ -337,8 +431,29 @@ class IngestionService:
                     path=relative_source,
                     warn_without_task=False,
                 )
-        except Exception:
-            pass
+                self.logger.info(
+                    "ingestion_source_cleanup",
+                    data={
+                        "event": "ingestion_source_cleanup",
+                        "status": "completed",
+                        "job_id": job.id,
+                        "vault_name": vault,
+                        "source": relative_source,
+                    },
+                )
+        except Exception as exc:
+            self.logger.warning(
+                "ingestion_source_cleanup",
+                data={
+                    "event": "ingestion_source_cleanup",
+                    "status": "failed",
+                    "job_id": job.id,
+                    "vault_name": vault,
+                    "source": job.source_uri,
+                    "error_type": type(exc).__name__,
+                    "error": self._truncate_log_value(str(exc)),
+                },
+            )
 
     def _render_pdf_page_images(
         self,
@@ -490,6 +605,7 @@ class IngestionService:
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
         url_fetch_strategy = "curl"
+        url_max_response_bytes = 5 * 1024 * 1024
         try:
             pdf_default_strategies = list(
                 setting_value("ingestion_pdf_default_strategies")
@@ -539,6 +655,12 @@ class IngestionService:
             )
         except Exception:
             url_fetch_strategy = "curl"
+        try:
+            url_max_response_bytes = int(
+                setting_value("ingestion_url_max_response_bytes")
+            )
+        except Exception:
+            url_max_response_bytes = 5 * 1024 * 1024
 
         return {
             "pdf": {
@@ -556,6 +678,7 @@ class IngestionService:
                 "read_timeout_seconds": max(1, url_read_timeout_seconds),
                 "connect_timeout_seconds": max(1, url_connect_timeout_seconds),
                 "fetch_strategy": url_fetch_strategy,
+                "max_response_bytes": max(1, url_max_response_bytes),
             },
         }
 
@@ -591,6 +714,7 @@ class IngestionService:
         self,
         job: IngestionJob,
         suffix: str,
+        mime: str | None,
         ingestion_settings: dict[str, Any],
     ) -> list[str]:
         """
@@ -600,10 +724,6 @@ class IngestionService:
         strategies = opts.get("strategies")
         if isinstance(strategies, list) and strategies:
             return [str(s) for s in strategies]
-
-        if job.source_type == SourceKind.URL.value:
-            # Single HTML strategy with optional cleaning
-            return ["html_markdownify"]
 
         # Defaults from settings
         pdf_cfg = (
@@ -616,7 +736,8 @@ class IngestionService:
             if isinstance(ingestion_settings, dict)
             else {}
         )
-        if suffix == ".pdf":
+        normalized_mime = (mime or "").strip().lower()
+        if normalized_mime == "application/pdf" or suffix == ".pdf":
             cfg_strategies = pdf_cfg.get("default_strategies") or []
             default_strats = (
                 [str(s) for s in cfg_strategies]
@@ -624,12 +745,21 @@ class IngestionService:
                 else ["pdf_text", "pdf_ocr"]
             )
             return default_strats
-        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
+        if normalized_mime.startswith("image/") or suffix in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".tif",
+            ".tiff",
+        }:
             cfg_strategies = image_cfg.get("default_strategies") or []
             default_strats = (
                 [str(s) for s in cfg_strategies] if cfg_strategies else ["image_ocr"]
             )
             return default_strats
+        if normalized_mime == "text/html":
+            return ["html_markdownify"]
         return []
 
     def _run_strategies(

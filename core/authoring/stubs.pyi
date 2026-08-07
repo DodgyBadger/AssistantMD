@@ -218,8 +218,3 @@ async def finish(
     status: str = "completed",
     reason: str | None = None,
 ) -> FinishResult: ...
-async def import_content(
-    *,
-    source: str,
-    options: dict[str, Any] | None = None,
-) -> Any: ...

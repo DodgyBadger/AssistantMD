@@ -34,6 +34,10 @@ in `api/services/ingestion.py`:
 
 `import_url_direct` enqueues a URL job and processes it immediately for fast feedback.
 
+The configured `content_import` tool submits one or more public HTTP/HTTPS URLs
+or vault-relative files as queued jobs. Configured tools are also available as
+direct Monty functions, so chat and authored workflows use the same contract.
+
 Immediate API processing runs ingestion jobs inside an execution task with
 `task_kind="ingestion"` and `task_source="api"`. Queued worker processing uses
 the same execution-task wrapper with `task_source="scheduler"`. Vault writes and
@@ -79,10 +83,10 @@ directly from API or scheduler code.
 
 1. Load job and mark `processing`.
 2. Resolve source importer:
-   - files by suffix/mime
-   - URLs by scheme/mime fallback
+   - vault-relative files by suffix/mime
+   - URLs through bounded transport followed by response classification
 3. Branch by source/mode:
-   - **PDF + `pdf_mode=page_images`**: bypass text extraction and render page images directly.
+   - **detected PDF + `pdf_mode=page_images`**: bypass text extraction and render page images directly.
    - **all other imports**: build strategy order and run extractors until one returns non-empty text.
 4. Persist outputs under configured import root.
 5. Save output paths and mark `completed` (or `failed` with error).
@@ -104,10 +108,19 @@ does not reroute durable URL imports. The shared curl transport validates the
 initial URL and every redirect against the public-network policy and enforces
 timeouts and response-size limits.
 
+URL responses retain bytes until classification. Response content type, PDF
+payload signature, and URL suffix evidence distinguish HTML from PDF before
+strategy selection. Remote PDF bytes use the same PDF strategies as vault
+files.
+
 Shared OCR config keys:
 
 - `ingestion_ocr_model`
 - `ingestion_ocr_endpoint`
+- `ingestion_url_connect_timeout_seconds`
+- `ingestion_url_read_timeout_seconds`
+- `ingestion_url_max_response_bytes`
+- `content_import_max_batch_size`
 
 Legacy OCR keys remain accepted as compatibility fallback.
 
@@ -153,6 +166,8 @@ Behavior:
 
 - Registry-backed importer matching limits scan imports to supported types.
 - Duplicate queued/processing jobs for the same source are skipped during folder scan.
+- Successful batch-inbox imports consume their source file. Vault files
+  submitted through `content_import` are preserved.
 - URL ingestion logs its selected fetch strategy and timeout context. Logged
   URL identities omit credentials, query strings, and fragments; the durable
   job retains the complete source URL needed for execution.

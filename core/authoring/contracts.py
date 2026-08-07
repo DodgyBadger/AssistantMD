@@ -19,7 +19,6 @@ BUILTIN_CAPABILITY_NAMES: frozenset[str] = frozenset(
         "retrieve_history",
         "assemble_context",
         "parse_markdown",
-        "import_content",
         "finish",
     }
 )
