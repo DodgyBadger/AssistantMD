@@ -17,6 +17,7 @@ DEFAULT_CONTENT_IMPORT_MAX_BATCH_SIZE = 20
 _ALLOWED_OPTION_KEYS = {
     "capture_ocr_images",
     "clean_html",
+    "destination",
     "pdf_mode",
     "strategies",
 }
@@ -166,8 +167,7 @@ class ContentImportService:
             job_options={**job_options, "consume_source": False},
         )
 
-    @staticmethod
-    def _validate_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    def _validate_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
         if options is None:
             return {}
         if not isinstance(options, dict):
@@ -179,6 +179,24 @@ class ContentImportService:
             )
 
         translated: dict[str, Any] = {}
+        destination = options.get("destination")
+        if destination is not None:
+            if not isinstance(destination, str) or not destination.strip():
+                raise ValueError("destination must be a non-empty vault-relative path")
+            resolved_destination = Path(
+                validate_and_resolve_path(
+                    destination.strip(),
+                    str(self._vault_path),
+                    markdown_only=False,
+                )
+            )
+            if resolved_destination.exists() and not resolved_destination.is_dir():
+                raise ValueError("destination must identify a vault directory")
+            relative_destination = resolved_destination.relative_to(
+                self._vault_path
+            ).as_posix()
+            translated["output_path_pattern"] = relative_destination
+
         pdf_mode = options.get("pdf_mode")
         if pdf_mode is not None:
             normalized_pdf_mode = str(pdf_mode).strip().lower()

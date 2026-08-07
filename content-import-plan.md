@@ -81,6 +81,8 @@ Contract rules:
 
 Initial allowed options should reuse current ingestion contracts:
 
+- `destination`: optional vault-relative output root for the submitted jobs;
+  defaults to `ingestion_output_path_pattern`
 - `pdf_mode`: `markdown` or `page_images`
 - `strategies`: optional ordered extraction strategy ids
 - `capture_ocr_images`: optional boolean override

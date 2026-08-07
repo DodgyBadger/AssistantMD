@@ -204,6 +204,13 @@ class IngestionService:
                 if isinstance(options, dict)
                 else "markdown"
             )
+            output_base_dir = self._resolve_output_base_dir(
+                configured_value=options.get(
+                    "output_path_pattern",
+                    ingestion_settings.get("output_base_dir", "Imported/"),
+                ),
+                vault_root=vault_root,
+            )
             if source_path:
                 relative_dir = self._compute_relative_import_dir(
                     source_path=source_path,
@@ -216,9 +223,7 @@ class IngestionService:
                     vault=vault,
                     source_path=source_path,
                     relative_dir=relative_dir,
-                    base_output_dir=ingestion_settings.get(
-                        "output_base_dir", "Imported/"
-                    ),
+                    base_output_dir=output_base_dir,
                     dpi=150,
                 )
                 update_job_outputs(job_id, outputs)
@@ -297,7 +302,7 @@ class IngestionService:
                     else None
                 ),
                 relative_dir=relative_dir,
-                path_pattern=ingestion_settings.get("output_base_dir", "Imported/"),
+                path_pattern=output_base_dir,
             )
             if warnings:
                 extracted.meta.setdefault("warnings", []).extend(warnings)
@@ -407,6 +412,19 @@ class IngestionService:
         except Exception:
             return ""
         return ""
+
+    @staticmethod
+    def _resolve_output_base_dir(*, configured_value: object, vault_root: Path) -> str:
+        raw_value = str(configured_value or "Imported/").strip()
+        output_path = Path(raw_value)
+        if output_path.is_absolute():
+            raise ValueError("Ingestion output path must be vault-relative")
+        resolved = (vault_root / output_path).resolve()
+        try:
+            relative = resolved.relative_to(vault_root)
+        except ValueError as exc:
+            raise ValueError("Ingestion output path escapes the vault") from exc
+        return relative.as_posix()
 
     def _cleanup_source_file_if_requested(
         self,

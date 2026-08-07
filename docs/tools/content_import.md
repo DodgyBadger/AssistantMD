@@ -21,6 +21,8 @@ and returns promptly; it does not wait for extraction to finish.
 
 Optional `options`:
 
+- `destination`: vault-relative output directory for this import; when omitted,
+  the configured `ingestion_output_path_pattern` is used
 - `pdf_mode`: `markdown` or `page_images`
 - `strategies`: ordered extraction strategy names
 - `capture_ocr_images`: boolean

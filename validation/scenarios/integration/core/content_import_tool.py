@@ -39,6 +39,7 @@ class ContentImportToolScenario(BaseScenario):
             submit = await tool.function(
                 operation="submit",
                 sources="Research/local.pdf",
+                options={"destination": "Research/Library"},
             )
             self.soft_assert(
                 isinstance(submit, ToolReturn),
@@ -60,6 +61,14 @@ class ContentImportToolScenario(BaseScenario):
                 status_items[0].get("status") if status_items else None,
                 "completed",
                 "status should expose terminal ingestion state",
+            )
+            local_outputs = (
+                status_items[0].get("outputs") if status_items else []
+            ) or []
+            self.soft_assert(
+                bool(local_outputs)
+                and str(local_outputs[0]).startswith("Research/Library/"),
+                "Per-job destination should override the configured import root",
             )
             self.soft_assert(
                 local_pdf.exists(),

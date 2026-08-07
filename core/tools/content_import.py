@@ -32,7 +32,7 @@ class ContentImport(BaseTool):
             :param operation: One of submit or status.
             :param sources: One source or a list of sources for submit.
             :param job_ids: One job id or a list of job ids for status.
-            :param options: Optional validated extraction options for submit.
+            :param options: Optional destination and validated extraction options for submit.
             """
             op = (operation or "").strip().lower()
             try:
