@@ -19,11 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import yaml
 
+from core.identity import LOCAL_USER_AUTHORITY
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 
 from .api_client import APIClient, APIResponse
+from .paths import resolve_validation_root
 from .system_controller import SystemController
 from .time_controller import TimeController
 from .vault_manager import VaultManager
@@ -69,8 +71,10 @@ class BaseScenario(ABC):
 
         # Create run directory for this scenario
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_path = Path(
-            f"/app/validation/runs/{timestamp}_{self.scenario_name.lower()}"
+        self.run_path = (
+            resolve_validation_root()
+            / "runs"
+            / f"{timestamp}_{self.scenario_name.lower()}"
         )
         self.run_path.mkdir(parents=True, exist_ok=True)
 
@@ -123,7 +127,7 @@ class BaseScenario(ABC):
         """Copy files/directories from source to vault.
 
         Args:
-            source_path: Path relative to /app root
+            source_path: Path relative to the configured application root
             vault: Target vault
             dest_dir: Optional subdirectory within vault
             dest_filename: Optional filename to rename single file (allows overwriting)
@@ -233,6 +237,7 @@ class BaseScenario(ABC):
                 await get_runtime_context().workflow_governor.execute_workflow(
                     global_id=f"{vault.name}/{workflow_name}",
                     source=ExecutionTaskSource.API,
+                    authority=LOCAL_USER_AUTHORITY,
                     step_name=step_name,
                     expect_failure=expect_failure,
                 )

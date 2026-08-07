@@ -8,6 +8,7 @@ from core.authoring.template_discovery import (
     list_system_workflow_templates,
 )
 from core.constants import ASSISTANTMD_ROOT_DIR
+from core.identity import require_current_execution_authority
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSnapshot,
@@ -185,6 +186,7 @@ async def update_workflow_file(
             scope=workflow_vault_scope(vault_name),
             source=ExecutionTaskSource.API,
             label=f"edit_workflow:{normalized_id}",
+            authority=require_current_execution_authority(),
             metadata={
                 "workflow_id": normalized_id,
                 "vault": vault_name,
@@ -500,6 +502,7 @@ async def execute_workflow_manually(
                 source=ExecutionTaskSource.API,
                 expect_failure=expect_failure,
                 background_tasks=runtime.background_tasks,
+                authority=require_current_execution_authority(),
             )
         except Exception as workflow_error:
             if isinstance(workflow_error, ValueError):

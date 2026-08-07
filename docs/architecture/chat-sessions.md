@@ -5,6 +5,8 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 ## Primary code
 
 - `core/chat/chat_store.py` — read/write sessions and messages
+- `core/chat/session_access.py` — authority-mediated session discovery,
+  creation, and listing
 - `core/chat/schema.py` — SQLite schema bootstrap
 - `core/chat/transcript_writer.py` — export markdown transcripts from stored session data on demand
 - `core/chat/history_service.py` — broker over persisted and in-memory conversation history
@@ -17,6 +19,15 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 ## SQLite store
 
 `system/chat_sessions.db` is the canonical record. A `session_id` is globally unique and is permanently bound to the `vault_name` recorded on the session row. Chat execution resolves this binding before running the model; reusing an existing `session_id` with another vault returns `ChatSessionVaultMismatch`.
+
+Interactive session operations are mediated by the runtime-owned
+`ChatSessionAccessService`. The service requires active authority, filters
+session discovery/listing by immutable owner, and assigns the active principal
+when creating a session. Foreign session identifiers are concealed as missing
+for both lookup and create-or-touch operations so those identifiers cannot be
+used as an ownership oracle. API session operations resolve access once at
+their service boundary before using the raw store for the remainder of that
+operation.
 
 The main tables are:
 
@@ -141,6 +152,15 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
 - A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.
 
 See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation semantics.
+
+## Session ownership
+
+Every durable chat session has one immutable `owner_principal_id`. Interactive
+requests currently resolve to the built-in `local-user` principal, and existing
+session rows are assigned to that principal by the chat database migration.
+Session touches never rewrite ownership, and forks retain the source session's
+owner. Ownership is an internal authorization contract and is not exposed in
+the current chat-session API models.
 
 ## History compaction
 

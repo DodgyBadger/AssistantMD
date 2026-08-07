@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai import AgentRunResultEvent, PartStartEvent, TextPartDelta
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
+from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_events import ChatTaskEventBuffer
 from core.chat.task_execution import start_prepared_chat_stream_task
@@ -45,6 +46,14 @@ class ChatStreamBackgroundTaskScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("ChatStreamBackgroundTaskVault")
         await self.start_system()
+        store = ChatStore()
+        for session_id in (
+            "chat_stream_background_task_session",
+            "chat_stream_background_cancel_session",
+        ):
+            store.ensure_session(
+                session_id, vault.name, owner_principal_id="local-user"
+            )
 
         runtime = get_runtime_context()
         event_buffer = ChatTaskEventBuffer()

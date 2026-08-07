@@ -23,7 +23,11 @@ class EditProposalArtifactsScenario(BaseScenario):
         session_id = "edit_proposal_artifacts_session"
         artifact_ref = "edit-proposals/historical-artifact"
         store = ChatStore(system_root=str(self._get_system_controller()._system_root))
-        store.ensure_session(session_id, vault.name)
+        store.ensure_session(
+            session_id,
+            vault.name,
+            owner_principal_id="local-user",
+        )
         proposal = {
             "artifact_ref": artifact_ref,
             "artifact_kind": "file_edit_proposal",

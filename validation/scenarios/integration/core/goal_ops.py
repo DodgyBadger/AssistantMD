@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.goals import GoalOpsStore
+from core.identity import LOCAL_USER_AUTHORITY
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
     ExecutionTaskSource,
@@ -229,6 +230,7 @@ class GoalOpsScenario(BaseScenario):
         runtime = get_runtime_context()
         workflow_source_id = f"{vault.name}/goal-source-workflow"
         async with runtime.task_coordinator.track_current_task(
+            authority=LOCAL_USER_AUTHORITY,
             kind=ExecutionTaskKind.WORKFLOW,
             scope=workflow_vault_scope(vault.name),
             source=ExecutionTaskSource.TOOL,
@@ -295,6 +297,7 @@ class GoalOpsScenario(BaseScenario):
 
         mutation_checkpoint = self.event_checkpoint()
         async with runtime.task_coordinator.track_current_task(
+            authority=LOCAL_USER_AUTHORITY,
             kind=ExecutionTaskKind.WORKFLOW,
             scope=workflow_vault_scope(vault.name),
             source=ExecutionTaskSource.TOOL,

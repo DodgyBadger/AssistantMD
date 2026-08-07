@@ -3,7 +3,7 @@
 import json
 import re
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
@@ -16,6 +16,7 @@ from core.chat.deferred_reviews import (
     get_pending_deferred_review,
 )
 from core.chat.workspace import normalize_workspace_path
+from core.identity import require_current_execution_authority
 from core.memory.session_summary import SessionSummary, SessionSummaryStore
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -79,13 +80,42 @@ class ChatSessionVaultMismatch(ValueError):
         )
 
 
+def _require_chat_session_access(
+    vault_name: str,
+    session_id: str,
+) -> StoredChatSession:
+    """Resolve one session through the runtime-owned authorization boundary."""
+    try:
+        session = get_runtime_context().chat_session_access.require_session(session_id)
+    except LookupError as exc:
+        raise APIException(
+            status_code=404,
+            error_type="ChatSessionNotFound",
+            message=f"Chat session not found: {session_id}",
+            details={"session_id": session_id, "vault_name": vault_name},
+        ) from exc
+    if session.vault_name != vault_name:
+        raise APIException(
+            status_code=409,
+            error_type="ChatSessionVaultMismatch",
+            message=f"Chat session '{session_id}' belongs to another vault.",
+            details={
+                "session_id": session_id,
+                "requested_vault": vault_name,
+                "bound_vault": session.vault_name,
+            },
+        )
+    return session
+
+
 def resolve_chat_session_for_request(
     *, requested_session_id: str | None, vault_name: str
 ) -> str:
     """Return a session ID that is durably bound to the requested vault."""
+    session_access = get_runtime_context().chat_session_access
     session_id = (requested_session_id or "").strip()
     if session_id:
-        existing_session = _chat_store.get_session_by_id(session_id)
+        existing_session = session_access.get_session_by_id(session_id)
         if existing_session is not None:
             if existing_session.vault_name != vault_name:
                 logger.warning(
@@ -101,18 +131,18 @@ def resolve_chat_session_for_request(
                     requested_vault=vault_name,
                     bound_vault=existing_session.vault_name,
                 )
-            _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+            session_access.ensure_session(session_id, vault_name)
             return session_id
-        _chat_store.ensure_session(session_id=session_id, vault_name=vault_name)
+        session_access.ensure_session(session_id, vault_name)
         return session_id
 
     base_session_id = generate_session_id(vault_name)
     generated_session_id = base_session_id
     suffix = 1
-    while _chat_store.get_session_by_id(generated_session_id) is not None:
+    while session_access.session_id_exists(generated_session_id):
         suffix += 1
         generated_session_id = f"{base_session_id}_{suffix}"
-    _chat_store.ensure_session(session_id=generated_session_id, vault_name=vault_name)
+    session_access.ensure_session(generated_session_id, vault_name)
     return generated_session_id
 
 
@@ -196,28 +226,7 @@ def set_chat_session_workspace(
 ) -> ChatWorkspaceInfo | None:
     """Set or clear the workspace path for one chat session."""
     normalized_path = _normalize_workspace_path(path)
-    existing_session = _chat_store.get_session_by_id(session_id)
-    if existing_session is None:
-        raise APIException(
-            status_code=404,
-            error_type="ChatSessionNotFound",
-            message=f"Chat session not found: {session_id}",
-            details={"session_id": session_id, "vault_name": vault_name},
-        )
-    if existing_session.vault_name != vault_name:
-        raise APIException(
-            status_code=409,
-            error_type="ChatSessionVaultMismatch",
-            message=(
-                f"Chat session '{session_id}' belongs to vault '{existing_session.vault_name}' "
-                f"and cannot be used with vault '{vault_name}'."
-            ),
-            details={
-                "session_id": session_id,
-                "requested_vault": vault_name,
-                "bound_vault": existing_session.vault_name,
-            },
-        )
+    _require_chat_session_access(vault_name, session_id)
     _chat_store.set_session_workspace(
         session_id=session_id,
         vault_name=vault_name,
@@ -239,19 +248,7 @@ def set_chat_session_mode(
     vault_name: str, session_id: str, chat_mode: str
 ) -> Literal["normal", "inline_edit"]:
     """Set the selected mode for an existing chat session."""
-    existing_session = _chat_store.get_session_by_id(session_id)
-    if existing_session is None:
-        raise APIException(
-            status_code=404,
-            error_type="ChatSessionNotFound",
-            message=f"Chat session not found: {session_id}",
-        )
-    if existing_session.vault_name != vault_name:
-        raise APIException(
-            status_code=409,
-            error_type="ChatSessionVaultMismatch",
-            message=f"Chat session '{session_id}' belongs to another vault.",
-        )
+    _require_chat_session_access(vault_name, session_id)
     normalized: Literal["normal", "inline_edit"] = (
         "inline_edit" if str(chat_mode).strip().lower() == "inline_edit" else "normal"
     )
@@ -265,7 +262,7 @@ def set_chat_session_mode(
 
 def list_chat_sessions(vault_name: str) -> list[ChatSessionInfo]:
     """List persisted chat sessions for a vault ordered by latest activity."""
-    sessions = _chat_store.list_sessions(vault_name)
+    sessions = get_runtime_context().chat_session_access.list_sessions(vault_name)
     summary_store = SessionSummaryStore()
     return [
         ChatSessionInfo(
@@ -295,28 +292,7 @@ def fork_chat_session(
     through_sequence_index: int,
 ) -> ChatSessionForkResponse:
     """Create a new chat session from a source session prefix."""
-    source_session = _chat_store.get_session_by_id(source_session_id)
-    if source_session is None:
-        raise APIException(
-            status_code=404,
-            error_type="ChatSessionNotFound",
-            message=f"Chat session not found: {source_session_id}",
-            details={"session_id": source_session_id, "vault_name": vault_name},
-        )
-    if source_session.vault_name != vault_name:
-        raise APIException(
-            status_code=409,
-            error_type="ChatSessionVaultMismatch",
-            message=(
-                f"Chat session '{source_session_id}' belongs to vault "
-                f"'{source_session.vault_name}' and cannot be used with vault '{vault_name}'."
-            ),
-            details={
-                "session_id": source_session_id,
-                "requested_vault": vault_name,
-                "bound_vault": source_session.vault_name,
-            },
-        )
+    source_session = _require_chat_session_access(vault_name, source_session_id)
 
     source_messages = _chat_store.get_stored_messages(source_session_id, vault_name)
     highest_sequence = max(
@@ -423,6 +399,7 @@ def _forked_session_title(source_session: StoredChatSession) -> str:
 
 def get_chat_session_summary(vault_name: str, session_id: str) -> dict:
     """Return a lightweight summary preview for one chat session."""
+    _require_chat_session_access(vault_name, session_id)
     session_summary = SessionSummaryStore().get_session_summary(
         vault_name=vault_name,
         session_id=session_id,
@@ -463,6 +440,7 @@ async def update_chat_session_summary(
     data: dict[str, Any],
 ) -> dict:
     """Manually update one session summary record and refresh search indexes."""
+    _require_chat_session_access(vault_name, session_id)
     store = SessionSummaryStore()
     existing = store.get_session_summary(vault_name=vault_name, session_id=session_id)
     if existing is None:
@@ -506,6 +484,7 @@ async def update_chat_session_summary(
 
 def delete_chat_session_summary(vault_name: str, session_id: str) -> dict:
     """Delete one session summary record without deleting the chat session."""
+    _require_chat_session_access(vault_name, session_id)
     deleted = SessionSummaryStore().delete_session_summary(
         vault_name=vault_name,
         session_id=session_id,
@@ -618,6 +597,7 @@ def get_chat_session_detail(
     vault_name: str, session_id: str
 ) -> ChatSessionDetailResponse:
     """Return persisted chat messages for one session."""
+    _require_chat_session_access(vault_name, session_id)
     messages = _chat_store.get_stored_messages(session_id, vault_name)
     tool_events = _chat_store.get_tool_events(
         session_id, vault_name, committed_only=True
@@ -765,6 +745,7 @@ def _chat_session_failure_info(value: Any) -> ChatSessionFailureInfo | None:
 
 def set_chat_session_title(vault_name: str, session_id: str, title: str | None) -> None:
     """Set or clear the user-defined title for a chat session."""
+    _require_chat_session_access(vault_name, session_id)
     _chat_store.set_session_title(session_id, vault_name, title)
 
 
@@ -772,6 +753,7 @@ def export_chat_session_markdown(
     vault_name: str, vault_path: str, session_id: str
 ) -> ChatSessionExportResponse:
     """Export one chat session transcript to the vault on demand."""
+    _require_chat_session_access(vault_name, session_id)
     session_summary = SessionSummaryStore().get_session_summary(
         vault_name=vault_name,
         session_id=session_id,
@@ -795,6 +777,7 @@ async def get_chat_history_compaction_status(
     session_id: str,
 ) -> ChatHistoryCompactionStatusResponse:
     """Return compaction status for one chat session."""
+    _require_chat_session_access(vault_name, session_id)
     status = await get_compaction_status(
         session_id=session_id,
         vault_name=vault_name,
@@ -811,6 +794,7 @@ async def compact_chat_session_history(
     focus: str | None,
 ) -> ChatHistoryCompactionResponse:
     """Compact one chat session through the shared compaction service."""
+    _require_chat_session_access(vault_name, session_id)
     runtime = get_runtime_context()
     result = await runtime.task_runner.run_inline(
         ExecutionTaskSpec(
@@ -818,6 +802,7 @@ async def compact_chat_session_history(
             scope=chat_session_scope(session_id),
             source=ExecutionTaskSource.API,
             label=compaction_task_label(session_id),
+            authority=require_current_execution_authority(),
             metadata={"vault": vault_name, "session_id": session_id},
         ),
         lambda _task: compact_chat_history(
@@ -834,6 +819,7 @@ async def compact_chat_session_history(
 
 def delete_chat_session(vault_name: str, vault_path: str, session_id: str) -> None:
     """Delete one chat session and its session summary."""
+    _require_chat_session_access(vault_name, session_id)
     del vault_path
     _chat_store.delete_sessions(vault_name, session_id=session_id)
     SessionSummaryStore().delete_session_summary(
@@ -848,9 +834,21 @@ def purge_chat_sessions(
     older_than_days: int | None,
 ) -> ChatSessionsPurgeResponse:
     """Delete old chat sessions and their transcript files for a vault."""
-    deleted_ids = _chat_store.delete_sessions(
-        vault_name, older_than_days=older_than_days
-    )
+    sessions = get_runtime_context().chat_session_access.list_sessions(vault_name)
+    if older_than_days is None:
+        selected_ids = [session.session_id for session in sessions]
+    else:
+        cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
+        selected_ids = [
+            session.session_id
+            for session in sessions
+            if _stored_timestamp(session.last_activity_at) < cutoff
+        ]
+    deleted_ids: list[str] = []
+    for session_id in selected_ids:
+        deleted_ids.extend(
+            _chat_store.delete_sessions(vault_name, session_id=session_id)
+        )
     summary_store = SessionSummaryStore()
     for session_id in deleted_ids:
         summary_store.delete_session_summary(
@@ -866,6 +864,14 @@ def purge_chat_sessions(
     else:
         message = f"Deleted {n} sessions."
     return ChatSessionsPurgeResponse(deleted=n, message=message)
+
+
+def _stored_timestamp(value: str) -> datetime:
+    """Parse a SQLite session timestamp as an aware UTC value."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _is_tool_message_text(content: str) -> bool:

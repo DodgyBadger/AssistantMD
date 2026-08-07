@@ -32,11 +32,17 @@ class ChatHistoryCompactionScenario(BaseScenario):
         import core.tools.session_ops as session_ops
         from core.chat.chat_store import ChatStore
         from core.chat.history_service import ChatHistoryContext, ChatHistoryService
+        from core.identity import LOCAL_USER_PRINCIPAL_ID
         from core.runtime.state import get_runtime_context
 
         runtime = get_runtime_context()
         store = ChatStore(system_root=str(runtime.config.system_root))
         session_id = "chat_history_compaction_session"
+        store.ensure_session(
+            session_id,
+            vault.name,
+            owner_principal_id=LOCAL_USER_PRINCIPAL_ID,
+        )
         messages = [
             ModelRequest(parts=[UserPromptPart(content="First user decision.")]),
             ModelResponse(parts=[TextPart(content="First assistant answer.")]),
@@ -410,8 +416,9 @@ class ChatHistoryCompactionScenario(BaseScenario):
         finally:
             migration_conn.close()
         assert [row[0] for row in migration_rows] == [
-            1
-        ], "Chat checkpoint migration is recorded in schema_migrations"
+            1,
+            2,
+        ], "Chat migrations are recorded in schema_migrations"
 
         assert (
             second_compact_response.status_code == 200

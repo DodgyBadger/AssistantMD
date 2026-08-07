@@ -14,18 +14,22 @@ from pathlib import Path
 # Add project root to path FIRST
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.runtime.paths import (
-    resolve_bootstrap_data_root,
-    resolve_bootstrap_system_root,
-    set_bootstrap_roots,
+from core.runtime.paths import set_bootstrap_roots
+from validation.core.paths import (
+    resolve_validation_data_root,
+    resolve_validation_system_root,
 )
 
 # Prime bootstrap roots for validation CLI before importing path-dependent modules
-_BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
-_BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
+_BOOTSTRAP_DATA_ROOT = resolve_validation_data_root()
+_BOOTSTRAP_SYSTEM_ROOT = resolve_validation_system_root()
 set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 
 from core.logger import UnifiedLogger  # noqa: E402
+from validation.core.reporting import (  # noqa: E402
+    render_terminal_summary,
+    write_run_reports,
+)
 from validation.core.runner import ValidationRunner  # noqa: E402
 
 logger = UnifiedLogger(tag="validation-cli", default_sinks=["validation", "logfire"])
@@ -94,69 +98,33 @@ def run_scenarios(args):
     # Run scenarios
     validation_run = runner.run_scenarios(
         scenario_names=scenario_names,
+        requested_scenarios=list(args.scenarios),
     )
 
-    # Print enhanced summary
-    print("\n=== VALIDATION RUN COMPLETE ===")
-    print(f"Run ID: {validation_run.run_id}")
-    print(f"Total Scenarios: {validation_run.total_scenarios}")
-    print(f"Passed: {validation_run.passed_scenarios}")
-    print(f"Failed: {validation_run.failed_scenarios}")
-    print(f"Errors: {validation_run.error_scenarios}")
-    print(f"Success Rate: {validation_run.success_rate:.1f}%")
+    report_paths = None
+    reporting_error = None
+    try:
+        report_paths = write_run_reports(validation_run, runner.runs_dir)
+    except Exception as exc:
+        reporting_error = f"Could not write validation reports: {exc}"
+        logger.error(reporting_error)
 
-    # Print scenario details with enhanced formatting
-    print("\n=== SCENARIO RESULTS ===")
-    for result in validation_run.scenario_results:
-        if result.status == "passed":
-            status_symbol = "✅"
-            status_text = "PASSED"
-        elif result.status == "failed":
-            status_symbol = "❌"
-            status_text = "FAILED"
-        elif result.status == "system_bug":
-            status_symbol = "🚨"
-            status_text = "SYSTEM ERROR"
-        elif result.status == "framework_error":
-            status_symbol = "💥"
-            status_text = "FRAMEWORK ERROR"
-        else:
-            status_symbol = "❓"
-            status_text = "ERROR"
-
-        print(
-            f"{status_symbol} {result.scenario_name} - {status_text} ({result.execution_time:.2f}s)"
+    print(
+        "\n"
+        + render_terminal_summary(
+            validation_run,
+            show_passed=args.show_passed,
+            report_paths=report_paths,
+            reporting_error=reporting_error,
         )
-
-        if result.error_message:
-            print(f"   Error: {result.error_message}")
-        if getattr(result, "error_classification", None):
-            classification = result.error_classification
-            error_type = classification.get("type")
-            recommendation = classification.get("recommendation")
-            if error_type:
-                print(f"   Classification: {error_type}")
-            if recommendation:
-                print(f"   Recommendation: {recommendation}")
-
-        # scenarios manage their own evidence in runs directory
-        print("   Evidence: Check /app/validation/runs/ for scenario artifacts")
-
-    # Additional V2-specific reporting
-    if validation_run.error_scenarios > 0 or validation_run.failed_scenarios > 0:
-        print("\n=== FOLLOW-UP ACTIONS ===")
-        print("📋 Check individual scenario timelines in validation/runs/")
-        print("🔍 Review vault snapshots for expected vs actual outputs")
-
-        if validation_run.error_scenarios > 0:
-            print(
-                f"🚨 CRITICAL: {validation_run.error_scenarios} system errors require immediate attention"
-            )
+    )
 
     # Exit with appropriate code
     sys.exit(
         0
-        if validation_run.failed_scenarios == 0 and validation_run.error_scenarios == 0
+        if validation_run.failed_scenarios == 0
+        and validation_run.error_scenarios == 0
+        and reporting_error is None
         else 1
     )
 
@@ -244,6 +212,11 @@ Features:
         "scenarios",
         nargs="+",
         help="One or more scenario names to run",
+    )
+    run_parser.add_argument(
+        "--show-passed",
+        action="store_true",
+        help="Include individual passing scenarios in the final terminal summary",
     )
 
     # List command

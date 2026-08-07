@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.identity import ExecutionAuthority
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.execution_tasks import ExecutionTaskSnapshot, TaskCoordinator
 
@@ -19,6 +20,7 @@ class ExecutionTaskSpec:
     scope: str
     source: str
     label: str
+    authority: ExecutionAuthority
     metadata: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float | None = None
     timeout_reason: str | None = None
@@ -87,6 +89,7 @@ class ExecutionTaskRunner:
             scope=spec.scope,
             source=spec.source,
             label=spec.label,
+            authority=spec.authority,
             metadata=spec.metadata,
         )
 
@@ -132,6 +135,7 @@ class ExecutionTaskRunner:
             scope=spec.scope,
             source=spec.source,
             label=spec.label,
+            authority=spec.authority,
             metadata=spec.metadata,
             start_immediately=start_immediately,
         ) as task:

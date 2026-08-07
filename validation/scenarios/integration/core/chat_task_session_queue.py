@@ -12,6 +12,7 @@ from pydantic_ai import AgentRunResultEvent, PartStartEvent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from core.chat import executor as chat_executor
+from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
 from core.runtime.state import get_runtime_context
@@ -67,6 +68,15 @@ class ChatTaskSessionQueueScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("ChatTaskSessionQueueVault")
         await self.start_system()
+        store = ChatStore()
+        for session_id in (
+            "queued-chat-session",
+            "cancel-queued-chat-session",
+            "cancel-preflight-chat-session",
+        ):
+            store.ensure_session(
+                session_id, vault.name, owner_principal_id="local-user"
+            )
 
         release_first = asyncio.Event()
         release_cancel_blocker = asyncio.Event()

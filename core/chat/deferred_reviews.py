@@ -13,6 +13,7 @@ from pydantic_ai import DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 
 from core.database import connect_sqlite_from_system_db
+from core.identity import LOCAL_USER_PRINCIPAL_ID
 from core.logger import UnifiedLogger
 from core.utils.hash import hash_file_bytes
 from core.vault_state.pathing import (
@@ -93,12 +94,12 @@ def create_deferred_review(
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
-            INSERT INTO chat_sessions (session_id, vault_name)
-            VALUES (?, ?)
+            INSERT INTO chat_sessions (session_id, vault_name, owner_principal_id)
+            VALUES (?, ?, ?)
             ON CONFLICT(session_id, vault_name)
             DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP
             """,
-            (session_id, vault_name),
+            (session_id, vault_name, LOCAL_USER_PRINCIPAL_ID),
         )
         conn.execute(
             """

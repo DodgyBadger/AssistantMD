@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import (
     start_prepared_chat_stream_task,
@@ -41,6 +42,14 @@ class ChatStreamKeepaliveScenario(BaseScenario):
     async def test_scenario(self):
         vault = self.create_vault("ChatStreamKeepaliveVault")
         await self.start_system()
+        store = ChatStore()
+        for session_id in (
+            "chat_stream_keepalive_session",
+            "chat_stream_keepalive_cancel_session",
+        ):
+            store.ensure_session(
+                session_id, vault.name, owner_principal_id="local-user"
+            )
 
         try:
             idle = await start_prepared_chat_stream_task(

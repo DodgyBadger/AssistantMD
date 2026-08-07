@@ -25,6 +25,7 @@ from pydantic_ai.messages import (
 )
 
 from core.chat import executor as chat_executor
+from core.chat.chat_store import ChatStore
 from core.chat.deferred_reviews import get_deferred_review
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import (
@@ -133,6 +134,16 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
         vault = self.create_vault("DeferredReviewTaskVault")
         self.create_file(vault, "Draft.md", "Original draft\n")
         await self.start_system()
+        ChatStore().ensure_session(
+            "deferred-review-session",
+            vault.name,
+            owner_principal_id="local-user",
+        )
+        ChatStore().ensure_session(
+            "deferred-denial-session",
+            vault.name,
+            owner_principal_id="local-user",
+        )
 
         original_prepare = chat_executor._prepare_chat_execution
         original_prepare_resume = (

@@ -75,7 +75,7 @@ Only add events at decision boundaries; avoid noisy instrumentation.
 ## Execution Rules
 - Agents should run individual scenarios directly to validate functionality being built.
 - Only the maintainers should run the full validation suite.
-- In this dev container, avoid long validation jobs unless explicitly requested.
+- In development environments, avoid long validation jobs unless explicitly requested.
 - Static analysis is agent-owned and is separate from the maintainer-owned
   validation suite. Production Python changes still require the complete
   [Production Python Quality Gate](coding-standards.md#production-python-quality-gate)

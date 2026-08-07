@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+import openai
 from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ToolReturn
 
@@ -57,6 +58,65 @@ def classify_exception(
             suggested_action=(
                 "Do not retry the same broad request. Split the work into smaller scoped steps "
                 "or raise the configured execution limit if the scope is intentional."
+            ),
+        )
+    if isinstance(exc, openai.APIStatusError):
+        status_code = exc.status_code
+        retry_after = exc.response.headers.get("Retry-After")
+        if status_code == 429:
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="rate_limited",
+                retryable=True,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                retry_after=retry_after,
+                suggested_action="Retry after the provider rate-limit window.",
+            )
+        if status_code in {408, 409} or 500 <= status_code <= 599:
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="provider_unavailable",
+                retryable=True,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                retry_after=retry_after,
+                suggested_action=(
+                    "Retry the request; use another model/provider if the failure continues."
+                ),
+            )
+        if status_code in {401, 403}:
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="configuration",
+                retryable=False,
+                phase=phase,
+                message=str(exc),
+                http_status=status_code,
+                suggested_action=(
+                    "Check the model provider secret and account access before retrying."
+                ),
+            )
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="bad_request",
+            retryable=False,
+            phase=phase,
+            message=str(exc),
+            http_status=status_code,
+            suggested_action="Change the model request or selected model before retrying.",
+        )
+    if isinstance(exc, openai.APIError):
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="transient_provider",
+            retryable=True,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Retry the request; use another model/provider if the failure continues."
             ),
         )
     if isinstance(exc, ModelHTTPError):

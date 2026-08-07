@@ -5,7 +5,7 @@ API endpoint implementations for the AssistantMD system.
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic_ai import BinaryContent
 from starlette.datastructures import FormData, UploadFile
@@ -126,6 +126,7 @@ from .models import (
     WorkflowLoadErrorsResponse,
     WorkflowRunHistoryResponse,
 )
+from .principal import use_request_authority
 from .services import (
     ChatSessionVaultMismatch,
     cancel_chat_session_task,
@@ -212,7 +213,11 @@ from .services import (
 from .utils import create_error_response, serialize_exception
 
 # Create API router
-router = APIRouter(prefix="/api", tags=["AssistantMD API"])
+router = APIRouter(
+    prefix="/api",
+    tags=["AssistantMD API"],
+    dependencies=[Depends(use_request_authority)],
+)
 logger = UnifiedLogger(tag="api-endpoints")
 _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
 _CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
@@ -703,7 +708,9 @@ async def chat_task_events(
 
 
 @router.post("/chat/tasks", response_model=ChatTaskStartResponse)
-async def start_chat_task(request: Request) -> ChatTaskStartResponse | JSONResponse:
+async def start_chat_task(
+    request: Request,
+) -> ChatTaskStartResponse | JSONResponse:
     """Start task-owned streaming chat execution and return its task snapshot."""
     try:
         chat_request, image_uploads = await _parse_chat_task_payload(request)
@@ -787,7 +794,9 @@ async def update_general_setting(
 
 
 @router.post("/import/scan", response_model=ImportScanResponse)
-async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONResponse:
+async def import_scan(
+    request: ImportScanRequest,
+) -> ImportScanResponse | JSONResponse:
     try:
         jobs, skipped = await scan_import_folder(
             vault=request.vault,
@@ -813,7 +822,9 @@ async def import_scan(request: ImportScanRequest) -> ImportScanResponse | JSONRe
 
 
 @router.post("/import/url", response_model=ImportUrlResponse)
-async def import_url(request: ImportUrlRequest) -> ImportUrlResponse | JSONResponse:
+async def import_url(
+    request: ImportUrlRequest,
+) -> ImportUrlResponse | JSONResponse:
     try:
         job = await import_url_direct(
             vault=request.vault,
@@ -1234,7 +1245,8 @@ async def workflow_file(global_id: str) -> WorkflowFileResponse | JSONResponse:
 
 @router.put("/workflows/file", response_model=WorkflowFileResponse)
 async def save_workflow_file(
-    global_id: str, request: WorkflowFileUpdateRequest
+    global_id: str,
+    request: WorkflowFileUpdateRequest,
 ) -> WorkflowFileResponse | JSONResponse:
     """Replace workflow file content and reload workflows."""
     try:
@@ -1744,10 +1756,15 @@ async def fork_chat_session_endpoint(
 
 @router.post("/chat/sessions/{session_id}/retry", response_model=ChatTaskStartResponse)
 async def retry_chat_session_turn_endpoint(
-    session_id: str, request: ChatSessionRetryRequest
+    session_id: str,
+    request: ChatSessionRetryRequest,
 ) -> ChatTaskStartResponse | JSONResponse:
     """Retry the latest retryable unfinished chat turn for one session."""
     try:
+        resolve_chat_session_for_request(
+            requested_session_id=session_id,
+            vault_name=request.vault_name,
+        )
         try:
             await get_active_chat_task(session_id)
         except APIException as exc:
@@ -1814,7 +1831,8 @@ async def chat_history_compaction_status_endpoint(
     "/chat/sessions/{session_id}/compact", response_model=ChatHistoryCompactionResponse
 )
 async def compact_chat_history_endpoint(
-    session_id: str, request: ChatHistoryCompactionRequest
+    session_id: str,
+    request: ChatHistoryCompactionRequest,
 ) -> ChatHistoryCompactionResponse | JSONResponse:
     """Compact one persisted chat session into a summary plus recent turns."""
     try:

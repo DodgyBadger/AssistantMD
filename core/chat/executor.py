@@ -31,6 +31,7 @@ from core.chat.compaction import (
     maybe_auto_compact_after_turn,
 )
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
+from core.identity import ExecutionAuthority
 from core.llm.agents import create_agent
 from core.llm.capabilities.factory import build_chat_capabilities
 from core.llm.model_factory import build_model_instance
@@ -754,6 +755,7 @@ def _build_model_capability_details(
 class ChatRunDeps:
     """Per-run dependencies/caches for chat agents."""
 
+    authority: ExecutionAuthority
     context_manager_cache: dict[str, Any] = field(default_factory=dict)
     context_manager_now: datetime | None = None
     buffer_store: BufferStore = field(default_factory=BufferStore)

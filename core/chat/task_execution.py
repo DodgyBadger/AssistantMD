@@ -39,6 +39,7 @@ from core.chat.deferred_reviews import (
     summarize_deferred_review,
 )
 from core.chat.task_events import ChatTaskEventBuffer
+from core.identity import ExecutionAuthority
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
 from core.runtime.buffers import get_session_buffer_store
@@ -72,6 +73,14 @@ class ChatStreamTaskStart:
 CHAT_TASK_EVENT_BUFFER = ChatTaskEventBuffer()
 
 
+def _session_authority(session_id: str, vault_name: str) -> ExecutionAuthority:
+    """Derive interactive execution authority from immutable session ownership."""
+    session = _CHAT_STORE.get_session(session_id, vault_name)
+    if session is None:
+        raise ValueError(f"Chat session not found: {session_id}")
+    return ExecutionAuthority(principal_id=session.owner_principal_id)
+
+
 async def start_prepared_chat_stream_task(
     *,
     prepared: chat_executor.PreparedChatExecution,
@@ -90,6 +99,7 @@ async def start_prepared_chat_stream_task(
             scope=chat_session_scope(session_id),
             source=ExecutionTaskSource.API,
             label=chat_task_label(session_id),
+            authority=_session_authority(session_id, vault_name),
             metadata={
                 "vault": vault_name,
                 "session_id": session_id,
@@ -318,6 +328,7 @@ async def start_deferred_review_resume_task(
             scope=chat_session_scope(session_id),
             source=ExecutionTaskSource.API,
             label=chat_task_label(session_id),
+            authority=_session_authority(session_id, vault_name),
             metadata={
                 "vault": vault_name,
                 "session_id": session_id,
@@ -489,6 +500,7 @@ async def start_queued_chat_stream_task(
             scope=chat_session_scope(session_id),
             source=ExecutionTaskSource.API,
             label=chat_task_label(session_id),
+            authority=_session_authority(session_id, vault_name),
             metadata={
                 "vault": vault_name,
                 "session_id": session_id,
@@ -649,17 +661,17 @@ async def _run_prepared_chat_stream_task(
     deferred_review = None
     tool_activity: dict[str, dict[str, Any]] = {}
     session_buffer_store = get_session_buffer_store(session_id)
-    run_deps = chat_executor.ChatRunDeps(
-        context_manager_now=chat_executor._resolve_context_manager_now(),
-        buffer_store=session_buffer_store,
-        buffer_store_registry={"session": session_buffer_store},
-        session_id=session_id,
-        vault_name=vault_name,
-        message_history=list(prepared.message_history or []),
-        tools=list(prepared.tools or []),
-    )
-
     async with task_context as task:
+        run_deps = chat_executor.ChatRunDeps(
+            context_manager_now=chat_executor._resolve_context_manager_now(),
+            buffer_store=session_buffer_store,
+            buffer_store_registry={"session": session_buffer_store},
+            session_id=session_id,
+            vault_name=vault_name,
+            message_history=list(prepared.message_history or []),
+            tools=list(prepared.tools or []),
+            authority=ExecutionAuthority(principal_id=task.principal_id),
+        )
         if should_mark_started:
             await runtime.task_coordinator.mark_started(task.task_id)
         if persist_user_request:

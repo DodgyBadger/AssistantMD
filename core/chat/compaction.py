@@ -26,6 +26,7 @@ from core.constants import (
     CHAT_HISTORY_COMPACTION_INSTRUCTION,
     CHAT_HISTORY_COMPACTION_PROMPT_VERSION,
 )
+from core.identity import SYSTEM_AUTHORITY
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -367,6 +368,7 @@ async def maybe_auto_compact_after_turn(
                 scope=chat_session_scope(session_id),
                 source=ExecutionTaskSource.SYSTEM,
                 label=compaction_task_label(session_id),
+                authority=SYSTEM_AUTHORITY,
                 metadata={
                     "vault": vault_name,
                     "session_id": session_id,

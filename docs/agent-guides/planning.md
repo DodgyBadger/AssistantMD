@@ -19,7 +19,7 @@
   directives, API payloads, validation events, routing, settings, persistence.
 - Pull in references only as needed:
   [Project Structure](project-structure.md),
-  architecture docs under `/app/docs/architecture/`.
+  architecture docs under `docs/architecture/`.
 - If the plan touches settings, secrets, or persisted runtime data, call that out explicitly in the plan.
 
 ## Common Mistakes

@@ -43,7 +43,7 @@ async def list_execution_tasks(
 ) -> ExecutionTaskListResponse:
     """List process-local execution task snapshots."""
     runtime = get_runtime_context()
-    snapshots = await runtime.task_coordinator.list_tasks(
+    snapshots = await runtime.execution_task_access.list_tasks(
         kind=kind,
         scope=scope,
         include_terminal=include_terminal,
@@ -56,7 +56,7 @@ async def list_execution_tasks(
 async def get_execution_task(task_id: str) -> ExecutionTaskInfo:
     """Return one process-local execution task snapshot."""
     runtime = get_runtime_context()
-    snapshot = await runtime.task_coordinator.get_task(task_id)
+    snapshot = await runtime.execution_task_access.get_task(task_id)
     if snapshot is None:
         raise APIException(
             status_code=404,
@@ -70,7 +70,7 @@ async def get_execution_task(task_id: str) -> ExecutionTaskInfo:
 async def cancel_execution_task(task_id: str) -> ExecutionTaskCancelResponse:
     """Request cancellation for one process-local execution task."""
     runtime = get_runtime_context()
-    cancellation = await runtime.task_coordinator.cancel_task(task_id)
+    cancellation = await runtime.execution_task_access.cancel_task(task_id)
     if cancellation is None:
         raise APIException(
             status_code=404,
@@ -88,7 +88,7 @@ async def cancel_execution_task(task_id: str) -> ExecutionTaskCancelResponse:
 async def get_active_chat_task(session_id: str) -> ExecutionTaskInfo:
     """Return the active task for a chat session."""
     runtime = get_runtime_context()
-    snapshots = await runtime.task_coordinator.list_tasks(
+    snapshots = await runtime.execution_task_access.list_tasks(
         scope=chat_session_scope(session_id),
         include_terminal=False,
     )

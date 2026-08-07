@@ -8,6 +8,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.tools import Tool
 
 from core.chat.compaction import compact_chat_history, get_compaction_status
+from core.identity import require_current_execution_authority
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -69,6 +70,7 @@ class ChatHistoryCompact(BaseTool):
                 scope=chat_session_scope(session_id),
                 source=ExecutionTaskSource.TOOL,
                 label=compaction_task_label(session_id),
+                authority=require_current_execution_authority(),
                 metadata={"vault": vault_name, "session_id": session_id},
             ):
                 result = await compact_chat_history(

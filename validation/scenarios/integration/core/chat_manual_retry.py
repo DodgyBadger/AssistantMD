@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import openai
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -16,11 +17,13 @@ from validation.core.base_scenario import BaseScenario
 
 
 class _InterruptedStreamAgent:
-    """Fake agent that fails like an interrupted provider stream."""
+    """Fake agent that fails with a retryable provider SDK error."""
 
     async def run_stream_events(self, *args, **kwargs):
-        raise httpx.RemoteProtocolError(
-            "peer closed connection without sending complete message body (incomplete chunked read)"
+        raise openai.APIError(
+            "An error occurred while processing your request.",
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
         )
         yield None
 
@@ -65,7 +68,7 @@ class ChatManualRetryScenario(BaseScenario):
             )
             assert (
                 failed_result["terminal_event"].get("event") == "error"
-            ), "Interrupted chat should emit an error event"
+            ), "Provider API failure should emit an error event"
 
             failed_detail = self.call_api(
                 f"/api/chat/sessions/{session_id}?vault_name={vault.name}"
@@ -78,11 +81,11 @@ class ChatManualRetryScenario(BaseScenario):
                 latest_failure is not None
             ), "Interrupted chat should expose a failure marker"
             assert (
-                latest_failure.get("failure_kind") == "transient_network"
-            ), "Interrupted provider streams should be retryable network failures"
+                latest_failure.get("failure_kind") == "transient_provider"
+            ), "Generic provider API errors should be classified as transient"
             assert (
                 latest_failure.get("retryable") is True
-            ), "Interrupted provider streams should be manually retryable"
+            ), "Generic provider API errors should be manually retryable"
 
             captured_retry_history: list[tuple[str, str]] = []
 

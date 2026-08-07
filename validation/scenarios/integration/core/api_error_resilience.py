@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import openai
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -88,6 +89,33 @@ class ApiErrorResilienceScenario(BaseScenario):
         self.soft_assert(
             not bad_classification.retryable,
             "Classification should mark permanent bad requests non-retryable",
+        )
+
+        generic_openai_error = openai.APIError(
+            "An error occurred while processing your request.",
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        )
+        generic_openai_classification = classify_exception(
+            generic_openai_error, phase="agent_stream"
+        )
+        self.soft_assert_equal(
+            generic_openai_classification.failure_kind,
+            "transient_provider",
+            "Generic OpenAI API failures should have a transient provider classification",
+        )
+        self.soft_assert(
+            generic_openai_classification.retryable,
+            "Generic OpenAI API failures should support manual prompt retry",
+        )
+
+        permanent_openai_error = _openai_status_error(400)
+        permanent_openai_classification = classify_exception(
+            permanent_openai_error, phase="agent_stream"
+        )
+        self.soft_assert(
+            not permanent_openai_classification.retryable,
+            "Permanent OpenAI request errors should not support unchanged prompt retry",
         )
 
         overloaded = classify_exception(
@@ -216,4 +244,14 @@ def _http_status_error(
     response = httpx.Response(status_code, headers=headers, request=request)
     return httpx.HTTPStatusError(
         "synthetic provider status failure", request=request, response=response
+    )
+
+
+def _openai_status_error(status_code: int) -> openai.APIStatusError:
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx.Response(status_code, request=request)
+    return openai.APIStatusError(
+        "synthetic OpenAI status failure",
+        response=response,
+        body=None,
     )

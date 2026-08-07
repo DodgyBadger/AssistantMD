@@ -28,6 +28,8 @@ from core.runtime.paths import set_bootstrap_roots
 from core.runtime.state import clear_runtime_context
 from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
 
+from .paths import resolve_validation_system_root
+
 
 class SchedulerJobInfo:
     """Information about a scheduler job for validation."""
@@ -66,7 +68,7 @@ class SystemController:
         target_secrets = (
             Path(os.environ["SECRETS_PATH"])
             if os.environ.get("SECRETS_PATH")
-            else Path("/app/system/secrets.yaml")
+            else resolve_validation_system_root() / "secrets.yaml"
         )
         target_secrets.parent.mkdir(parents=True, exist_ok=True)
         if not target_secrets.exists():

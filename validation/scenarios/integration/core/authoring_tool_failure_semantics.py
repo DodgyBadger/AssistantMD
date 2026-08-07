@@ -10,6 +10,7 @@ from pydantic_ai.messages import ToolReturn
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 import core.tools.session_ops as session_ops_module
+from core.identity import LOCAL_USER_AUTHORITY
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from core.tools.file_read import FileRead
@@ -56,10 +57,12 @@ class AuthoringToolFailureSemanticsScenario(BaseScenario):
         caught_result = await runtime.workflow_governor.execute_workflow(
             global_id=f"{vault.name}/caught_probe",
             source=ExecutionTaskSource.API,
+            authority=LOCAL_USER_AUTHORITY,
         )
         explicit_result = await runtime.workflow_governor.execute_workflow(
             global_id=f"{vault.name}/explicit_failure",
             source=ExecutionTaskSource.API,
+            authority=LOCAL_USER_AUTHORITY,
         )
 
         original_preflight = session_ops_module._preflight_session_summary_embeddings
@@ -79,6 +82,7 @@ class AuthoringToolFailureSemanticsScenario(BaseScenario):
             await runtime.workflow_governor.execute_workflow(
                 global_id=f"{vault.name}/session_model_failure",
                 source=ExecutionTaskSource.API,
+                authority=LOCAL_USER_AUTHORITY,
             )
         except Exception as exc:  # noqa: BLE001
             session_failure = exc

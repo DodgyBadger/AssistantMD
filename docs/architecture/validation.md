@@ -18,7 +18,7 @@ For process guidance on validation-driven implementation, see [Testing and Valid
 
 **Scenario**: A Python class that tests some aspect of the system. It sets up one or more sandbox vaults and the files needed for the test, launches the runtime, uses `BaseScenario` helpers to trigger code paths and then asserts on artifacts.  
 
-**Run**: One execution of a scenario. Each run gets a dedicated folder under `validation/runs/` containing the scenario vault(s), system folder and artifacts.  
+**Run**: One validation CLI invocation. Each scenario execution still gets a dedicated folder under `validation/runs/` containing its vaults, system folder and artifacts. The CLI invocation also writes a run-level report index under `validation/runs/reports/`.
 
 **Artifacts**: Evidence emitted during a run such as run and system logs, outputs of the feature being exercised (e.g. chat response, workflow output) and internal events emitted via validation sinks on `UnifiedLogger`.  
 
@@ -35,11 +35,29 @@ For process guidance on validation-driven implementation, see [Testing and Valid
 **Run** it via `validation/run_validation.py`
 - the runner discovers the class, boots a sandboxed runtime, and executes `test_scenario`
 - validation framework prunes to 10 most recent runs
+- the final terminal output summarizes counts and puts failures and errors last;
+  passing scenario details are collapsed unless `--show-passed` is supplied
+- each failure includes its evidence path and a focused rerun command
 
 **Review** artifacts under `validation/runs/`
 - timeline, logs, validation events, vault outputs
+- `reports/latest.md` is the latest human-readable run index
+- `reports/latest.json` is the versioned machine-readable run index
+- timestamped run indexes are retained for the 20 most recent CLI invocations
 
 See `validation/scenarios/integration/basic_haiku.py` for a minimal example.
+
+### Filesystem roots
+
+The validation harness discovers the application root from its checkout, so the
+CLI works from a checkout-local UV environment regardless of where the checkout
+is mounted. Set `VALIDATION_APP_ROOT` to override the checkout root used for
+fixtures and default runtime paths. Set `VALIDATION_ROOT` when scenario
+discovery and run evidence live somewhere other than
+`<application-root>/validation`.
+
+Explicit `CONTAINER_DATA_ROOT`, `CONTAINER_SYSTEM_ROOT`, and `SECRETS_PATH`
+values remain authoritative.
 
 
 ## Working with secrets during validation
@@ -175,7 +193,14 @@ python validation/run_validation.py run integration
 
 # Filter by name pattern (glob)
 python validation/run_validation.py run integration/context_manager*
+
+# Include individual passing scenarios in the final summary
+python validation/run_validation.py run integration/core --show-passed
 ```
+
+Required GitHub validation runs the deterministic `integration/core` folder.
+Scenarios outside that folder may exercise live models or external services and
+remain available for intentional maintainer runs with the required credentials.
 
 ## Tips for fast iteration
 

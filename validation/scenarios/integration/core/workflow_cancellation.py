@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
+from core.identity import LOCAL_USER_AUTHORITY
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
@@ -30,6 +31,7 @@ class WorkflowCancellationScenario(BaseScenario):
             global_id=f"{vault.name}/cancellable_probe",
             source=ExecutionTaskSource.API,
             background_tasks=get_runtime_context().background_tasks,
+            authority=LOCAL_USER_AUTHORITY,
         )
         task_id = task.task_id
         self.soft_assert(bool(task_id), "Workflow start should return a task id")

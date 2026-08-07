@@ -7,6 +7,8 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/runtime/execution_tasks.py` — task lifecycle model, scope helpers, cancellation results
 - `core/runtime/background.py` — runtime-loop background task spawning and shutdown registration
 - `core/runtime/task_runner.py` — generic background execution task runner shell
+- `core/runtime/task_access.py` — authority-mediated task lookup, listing, and
+  cancellation
 - `core/runtime/workflow_governor.py` — workflow concurrency policy and workflow task lifecycle logging
 - `core/ingestion/task_execution.py` — ingestion job task wrapper for inline API paths
 - `core/ingestion/worker.py` — scheduled ingestion worker using the runtime task runner
@@ -99,6 +101,12 @@ Terminal statuses remain queryable until the bounded terminal history is pruned.
 - Terminal tasks are not mutated. The coordinator logs `execution_task_cancel_ignored` with `ignored_reason="task_terminal"` and returns `effective=False`.
 - Missing task IDs return `None`; API services translate that into a 404 response.
 
+Interactive task reads and cancellation go through the runtime-owned
+`ExecutionTaskAccessService`. It requires active request/task authority, filters
+task lists through centralized authorization policy, and conceals inaccessible
+task IDs. The raw coordinator remains the lifecycle mechanism used by task
+runners and explicit system infrastructure.
+
 Chat session cancellation is scope-oriented at the API layer: `/api/chat/sessions/{session_id}/cancel` resolves the active `chat_session:<session_id>` task and cancels that task ID.
 
 Chat is task-oriented at the API layer:
@@ -156,4 +164,9 @@ Execution task events use the validation sink and stable event names:
 - `execution_task_skipped`
 - `workflow_task_heartbeat`
 
-Payloads include task identity fields (`task_id`, `kind`, `scope`, `source`, `label`), status, cancellation state, and terminal reason. These events are part of the scenario validation surface.
+Payloads include task identity fields (`task_id`, `kind`, `scope`, `source`,
+`label`, `principal_id`), status, cancellation state, and terminal reason. Each
+task captures explicit execution authority when it is created. Queued,
+background, gated, and nested execution installs that authority in a
+context-local binding for the lifetime of the worker. These events are part of
+the scenario validation surface.

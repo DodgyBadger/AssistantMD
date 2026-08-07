@@ -10,6 +10,8 @@ helpers or RuntimeConfig rather than adding env-derived values here.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 # File to mark directories as excluded from vault discovery
 VAULT_IGNORE_FILE = ".vaultignore"
 
@@ -63,11 +65,11 @@ BUFFER_READ_MAX_CHARS = 8000
 BUFFER_SEARCH_MAX_MATCHES = 100
 BUFFER_SEARCH_CONTEXT_CHARS = 0
 
-# Virtual mounts registry (reserved path prefixes)
-# root values are absolute paths inside the container
+# Virtual mounts registry (reserved path prefixes). Resolve repository-owned
+# content relative to this module so checkout and container entrypoints agree.
 VIRTUAL_MOUNTS = {
     "__virtual_docs__": {
-        "root": "/app/docs",
+        "root": str(Path(__file__).resolve().parents[1] / "docs"),
         "read_only": True,
     },
 }

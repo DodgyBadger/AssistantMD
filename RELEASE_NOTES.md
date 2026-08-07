@@ -1,5 +1,33 @@
 # Release Notes
 
+## v0.7.1
+
+### Backend authorization foundation
+
+- Chat sessions now have durable internal ownership, and queued or background
+  work retains the authority under which it was created.
+- Shared backend authorization boundaries reduce the risk that new API services
+  bypass access checks.
+- Ownership-sensitive session operations consistently conceal inaccessible
+  session identifiers, including create-or-touch requests, preventing those
+  identifiers from being used to probe ownership.
+- This release has no visible app changes and does not change routes or API
+  request and response payloads.
+
+### Development setup
+
+- Development is supported on both general-purpose hosts and the devcontainer
+  through one `scripts/dev` workflow. Each checkout uses a pinned Python 3.13
+  UV environment and isolated local runtime state.
+- Setup can repair stale virtual environments, prepare frontend dependencies,
+  optionally install Playwright Chromium, run the development server, diagnose
+  prerequisites, and invoke focused validation scenarios.
+- Validation runs now finish with a failure-focused digest containing direct
+  evidence links and rerun commands, and retain Markdown and JSON run indexes
+  so failures remain easy to find after terminal output has scrolled away.
+- Checkout-local development now exposes built-in tool documentation through
+  the same virtual docs mount used by container deployments.
+
 
 ## 2026-08-02 - v0.7.0
 
