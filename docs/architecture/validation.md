@@ -198,6 +198,10 @@ python validation/run_validation.py run integration/context_manager*
 python validation/run_validation.py run integration/core --show-passed
 ```
 
+Required GitHub validation runs the deterministic `integration/core` folder.
+Scenarios outside that folder may exercise live models or external services and
+remain available for intentional maintainer runs with the required credentials.
+
 ## Tips for fast iteration
 
 - Use the `@model test` directive to avoid external LLM calls when you only need   to confirm workflow wiring.
