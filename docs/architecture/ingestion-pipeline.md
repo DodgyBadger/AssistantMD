@@ -119,7 +119,7 @@ Shared OCR config keys:
 - `ingestion_ocr_endpoint`
 - `ingestion_url_connect_timeout_seconds`
 - `ingestion_url_read_timeout_seconds`
-- `ingestion_url_max_response_bytes`
+- `ingestion_url_max_response_mb`
 - `content_import_max_batch_size`
 
 Legacy OCR keys remain accepted as compatibility fallback.

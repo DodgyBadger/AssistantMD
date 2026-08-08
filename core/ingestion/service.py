@@ -623,7 +623,7 @@ class IngestionService:
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
         url_fetch_strategy = "curl"
-        url_max_response_bytes = 5 * 1024 * 1024
+        url_max_response_mb = 5
         try:
             pdf_default_strategies = list(
                 setting_value("ingestion_pdf_default_strategies")
@@ -674,11 +674,9 @@ class IngestionService:
         except Exception:
             url_fetch_strategy = "curl"
         try:
-            url_max_response_bytes = int(
-                setting_value("ingestion_url_max_response_bytes")
-            )
+            url_max_response_mb = int(setting_value("ingestion_url_max_response_mb"))
         except Exception:
-            url_max_response_bytes = 5 * 1024 * 1024
+            url_max_response_mb = 5
 
         return {
             "pdf": {
@@ -696,7 +694,7 @@ class IngestionService:
                 "read_timeout_seconds": max(1, url_read_timeout_seconds),
                 "connect_timeout_seconds": max(1, url_connect_timeout_seconds),
                 "fetch_strategy": url_fetch_strategy,
-                "max_response_bytes": max(1, url_max_response_bytes),
+                "max_response_bytes": max(1, url_max_response_mb) * 1024 * 1024,
             },
         }
 

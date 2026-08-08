@@ -282,9 +282,9 @@ settings:
     description: "Read timeout in seconds for URL ingestion HTTP requests. Increase if you get timeout errors on large URL imports."
     category: "Import"
     restart_required: false
-  ingestion_url_max_response_bytes:
-    value: 5242880
-    description: "Maximum response body size in bytes for one URL ingestion request."
+  ingestion_url_max_response_mb:
+    value: 5
+    description: "Maximum response body size in megabytes for one URL ingestion request."
     category: "Import"
     restart_required: false
   content_import_max_batch_size:

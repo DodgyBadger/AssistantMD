@@ -48,7 +48,7 @@ Runtime-relevant general settings include:
   independently of agent web extraction.
 - `ingestion_url_connect_timeout_seconds`,
   `ingestion_url_read_timeout_seconds`, and
-  `ingestion_url_max_response_bytes`: bounded URL-ingestion transport limits.
+  `ingestion_url_max_response_mb`: bounded URL-ingestion transport limits.
 - `content_import_max_batch_size`: maximum sources or job ids accepted by one
   `content_import` tool call.
 - `browser_max_concurrent_sessions`, `browser_max_calls_per_turn`, and
