@@ -9,7 +9,7 @@ from pathlib import Path
 class ImportOutputPaths:
     rel_dir: str
     base_name: str
-    job_dir: str
+    asset_dir: str
     markdown_path: str
 
 
@@ -36,12 +36,12 @@ def resolve_import_output_paths(
     else:
         filename = filename.replace("/", "_").replace("\\", "_").strip() or "import"
 
-    job_dir = os.path.join(rel_dir, filename).lstrip("/")
-    markdown_path = os.path.join(job_dir, f"{filename}.md").lstrip("/")
+    asset_dir = os.path.join(rel_dir, "assets", filename).lstrip("/")
+    markdown_path = os.path.join(rel_dir, f"{filename}.md").lstrip("/")
     return ImportOutputPaths(
         rel_dir=rel_dir,
         base_name=filename,
-        job_dir=job_dir,
+        asset_dir=asset_dir,
         markdown_path=markdown_path,
     )
 

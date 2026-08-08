@@ -5,10 +5,11 @@ Ingestion service wired into runtime.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+
+import yaml
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.jobs import (
@@ -498,9 +499,9 @@ class IngestionService:
             title=raw_doc.suggested_title,
         )
 
-        job_dir_rel = Path(paths.job_dir)
-        pages_dir_rel = job_dir_rel / "pages"
-        manifest_rel = job_dir_rel / "manifest.json"
+        asset_dir_rel = Path(paths.asset_dir)
+        pages_dir_rel = asset_dir_rel / "pages"
+        markdown_rel = Path(paths.markdown_path)
 
         data_root = Path(get_data_root())
         vault_root = data_root / vault
@@ -535,37 +536,41 @@ class IngestionService:
             except Exception:
                 source_mtime = None
 
-        manifest = {
-            "source": {
-                "name": (
-                    source_path.name
-                    if source_path
-                    else (raw_doc.suggested_title or "import.pdf")
-                ),
-                "path": str(source_path) if source_path else raw_doc.source_uri,
-                "mime": raw_doc.mime or "application/pdf",
-                "sha256": source_hash,
-                "mtime": source_mtime,
-            },
-            "mode": "page_images",
-            "render": {
-                "format": "png",
-                "dpi": int(dpi),
-            },
+        source_name = (
+            source_path.name
+            if source_path
+            else (raw_doc.suggested_title or "import.pdf")
+        )
+        source_value = str(source_path) if source_path else raw_doc.source_uri
+        frontmatter: dict[str, object] = {
+            "source": source_value,
+            "source_name": source_name,
+            "mime": raw_doc.mime or "application/pdf",
+            "sha256": source_hash,
+            "import_mode": "page_images",
+            "render_format": "png",
+            "render_dpi": int(dpi),
             "page_count": len(page_paths),
-            "pages": [
-                {"page": idx + 1, "path": page_path}
-                for idx, page_path in enumerate(page_paths)
-            ],
         }
+        if source_mtime is not None:
+            frontmatter["source_mtime"] = source_mtime
+        frontmatter_text = yaml.safe_dump(
+            frontmatter,
+            allow_unicode=True,
+            sort_keys=False,
+        ).strip()
+        page_links = [
+            f"![Page {idx}]({Path(page_path).relative_to(markdown_rel.parent).as_posix()})"
+            for idx, page_path in enumerate(page_paths, start=1)
+        ]
         write_vault_file(
             vault_path=vault_root,
-            path=manifest_rel.as_posix(),
-            content=json.dumps(manifest, indent=2),
+            path=markdown_rel.as_posix(),
+            content="\n".join(["---", frontmatter_text, "---", "", *page_links, ""]),
             warn_without_task=False,
         )
 
-        return [manifest_rel.as_posix(), *page_paths]
+        return [markdown_rel.as_posix(), *page_paths]
 
     def _resolve_importer(
         self, source_path: Path, mime_hint: str | None

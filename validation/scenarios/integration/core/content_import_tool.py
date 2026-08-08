@@ -79,9 +79,8 @@ class ContentImportToolScenario(BaseScenario):
                 status_items[0].get("outputs") if status_items else []
             ) or []
             self.soft_assert(
-                bool(local_outputs)
-                and str(local_outputs[0]).startswith("Research/Library/"),
-                "Per-job destination should override the configured import root",
+                local_outputs == ["Research/Library/local.md"],
+                "Import Markdown should land directly in the per-job destination",
             )
             self.soft_assert(
                 local_pdf.exists(),
@@ -127,6 +126,11 @@ class ContentImportToolScenario(BaseScenario):
                 len(remote_outputs), 1, "Remote PDF should create one markdown output"
             )
             if remote_outputs:
+                self.soft_assert_equal(
+                    remote_outputs[0],
+                    "Imported/remote.md",
+                    "Import Markdown should land directly in the default destination",
+                )
                 remote_content = (vault / remote_outputs[0]).read_text(encoding="utf-8")
                 self.soft_assert(
                     "Remote PDF content import validation" in remote_content,

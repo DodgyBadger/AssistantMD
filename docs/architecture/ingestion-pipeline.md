@@ -133,16 +133,18 @@ If secrets are missing, the strategy is skipped and warnings are attached to ext
 
 ## Output Artifacts and Layout
 
-Outputs are stored vault-relative under `ingestion_output_path_pattern` (default `Imported/`) using per-import folders.
+Outputs are stored vault-relative under `ingestion_output_path_pattern` (default
+`Imported/`). Markdown files are written directly into that destination.
 
 Current conventions:
 
-- Markdown output: `Imported/<name>/<name>.md`
-- OCR assets (when enabled): `Imported/<name>/assets/...`
-- PDF page-images mode: `Imported/<name>/pages/page_0001.png ...`
-- PDF page-images manifest: `Imported/<name>/manifest.json`
+- Markdown output: `Imported/<name>.md`
+- OCR assets (when enabled): `Imported/assets/<name>/...`
+- PDF page-images mode: `Imported/assets/<name>/pages/page_0001.png ...`
+- PDF page-images index and metadata: `Imported/<name>.md`
 
-`manifest.json` is metadata-only and is intended for orchestration/resume workflows (no built-in classification semantics).
+Page-images metadata is stored in the Markdown index frontmatter. Its body links
+to each rendered page image.
 
 OCR image persistence controls:
 
@@ -159,7 +161,7 @@ Behavior:
 
 - applies to PDF inputs only
 - bypasses extraction strategies
-- writes page images plus manifest artifacts
+- writes page images plus a Markdown index with import metadata in frontmatter
 - preserves existing scheduler/job model (no separate batch engine)
 
 ## Operational Notes

@@ -2,7 +2,9 @@
 
 `content_import` submits URLs or vault files to the durable ingestion pipeline
 and reads the resulting job status. Imported content is written as vault
-artifacts under the configured ingestion output path.
+artifacts under the configured ingestion output path. Markdown files land
+directly in the selected destination. Optional companion files are grouped under
+`assets/<import-name>/` within that destination.
 
 ## Submit
 
