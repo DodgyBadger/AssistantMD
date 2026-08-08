@@ -138,13 +138,83 @@ def find_job_for_source(
         return cast(IngestionJob | None, query.first())
 
 
-def list_jobs(limit: int = 50) -> list[IngestionJob]:
+def list_jobs(limit: int = 50, *, vault: str | None = None) -> list[IngestionJob]:
     session_factory = _get_session_factory()
     with session_factory() as session:
+        query = session.query(IngestionJob)
+        if vault:
+            query = query.filter(IngestionJob.vault == vault)
         return cast(
             list[IngestionJob],
-            session.query(IngestionJob)
-            .order_by(IngestionJob.created_at.desc())
-            .limit(limit)
-            .all(),
+            query.order_by(IngestionJob.created_at.desc()).limit(limit).all(),
         )
+
+
+def cancel_queued_job(job_id: int) -> IngestionJob:
+    """Atomically mark one queued ingestion job cancelled."""
+    session_factory = _get_session_factory()
+    try:
+        with session_factory() as session:
+            updated = (
+                session.query(IngestionJob)
+                .filter(
+                    IngestionJob.id == job_id,
+                    IngestionJob.status == JobStatus.QUEUED.value,
+                )
+                .update(
+                    {
+                        IngestionJob.status: JobStatus.CANCELLED.value,
+                        IngestionJob.updated_at: datetime.utcnow(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if not updated:
+                job = session.get(IngestionJob, job_id)
+                if job is None:
+                    raise ValueError(f"Job {job_id} not found")
+                raise ValueError(
+                    f"Job {job_id} cannot be cancelled from status {job.status}"
+                )
+            session.commit()
+            job = session.get(IngestionJob, job_id)
+            if job is None:  # pragma: no cover - defensive
+                raise RuntimeError(f"Cancelled ingestion job disappeared: {job_id}")
+            return job
+    except SQLAlchemyError as exc:
+        raise RuntimeError(f"Failed to cancel job {job_id}: {exc}") from exc
+
+
+def claim_queued_job(job_id: int) -> bool:
+    """Atomically transition one queued job to processing."""
+    session_factory = _get_session_factory()
+    try:
+        with session_factory() as session:
+            updated = (
+                session.query(IngestionJob)
+                .filter(
+                    IngestionJob.id == job_id,
+                    IngestionJob.status == JobStatus.QUEUED.value,
+                )
+                .update(
+                    {
+                        IngestionJob.status: JobStatus.PROCESSING.value,
+                        IngestionJob.updated_at: datetime.utcnow(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            session.commit()
+            return bool(updated)
+    except SQLAlchemyError as exc:
+        raise RuntimeError(f"Failed to claim job {job_id}: {exc}") from exc
+
+
+def count_jobs(*, status: JobStatus | None = None) -> int:
+    """Count durable ingestion jobs, optionally limited to one status."""
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        query = session.query(IngestionJob)
+        if status is not None:
+            query = query.filter(IngestionJob.status == status.value)
+        return int(query.count())

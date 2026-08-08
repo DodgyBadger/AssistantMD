@@ -45,6 +45,7 @@ your own python workflow and context assembly scripts. See the [Build Guide](doc
 - **[Development Setup](docs/setup/development.md)**
 - **[Build Guide](docs/use/build-guide.md)** — start here for the composable building blocks and default setup
 - **[Authoring Reference](docs/use/authoring.md)** — workflow scripts and context assembly scripts
+- **[Importing Content](docs/use/importing-content.md)** — import monitoring, queue controls, and timing configuration
 - **[Security Considerations](docs/setup/security.md)**
 - **[Upgrading](docs/setup/upgrading.md)**
 - **[Release Notes](RELEASE_NOTES.md)**

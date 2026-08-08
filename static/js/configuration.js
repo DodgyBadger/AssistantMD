@@ -30,6 +30,8 @@
         isRunningSystemMigrations: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
+        isLoadingImportJobs: false,
+        isTriggeringImportQueue: false,
         isImportingUrl: false,
         settings: [],
         models: [],
@@ -38,6 +40,7 @@
         importVaults: [],
         importResults: null,
         importUrlResult: null,
+        importJobs: [],
         activityLogEntries: [],
         activityLogNextCursor: null,
         activityLogTotalMatching: 0,
@@ -94,6 +97,7 @@
         refreshStatus: null
     };
     let activityLogSearchTimer = null;
+    let importJobPollTimer = null;
 
     const elements = {
         activityLogViewer: null,
@@ -161,7 +165,12 @@
         importRefreshVaultsBtn: null,
         importResults: null,
         importUrlInput: null,
-        importUrlSubmit: null
+        importUrlSubmit: null,
+        importJobsSummary: null,
+        importJobsFeedback: null,
+        importJobsList: null,
+        importJobsRefreshBtn: null,
+        importJobsRunNowBtn: null
     };
 
     const toneClasses = {
@@ -181,6 +190,7 @@
             clean: icon.CLEAN_ICON_SVG,
             database: icon.DATABASE_ICON_SVG,
             edit: icon.EDIT_ICON_SVG,
+            play: icon.PLAY_ICON_SVG,
             refresh: icon.REFRESH_ICON_SVG,
             save: icon.SAVE_ICON_SVG,
             trash: icon.TRASH_ICON_SVG,
@@ -261,6 +271,11 @@
         elements.importResults = document.getElementById('import-results');
         elements.importUrlInput = document.getElementById('import-url-input');
         elements.importUrlSubmit = document.getElementById('import-url-submit');
+        elements.importJobsSummary = document.getElementById('import-jobs-summary');
+        elements.importJobsFeedback = document.getElementById('import-jobs-feedback');
+        elements.importJobsList = document.getElementById('import-jobs-list');
+        elements.importJobsRefreshBtn = document.getElementById('import-jobs-refresh');
+        elements.importJobsRunNowBtn = document.getElementById('import-jobs-run-now');
     }
 
     function bindEvents() {
@@ -303,6 +318,9 @@
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
         elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
+        elements.importJobsRefreshBtn?.addEventListener('click', () => loadImportJobs());
+        elements.importJobsRunNowBtn?.addEventListener('click', handleRunImportQueueNow);
+        elements.importJobsList?.addEventListener('click', handleImportJobAction);
         elements.importPdfModeSelect?.addEventListener('change', updateImportOcrAvailability);
     }
 
@@ -3019,6 +3037,7 @@ async function saveModelRow(rowKey) {
         if (!state.initialized) return;
         await loadSecrets();
         await loadImportVaults();
+        await loadImportJobs();
     }
 
     function renderImportVaults() {
@@ -3149,8 +3168,7 @@ async function saveModelRow(rowKey) {
             if (!commonDir.length) break;
         }
 
-        // Import outputs generally live under Imported/<import-set>/...
-        // Prefer showing that root folder instead of deep subfolders like /pages.
+        // Collapse companion assets to a useful import destination summary.
         const destinationSegments = (
             commonDir.length >= 2 && commonDir[0] === 'Imported'
                 ? commonDir.slice(0, 2)
@@ -3178,6 +3196,139 @@ async function saveModelRow(rowKey) {
         const filesLabel = `${paths.length} file${paths.length === 1 ? '' : 's'} (${typeParts.join(', ')})`;
 
         return { destinationLabel, filesLabel };
+    }
+
+    function renderImportJobs() {
+        if (!elements.importJobsList) return;
+        const jobs = Array.isArray(state.importJobs) ? state.importJobs : [];
+        const queuedCount = jobs.filter(job => job.status === 'queued').length;
+        const processingCount = jobs.filter(job => job.status === 'processing').length;
+        if (elements.importJobsSummary) {
+            elements.importJobsSummary.textContent = jobs.length
+                ? `${queuedCount} queued · ${processingCount} processing · ${jobs.length} recent`
+                : 'No recent imports.';
+        }
+        if (!jobs.length) {
+            elements.importJobsList.innerHTML = '<p>No import jobs have been recorded.</p>';
+            syncImportJobPolling();
+            return;
+        }
+
+        elements.importJobsList.innerHTML = `
+            <div class="dashboard-table-wrap" role="region" aria-label="Recent import jobs" tabindex="0">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Job</th>
+                            <th>Source</th>
+                            <th>Vault</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                            <th>Output / Error</th>
+                            <th class="cell-center" aria-label="Cancel"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${jobs.map(job => {
+                            const outputs = Array.isArray(job.outputs) ? job.outputs : [];
+                            const detail = job.error || outputs.join(', ') || '—';
+                            const cancelButton = job.status === 'queued'
+                                ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
+                                : '';
+                            return `
+                                <tr>
+                                    <td class="cell-xs cell-mono">${escapeHtml(job.id)}</td>
+                                    <td class="cell-xs">${escapeHtml(job.source_uri || 'unknown')}</td>
+                                    <td class="cell-xs">${escapeHtml(job.vault || '—')}</td>
+                                    <td class="cell-xs">${escapeHtml(job.status || 'unknown')}</td>
+                                    <td class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
+                                    <td class="cell-xs">${escapeHtml(detail)}</td>
+                                    <td class="cell-center">${cancelButton}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        syncImportJobPolling();
+    }
+
+    function syncImportJobPolling() {
+        const hasActiveJobs = (state.importJobs || []).some(
+            job => job.status === 'queued' || job.status === 'processing'
+        );
+        if (hasActiveJobs && !importJobPollTimer) {
+            importJobPollTimer = window.setInterval(() => loadImportJobs({ silent: true }), 3000);
+        } else if (!hasActiveJobs && importJobPollTimer) {
+            window.clearInterval(importJobPollTimer);
+            importJobPollTimer = null;
+        }
+    }
+
+    async function loadImportJobs({ silent = false } = {}) {
+        if (state.isLoadingImportJobs) return;
+        state.isLoadingImportJobs = true;
+        if (!silent) setStatus(elements.importJobsFeedback, 'Refreshing import status…', 'info');
+        try {
+            const response = await fetch('api/import/jobs?limit=50', { cache: 'no-store' });
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            state.importJobs = Array.isArray(data?.jobs) ? data.jobs : [];
+            renderImportJobs();
+            if (!silent) setStatus(elements.importJobsFeedback, '', 'info');
+        } catch (error) {
+            if (!silent) setStatus(elements.importJobsFeedback, `Failed to load imports: ${error.message}`, 'error');
+        } finally {
+            state.isLoadingImportJobs = false;
+        }
+    }
+
+    async function handleImportJobAction(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const button = target.closest('[data-import-job-cancel]');
+        if (!(button instanceof HTMLElement) || button.disabled) return;
+        const jobId = button.getAttribute('data-import-job-cancel');
+        if (!jobId) return;
+        button.disabled = true;
+        setStatus(elements.importJobsFeedback, `Cancelling import job ${jobId}…`, 'info');
+        try {
+            const response = await fetch(`api/import/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            setStatus(elements.importJobsFeedback, `Import job ${jobId} cancelled.`, 'success');
+            await loadImportJobs({ silent: true });
+        } catch (error) {
+            setStatus(elements.importJobsFeedback, `Could not cancel import: ${error.message}`, 'error');
+            button.disabled = false;
+        }
+    }
+
+    async function handleRunImportQueueNow() {
+        if (!elements.importJobsRunNowBtn || state.isTriggeringImportQueue) return;
+        state.isTriggeringImportQueue = true;
+        elements.importJobsRunNowBtn.disabled = true;
+        setStatus(elements.importJobsFeedback, 'Requesting an ingestion worker run…', 'info');
+        try {
+            const response = await fetch('api/import/run-now', { method: 'POST' });
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            const queuedCount = Number(data?.queued_count || 0);
+            setStatus(
+                elements.importJobsFeedback,
+                queuedCount
+                    ? `Worker run requested for ${queuedCount} queued import${queuedCount === 1 ? '' : 's'}.`
+                    : 'Worker run requested; the queue is currently empty.',
+                'success'
+            );
+            await loadImportJobs({ silent: true });
+        } catch (error) {
+            setStatus(elements.importJobsFeedback, `Could not run imports: ${error.message}`, 'error');
+        } finally {
+            state.isTriggeringImportQueue = false;
+            elements.importJobsRunNowBtn.disabled = false;
+        }
     }
 
     function renderImportResults() {
@@ -3293,6 +3444,7 @@ async function saveModelRow(rowKey) {
             const data = await response.json();
             state.importResults = data;
             renderImportResults();
+            await loadImportJobs({ silent: true });
             setStatus(
                 elements.importStatus,
                 queueOnly ? 'Jobs queued.' : 'Import completed.',
@@ -3337,6 +3489,7 @@ async function saveModelRow(rowKey) {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             state.importUrlResult = data;
+            await loadImportJobs({ silent: true });
             setStatus(elements.importStatus, 'URL ingested.', data.error ? 'warning' : 'success');
             if (callbacks.refreshStatus) callbacks.refreshStatus();
             renderImportResults();

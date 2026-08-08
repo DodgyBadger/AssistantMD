@@ -52,6 +52,7 @@ Jobs are persisted by `core/ingestion/jobs.py` in system database `ingestion_job
 - `processing`
 - `completed`
 - `failed`
+- `cancelled`
 
 Key fields include source URI, vault, source type, options, error, and output file list.
 
@@ -72,6 +73,12 @@ Worker scheduling is driven by settings:
 
 - `ingestion_worker_interval_seconds`
 - `ingestion_worker_batch_size` (mapped to worker max concurrent jobs)
+
+The Dashboard Import Status panel reads durable jobs through `/api/import/jobs`.
+Queued jobs can transition atomically to `cancelled` through
+`/api/import/jobs/{job_id}/cancel`. `/api/import/run-now` advances and wakes the
+existing scheduler job; it does not create a parallel ingestion execution path.
+The panel polls while queued or processing work exists.
 
 The shared wrapper lives in `core/ingestion/task_execution.py`; new ingestion
 execution paths should use it rather than calling `IngestionService.process_job`

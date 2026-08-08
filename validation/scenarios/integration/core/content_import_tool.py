@@ -141,6 +141,93 @@ class ContentImportToolScenario(BaseScenario):
                     "Remote output should preserve requested URL provenance",
                 )
 
+            cancel_submit = await tool.function(
+                operation="submit",
+                sources="Research/local.pdf",
+            )
+            cancel_items = (cancel_submit.metadata or {}).get("items") or []
+            cancel_job_id = cancel_items[0].get("job_id") if cancel_items else None
+            cancel_response = self.call_api(
+                f"/api/import/jobs/{cancel_job_id}/cancel",
+                method="POST",
+            )
+            self.soft_assert_equal(
+                cancel_response.status_code,
+                200,
+                "Queued import cancellation endpoint should succeed",
+            )
+            cancelled_job = cancel_response.json().get("job") or {}
+            self.soft_assert_equal(
+                cancelled_job.get("status"),
+                "cancelled",
+                "Queued imports should support durable cancellation",
+            )
+            repeat_cancel = self.call_api(
+                f"/api/import/jobs/{cancel_job_id}/cancel",
+                method="POST",
+            )
+            self.soft_assert_equal(
+                repeat_cancel.status_code,
+                409,
+                "Terminal imports should reject cancellation",
+            )
+            recent_response = self.call_api(
+                "/api/import/jobs",
+                params={"limit": 3, "vault": vault.name},
+            )
+            recent_jobs = recent_response.json().get("jobs") or []
+            self.soft_assert_equal(
+                recent_jobs[0].get("id") if recent_jobs else None,
+                cancel_job_id,
+                "Recent import status should return newest jobs first",
+            )
+            await get_runtime_context().ingestion_worker.run_once()
+            cancelled_status = await tool.function(
+                operation="status",
+                job_ids=cancel_job_id,
+            )
+            cancelled_items = (cancelled_status.metadata or {}).get("items") or []
+            self.soft_assert_equal(
+                cancelled_items[0].get("status") if cancelled_items else None,
+                "cancelled",
+                "The worker should not process cancelled imports",
+            )
+
+            runtime = get_runtime_context()
+            with (
+                patch.object(runtime.scheduler, "modify_job") as modify_job,
+                patch.object(runtime.scheduler, "wakeup") as wakeup,
+            ):
+                run_now_response = self.call_api(
+                    "/api/import/run-now",
+                    method="POST",
+                )
+            self.soft_assert_equal(
+                run_now_response.status_code,
+                200,
+                "Run now endpoint should accept the scheduler trigger",
+            )
+            self.soft_assert(
+                run_now_response.json().get("queued_count", -1) >= 0,
+                "Run now should report queue depth",
+            )
+            self.soft_assert(
+                modify_job.called and wakeup.called,
+                "Run now should advance and wake the scheduler-owned worker",
+            )
+
+            events = self.validation_events()
+            self.soft_assert_event_contains(
+                events,
+                name="ingestion_job_cancelled",
+                expected={"job_id": cancel_job_id, "status": "cancelled"},
+            )
+            self.soft_assert_event_contains(
+                events,
+                name="ingestion_worker_triggered",
+                expected={"source": "api"},
+            )
+
             invalid = await tool.function(
                 operation="submit",
                 sources="../outside.pdf",

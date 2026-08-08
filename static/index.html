@@ -222,6 +222,20 @@
                     </svg>
                 </summary>
                 <div class="p-4 pt-0 space-y-4">
+                    <div class="space-y-3 border border-border-primary rounded-md bg-app-elevated p-4">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p class="font-semibold text-txt-primary">Import Status</p>
+                                <p id="import-jobs-summary" class="text-xs text-txt-secondary">Loading recent imports…</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="import-jobs-run-now" type="button" class="ui-icon-button is-primary" data-icon="play" data-icon-label="Process Queue Now"></button>
+                                <button id="import-jobs-refresh" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Import Status"></button>
+                            </div>
+                        </div>
+                        <div id="import-jobs-feedback" class="text-sm text-txt-secondary"></div>
+                        <div id="import-jobs-list" class="text-sm text-txt-secondary">Loading…</div>
+                    </div>
                     <p class="text-sm text-txt-secondary">
                         Drop files into AssistantMD/Import/ inside your vault, then click Import Files to import them immediately. Files are removed after successful import.
                     </p>

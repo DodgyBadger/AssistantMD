@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -19,9 +21,27 @@ class ImportJobInfo(BaseModel):
     id: int
     source_uri: str
     vault: str
+    source_type: str
     status: str
     error: str | None = None
     outputs: list[str] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportJobListResponse(BaseModel):
+    jobs: list[ImportJobInfo]
+
+
+class ImportJobCancelResponse(BaseModel):
+    job: ImportJobInfo
+    cancelled: bool
+
+
+class ImportRunNowResponse(BaseModel):
+    accepted: bool
+    queued_count: int
+    triggered_at: datetime
 
 
 class ImportScanResponse(BaseModel):
@@ -35,10 +55,5 @@ class ImportUrlRequest(BaseModel):
     clean_html: bool = True
 
 
-class ImportUrlResponse(BaseModel):
-    id: int
-    source_uri: str
-    vault: str
-    status: str
-    error: str | None = None
-    outputs: list[str] | None = None
+class ImportUrlResponse(ImportJobInfo):
+    pass

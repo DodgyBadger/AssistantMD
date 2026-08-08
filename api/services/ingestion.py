@@ -1,12 +1,19 @@
 """API orchestration for ingestion jobs."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.identity import ExecutionAuthority, require_current_execution_authority
 from core.ingestion.import_service import ContentImportService
-from core.ingestion.jobs import IngestionJob, find_job_for_source
+from core.ingestion.jobs import (
+    IngestionJob,
+    cancel_queued_job,
+    count_jobs,
+    find_job_for_source,
+    list_jobs,
+)
 from core.ingestion.models import JobStatus, SourceKind
 from core.ingestion.registry import importer_registry
 from core.ingestion.service import IngestionService
@@ -14,8 +21,57 @@ from core.ingestion.task_execution import process_ingestion_job_in_task
 from core.runtime.context import RuntimeContext
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
+from core.scheduling.system_jobs import INGESTION_WORKER_JOB_ID
 
 from .shared import logger
+
+
+def list_recent_import_jobs(
+    *, limit: int = 50, vault: str | None = None
+) -> list[IngestionJob]:
+    """Return recent durable ingestion jobs for Dashboard visibility."""
+    return list_jobs(limit=limit, vault=(vault or "").strip() or None)
+
+
+def cancel_import_job(job_id: int) -> IngestionJob:
+    """Cancel one job only while it remains queued."""
+    job = cancel_queued_job(job_id)
+    logger.add_sink("validation").info(
+        "ingestion_job_cancelled",
+        data={
+            "event": "ingestion_job_cancelled",
+            "job_id": job.id,
+            "vault_name": job.vault,
+            "status": job.status,
+            "source": "api",
+        },
+    )
+    return job
+
+
+def trigger_import_queue_now() -> tuple[int, datetime]:
+    """Advance the scheduler-owned ingestion worker to run now."""
+    runtime = get_runtime_context()
+    scheduler_job = runtime.scheduler.get_job(INGESTION_WORKER_JOB_ID)
+    if scheduler_job is None:
+        raise RuntimeError("Ingestion worker scheduler job is unavailable")
+    queued_count = count_jobs(status=JobStatus.QUEUED)
+    triggered_at = datetime.now(UTC)
+    runtime.scheduler.modify_job(
+        INGESTION_WORKER_JOB_ID,
+        next_run_time=triggered_at,
+    )
+    runtime.scheduler.wakeup()
+    logger.add_sink("validation").info(
+        "ingestion_worker_triggered",
+        data={
+            "event": "ingestion_worker_triggered",
+            "queued_count": queued_count,
+            "source": "api",
+            "triggered_at": triggered_at.isoformat(),
+        },
+    )
+    return queued_count, triggered_at
 
 
 async def scan_import_folder(

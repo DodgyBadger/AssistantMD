@@ -12,7 +12,10 @@ from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.import_models import (
+    ImportJobCancelResponse,
     ImportJobInfo,
+    ImportJobListResponse,
+    ImportRunNowResponse,
     ImportScanRequest,
     ImportScanResponse,
     ImportUrlRequest,
@@ -131,6 +134,7 @@ from .services import (
     ChatSessionVaultMismatch,
     cancel_chat_session_task,
     cancel_execution_task,
+    cancel_import_job,
     check_openai_oauth_device_connection,
     cleanup_goals,
     cleanup_vault_state,
@@ -175,6 +179,7 @@ from .services import (
     list_chat_sessions,
     list_context_templates,
     list_execution_tasks,
+    list_recent_import_jobs,
     list_secrets,
     list_vault_directories,
     list_vault_file_references,
@@ -200,6 +205,7 @@ from .services import (
     start_openai_oauth_connection,
     start_openai_oauth_device_connection,
     submit_chat_deferred_review,
+    trigger_import_queue_now,
     update_chat_session_summary,
     update_general_setting_value,
     update_secret,
@@ -793,6 +799,75 @@ async def update_general_setting(
 #######################################################################
 
 
+def _import_job_info(job: Any, *, fallback_vault: str = "") -> ImportJobInfo:
+    """Project one durable ingestion job into the public import contract."""
+    return ImportJobInfo(
+        id=job.id,
+        source_uri=job.source_uri,
+        vault=job.vault or fallback_vault,
+        source_type=job.source_type,
+        status=job.status,
+        error=job.error,
+        outputs=job.outputs,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+@router.get("/import/jobs", response_model=ImportJobListResponse)
+async def import_jobs(
+    limit: int = Query(50, ge=1, le=100),
+    vault: str | None = None,
+) -> ImportJobListResponse | JSONResponse:
+    """List recent durable ingestion jobs for queue observability."""
+    try:
+        jobs = list_recent_import_jobs(limit=limit, vault=vault)
+        return ImportJobListResponse(jobs=[_import_job_info(job) for job in jobs])
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/import/jobs/{job_id}/cancel",
+    response_model=ImportJobCancelResponse,
+)
+async def cancel_import(job_id: int) -> ImportJobCancelResponse | JSONResponse:
+    """Cancel one ingestion job if it has not started processing."""
+    try:
+        job = cancel_import_job(job_id)
+        return ImportJobCancelResponse(job=_import_job_info(job), cancelled=True)
+    except ValueError as e:
+        message = str(e)
+        return create_error_response(
+            APIException(
+                status_code=404 if "not found" in message else 409,
+                error_type=(
+                    "IngestionJobNotFound"
+                    if "not found" in message
+                    else "IngestionJobNotCancellable"
+                ),
+                message=message,
+                details={"job_id": job_id},
+            )
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/import/run-now", response_model=ImportRunNowResponse)
+async def run_import_queue_now() -> ImportRunNowResponse | JSONResponse:
+    """Advance the scheduler-owned ingestion worker to run immediately."""
+    try:
+        queued_count, triggered_at = trigger_import_queue_now()
+        return ImportRunNowResponse(
+            accepted=True,
+            queued_count=queued_count,
+            triggered_at=triggered_at,
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
 @router.post("/import/scan", response_model=ImportScanResponse)
 async def import_scan(
     request: ImportScanRequest,
@@ -806,15 +881,7 @@ async def import_scan(
             pdf_mode=request.pdf_mode,
         )
         job_infos = [
-            ImportJobInfo(
-                id=job.id,
-                source_uri=job.source_uri,
-                vault=job.vault or request.vault,
-                status=job.status,
-                error=job.error,
-                outputs=job.outputs,
-            )
-            for job in jobs
+            _import_job_info(job, fallback_vault=request.vault) for job in jobs
         ]
         return ImportScanResponse(jobs_created=job_infos, skipped=skipped)
     except Exception as e:
@@ -832,12 +899,7 @@ async def import_url(
             clean_html=request.clean_html,
         )
         return ImportUrlResponse(
-            id=job.id,
-            source_uri=job.source_uri,
-            vault=job.vault or request.vault,
-            status=job.status,
-            error=job.error,
-            outputs=job.outputs,
+            **_import_job_info(job, fallback_vault=request.vault).model_dump()
         )
     except Exception as e:
         return create_error_response(e)

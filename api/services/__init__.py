@@ -281,7 +281,13 @@ from .execution_tasks import (
     list_execution_tasks,
     list_workflow_tasks,
 )
-from .ingestion import import_url_direct, scan_import_folder
+from .ingestion import (
+    cancel_import_job,
+    import_url_direct,
+    list_recent_import_jobs,
+    scan_import_folder,
+    trigger_import_queue_now,
+)
 from .maintenance import (
     cleanup_goals,
     get_system_database_migration_status,
