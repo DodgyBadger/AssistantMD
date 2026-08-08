@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -48,6 +49,12 @@ class ContentImportToolScenario(BaseScenario):
             submit_items = (submit.metadata or {}).get("items") or []
             self.soft_assert_equal(len(submit_items), 1, "submit should create one job")
             local_job_id = submit_items[0].get("job_id") if submit_items else None
+            submit_payload = json.loads(str(submit.return_value))
+            self.soft_assert_equal(
+                submit_payload.get("items"),
+                submit_items,
+                "submit should expose job ids and records in the agent-visible result",
+            )
             self.soft_assert_equal(
                 submit_items[0].get("status") if submit_items else None,
                 "queued",
@@ -57,6 +64,12 @@ class ContentImportToolScenario(BaseScenario):
             await get_runtime_context().ingestion_worker.run_once()
             status = await tool.function(operation="status", job_ids=local_job_id)
             status_items = (status.metadata or {}).get("items") or []
+            status_payload = json.loads(str(status.return_value))
+            self.soft_assert_equal(
+                status_payload.get("items"),
+                status_items,
+                "status should expose job records in the agent-visible result",
+            )
             self.soft_assert_equal(
                 status_items[0].get("status") if status_items else None,
                 "completed",

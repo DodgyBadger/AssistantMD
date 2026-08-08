@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic_ai.messages import ToolReturn
@@ -115,12 +116,13 @@ def _success_result(
     results: list[ContentImportResult],
 ) -> ToolReturn:
     items = [item.to_dict() for item in results]
-    if operation == "submit":
-        summary = f"Queued {len(items)} content import job(s)."
-    else:
-        summary = f"Returned {len(items)} content import job status result(s)."
+    payload = {
+        "status": "ok",
+        "operation": operation,
+        "items": items,
+    }
     return ToolReturn(
-        return_value=summary,
+        return_value=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         metadata={
             "tool_name": "content_import",
             "status": "success",

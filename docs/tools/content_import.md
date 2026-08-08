@@ -17,7 +17,9 @@ content_import(
 
 Sources may be public HTTP/HTTPS URLs or vault-relative file paths. Vault files
 are preserved after import. The call queues one durable ingestion job per source
-and returns promptly; it does not wait for extraction to finish.
+and returns promptly; it does not wait for extraction to finish. The returned
+JSON includes an `items` array with the `job_id`, source, source kind, and queued
+status for every accepted source. Retain those job ids to inspect the jobs later.
 
 Optional `options`:
 
@@ -39,9 +41,10 @@ Use `operation="status"` with one job id or a list of job ids:
 content_import(operation="status", job_ids=[41, 42])
 ```
 
-Status results include the job id, source, source kind, current state, output
-paths, and any durable ingestion error. A caller can choose when to inspect
-queued work; the tool does not define research progress or retry policy.
+The returned JSON includes an `items` array with the job id, source, source kind,
+current state, output paths, and any durable ingestion error. A caller can choose
+when to inspect queued work; the tool does not define research progress or retry
+policy.
 
 ## Boundaries
 
