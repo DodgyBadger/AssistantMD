@@ -42,6 +42,11 @@ surface used by endpoints and validation.
 
 ## Operational notes
 
+- First-party frontend code accesses browser persistence through
+  `static/js/browser-storage.js`. The boundary catches storage access failures
+  and uses page-lifetime memory when local storage is unavailable, including in
+  opaque-origin sandboxed iframes. Browser storage is never required for UI
+  initialization.
 - Endpoint logic is intentionally thin; most behavior should live in services/core modules.
 - Error responses keep the stable top-level `success`, `error`, and `message` fields. `details` includes an agent-safe recovery envelope with `status`, `error_type`, `phase`, `failure_kind`, `retryable`, `suggested_action`, and relevant ids when available. Unexpected errors keep tracebacks in server logs and debug responses only.
 - Config and secret updates trigger reload through runtime reload service.
