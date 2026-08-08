@@ -58,7 +58,7 @@ scripts/dev setup
 - syncs all locked Python and development dependencies;
 - installs frontend dependencies from `package-lock.json`;
 - builds `static/output.css`;
-- creates ignored `.runtime/data` and `.runtime/system` directories; and
+- creates ignored `data/` and `system/` runtime directories; and
 - verifies Python 3.13 and the Logfire import.
 
 Run it again after dependency changes or when `.venv` is stale or broken. The
@@ -82,17 +82,17 @@ scripts/dev run
 The server listens on `127.0.0.1:8000` by default. Open
 <http://127.0.0.1:8000/>.
 
-The command stores development runtime state under:
+By default, the command stores development runtime state under the checkout:
 
 ```text
-.runtime/
+<checkout>/
 ├── data/
 └── system/
 ```
 
-These directories are ignored by Git. They contain local vault data, settings,
-secrets, logs, and databases. They are separate from the production container's
-`/app/data` and `/app/system` mounts.
+These directories are ignored by Git and the container build context. They
+contain local vault data, settings, secrets, logs, and databases. Production
+containers use the separate `/app/data` and `/app/system` mounts.
 
 Override the development address or runtime roots when needed:
 
@@ -112,13 +112,21 @@ provide built-in authentication or TLS, so only do this on an intentionally
 restricted network.
 
 The equivalent environment variables remain available for persistent shell or
-automation configuration:
+automation configuration. `ASSISTANTMD_DEV_RUNTIME_ROOT` selects an alternate
+parent containing `data/` and `system/`, which is useful for an isolated or
+disposable development runtime:
 
 ```bash
 ASSISTANTMD_DEV_HOST=127.0.0.1 \
 ASSISTANTMD_DEV_PORT=8080 \
 ASSISTANTMD_DEV_RUNTIME_ROOT=/path/to/dev-state \
 scripts/dev run
+```
+
+For example, the former checkout-local isolated layout remains available with:
+
+```bash
+ASSISTANTMD_DEV_RUNTIME_ROOT="$PWD/.runtime" scripts/dev run
 ```
 
 Command-line address and port options take precedence over these environment
@@ -129,7 +137,7 @@ scripts/dev run -p 8080 -- --log-level debug
 ```
 
 `CONTAINER_DATA_ROOT` and `CONTAINER_SYSTEM_ROOT` may override the individual
-runtime paths. Explicit values take precedence over
+runtime paths. Explicit values take precedence over the checkout defaults or
 `ASSISTANTMD_DEV_RUNTIME_ROOT`.
 
 ## Use the Python environment

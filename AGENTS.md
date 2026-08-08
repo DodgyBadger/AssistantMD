@@ -17,8 +17,8 @@ Fail fast so we can see and then fix bugs.
 - Documentation should describe the current contract only. Do not document behavior as “instead of the old way” or teach migrations inside product docs unless the task explicitly calls for migration guidance.
 - Never commit real API keys or populated `system/secrets.yaml`.
 - Treat the configured data and system roots as persistent runtime state during
-  local testing. `scripts/dev run` defaults them to `.runtime/data` and
-  `.runtime/system`; production containers use `/app/data` and `/app/system`.
+  local testing. `scripts/dev run` defaults them to repository `data/` and
+  `system/`; production containers use `/app/data` and `/app/system`.
 - Commit message expectations live in [Git and Review Workflow](docs/agent-guides/git-and-review.md).
 
 ## Choose the Current Phase
