@@ -7,6 +7,7 @@
 
 (function configurationModule(window, document) {
     const ACTIVITY_LOG_LEVELS = ['critical', 'error', 'warning', 'warn', 'info', 'debug', 'fatal'];
+    const DEFAULT_IMPORT_JOB_STATUSES = ['queued', 'processing', 'failed'];
     const state = {
         initialized: false,
         hasLoadedOnce: false,
@@ -31,6 +32,7 @@
         isScanningImport: false,
         isLoadingImportVaults: false,
         isLoadingImportJobs: false,
+        hasLoadedImportJobs: false,
         isTriggeringImportQueue: false,
         isImportingUrl: false,
         settings: [],
@@ -41,6 +43,9 @@
         importResults: null,
         importUrlResult: null,
         importJobs: [],
+        importJobsNextCursor: null,
+        importJobsTotalMatching: 0,
+        importJobStatusCounts: {},
         activityLogEntries: [],
         activityLogNextCursor: null,
         activityLogTotalMatching: 0,
@@ -170,7 +175,9 @@
         importJobsFeedback: null,
         importJobsList: null,
         importJobsRefreshBtn: null,
-        importJobsRunNowBtn: null
+        importJobsRunNowBtn: null,
+        importJobsStatusFilters: null,
+        importJobsLoadOlderBtn: null
     };
 
     const toneClasses = {
@@ -276,6 +283,8 @@
         elements.importJobsList = document.getElementById('import-jobs-list');
         elements.importJobsRefreshBtn = document.getElementById('import-jobs-refresh');
         elements.importJobsRunNowBtn = document.getElementById('import-jobs-run-now');
+        elements.importJobsStatusFilters = document.getElementById('import-jobs-status-filters');
+        elements.importJobsLoadOlderBtn = document.getElementById('import-jobs-load-older');
     }
 
     function bindEvents() {
@@ -320,6 +329,8 @@
         elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
         elements.importJobsRefreshBtn?.addEventListener('click', () => loadImportJobs());
         elements.importJobsRunNowBtn?.addEventListener('click', handleRunImportQueueNow);
+        elements.importJobsStatusFilters?.addEventListener('change', handleImportJobFilterChange);
+        elements.importJobsLoadOlderBtn?.addEventListener('click', () => loadImportJobs({ append: true }));
         elements.importJobsList?.addEventListener('click', handleImportJobAction);
         elements.importPdfModeSelect?.addEventListener('change', updateImportOcrAvailability);
     }
@@ -3201,21 +3212,23 @@ async function saveModelRow(rowKey) {
     function renderImportJobs() {
         if (!elements.importJobsList) return;
         const jobs = Array.isArray(state.importJobs) ? state.importJobs : [];
-        const queuedCount = jobs.filter(job => job.status === 'queued').length;
-        const processingCount = jobs.filter(job => job.status === 'processing').length;
         if (elements.importJobsSummary) {
-            elements.importJobsSummary.textContent = jobs.length
-                ? `${queuedCount} queued · ${processingCount} processing · ${jobs.length} recent`
+            const selectedCounts = selectedImportJobStatuses().map(status => (
+                `${Number(state.importJobStatusCounts[status] || 0)} ${status}`
+            ));
+            elements.importJobsSummary.textContent = state.importJobsTotalMatching
+                ? `${selectedCounts.join(' · ')} · ${jobs.length} loaded`
                 : 'No recent imports.';
         }
+        elements.importJobsLoadOlderBtn?.classList.toggle('hidden', !state.importJobsNextCursor);
         if (!jobs.length) {
-            elements.importJobsList.innerHTML = '<p>No import jobs have been recorded.</p>';
+            elements.importJobsList.innerHTML = '<p>No import jobs match the selected statuses.</p>';
             syncImportJobPolling();
             return;
         }
 
         elements.importJobsList.innerHTML = `
-            <div class="dashboard-table-wrap" role="region" aria-label="Recent import jobs" tabindex="0">
+            <div class="dashboard-table-wrap import-jobs-table-wrap" role="region" aria-label="Recent import jobs" tabindex="0">
                 <table class="dashboard-table">
                     <thead>
                         <tr>
@@ -3225,7 +3238,7 @@ async function saveModelRow(rowKey) {
                             <th>Status</th>
                             <th>Updated</th>
                             <th>Output / Error</th>
-                            <th class="cell-center" aria-label="Cancel"></th>
+                            <th class="cell-center" aria-label="Actions"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -3235,15 +3248,18 @@ async function saveModelRow(rowKey) {
                             const cancelButton = job.status === 'queued'
                                 ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
                                 : '';
+                            const editButton = job.source_type === 'url'
+                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('edit', `Load URL from import job ${job.id}`, 'is-primary')}>${iconSvg('edit')}</button>`
+                                : '';
                             return `
                                 <tr>
-                                    <td class="cell-xs cell-mono">${escapeHtml(job.id)}</td>
-                                    <td class="cell-xs">${escapeHtml(job.source_uri || 'unknown')}</td>
-                                    <td class="cell-xs">${escapeHtml(job.vault || '—')}</td>
-                                    <td class="cell-xs">${escapeHtml(job.status || 'unknown')}</td>
-                                    <td class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
-                                    <td class="cell-xs">${escapeHtml(detail)}</td>
-                                    <td class="cell-center">${cancelButton}</td>
+                                    <td data-label="Job" class="cell-xs cell-mono">${escapeHtml(job.id)}</td>
+                                    <td data-label="Source" class="cell-xs">${escapeHtml(job.source_uri || 'unknown')}</td>
+                                    <td data-label="Vault" class="cell-xs">${escapeHtml(job.vault || '—')}</td>
+                                    <td data-label="Status" class="cell-xs">${escapeHtml(job.status || 'unknown')}</td>
+                                    <td data-label="Updated" class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
+                                    <td data-label="Output / Error" class="cell-xs">${escapeHtml(detail)}</td>
+                                    <td data-label="Actions" class="cell-center import-job-actions">${cancelButton}${editButton}</td>
                                 </tr>
                             `;
                         }).join('')}
@@ -3252,6 +3268,20 @@ async function saveModelRow(rowKey) {
             </div>
         `;
         syncImportJobPolling();
+    }
+
+    function selectedImportJobStatuses() {
+        if (!elements.importJobsStatusFilters) return [...DEFAULT_IMPORT_JOB_STATUSES];
+        return Array.from(elements.importJobsStatusFilters.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(input => input.value);
+    }
+
+    function handleImportJobFilterChange(event) {
+        if (!selectedImportJobStatuses().length && event.target instanceof HTMLInputElement) {
+            event.target.checked = true;
+            return;
+        }
+        loadImportJobs();
     }
 
     function syncImportJobPolling() {
@@ -3266,16 +3296,54 @@ async function saveModelRow(rowKey) {
         }
     }
 
-    async function loadImportJobs({ silent = false } = {}) {
+    async function loadImportJobs({ silent = false, append = false } = {}) {
         if (state.isLoadingImportJobs) return;
+        if (append && !state.importJobsNextCursor) return;
         state.isLoadingImportJobs = true;
         if (!silent) setStatus(elements.importJobsFeedback, 'Refreshing import status…', 'info');
         try {
-            const response = await fetch('api/import/jobs?limit=50', { cache: 'no-store' });
+            const refreshLimit = silent && !append
+                ? Math.min(Math.max(state.importJobs.length, 25), 100)
+                : 25;
+            const params = new URLSearchParams({ limit: String(refreshLimit) });
+            selectedImportJobStatuses().forEach(status => params.append('status', status));
+            if (append) params.set('cursor', state.importJobsNextCursor);
+            const scrollTop = elements.importJobsList
+                ?.querySelector('.import-jobs-table-wrap')?.scrollTop || 0;
+            const response = await fetch(`api/import/jobs?${params.toString()}`, { cache: 'no-store' });
             const data = await safeJson(response);
             if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
-            state.importJobs = Array.isArray(data?.jobs) ? data.jobs : [];
-            renderImportJobs();
+            const received = Array.isArray(data?.jobs) ? data.jobs : [];
+            let nextJobs;
+            if (append) {
+                const knownIds = new Set(state.importJobs.map(job => job.id));
+                nextJobs = [
+                    ...state.importJobs,
+                    ...received.filter(job => !knownIds.has(job.id))
+                ];
+            } else {
+                nextJobs = received;
+            }
+            const nextCursor = data?.next_cursor || null;
+            const nextTotalMatching = Number(data?.total_matching || 0);
+            const nextStatusCounts = data?.status_counts || {};
+            const viewChanged = (
+                !state.hasLoadedImportJobs
+                || JSON.stringify(nextJobs) !== JSON.stringify(state.importJobs)
+                || nextCursor !== state.importJobsNextCursor
+                || nextTotalMatching !== state.importJobsTotalMatching
+                || JSON.stringify(nextStatusCounts) !== JSON.stringify(state.importJobStatusCounts)
+            );
+            state.importJobs = nextJobs;
+            state.importJobsNextCursor = nextCursor;
+            state.importJobsTotalMatching = nextTotalMatching;
+            state.importJobStatusCounts = nextStatusCounts;
+            state.hasLoadedImportJobs = true;
+            if (viewChanged) {
+                renderImportJobs();
+                const tableWrap = elements.importJobsList?.querySelector('.import-jobs-table-wrap');
+                if (tableWrap) tableWrap.scrollTop = scrollTop;
+            }
             if (!silent) setStatus(elements.importJobsFeedback, '', 'info');
         } catch (error) {
             if (!silent) setStatus(elements.importJobsFeedback, `Failed to load imports: ${error.message}`, 'error');
@@ -3287,20 +3355,44 @@ async function saveModelRow(rowKey) {
     async function handleImportJobAction(event) {
         const target = event.target;
         if (!(target instanceof Element)) return;
-        const button = target.closest('[data-import-job-cancel]');
+        const button = target.closest('[data-import-job-cancel], [data-import-job-edit]');
         if (!(button instanceof HTMLElement) || button.disabled) return;
+        const editJobId = button.getAttribute('data-import-job-edit');
+        if (editJobId) {
+            const job = state.importJobs.find(item => String(item.id) === editJobId);
+            if (!job || job.source_type !== 'url') return;
+            if (elements.importVaultSelect) elements.importVaultSelect.value = job.vault || '';
+            if (elements.importUrlInput) {
+                elements.importUrlInput.value = job.source_uri || '';
+                elements.importUrlInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                elements.importUrlInput.focus({ preventScroll: true });
+            }
+            setStatus(
+                elements.importStatus,
+                `Loaded URL from job ${editJobId}. Adjust PDF/OCR settings and import again.`,
+                'info'
+            );
+            return;
+        }
         const jobId = button.getAttribute('data-import-job-cancel');
         if (!jobId) return;
         button.disabled = true;
         setStatus(elements.importJobsFeedback, `Cancelling import job ${jobId}…`, 'info');
         try {
-            const response = await fetch(`api/import/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+            const response = await fetch(
+                `api/import/jobs/${encodeURIComponent(jobId)}/cancel`,
+                { method: 'POST' }
+            );
             const data = await safeJson(response);
             if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
             setStatus(elements.importJobsFeedback, `Import job ${jobId} cancelled.`, 'success');
             await loadImportJobs({ silent: true });
         } catch (error) {
-            setStatus(elements.importJobsFeedback, `Could not cancel import: ${error.message}`, 'error');
+            setStatus(
+                elements.importJobsFeedback,
+                `Could not cancel import: ${error.message}`,
+                'error'
+            );
             button.disabled = false;
         }
     }
@@ -3480,11 +3572,18 @@ async function saveModelRow(rowKey) {
         setIconButtonLabel(btn, 'Ingesting URL...');
         setStatus(elements.importStatus, 'Ingesting URL…', 'info');
 
+        const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
+        const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
+        const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
+        const payload = { vault, url, clean_html: true, pdf_mode: pdfMode };
+        if (useOcr) payload.strategies = ['pdf_ocr', 'pdf_text', 'image_ocr'];
+        if (captureOcrImages) payload.capture_ocr_images = true;
+
         try {
             const response = await fetch('api/import/url', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vault, url, clean_html: true })
+                body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();

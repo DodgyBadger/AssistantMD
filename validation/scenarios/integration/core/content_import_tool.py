@@ -181,6 +181,67 @@ class ContentImportToolScenario(BaseScenario):
                 cancel_job_id,
                 "Recent import status should return newest jobs first",
             )
+            cancelled_response = self.call_api(
+                "/api/import/jobs",
+                params={"limit": 1, "vault": vault.name, "status": "cancelled"},
+            )
+            cancelled_payload = cancelled_response.json()
+            self.soft_assert_equal(
+                [job.get("status") for job in cancelled_payload.get("jobs") or []],
+                ["cancelled"],
+                "Import job status filtering should happen before the page limit",
+            )
+            completed_page = self.call_api(
+                "/api/import/jobs",
+                params={"limit": 1, "vault": vault.name, "status": "completed"},
+            ).json()
+            completed_cursor = completed_page.get("next_cursor")
+            self.soft_assert(
+                bool(completed_cursor),
+                "A bounded import history page should expose an older-page cursor",
+            )
+            older_completed_page = self.call_api(
+                "/api/import/jobs",
+                params={
+                    "limit": 1,
+                    "vault": vault.name,
+                    "status": "completed",
+                    "cursor": completed_cursor,
+                },
+            ).json()
+            first_completed_ids = {
+                job.get("id") for job in completed_page.get("jobs") or []
+            }
+            older_completed_ids = {
+                job.get("id") for job in older_completed_page.get("jobs") or []
+            }
+            self.soft_assert(
+                first_completed_ids.isdisjoint(older_completed_ids),
+                "Import job cursor pages should not repeat jobs",
+            )
+            static_root = Path(__file__).resolve().parents[4] / "static"
+            import_markup = (static_root / "index.html").read_text(encoding="utf-8")
+            import_styles = (static_root / "app.css").read_text(encoding="utf-8")
+            self.soft_assert(
+                all(
+                    f'value="{status}" checked' in import_markup
+                    for status in ("queued", "processing", "failed")
+                ),
+                "Import status UI should default to active and failed jobs",
+            )
+            self.soft_assert(
+                "max-height: 24rem" in import_styles
+                and ".import-jobs-table-wrap" in import_styles,
+                "Import history should remain inside a vertically bounded table",
+            )
+            import_script = (static_root / "js" / "configuration.js").read_text(
+                encoding="utf-8"
+            )
+            self.soft_assert(
+                "data-import-job-edit" in import_script
+                and "Adjust PDF/OCR settings" in import_script,
+                "URL imports should load into the configurable manual form",
+            )
             await get_runtime_context().ingestion_worker.run_once()
             cancelled_status = await tool.function(
                 operation="status",

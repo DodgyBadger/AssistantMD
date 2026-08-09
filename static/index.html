@@ -233,8 +233,19 @@
                                 <button id="import-jobs-refresh" type="button" class="ui-icon-button" data-icon="refresh" data-icon-label="Refresh Import Status"></button>
                             </div>
                         </div>
+                        <fieldset id="import-jobs-status-filters" class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-txt-secondary">
+                            <legend class="sr-only">Import job statuses</legend>
+                            <label><input type="checkbox" value="queued" checked> Queued</label>
+                            <label><input type="checkbox" value="processing" checked> Processing</label>
+                            <label><input type="checkbox" value="failed" checked> Failed</label>
+                            <label><input type="checkbox" value="completed"> Completed</label>
+                            <label><input type="checkbox" value="cancelled"> Cancelled</label>
+                        </fieldset>
                         <div id="import-jobs-feedback" class="text-sm text-txt-secondary"></div>
                         <div id="import-jobs-list" class="text-sm text-txt-secondary">Loading…</div>
+                        <div class="flex justify-center">
+                            <button id="import-jobs-load-older" type="button" class="ui-button hidden">Load older</button>
+                        </div>
                     </div>
                     <p class="text-sm text-txt-secondary">
                         Drop files into AssistantMD/Import/ inside your vault, then click Import Files to import them immediately. Files are removed after successful import.

@@ -730,3 +730,50 @@ The implementation should:
 No new validation event is required: binary rejection is already represented
 by the existing typed per-item web failure contract, and successful tool-event
 persistence is directly observable through the session detail contract.
+
+## Import Job List Usability
+
+The Import status panel should present operational work by default without
+making durable job history inaccessible.
+
+### Recommended contract
+
+- Add server-side multi-status filtering to `GET /api/import/jobs`.
+- Default the UI to `queued`, `processing`, and `failed`; completed and
+  cancelled jobs remain available through status filters.
+- Return a bounded page (recommended default: 25) and an opaque cursor for
+  loading older matching jobs. Filtering must happen before the page limit.
+- Keep accumulated pages inside a vertically bounded, scrollable table region;
+  loading older history must not continuously expand the Import section.
+- Show status totals for the active filter so the summary does not imply that
+  the visible page is the complete job history.
+- Preserve automatic polling whenever the selected result set includes queued
+  or processing work, along with the existing cancel and run-now actions.
+- Silent polling must not rebuild an unchanged table, and genuine updates must
+  preserve the table's vertical scroll position.
+- The table must remain horizontally constrained: desktop cells wrap long
+  sources and errors, while narrow screens use the existing stacked-row pattern
+  rather than exposing a horizontal scrollbar.
+- URL jobs expose a reuse action that loads the original vault and URL into the
+  manual import controls. The user can adjust the available settings before
+  explicitly submitting a new job; prior job history is preserved.
+
+This combines status filters with pagination. Showing only queued jobs would
+hide processing state and actionable failures, while date rotation alone would
+still mix completed noise into the operational view.
+
+### Affected areas
+
+- `core/ingestion/jobs.py`: filtered, cursor-bounded query and matching counts
+- `api/services/ingestion.py`, `api/endpoints.py`, and `api/import_models.py`:
+  public query and response contracts
+- `static/index.html` and `static/js/configuration.js`: status controls, summary,
+  filtered loading, and Load Older behavior
+- import API/UI validation scenario: assert filtering occurs before limiting,
+  paging has no duplicate jobs, and default UI contract includes queued,
+  processing, and failed statuses
+
+No database migration or retention policy change is needed. Durable jobs remain
+in the subsystem-owned ingestion database; this work only changes how history
+is queried and presented. The next phase is Feature Development, beginning with
+the API scenario and persistence query contract.

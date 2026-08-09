@@ -4,10 +4,13 @@ Persistence for ingestion jobs.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import JSON, DateTime, Integer, String, Table, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Table, Text, func
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
@@ -138,16 +141,63 @@ def find_job_for_source(
         return cast(IngestionJob | None, query.first())
 
 
-def list_jobs(limit: int = 50, *, vault: str | None = None) -> list[IngestionJob]:
+def list_jobs(
+    limit: int = 50,
+    *,
+    vault: str | None = None,
+    statuses: list[JobStatus] | None = None,
+    cursor: str | None = None,
+) -> list[IngestionJob]:
     session_factory = _get_session_factory()
     with session_factory() as session:
         query = session.query(IngestionJob)
         if vault:
             query = query.filter(IngestionJob.vault == vault)
+        if statuses:
+            query = query.filter(
+                IngestionJob.status.in_([status.value for status in statuses])
+            )
+        if cursor:
+            query = query.filter(IngestionJob.id < _decode_job_cursor(cursor))
         return cast(
             list[IngestionJob],
-            query.order_by(IngestionJob.created_at.desc()).limit(limit).all(),
+            query.order_by(IngestionJob.id.desc()).limit(limit).all(),
         )
+
+
+def count_jobs_by_status(*, vault: str | None = None) -> dict[str, int]:
+    """Count durable ingestion jobs by status for one optional vault."""
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        query = session.query(IngestionJob.status, func.count(IngestionJob.id))
+        if vault:
+            query = query.filter(IngestionJob.vault == vault)
+        rows = query.group_by(IngestionJob.status).all()
+        return {str(status): int(count) for status, count in rows}
+
+
+def encode_job_cursor(job_id: int) -> str:
+    """Encode the exclusive job-id boundary used for older pages."""
+    payload = json.dumps({"before_id": job_id}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_job_cursor(value: str) -> int:
+    try:
+        padding = "=" * (-len(value) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(value + padding))
+        job_id = int(decoded["before_id"])
+        if job_id < 1:
+            raise ValueError
+        return job_id
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("Invalid import job cursor") from exc
 
 
 def cancel_queued_job(job_id: int) -> IngestionJob:

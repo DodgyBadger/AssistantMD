@@ -11,6 +11,8 @@ from core.ingestion.jobs import (
     IngestionJob,
     cancel_queued_job,
     count_jobs,
+    count_jobs_by_status,
+    encode_job_cursor,
     find_job_for_source,
     list_jobs,
 )
@@ -27,10 +29,30 @@ from .shared import logger
 
 
 def list_recent_import_jobs(
-    *, limit: int = 50, vault: str | None = None
-) -> list[IngestionJob]:
+    *,
+    limit: int = 25,
+    vault: str | None = None,
+    statuses: list[JobStatus] | None = None,
+    cursor: str | None = None,
+) -> tuple[list[IngestionJob], str | None, int, dict[str, int]]:
     """Return recent durable ingestion jobs for Dashboard visibility."""
-    return list_jobs(limit=limit, vault=(vault or "").strip() or None)
+    normalized_vault = (vault or "").strip() or None
+    jobs = list_jobs(
+        limit=limit + 1,
+        vault=normalized_vault,
+        statuses=statuses,
+        cursor=cursor,
+    )
+    has_older = len(jobs) > limit
+    page = jobs[:limit]
+    status_counts = count_jobs_by_status(vault=normalized_vault)
+    total_matching = (
+        sum(status_counts.get(status.value, 0) for status in statuses)
+        if statuses
+        else sum(status_counts.values())
+    )
+    next_cursor = encode_job_cursor(page[-1].id) if has_older and page else None
+    return page, next_cursor, total_matching, status_counts
 
 
 def cancel_import_job(job_id: int) -> IngestionJob:
@@ -194,15 +216,24 @@ async def import_url_direct(
     vault: str,
     url: str,
     clean_html: bool = True,
+    strategies: list[str] | None = None,
+    capture_ocr_images: bool | None = None,
+    pdf_mode: str | None = None,
 ) -> IngestionJob:
     """Import one URL immediately as API-attributed ingestion."""
     runtime = get_runtime_context()
     ingest_service = runtime.ingestion
     import_service = ContentImportService(str(Path(runtime.config.data_root) / vault))
-    submitted = import_service.submit(
-        sources=url,
-        options={"clean_html": clean_html},
-    )
+    options: dict[str, Any] = {"clean_html": clean_html}
+    if strategies:
+        options["strategies"] = strategies
+    if capture_ocr_images is not None:
+        options["extractor_options"] = {
+            "capture_ocr_images": capture_ocr_images,
+        }
+    if pdf_mode:
+        options["pdf_mode"] = pdf_mode
+    submitted = import_service.submit(sources=url, options=options)
     job = ingest_service.get_job(submitted[0].job_id)
     if job is None:
         raise RuntimeError("URL import job was not created")
@@ -222,6 +253,9 @@ async def import_url_direct(
             "status": refreshed_job.status,
             "outputs_count": len(outputs) if outputs is not None else 0,
             "clean_html": clean_html,
+            "strategies": strategies or [],
+            "capture_ocr_images": capture_ocr_images,
+            "pdf_mode": pdf_mode,
         },
     )
     return refreshed_job

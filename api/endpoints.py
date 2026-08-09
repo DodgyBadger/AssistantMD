@@ -28,6 +28,7 @@ from core.chat.task_execution import (
     start_queued_chat_stream_task,
     stream_chat_task_sse,
 )
+from core.ingestion.models import JobStatus
 from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
@@ -816,13 +817,33 @@ def _import_job_info(job: Any, *, fallback_vault: str = "") -> ImportJobInfo:
 
 @router.get("/import/jobs", response_model=ImportJobListResponse)
 async def import_jobs(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(25, ge=1, le=100),
     vault: str | None = None,
+    status: list[JobStatus] | None = Query(None),
+    cursor: str | None = None,
 ) -> ImportJobListResponse | JSONResponse:
     """List recent durable ingestion jobs for queue observability."""
     try:
-        jobs = list_recent_import_jobs(limit=limit, vault=vault)
-        return ImportJobListResponse(jobs=[_import_job_info(job) for job in jobs])
+        jobs, next_cursor, total_matching, status_counts = list_recent_import_jobs(
+            limit=limit,
+            vault=vault,
+            statuses=status,
+            cursor=cursor,
+        )
+        return ImportJobListResponse(
+            jobs=[_import_job_info(job) for job in jobs],
+            next_cursor=next_cursor,
+            total_matching=total_matching,
+            status_counts=status_counts,
+        )
+    except ValueError as e:
+        return create_error_response(
+            APIException(
+                status_code=400,
+                error_type="InvalidImportJobCursor",
+                message=str(e),
+            )
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -897,6 +918,9 @@ async def import_url(
             vault=request.vault,
             url=request.url,
             clean_html=request.clean_html,
+            strategies=request.strategies,
+            capture_ocr_images=request.capture_ocr_images,
+            pdf_mode=request.pdf_mode,
         )
         return ImportUrlResponse(
             **_import_job_info(job, fallback_vault=request.vault).model_dump()

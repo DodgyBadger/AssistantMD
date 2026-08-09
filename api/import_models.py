@@ -31,6 +31,9 @@ class ImportJobInfo(BaseModel):
 
 class ImportJobListResponse(BaseModel):
     jobs: list[ImportJobInfo]
+    next_cursor: str | None = None
+    total_matching: int
+    status_counts: dict[str, int]
 
 
 class ImportJobCancelResponse(BaseModel):
@@ -53,6 +56,9 @@ class ImportUrlRequest(BaseModel):
     vault: str
     url: str
     clean_html: bool = True
+    strategies: list[str] | None = None
+    capture_ocr_images: bool | None = None
+    pdf_mode: str | None = None
 
 
 class ImportUrlResponse(ImportJobInfo):
