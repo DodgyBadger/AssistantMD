@@ -757,6 +757,9 @@ making durable job history inaccessible.
 - URL jobs expose a reuse action that loads the original vault and URL into the
   manual import controls. The user can adjust the available settings before
   explicitly submitting a new job; prior job history is preserved.
+- The vault selector sits at the top of the Import section and scopes both the
+  visible job history and all inbox/URL submissions below it. No vault selection
+  must never fall back to showing cross-vault history.
 
 This combines status filters with pagination. Showing only queued jobs would
 hide processing state and actionable failures, while date rotation alone would

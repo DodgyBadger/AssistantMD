@@ -32,6 +32,7 @@
         isScanningImport: false,
         isLoadingImportVaults: false,
         isLoadingImportJobs: false,
+        pendingImportJobsReload: false,
         hasLoadedImportJobs: false,
         isTriggeringImportQueue: false,
         isImportingUrl: false,
@@ -326,6 +327,7 @@
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
+        elements.importVaultSelect?.addEventListener('change', handleImportVaultChange);
         elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
         elements.importJobsRefreshBtn?.addEventListener('click', () => loadImportJobs());
         elements.importJobsRunNowBtn?.addEventListener('click', handleRunImportQueueNow);
@@ -3054,6 +3056,7 @@ async function saveModelRow(rowKey) {
     function renderImportVaults() {
         const select = elements.importVaultSelect;
         if (!select) return;
+        const selectedVault = select.value;
         select.innerHTML = '<option value="">Select vault…</option>';
         if (!state.importVaults || state.importVaults.length === 0) {
             const opt = document.createElement('option');
@@ -3069,6 +3072,20 @@ async function saveModelRow(rowKey) {
             opt.textContent = vault;
             select.appendChild(opt);
         });
+        if (state.importVaults.includes(selectedVault)) {
+            select.value = selectedVault;
+        }
+    }
+
+    function handleImportVaultChange() {
+        state.importResults = null;
+        state.importUrlResult = null;
+        renderImportResults();
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+        } else {
+            loadImportJobs();
+        }
     }
 
     async function loadImportVaults(force = false) {
@@ -3212,6 +3229,16 @@ async function saveModelRow(rowKey) {
     function renderImportJobs() {
         if (!elements.importJobsList) return;
         const jobs = Array.isArray(state.importJobs) ? state.importJobs : [];
+        const selectedVault = (elements.importVaultSelect?.value || '').trim();
+        if (!selectedVault) {
+            if (elements.importJobsSummary) {
+                elements.importJobsSummary.textContent = 'Select a vault to view import jobs.';
+            }
+            elements.importJobsLoadOlderBtn?.classList.add('hidden');
+            elements.importJobsList.innerHTML = '<p>Select a vault to load its import history.</p>';
+            syncImportJobPolling();
+            return;
+        }
         if (elements.importJobsSummary) {
             const selectedCounts = selectedImportJobStatuses().map(status => (
                 `${Number(state.importJobStatusCounts[status] || 0)} ${status}`
@@ -3299,6 +3326,16 @@ async function saveModelRow(rowKey) {
     async function loadImportJobs({ silent = false, append = false } = {}) {
         if (state.isLoadingImportJobs) return;
         if (append && !state.importJobsNextCursor) return;
+        const selectedVault = (elements.importVaultSelect?.value || '').trim();
+        if (!selectedVault) {
+            state.importJobs = [];
+            state.importJobsNextCursor = null;
+            state.importJobsTotalMatching = 0;
+            state.importJobStatusCounts = {};
+            state.hasLoadedImportJobs = true;
+            renderImportJobs();
+            return;
+        }
         state.isLoadingImportJobs = true;
         if (!silent) setStatus(elements.importJobsFeedback, 'Refreshing import status…', 'info');
         try {
@@ -3306,6 +3343,7 @@ async function saveModelRow(rowKey) {
                 ? Math.min(Math.max(state.importJobs.length, 25), 100)
                 : 25;
             const params = new URLSearchParams({ limit: String(refreshLimit) });
+            params.set('vault', selectedVault);
             selectedImportJobStatuses().forEach(status => params.append('status', status));
             if (append) params.set('cursor', state.importJobsNextCursor);
             const scrollTop = elements.importJobsList
@@ -3313,6 +3351,7 @@ async function saveModelRow(rowKey) {
             const response = await fetch(`api/import/jobs?${params.toString()}`, { cache: 'no-store' });
             const data = await safeJson(response);
             if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            if ((elements.importVaultSelect?.value || '').trim() !== selectedVault) return;
             const received = Array.isArray(data?.jobs) ? data.jobs : [];
             let nextJobs;
             if (append) {
@@ -3349,6 +3388,10 @@ async function saveModelRow(rowKey) {
             if (!silent) setStatus(elements.importJobsFeedback, `Failed to load imports: ${error.message}`, 'error');
         } finally {
             state.isLoadingImportJobs = false;
+            if (state.pendingImportJobsReload) {
+                state.pendingImportJobsReload = false;
+                loadImportJobs();
+            }
         }
     }
 

@@ -242,6 +242,11 @@ class ContentImportToolScenario(BaseScenario):
                 and "Adjust PDF/OCR settings" in import_script,
                 "URL imports should load into the configurable manual form",
             )
+            self.soft_assert(
+                "params.set('vault', selectedVault)" in import_script
+                and "Select a vault to load its import history" in import_script,
+                "Import history should be scoped by the top-level vault selection",
+            )
             await get_runtime_context().ingestion_worker.run_once()
             cancelled_status = await tool.function(
                 operation="status",
