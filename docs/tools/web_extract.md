@@ -6,6 +6,11 @@ Extract readable content from known URLs using the extraction strategy selected
 in System settings. Extraction is transient and does not import content into the
 vault.
 
+This tool accepts readable web pages, not PDFs or other downloadable binary
+files. Use `content_import` when a source should become durable Markdown in the
+vault, including PDF and document URLs. Binary responses are rejected with a
+per-URL failure rather than decoded into tool context.
+
 ## Arguments
 
 - `urls`: one URL or a list of up to ten URLs

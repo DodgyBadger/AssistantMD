@@ -19,6 +19,7 @@ from core.web.html import html_to_markdown
 from core.web.models import (
     WebExtractionItem,
     WebExtractionResult,
+    WebFetchResult,
     WebSearchItem,
     WebSearchResult,
 )
@@ -29,6 +30,7 @@ from core.web.security import (
     sanitize_urls_in_text_for_log,
 )
 from core.web.service import WebCapabilityService
+from core.web.strategies.extract_curl import extract_with_curl
 from validation.core.base_scenario import BaseScenario
 
 
@@ -150,6 +152,35 @@ class WebCapabilityStrategiesScenario(BaseScenario):
         self.soft_assert(
             "ignored" not in ingestion_markdown,
             "Shared clean_html policy should remove script content",
+        )
+
+        pdf_url = "https://example.com/report.pdf"
+        with patch(
+            "core.web.strategies.extract_curl.fetch_url_with_curl",
+            return_value=WebFetchResult(
+                source_url=pdf_url,
+                effective_url=pdf_url,
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                body=b"%PDF-1.7 binary content",
+            ),
+        ):
+            binary_result = await extract_with_curl(
+                urls=[pdf_url], include_images=False
+            )
+        self.soft_assert_equal(
+            binary_result.items,
+            [],
+            "web_extract should not decode binary document responses as readable text",
+        )
+        self.soft_assert_equal(
+            len(binary_result.failures),
+            1,
+            "A binary response should remain visible as a per-URL extraction failure",
+        )
+        self.soft_assert(
+            "content_import" in binary_result.failures[0].error,
+            "Binary extraction failures should direct callers to durable content import",
         )
 
         try:

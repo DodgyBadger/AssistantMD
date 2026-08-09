@@ -703,3 +703,30 @@ These do not belong in the first implementation pass:
   suffixing behavior
 - Whether persisted structured-document caches are worth adding later, after
   read-time use cases prove the need
+
+## Tool Boundary Hardening
+
+Observed manual testing exposed two adjacent failure modes at the boundary
+between transient web extraction and durable content import:
+
+- `web_extract` can receive a PDF or other binary response and accidentally
+  return decoded bytes as an enormous tool result.
+- otherwise valid tool metadata can contain YAML-derived temporal values that
+  SQLite event persistence cannot serialize with plain `json.dumps`.
+
+The implementation should:
+
+1. reject non-text responses in the curl extraction strategy before decoding,
+   preserving per-URL partial-result behavior and directing callers to
+   `content_import` for durable document ingestion;
+2. make the one-line `web_extract` tool description and user-facing tool docs
+   distinguish readable web pages from PDFs and other downloadable files;
+3. normalize chat tool-event arguments and result metadata to JSON-compatible
+   values at the persistence boundary so diagnostic recording cannot abort a
+   chat stream;
+4. add regression assertions to `web_capability_strategies` for binary rejection
+   and to `chat_tool_replay_contract` for temporal metadata persistence.
+
+No new validation event is required: binary rejection is already represented
+by the existing typed per-item web failure contract, and successful tool-event
+persistence is directly observable through the session detail contract.
