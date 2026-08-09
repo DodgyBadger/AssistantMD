@@ -15,6 +15,11 @@ class ImportScanRequest(BaseModel):
     pdf_mode: str | None = (
         None  # Optional per-run PDF mode override: markdown|page_images
     )
+    include_ocr_blocks: bool | None = None
+    ocr_table_format: str | None = None
+    extract_ocr_header: bool | None = None
+    extract_ocr_footer: bool | None = None
+    ocr_confidence: str | None = None
 
 
 class ImportJobInfo(BaseModel):
@@ -64,6 +69,11 @@ class ImportUrlRequest(BaseModel):
     strategies: list[str] | None = None
     capture_ocr_images: bool | None = None
     pdf_mode: str | None = None
+    include_ocr_blocks: bool | None = None
+    ocr_table_format: str | None = None
+    extract_ocr_header: bool | None = None
+    extract_ocr_footer: bool | None = None
+    ocr_confidence: str | None = None
 
 
 class ImportUrlResponse(ImportJobInfo):

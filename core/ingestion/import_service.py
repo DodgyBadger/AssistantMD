@@ -18,10 +18,46 @@ _ALLOWED_OPTION_KEYS = {
     "capture_ocr_images",
     "clean_html",
     "destination",
+    "extract_ocr_footer",
+    "extract_ocr_header",
+    "include_ocr_blocks",
+    "ocr_confidence",
+    "ocr_table_format",
     "pdf_mode",
     "strategies",
 }
 _ALLOWED_PDF_MODES = {"markdown", "page_images"}
+_ALLOWED_OCR_TABLE_FORMATS = {"markdown", "html"}
+_ALLOWED_OCR_CONFIDENCE = {"page", "word"}
+
+
+def translate_ocr_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Validate public OCR enrichment options and return extractor options."""
+    translated: dict[str, Any] = {}
+    for public_name, internal_name in (
+        ("include_ocr_blocks", "ocr_include_blocks"),
+        ("extract_ocr_header", "ocr_extract_header"),
+        ("extract_ocr_footer", "ocr_extract_footer"),
+    ):
+        if public_name not in options:
+            continue
+        value = options[public_name]
+        if not isinstance(value, bool):
+            raise ValueError(f"{public_name} must be a boolean")
+        translated[internal_name] = value
+    for public_name, internal_name, allowed in (
+        ("ocr_table_format", "ocr_table_format", _ALLOWED_OCR_TABLE_FORMATS),
+        ("ocr_confidence", "ocr_confidence", _ALLOWED_OCR_CONFIDENCE),
+    ):
+        value = options.get(public_name)
+        if value is None:
+            continue
+        normalized = str(value).strip().lower()
+        if normalized not in allowed:
+            choices = " or ".join(sorted(allowed))
+            raise ValueError(f"{public_name} must be {choices}")
+        translated[internal_name] = normalized
+    return translated
 
 
 @dataclass(frozen=True)
@@ -225,7 +261,7 @@ class ContentImportService:
                 normalized_strategies.append(strategy.strip())
             translated["strategies"] = normalized_strategies
 
-        extractor_options: dict[str, bool] = {}
+        extractor_options: dict[str, Any] = {}
         for public_name, internal_name in (
             ("capture_ocr_images", "ocr_capture_images"),
             ("clean_html", "clean_html"),
@@ -236,6 +272,7 @@ class ContentImportService:
             if not isinstance(value, bool):
                 raise ValueError(f"{public_name} must be a boolean")
             extractor_options[internal_name] = value
+        extractor_options.update(translate_ocr_options(options))
         if extractor_options:
             translated["extractor_options"] = extractor_options
         return translated

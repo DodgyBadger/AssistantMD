@@ -310,6 +310,12 @@ files or overloading input options.
 
 ## Delivery Stages
 
+Implementation status: Stage 1 is complete. The initial Stage 2 slice now covers
+direct provider delivery for explicitly OCR-only public `.pdf` URLs, opt-in
+blocks/tables/header/footer/confidence controls, and retention of structured OCR
+results as a companion JSON asset. File upload, page ranges, annotations, and
+additional source formats remain future work.
+
 ### Stage 1: Correctness and observability
 
 1. Fix direct URL OCR option translation.

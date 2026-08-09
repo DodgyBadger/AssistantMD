@@ -4,6 +4,7 @@ Render extracted chunks to markdown artifacts.
 
 import base64
 import binascii
+import json
 import os
 import re
 from datetime import datetime
@@ -84,6 +85,9 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
     )
     if image_count:
         frontmatter["ocr_images_saved"] = image_count
+    metadata_artifact = _render_ocr_metadata_artifact(doc, paths.asset_dir)
+    if metadata_artifact is not None:
+        frontmatter["ocr_metadata"] = metadata_artifact["path"]
 
     content = "---\n"
     for key, val in frontmatter.items():
@@ -93,7 +97,7 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
     rewritten_text = _rewrite_ocr_image_links(doc.plain_text or "", image_link_map)
     content += rewritten_text
 
-    artifacts = [
+    artifacts: list[dict[str, object]] = [
         {
             "path": rel_path,
             "content": content,
@@ -101,7 +105,31 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
         }
     ]
     artifacts.extend(image_artifacts)
+    if metadata_artifact is not None:
+        artifacts.append(metadata_artifact)
     return artifacts
+
+
+def _render_ocr_metadata_artifact(
+    doc: ExtractedDocument,
+    asset_dir: str,
+) -> dict[str, object] | None:
+    pages = doc.meta.get("ocr_pages") if isinstance(doc.meta, dict) else None
+    if not isinstance(pages, list) or not any(bool(page) for page in pages):
+        return None
+    payload = {
+        "provider": doc.meta.get("provider"),
+        "model": doc.meta.get("model"),
+        "requested_model": doc.meta.get("requested_model"),
+        "transport": doc.meta.get("transport"),
+        "usage_info": doc.meta.get("usage_info"),
+        "pages": pages,
+    }
+    return {
+        "path": f"{asset_dir.rstrip('/')}/ocr.json",
+        "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        "meta": {"kind": "ocr_metadata", "source_strategy": doc.strategy_id},
+    }
 
 
 def _render_ocr_image_artifacts(

@@ -820,6 +820,20 @@ def _import_job_info(job: Any, *, fallback_vault: str = "") -> ImportJobInfo:
     )
 
 
+def _ocr_options_from_request(request: Any) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in {
+            "include_ocr_blocks": request.include_ocr_blocks,
+            "ocr_table_format": request.ocr_table_format,
+            "extract_ocr_header": request.extract_ocr_header,
+            "extract_ocr_footer": request.extract_ocr_footer,
+            "ocr_confidence": request.ocr_confidence,
+        }.items()
+        if value is not None
+    }
+
+
 @router.get("/import/jobs", response_model=ImportJobListResponse)
 async def import_jobs(
     limit: int = Query(25, ge=1, le=100),
@@ -905,6 +919,7 @@ async def import_scan(
             strategies=request.strategies,
             capture_ocr_images=request.capture_ocr_images,
             pdf_mode=request.pdf_mode,
+            ocr_options=_ocr_options_from_request(request),
         )
         job_infos = [
             _import_job_info(job, fallback_vault=request.vault) for job in jobs
@@ -926,6 +941,7 @@ async def import_url(
             strategies=request.strategies,
             capture_ocr_images=request.capture_ocr_images,
             pdf_mode=request.pdf_mode,
+            ocr_options=_ocr_options_from_request(request),
         )
         return ImportUrlResponse(
             **_import_job_info(job, fallback_vault=request.vault).model_dump()

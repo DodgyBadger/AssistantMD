@@ -8,6 +8,7 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
@@ -43,7 +44,7 @@ from core.vault_state.file_mutations import (
     write_vault_file,
     write_vault_file_bytes,
 )
-from core.web.security import sanitize_url_for_log
+from core.web.security import resolve_public_url, sanitize_url_for_log
 
 
 class IngestionService:
@@ -119,28 +120,32 @@ class IngestionService:
             relative_dir = ""
 
             if job.source_type == SourceKind.URL.value:
-                importer_fn = self._resolve_importer_for_url(
-                    job.source_uri, job.mime_hint
-                )
-                if importer_fn is None:
-                    msg = "Unsupported URL ingestion source"
-                    self.logger.warning(
-                        msg, metadata={"job_id": job_id, "source": job.source_uri}
+                direct_ocr_doc = self._direct_pdf_ocr_document(job)
+                if direct_ocr_doc is not None:
+                    raw_doc = direct_ocr_doc
+                else:
+                    importer_fn = self._resolve_importer_for_url(
+                        job.source_uri, job.mime_hint
                     )
-                    self.mark_failed(job_id, msg)
-                    return
-                url_cfg = (
-                    ingestion_settings.get("url", {})
-                    if isinstance(ingestion_settings, dict)
-                    else {}
-                )
-                raw_doc = importer_fn(
-                    job.source_uri,
-                    timeout=url_cfg.get("read_timeout_seconds", 10),
-                    connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
-                    strategy=url_cfg.get("fetch_strategy", "curl"),
-                    max_bytes=url_cfg.get("max_response_bytes", 5 * 1024 * 1024),
-                )
+                    if importer_fn is None:
+                        msg = "Unsupported URL ingestion source"
+                        self.logger.warning(
+                            msg, metadata={"job_id": job_id, "source": job.source_uri}
+                        )
+                        self.mark_failed(job_id, msg)
+                        return
+                    url_cfg = (
+                        ingestion_settings.get("url", {})
+                        if isinstance(ingestion_settings, dict)
+                        else {}
+                    )
+                    raw_doc = importer_fn(
+                        job.source_uri,
+                        timeout=url_cfg.get("read_timeout_seconds", 10),
+                        connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
+                        strategy=url_cfg.get("fetch_strategy", "curl"),
+                        max_bytes=url_cfg.get("max_response_bytes", 5 * 1024 * 1024),
+                    )
                 self.logger.info(
                     "ingestion_remote_classified",
                     data={
@@ -400,6 +405,31 @@ class IngestionService:
                 )
             self.mark_failed(job_id, str(exc))
             raise
+
+    @staticmethod
+    def _direct_pdf_ocr_document(job: IngestionJob) -> RawDocument | None:
+        """Build a URL-backed PDF document when OCR is the sole requested strategy."""
+        options = job.options if isinstance(job.options, dict) else {}
+        strategies = options.get("strategies")
+        if strategies != ["pdf_ocr"] or options.get("pdf_mode") == "page_images":
+            return None
+        parsed = urlsplit(job.source_uri)
+        if Path(unquote(parsed.path)).suffix.lower() != ".pdf":
+            return None
+        resolve_public_url(job.source_uri)
+        name = Path(unquote(parsed.path)).stem or "import"
+        return RawDocument(
+            source_uri=job.source_uri,
+            kind=SourceKind.URL,
+            mime="application/pdf",
+            payload=b"",
+            suggested_title=name,
+            meta={
+                "effective_url": job.source_uri,
+                "classification_evidence": "url_suffix",
+                "ocr_document_url": job.source_uri,
+            },
+        )
 
     def _resolve_file_source(
         self,

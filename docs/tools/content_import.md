@@ -29,8 +29,39 @@ Optional `options`:
   the configured `ingestion_output_path_pattern` is used
 - `pdf_mode`: `markdown` or `page_images`
 - `strategies`: ordered extraction strategy names
-- `capture_ocr_images`: boolean
+- `capture_ocr_images`: save images extracted by Mistral under the import's
+  assets directory and rewrite matching Markdown image links; increases the
+  provider response size and vault storage
+- `include_ocr_blocks`: retain labeled blocks in reading order, including their
+  page bounding boxes; useful for scripted layout analysis, but unnecessary for
+  ordinary Markdown imports
+- `ocr_table_format`: `markdown` or `html`; additionally retain tables as
+  separate structured values in OCR metadata. Use `html` for complex or merged
+  cells; omit this option to keep tables inline in the page Markdown
+- `extract_ocr_header`: remove detected page headers from the main Markdown and
+  retain them separately in OCR metadata
+- `extract_ocr_footer`: remove detected page footers from the main Markdown and
+  retain them separately in OCR metadata
+- `ocr_confidence`: `page` for compact page-level review scores or `word` for
+  detailed per-word scores and substantially larger metadata
 - `clean_html`: boolean
+
+OCR enrichment options are opt-in. When requested structured data is returned,
+it is stored under `assets/<import-name>/ocr.json` and referenced by the imported
+Markdown frontmatter.
+
+OCR requires a configured `MISTRAL_API_KEY`, non-empty
+`ingestion_ocr_endpoint` and `ingestion_ocr_model` settings, and the `pdf_ocr`
+strategy. If OCR is unavailable, do not request OCR enrichments; use the default
+local PDF import or report the missing configuration to the user.
+
+For routine research imports, omit all OCR enrichment options. Use
+`options={"strategies": ["pdf_ocr"]}` for scanned or layout-heavy PDFs, add
+`"capture_ocr_images": true` when figures matter, and add
+`"ocr_confidence": "page"` when low-quality pages need review. Blocks, separate
+tables, and word confidence are primarily intended for deterministic downstream
+scripts. PDF enrichment options affect `pdf_ocr`; local `pdf_text` extraction
+ignores them.
 
 The maximum sources accepted per call is controlled by the editable
 `content_import_max_batch_size` setting, which defaults to 20.

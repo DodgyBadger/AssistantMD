@@ -166,6 +166,11 @@
         importQueueCheckbox: null,
         importUseOcrCheckbox: null,
         importCaptureOcrImagesCheckbox: null,
+        importIncludeOcrBlocksCheckbox: null,
+        importExtractOcrHeaderCheckbox: null,
+        importExtractOcrFooterCheckbox: null,
+        importOcrTableFormatSelect: null,
+        importOcrConfidenceSelect: null,
         importStatus: null,
         importScanBtn: null,
         importRefreshVaultsBtn: null,
@@ -273,6 +278,11 @@
         elements.importQueueCheckbox = document.getElementById('import-queue');
         elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
         elements.importCaptureOcrImagesCheckbox = document.getElementById('import-capture-ocr-images');
+        elements.importIncludeOcrBlocksCheckbox = document.getElementById('import-include-ocr-blocks');
+        elements.importExtractOcrHeaderCheckbox = document.getElementById('import-extract-ocr-header');
+        elements.importExtractOcrFooterCheckbox = document.getElementById('import-extract-ocr-footer');
+        elements.importOcrTableFormatSelect = document.getElementById('import-ocr-table-format');
+        elements.importOcrConfidenceSelect = document.getElementById('import-ocr-confidence');
         elements.importStatus = document.getElementById('import-status');
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
@@ -454,6 +464,7 @@
             state.settingEditKey = null;
             state.settingDraftValue = '';
             renderSettings();
+            updateImportOcrAvailability();
             setStatus(elements.settingsFeedback, '', 'info');
         } catch (error) {
             renderSettings(true);
@@ -665,6 +676,7 @@
 
             const result = await response.json();
             state.settings = state.settings.map((setting) => (setting.key === result.key ? result : setting));
+            updateImportOcrAvailability();
             cancelSettingEdit(false);
             renderSettings();
             await notifyConfigChanged();
@@ -2275,27 +2287,42 @@ async function saveModelRow(rowKey) {
         const hasMistral = state.secrets.some(
             (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
         );
+        const settingValue = (key) => state.settings.find(setting => setting.key === key)?.value;
+        const ocrModel = String(settingValue('ingestion_ocr_model') || '').trim();
+        const ocrEndpoint = String(settingValue('ingestion_ocr_endpoint') || '').trim();
+        const pdfStrategies = settingValue('ingestion_pdf_default_strategies');
+        const hasPdfOcrStrategy = Array.isArray(pdfStrategies) && pdfStrategies.includes('pdf_ocr');
         const isPageImagesMode = (elements.importPdfModeSelect?.value || 'markdown') === 'page_images';
-        const disableOcrControls = !hasMistral || isPageImagesMode;
+        const missingRequirements = [];
+        if (!hasMistral) missingRequirements.push('MISTRAL_API_KEY');
+        if (!ocrModel) missingRequirements.push('OCR model');
+        if (!ocrEndpoint) missingRequirements.push('OCR endpoint');
+        if (!hasPdfOcrStrategy) missingRequirements.push('pdf_ocr strategy');
+        const disableOcrControls = missingRequirements.length > 0 || isPageImagesMode;
+        const disabledReason = isPageImagesMode
+            ? 'Disabled for PDF mode: Page Images'
+            : `OCR unavailable: configure ${missingRequirements.join(', ')}`;
+        const enrichmentControls = [
+            elements.importIncludeOcrBlocksCheckbox,
+            elements.importExtractOcrHeaderCheckbox,
+            elements.importExtractOcrFooterCheckbox,
+            elements.importOcrTableFormatSelect,
+            elements.importOcrConfidenceSelect
+        ].filter(Boolean);
 
         elements.importUseOcrCheckbox.disabled = disableOcrControls;
         if (elements.importCaptureOcrImagesCheckbox) {
             elements.importCaptureOcrImagesCheckbox.disabled = disableOcrControls;
         }
-        if (isPageImagesMode) {
-            elements.importUseOcrCheckbox.title = 'Disabled for PDF mode: Page Images';
+        enrichmentControls.forEach(control => { control.disabled = disableOcrControls; });
+        if (disableOcrControls) {
+            elements.importUseOcrCheckbox.title = disabledReason;
+            enrichmentControls.forEach(control => { control.title = disabledReason; });
             if (elements.importCaptureOcrImagesCheckbox) {
-                elements.importCaptureOcrImagesCheckbox.title = 'Disabled for PDF mode: Page Images';
+                elements.importCaptureOcrImagesCheckbox.title = disabledReason;
             }
         } else {
-            elements.importUseOcrCheckbox.title = hasMistral
-                ? ''
-                : 'Requires MISTRAL_API_KEY secret';
-            if (elements.importCaptureOcrImagesCheckbox) {
-                elements.importCaptureOcrImagesCheckbox.title = hasMistral
-                    ? ''
-                    : 'Requires MISTRAL_API_KEY secret';
-            }
+            elements.importUseOcrCheckbox.title = 'Use Mistral OCR instead of local PDF text extraction.';
         }
         if (elements.importCaptureOcrImagesCheckbox) {
             // title is set above to keep mode/secret messaging consistent
@@ -2305,6 +2332,10 @@ async function saveModelRow(rowKey) {
             if (elements.importCaptureOcrImagesCheckbox) {
                 elements.importCaptureOcrImagesCheckbox.checked = false;
             }
+            enrichmentControls.forEach(control => {
+                if (control instanceof HTMLInputElement) control.checked = false;
+                if (control instanceof HTMLSelectElement) control.value = '';
+            });
         }
     }
 
@@ -3561,6 +3592,7 @@ async function saveModelRow(rowKey) {
         if (captureOcrImages) {
             payload.capture_ocr_images = true;
         }
+        addOcrEnrichmentOptions(payload);
 
         state.isScanningImport = true;
         // Reset URL status when starting a file import
@@ -3626,8 +3658,13 @@ async function saveModelRow(rowKey) {
         const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
         const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
         const payload = { vault, url, clean_html: true, pdf_mode: pdfMode };
-        if (useOcr) payload.strategies = ['pdf_ocr', 'pdf_text', 'image_ocr'];
+        if (useOcr) {
+            payload.strategies = url.toLowerCase().split(/[?#]/, 1)[0].endsWith('.pdf')
+                ? ['pdf_ocr']
+                : ['pdf_ocr', 'pdf_text', 'image_ocr'];
+        }
         if (captureOcrImages) payload.capture_ocr_images = true;
+        addOcrEnrichmentOptions(payload);
 
         try {
             const response = await fetch('api/import/url', {
@@ -3649,6 +3686,16 @@ async function saveModelRow(rowKey) {
             setIconButtonLabel(btn, originalLabel);
             state.isImportingUrl = false;
         }
+    }
+
+    function addOcrEnrichmentOptions(payload) {
+        if (elements.importIncludeOcrBlocksCheckbox?.checked) payload.include_ocr_blocks = true;
+        if (elements.importExtractOcrHeaderCheckbox?.checked) payload.extract_ocr_header = true;
+        if (elements.importExtractOcrFooterCheckbox?.checked) payload.extract_ocr_footer = true;
+        const tableFormat = (elements.importOcrTableFormatSelect?.value || '').trim();
+        const confidence = (elements.importOcrConfidenceSelect?.value || '').trim();
+        if (tableFormat) payload.ocr_table_format = tableFormat;
+        if (confidence) payload.ocr_confidence = confidence;
     }
 
     window.ConfigurationPanel = {

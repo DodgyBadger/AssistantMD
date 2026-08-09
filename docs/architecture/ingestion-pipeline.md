@@ -139,6 +139,16 @@ Secret-gated OCR strategies:
 
 If secrets are missing, the strategy is skipped and warnings are attached to extraction metadata.
 
+For an explicitly OCR-only public PDF URL ending in `.pdf`, `pdf_ocr` passes the
+validated URL directly to Mistral. Other URL strategy combinations retain the
+existing bounded AssistantMD download path so local extraction and fallback
+strategies receive source bytes. Vault files are sent as inline base64 data.
+
+OCR blocks, separately returned tables, separated headers/footers, and
+confidence scores are opt-in. Structured results are retained as
+`assets/<import-name>/ocr.json`; baseline OCR continues to produce Markdown
+without that companion artifact.
+
 Each durable ingestion job records the strategies attempted and, when extraction
 succeeds, the selected strategy, provider, and resolved model. The Import table
 shows this decision alongside job status. A fallback reason is retained when an

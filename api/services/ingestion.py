@@ -6,7 +6,7 @@ from typing import Any
 
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.identity import ExecutionAuthority, require_current_execution_authority
-from core.ingestion.import_service import ContentImportService
+from core.ingestion.import_service import ContentImportService, translate_ocr_options
 from core.ingestion.jobs import (
     IngestionJob,
     cancel_queued_job,
@@ -102,6 +102,7 @@ async def scan_import_folder(
     strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
     pdf_mode: str | None = None,
+    ocr_options: dict[str, Any] | None = None,
 ) -> tuple[list[IngestionJob], list[str]]:
     """Enqueue supported import-folder files and optionally process them."""
     runtime, ingest_service, jobs_created, skipped = _enqueue_import_scan_jobs(
@@ -109,6 +110,7 @@ async def scan_import_folder(
         strategies=strategies,
         capture_ocr_images=capture_ocr_images,
         pdf_mode=pdf_mode,
+        ocr_options=ocr_options,
     )
 
     if not queue_only and jobs_created:
@@ -142,6 +144,7 @@ def _enqueue_import_scan_jobs(
     strategies: list[str] | None,
     capture_ocr_images: bool | None,
     pdf_mode: str | None,
+    ocr_options: dict[str, Any] | None,
 ) -> tuple[RuntimeContext, IngestionService, list[IngestionJob], list[str]]:
     """Create ingestion jobs for supported files in a vault import folder."""
     runtime = get_runtime_context()
@@ -164,6 +167,7 @@ def _enqueue_import_scan_jobs(
     extractor_options: dict[str, Any] = {}
     if capture_ocr_images is not None:
         extractor_options["ocr_capture_images"] = bool(capture_ocr_images)
+    extractor_options.update(translate_ocr_options(ocr_options or {}))
     normalized_pdf_mode = (pdf_mode or "").strip().lower()
     if normalized_pdf_mode not in {"", "markdown", "page_images"}:
         normalized_pdf_mode = ""
@@ -219,6 +223,7 @@ async def import_url_direct(
     strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
     pdf_mode: str | None = None,
+    ocr_options: dict[str, Any] | None = None,
 ) -> IngestionJob:
     """Import one URL immediately as API-attributed ingestion."""
     runtime = get_runtime_context()
@@ -231,6 +236,7 @@ async def import_url_direct(
         options["capture_ocr_images"] = capture_ocr_images
     if pdf_mode:
         options["pdf_mode"] = pdf_mode
+    options.update(ocr_options or {})
     submitted = import_service.submit(sources=url, options=options)
     job = ingest_service.get_job(submitted[0].job_id)
     if job is None:
