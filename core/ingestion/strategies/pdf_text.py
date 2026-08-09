@@ -25,7 +25,7 @@ def extract_pdf_text(raw: RawDocument) -> ExtractedDocument:
         mime="application/pdf",
         strategy_id="pdf_text",
         blocks=None,
-        meta={"page_count": doc.page_count},
+        meta={"page_count": doc.page_count, "provider": "local"},
     )
 
 

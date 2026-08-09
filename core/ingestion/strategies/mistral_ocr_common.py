@@ -29,6 +29,14 @@ def _setting_bool(settings: Any, key: str, default: bool) -> bool:
     return default
 
 
+def _setting_positive_int(settings: Any, key: str, default: int) -> int:
+    try:
+        value = int(settings.get(key).value)
+    except (AttributeError, TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 def _extract_base64_and_media(value: Any) -> tuple[str | None, str | None]:
     if not isinstance(value, str):
         return None, None
@@ -189,7 +197,14 @@ def extract_with_mistral_ocr(
     }
 
     resp = requests.post(
-        endpoint, headers=headers, data=json.dumps(request_payload), timeout=60
+        endpoint,
+        headers=headers,
+        data=json.dumps(request_payload),
+        timeout=_setting_positive_int(
+            settings,
+            "ingestion_ocr_timeout_seconds",
+            120,
+        ),
     )
     if resp.status_code >= 400:
         raise RuntimeError(f"OCR request failed ({resp.status_code}): {resp.text}")
@@ -225,7 +240,8 @@ def extract_with_mistral_ocr(
         "ocr_image_count": len(ocr_images),
         "ocr_images": ocr_images,
         "provider": "mistral",
-        "model": model,
+        "model": str(body.get("model") or model),
+        "requested_model": model,
     }
 
     return ExtractedDocument(

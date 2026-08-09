@@ -19,6 +19,7 @@ from core.ingestion.jobs import (
     init_db,
     list_jobs,
     update_job_outputs,
+    update_job_provenance,
     update_job_status,
 )
 from core.ingestion.models import (
@@ -219,6 +220,14 @@ class IngestionService:
                 )
 
             if raw_doc.mime == "application/pdf" and pdf_mode == "page_images":
+                update_job_provenance(
+                    job_id,
+                    selected_strategy="pdf_page_images",
+                    selected_provider="local",
+                    selected_model=None,
+                    strategy_attempts=["pdf_page_images"],
+                    fallback_reason=None,
+                )
                 outputs = self._render_pdf_page_images(
                     raw_doc=raw_doc,
                     vault=vault,
@@ -267,7 +276,7 @@ class IngestionService:
                     "extractor_option_keys": sorted(extractor_opts.keys()),
                 },
             )
-            extracted, warnings = self._run_strategies(
+            extracted, warnings, attempts = self._run_strategies(
                 raw_doc,
                 strategies,
                 ingestion_settings,
@@ -276,6 +285,16 @@ class IngestionService:
             )
             if extracted is None:
                 msg = f"No extractor succeeded for {raw_doc.mime or 'unknown mime'}"
+                update_job_provenance(
+                    job_id,
+                    selected_strategy=None,
+                    selected_provider=None,
+                    selected_model=None,
+                    strategy_attempts=attempts,
+                    fallback_reason=self._truncate_log_value(
+                        "; ".join(warnings or []) or msg
+                    ),
+                )
                 self.logger.warning(
                     "ingestion_job_failed",
                     data={
@@ -289,6 +308,21 @@ class IngestionService:
                 )
                 self.mark_failed(job_id, msg)
                 return
+
+            update_job_provenance(
+                job_id,
+                selected_strategy=extracted.strategy_id,
+                selected_provider=str(extracted.meta.get("provider") or "local"),
+                selected_model=(
+                    str(extracted.meta["model"])
+                    if extracted.meta.get("model")
+                    else None
+                ),
+                strategy_attempts=attempts,
+                fallback_reason=(
+                    self._truncate_log_value("; ".join(warnings)) if warnings else None
+                ),
+            )
 
             render_options = RenderOptions(
                 mode=RenderMode.FULL,
@@ -791,14 +825,16 @@ class IngestionService:
         options: dict[str, Any] | None = None,
         *,
         log_context: dict[str, Any] | None = None,
-    ) -> tuple[ExtractedDocument | None, list[str] | None]:
+    ) -> tuple[ExtractedDocument | None, list[str] | None, list[str]]:
         """
         Try extractors in order; return first non-empty result.
         """
         warnings: list[str] = []
+        attempts: list[str] = []
         extractor_options = options or {}
         base_log_context = log_context or {}
         for strat in strategies:
+            attempts.append(strat)
             secret_name = self._STRATEGY_SECRET_REQUIREMENTS.get(strat)
             if secret_name and not secret_has_value(secret_name):
                 warning = f"{strat}:missing_secret:{secret_name}"
@@ -863,7 +899,7 @@ class IngestionService:
                         "warnings": warnings,
                     },
                 )
-                return result, warnings if warnings else None
+                return result, warnings if warnings else None, attempts
             warning = f"{strat}:empty"
             warnings.append(warning)
             self.logger.info(
@@ -875,7 +911,7 @@ class IngestionService:
                 },
             )
 
-        return None, warnings if warnings else None
+        return None, warnings if warnings else None, attempts
 
     def _job_log_context(self, job: IngestionJob) -> dict[str, Any]:
         options: dict[str, Any] = job.options if isinstance(job.options, dict) else {}

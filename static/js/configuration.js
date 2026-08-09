@@ -3263,6 +3263,7 @@ async function saveModelRow(rowKey) {
                             <th>Source</th>
                             <th>Vault</th>
                             <th>Status</th>
+                            <th>Strategy</th>
                             <th>Updated</th>
                             <th>Output / Error</th>
                             <th class="cell-center" aria-label="Actions"></th>
@@ -3272,6 +3273,11 @@ async function saveModelRow(rowKey) {
                         ${jobs.map(job => {
                             const outputs = Array.isArray(job.outputs) ? job.outputs : [];
                             const detail = job.error || outputs.join(', ') || '—';
+                            const strategy = [
+                                job.selected_strategy,
+                                job.selected_provider,
+                                job.selected_model
+                            ].filter(Boolean).join(' · ') || '—';
                             const cancelButton = job.status === 'queued'
                                 ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
                                 : '';
@@ -3284,6 +3290,7 @@ async function saveModelRow(rowKey) {
                                     <td data-label="Source" class="cell-xs">${escapeHtml(job.source_uri || 'unknown')}</td>
                                     <td data-label="Vault" class="cell-xs">${escapeHtml(job.vault || '—')}</td>
                                     <td data-label="Status" class="cell-xs">${escapeHtml(job.status || 'unknown')}</td>
+                                    <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>
                                     <td data-label="Updated" class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
                                     <td data-label="Output / Error" class="cell-xs">${escapeHtml(detail)}</td>
                                     <td data-label="Actions" class="cell-center import-job-actions">${cancelButton}${editButton}</td>

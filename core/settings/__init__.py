@@ -370,6 +370,7 @@ def validate_settings(
     general_settings = get_general_settings() or {}
     for setting_key in (
         "content_import_max_batch_size",
+        "ingestion_ocr_timeout_seconds",
         "ingestion_url_connect_timeout_seconds",
         "ingestion_url_max_response_mb",
         "ingestion_url_read_timeout_seconds",

@@ -124,6 +124,7 @@ Shared OCR config keys:
 
 - `ingestion_ocr_model`
 - `ingestion_ocr_endpoint`
+- `ingestion_ocr_timeout_seconds`
 - `ingestion_url_connect_timeout_seconds`
 - `ingestion_url_read_timeout_seconds`
 - `ingestion_url_max_response_mb`
@@ -137,6 +138,11 @@ Secret-gated OCR strategies:
 - `image_ocr` requires `MISTRAL_API_KEY`
 
 If secrets are missing, the strategy is skipped and warnings are attached to extraction metadata.
+
+Each durable ingestion job records the strategies attempted and, when extraction
+succeeds, the selected strategy, provider, and resolved model. The Import table
+shows this decision alongside job status. A fallback reason is retained when an
+earlier strategy is skipped, fails, or returns no content.
 
 ## Output Artifacts and Layout
 

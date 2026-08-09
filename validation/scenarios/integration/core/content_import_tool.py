@@ -75,6 +75,21 @@ class ContentImportToolScenario(BaseScenario):
                 "completed",
                 "status should expose terminal ingestion state",
             )
+            self.soft_assert_equal(
+                status_items[0].get("selected_strategy") if status_items else None,
+                "pdf_text",
+                "status should expose the selected extraction strategy",
+            )
+            self.soft_assert_equal(
+                status_items[0].get("selected_provider") if status_items else None,
+                "local",
+                "status should expose the selected extraction provider",
+            )
+            self.soft_assert_equal(
+                status_items[0].get("strategy_attempts") if status_items else None,
+                ["pdf_text"],
+                "status should expose extraction attempts",
+            )
             local_outputs = (
                 status_items[0].get("outputs") if status_items else []
             ) or []

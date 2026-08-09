@@ -44,6 +44,11 @@ class ContentImportResult:
     status: str
     outputs: list[str]
     error: str | None
+    selected_strategy: str | None
+    selected_provider: str | None
+    selected_model: str | None
+    strategy_attempts: list[str]
+    fallback_reason: str | None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -53,6 +58,11 @@ class ContentImportResult:
             "status": self.status,
             "outputs": list(self.outputs),
             "error": self.error,
+            "selected_strategy": self.selected_strategy,
+            "selected_provider": self.selected_provider,
+            "selected_model": self.selected_model,
+            "strategy_attempts": list(self.strategy_attempts),
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -263,6 +273,11 @@ class ContentImportService:
             status=job.status,
             outputs=list(job.outputs or []),
             error=job.error,
+            selected_strategy=job.selected_strategy,
+            selected_provider=job.selected_provider,
+            selected_model=job.selected_model,
+            strategy_attempts=list(job.strategy_attempts or []),
+            fallback_reason=job.fallback_reason,
         )
 
 

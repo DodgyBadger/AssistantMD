@@ -45,6 +45,9 @@ class ImportPipelineScenario(BaseScenario):
         assert len(jobs) == 1, "One job should be created for the PDF"
         job = jobs[0]
         assert job.get("status") == "completed", "Job should complete inline"
+        assert job.get("selected_strategy") == "pdf_text"
+        assert job.get("selected_provider") == "local"
+        assert job.get("strategy_attempts") == ["pdf_text"]
         outputs = job.get("outputs") or []
         assert len(outputs) > 0, "Import scan should return at least one output path"
         sample_rel_path = outputs[0]

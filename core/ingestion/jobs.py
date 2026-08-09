@@ -22,6 +22,7 @@ from core.database import (
     create_tables,
 )
 from core.ingestion.models import JobStatus
+from core.ingestion.schema import ensure_ingestion_jobs_schema
 
 
 class IngestionJob(Base):
@@ -38,6 +39,11 @@ class IngestionJob(Base):
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     outputs: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    selected_strategy: Mapped[str | None] = mapped_column(String, nullable=True)
+    selected_provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    selected_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    strategy_attempts: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
@@ -57,6 +63,7 @@ def _get_session_factory() -> sessionmaker[Session]:
 
 def init_db() -> None:
     """Create tables if they do not exist."""
+    ensure_ingestion_jobs_schema()
     engine = _get_engine()
     create_tables(engine, cast(Table, IngestionJob.__table__))
 
@@ -115,6 +122,34 @@ def update_job_outputs(job_id: int, outputs: list[str]) -> None:
             session.commit()
     except SQLAlchemyError as exc:
         raise RuntimeError(f"Failed to update outputs for job {job_id}: {exc}") from exc
+
+
+def update_job_provenance(
+    job_id: int,
+    *,
+    selected_strategy: str | None,
+    selected_provider: str | None,
+    selected_model: str | None,
+    strategy_attempts: list[str],
+    fallback_reason: str | None,
+) -> None:
+    """Persist the extraction decision for one ingestion job."""
+    session_factory = _get_session_factory()
+    try:
+        with session_factory() as session:
+            job: IngestionJob | None = session.get(IngestionJob, job_id)
+            if job is None:
+                raise ValueError(f"Job {job_id} not found")
+            job.selected_strategy = selected_strategy
+            job.selected_provider = selected_provider
+            job.selected_model = selected_model
+            job.strategy_attempts = list(strategy_attempts)
+            job.fallback_reason = fallback_reason
+            session.commit()
+    except SQLAlchemyError as exc:
+        raise RuntimeError(
+            f"Failed to update provenance for job {job_id}: {exc}"
+        ) from exc
 
 
 def get_job(job_id: int) -> IngestionJob | None:

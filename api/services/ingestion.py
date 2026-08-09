@@ -228,9 +228,7 @@ async def import_url_direct(
     if strategies:
         options["strategies"] = strategies
     if capture_ocr_images is not None:
-        options["extractor_options"] = {
-            "capture_ocr_images": capture_ocr_images,
-        }
+        options["capture_ocr_images"] = capture_ocr_images
     if pdf_mode:
         options["pdf_mode"] = pdf_mode
     submitted = import_service.submit(sources=url, options=options)

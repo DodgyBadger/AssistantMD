@@ -810,6 +810,11 @@ def _import_job_info(job: Any, *, fallback_vault: str = "") -> ImportJobInfo:
         status=job.status,
         error=job.error,
         outputs=job.outputs,
+        selected_strategy=job.selected_strategy,
+        selected_provider=job.selected_provider,
+        selected_model=job.selected_model,
+        strategy_attempts=job.strategy_attempts,
+        fallback_reason=job.fallback_reason,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

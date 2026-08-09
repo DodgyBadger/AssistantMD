@@ -256,6 +256,11 @@ settings:
     description: "When true, request OCR image payloads and persist them as assets during ingestion."
     category: "Import"
     restart_required: false
+  ingestion_ocr_timeout_seconds:
+    value: 120
+    description: "Maximum time in seconds to wait for one OCR provider request. Increase this for large or complex documents."
+    category: "Import"
+    restart_required: false
   ingestion_image_default_strategies:
     value:
       - image_ocr

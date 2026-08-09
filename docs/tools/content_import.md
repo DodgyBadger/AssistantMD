@@ -44,9 +44,11 @@ content_import(operation="status", job_ids=[41, 42])
 ```
 
 The returned JSON includes an `items` array with the job id, source, source kind,
-current state, output paths, and any durable ingestion error. A caller can choose
-when to inspect queued work; the tool does not define research progress or retry
-policy.
+current state, output paths, any durable ingestion error, strategies attempted,
+the selected strategy/provider/model, and any fallback reason. Selection fields
+remain empty while a job is queued or when no extractor succeeds. A caller can
+choose when to inspect queued work; the tool does not define research progress
+or retry policy.
 
 ## Boundaries
 

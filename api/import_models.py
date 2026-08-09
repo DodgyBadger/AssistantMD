@@ -25,6 +25,11 @@ class ImportJobInfo(BaseModel):
     status: str
     error: str | None = None
     outputs: list[str] | None = None
+    selected_strategy: str | None = None
+    selected_provider: str | None = None
+    selected_model: str | None = None
+    strategy_attempts: list[str] | None = None
+    fallback_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
