@@ -2290,7 +2290,18 @@ async function saveModelRow(rowKey) {
         const settingValue = (key) => state.settings.find(setting => setting.key === key)?.value;
         const ocrModel = String(settingValue('ingestion_ocr_model') || '').trim();
         const ocrEndpoint = String(settingValue('ingestion_ocr_endpoint') || '').trim();
-        const pdfStrategies = settingValue('ingestion_pdf_default_strategies');
+        const rawPdfStrategies = settingValue('ingestion_pdf_default_strategies');
+        let pdfStrategies = [];
+        if (Array.isArray(rawPdfStrategies)) {
+            pdfStrategies = rawPdfStrategies;
+        } else if (typeof rawPdfStrategies === 'string' && rawPdfStrategies.trim()) {
+            try {
+                const parsedStrategies = JSON.parse(rawPdfStrategies);
+                if (Array.isArray(parsedStrategies)) pdfStrategies = parsedStrategies;
+            } catch (_) {
+                pdfStrategies = [];
+            }
+        }
         const hasPdfOcrStrategy = Array.isArray(pdfStrategies) && pdfStrategies.includes('pdf_ocr');
         const isPageImagesMode = (elements.importPdfModeSelect?.value || 'markdown') === 'page_images';
         const missingRequirements = [];
