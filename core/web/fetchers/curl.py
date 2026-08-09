@@ -19,6 +19,11 @@ from core.web.security import (
 _MAX_REDIRECTS = 5
 
 
+def _response_limit_message(max_bytes: int) -> str:
+    max_mb = max_bytes / (1024 * 1024)
+    return f"Response exceeded {max_mb:.3g} MB limit"
+
+
 def fetch_url_with_curl(
     source_url: str,
     *,
@@ -145,7 +150,7 @@ def _fetch_once(
             )
         body = body_path.read_bytes()
         if len(body) > max_bytes:
-            raise RuntimeError(f"Response exceeded {max_bytes} bytes")
+            raise RuntimeError(_response_limit_message(max_bytes))
 
         raw_headers = headers_path.read_bytes() if headers_path.exists() else b""
         status_code, response_headers = _parse_header_dump(raw_headers)
@@ -219,7 +224,7 @@ def _map_curl_error(
     if return_code == 7:
         return RuntimeError(f"URL fetch connect failed: {display_url}")
     if return_code == 63:
-        return RuntimeError(f"Response exceeded {max_bytes} bytes")
+        return RuntimeError(_response_limit_message(max_bytes))
     if return_code in {35, 51, 58, 60}:
         detail = safe_stderr.strip() or f"curl exit {return_code}"
         return RuntimeError(f"URL fetch TLS/SSL error for {display_url}: {detail}")

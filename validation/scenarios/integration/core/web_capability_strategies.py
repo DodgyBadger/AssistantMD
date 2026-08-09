@@ -14,7 +14,7 @@ from core.ingestion.strategies.html_raw import extract_html_markdownify
 from core.settings.upgrades import upgrade_settings_mapping
 from core.tools.web_extract import WebExtract
 from core.web.errors import WebUrlPolicyError
-from core.web.fetchers.curl import _fetch_once
+from core.web.fetchers.curl import _fetch_once, _map_curl_error
 from core.web.html import html_to_markdown
 from core.web.models import (
     WebExtractionItem,
@@ -207,6 +207,19 @@ class WebCapabilityStrategiesScenario(BaseScenario):
             ),
             "request failed for https://example.com/page",
             "URLs embedded in provider diagnostics should use shared sanitization",
+        )
+        self.soft_assert_equal(
+            str(
+                _map_curl_error(
+                    63,
+                    "curl write limit",
+                    "https://example.com/report.pdf",
+                    20,
+                    5 * 1024 * 1024,
+                )
+            ),
+            "Response exceeded 5 MB limit",
+            "URL response-limit failures should use the configured setting unit",
         )
 
         captured_command: list[str] = []

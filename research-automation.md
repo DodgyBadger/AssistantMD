@@ -758,8 +758,10 @@ making durable job history inaccessible.
   manual import controls. The user can adjust the available settings before
   explicitly submitting a new job; prior job history is preserved.
 - The vault selector sits at the top of the Import section and scopes both the
-  visible job history and all inbox/URL submissions below it. No vault selection
-  must never fall back to showing cross-vault history.
+  visible job history and all inbox/URL submissions below it. An empty vault
+  selection must never fall back to showing cross-vault history.
+- URL response-limit failures report the configured threshold in MB, matching
+  the unit used by `ingestion_url_max_response_mb`.
 
 This combines status filters with pagination. Showing only queued jobs would
 hide processing state and actionable failures, while date rotation alone would
