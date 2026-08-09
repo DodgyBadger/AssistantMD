@@ -128,6 +128,29 @@ Primary alternative-provider references:
 
 ## Recommended Architecture
 
+### Import UI follows artifact, strategy, then strategy options
+
+The PDF conversion UI should present dependent decisions in order rather than
+as one flat set of controls:
+
+1. **Output mode**: Markdown or Page Images.
+2. **Conversion strategy**: shown only for Markdown. Choices are Configured
+   Default (including the resolved order), Local Text Only, and Mistral OCR
+   Only.
+3. **Strategy options**: OCR enrichments are shown or enabled only when the
+   selected strategy path can invoke `pdf_ocr`. Configured Default should state
+   whether OCR is primary or fallback.
+4. **Page-image options**: shown only for Page Images. Future controls such as
+   DPI, image format, page range, or rendering quality belong here.
+
+Configured Default remains the initial selection and means no per-job strategy
+override. Do not preselect Mistral OCR merely because it is first in the global
+order. Backend metadata supplies the configured strategy order and capability
+availability so the browser does not reconstruct these rules.
+
+Image OCR capture for mixed inbox imports is related but distinct from PDF OCR
+enrichment. Its label and help text should make that cross-format scope clear.
+
 ### Pydantic AI reuse boundary
 
 Current Pydantic AI provides provider-neutral multimodal document inputs through

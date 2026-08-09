@@ -42,6 +42,7 @@ class MistralOcrContractScenario(BaseScenario):
                 return_value=("example.org", ["93.184.216.34"]),
             ),
             patch("core.ingestion.service.secret_has_value", return_value=True),
+            patch("core.ingestion.capabilities.secret_has_value", return_value=True),
             patch(
                 "core.ingestion.strategies.mistral_ocr_common.get_secret_value",
                 return_value="test-key",
@@ -51,6 +52,26 @@ class MistralOcrContractScenario(BaseScenario):
                 return_value=response,
             ) as post,
         ):
+            metadata_response = self.call_api("/api/metadata")
+            pdf_ocr_capability = (
+                metadata_response.json()
+                .get("ingestion_capabilities", {})
+                .get("pdf_ocr", {})
+            )
+            self.soft_assert_equal(
+                pdf_ocr_capability.get("available"),
+                True,
+                "Metadata should expose backend-derived PDF OCR availability",
+            )
+            self.soft_assert(
+                "blocks" in (pdf_ocr_capability.get("features") or []),
+                "Metadata should expose supported PDF OCR enrichments",
+            )
+            self.soft_assert_equal(
+                pdf_ocr_capability.get("default_order"),
+                ["pdf_text", "pdf_ocr"],
+                "Metadata should expose the configured PDF strategy order",
+            )
             service = ContentImportService(str(vault))
             submitted = service.submit(
                 sources="https://example.org/report.pdf",

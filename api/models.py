@@ -945,6 +945,16 @@ class ProviderInfo(BaseModel):
     )
 
 
+class IngestionCapabilityInfo(BaseModel):
+    """Availability and supported features for one ingestion strategy."""
+
+    available: bool
+    provider: str
+    missing: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
+    default_order: list[str] = Field(default_factory=list)
+
+
 class MetadataResponse(BaseModel):
     """Unified metadata response for vaults, models, and tools."""
 
@@ -954,6 +964,10 @@ class MetadataResponse(BaseModel):
     settings: dict[str, Any] = Field(
         default_factory=dict,
         description="Selected settings values for UI hints.",
+    )
+    ingestion_capabilities: dict[str, IngestionCapabilityInfo] = Field(
+        default_factory=dict,
+        description="Backend-derived ingestion strategy availability and features.",
     )
     default_context_script: str | None = Field(
         None,

@@ -196,7 +196,7 @@ def _enqueue_import_scan_jobs(
                 continue
 
             job_options: dict[str, Any] = {}
-            if strategies:
+            if strategies and item.suffix.lower() == ".pdf":
                 job_options["strategies"] = strategies
             if extractor_options:
                 job_options["extractor_options"] = extractor_options

@@ -1013,7 +1013,8 @@ async function init() {
     if (window.ConfigurationPanel) {
         window.ConfigurationPanel.init({
             refreshMetadata: () => fetchMetadata(),
-            refreshStatus: () => fetchSystemStatus()
+            refreshStatus: () => fetchSystemStatus(),
+            openFile: (path, vaultName) => fileReferences.openFile(path, { vaultName })
         });
     }
     await fetchMetadata();
@@ -1089,6 +1090,7 @@ async function fetchMetadata() {
         // Expose for other modules (e.g., configuration import panel) to avoid duplicate fetches.
         window.App = window.App || {};
         window.App.metadata = state.metadata;
+        window.ConfigurationPanel?.onMetadataUpdated?.();
         populateSelectors();
         updateStatus();
     } catch (error) {

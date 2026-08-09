@@ -149,6 +149,18 @@ confidence scores are opt-in. Structured results are retained as
 `assets/<import-name>/ocr.json`; baseline OCR continues to produce Markdown
 without that companion artifact.
 
+`/api/metadata` exposes backend-derived ingestion capability metadata. The
+Import UI uses the `pdf_ocr` availability, missing prerequisites, provider, and
+feature list from that shared contract; configured strategy order drives the
+Configured Default label and OCR primary/fallback guidance. The browser does
+not reconstruct availability from raw settings or secrets.
+
+PDF import controls follow the dependency order: output mode, Markdown
+conversion strategy, then strategy-specific options. Page Images hides Markdown
+strategy controls and owns a separate options panel. Per-job PDF strategy
+overrides apply only to PDF inbox files, so mixed inbox imports retain their
+format-specific image strategies.
+
 Each durable ingestion job records the strategies attempted and, when extraction
 succeeds, the selected strategy, provider, and resolved model. The Import table
 shows this decision alongside job status. A fallback reason is retained when an
