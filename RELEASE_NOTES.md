@@ -10,6 +10,8 @@ requiring users to download and stage every document manually.
 - The new `content_import` tool lets chat agents and Monty workflows submit one
   or many public web URLs or existing vault files, then inspect durable job
   status using the returned job IDs.
+- The maximum sources accepted in one tool call is configurable through
+  `content_import_max_batch_size`, with a default of 20.
 - Each import can choose its destination directory. When omitted, AssistantMD
   uses the configured default import destination.
 - Remote HTML pages and PDFs use the same ingestion pipeline as manual imports.
@@ -50,8 +52,8 @@ response limits are now configured and reported in MB; new installations use a
 
 - PDF imports clearly separate the desired output—Markdown or page images—from
   the Markdown extraction strategy and its applicable options.
-- Mistral OCR can receive public PDF URLs directly, avoiding an unnecessary
-  download and re-upload when OCR is explicitly selected.
+- When **Mistral OCR Only** is selected for a public `.pdf` URL, Mistral can
+  receive that URL directly, avoiding an unnecessary download and re-upload.
 - Optional OCR enrichments can retain document images, structural blocks,
   tables, separated headers and footers, and page- or word-level confidence.
   Structured results are stored alongside the imported document for later
@@ -72,6 +74,12 @@ response limits are now configured and reported in MB; new installations use a
   `localStorage` is unavailable.
 - Imports left in progress by an application restart are marked failed with a
   clear interruption reason instead of remaining stuck indefinitely.
+- Import jobs are confined to configured vaults, and invalid or escaping vault
+  paths are rejected before scanning or writing content.
+- Immediate and scheduled imports atomically claim queued jobs, preventing the
+  same job from being processed twice or a cancelled job from being restarted.
+- Inbox source-cleanup failures are reported on the job instead of silently
+  marking an import complete while leaving its source behind.
 - `scripts/dev run` now uses the checkout's repository-local `data/` and
   `system/` directories by default, matching the persistent development state
   developers expect.
