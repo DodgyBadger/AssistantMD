@@ -16,7 +16,7 @@ from core.web.html import extract_html_title
 _DEFAULT_READ_TIMEOUT = 10
 _DEFAULT_CONNECT_TIMEOUT = 10
 _DEFAULT_FETCH_STRATEGY = "curl"
-_MAX_BYTES = 5 * 1024 * 1024  # 5 MB guardrail
+_MAX_BYTES = 25 * 1024 * 1024
 _DEFAULT_HEADERS: dict[str, str] = {}
 
 

@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import fitz
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.ingestion.import_service import ContentImportService
@@ -35,7 +37,6 @@ class MistralOcrContractScenario(BaseScenario):
                 }
             ],
         }
-
         with (
             patch(
                 "core.ingestion.service.resolve_public_url",
@@ -69,7 +70,7 @@ class MistralOcrContractScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 pdf_ocr_capability.get("default_order"),
-                ["pdf_text", "pdf_ocr"],
+                ["pdf_ocr", "pdf_text"],
                 "Metadata should expose the configured PDF strategy order",
             )
             service = ContentImportService(str(vault))
@@ -118,6 +119,32 @@ class MistralOcrContractScenario(BaseScenario):
         self.soft_assert(
             any(path.endswith("/ocr.json") for path in outputs),
             "Requested structured OCR data should be retained as an asset",
+        )
+
+        local_pdf = vault / "local-fallback.pdf"
+        with fitz.open() as document:
+            page = document.new_page()
+            page.insert_text((72, 72), "Local extraction fallback")
+            document.save(local_pdf)
+        with patch("core.ingestion.service.secret_has_value", return_value=False):
+            fallback_submission = service.submit(sources="local-fallback.pdf")
+            await get_runtime_context().ingestion_worker.run_once()
+            fallback_result = service.status(job_ids=fallback_submission[0].job_id)[0]
+
+        self.soft_assert_equal(
+            fallback_result.status,
+            "completed",
+            "Missing Mistral credentials should not prevent local PDF extraction",
+        )
+        self.soft_assert_equal(
+            fallback_result.strategy_attempts,
+            ["pdf_ocr", "pdf_text"],
+            "Default PDF extraction should try OCR before local text",
+        )
+        self.soft_assert_equal(
+            fallback_result.selected_strategy,
+            "pdf_text",
+            "Unavailable OCR should fall through to local PDF text extraction",
         )
 
         await self.stop_system()

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai.messages import ToolReturn
 
 from core.authoring.shared.tool_binding import resolve_tool_binding
+from core.ingestion.jobs import claim_queued_job, fail_processing_jobs
 from core.runtime.state import get_runtime_context
 from core.tools.content_import import ContentImport
 from core.web.models import WebFetchResult
@@ -28,6 +29,11 @@ class ContentImportToolScenario(BaseScenario):
         local_pdf.write_bytes(self.make_pdf("Local content import validation"))
 
         await self.start_system()
+        ocr_unavailable = patch(
+            "core.ingestion.service.secret_has_value",
+            return_value=False,
+        )
+        ocr_unavailable.start()
         try:
             binding = resolve_tool_binding(["content_import"], vault_path=str(vault))
             self.soft_assert_equal(
@@ -87,8 +93,13 @@ class ContentImportToolScenario(BaseScenario):
             )
             self.soft_assert_equal(
                 status_items[0].get("strategy_attempts") if status_items else None,
-                ["pdf_text"],
+                ["pdf_ocr", "pdf_text"],
                 "status should expose extraction attempts",
+            )
+            self.soft_assert_equal(
+                status_items[0].get("fallback_reason") if status_items else None,
+                "pdf_ocr:missing_secret:MISTRAL_API_KEY",
+                "status should explain why OCR fell back to local extraction",
             )
             local_outputs = (
                 status_items[0].get("outputs") if status_items else []
@@ -155,6 +166,39 @@ class ContentImportToolScenario(BaseScenario):
                     f"source: {remote_url}" in remote_content,
                     "Remote output should preserve requested URL provenance",
                 )
+
+            extensionless_url = "https://example.org/download?id=report"
+            extensionless_fetch = WebFetchResult(
+                source_url=extensionless_url,
+                effective_url=extensionless_url,
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                body=self.make_pdf("Extensionless PDF strategy validation"),
+                remote_ip="203.0.113.10",
+            )
+            with patch(
+                "core.ingestion.sources.web.fetch_url_with_curl",
+                return_value=extensionless_fetch,
+            ):
+                extensionless_response = self.call_api(
+                    "/api/import/url",
+                    method="POST",
+                    data={
+                        "vault": vault.name,
+                        "url": extensionless_url,
+                        "pdf_strategies": ["pdf_text"],
+                    },
+                )
+            self.soft_assert_equal(
+                extensionless_response.status_code,
+                200,
+                "Extensionless PDF URLs should accept PDF-specific strategy intent",
+            )
+            self.soft_assert_equal(
+                extensionless_response.json().get("selected_strategy"),
+                "pdf_text",
+                "PDF-specific strategy intent should apply after classification",
+            )
 
             cancel_submit = await tool.function(
                 operation="submit",
@@ -274,6 +318,41 @@ class ContentImportToolScenario(BaseScenario):
                 "The worker should not process cancelled imports",
             )
 
+            interrupted_submit = await tool.function(
+                operation="submit",
+                sources="Research/local.pdf",
+            )
+            interrupted_items = (interrupted_submit.metadata or {}).get("items") or []
+            interrupted_job_id = (
+                interrupted_items[0].get("job_id") if interrupted_items else None
+            )
+            self.soft_assert(
+                bool(interrupted_job_id and claim_queued_job(interrupted_job_id)),
+                "Restart-recovery probe should claim a queued import",
+            )
+            reconciled_ids = fail_processing_jobs(
+                "Import interrupted by an application restart"
+            )
+            self.soft_assert(
+                interrupted_job_id in reconciled_ids,
+                "Restart recovery should reconcile orphaned processing imports",
+            )
+            interrupted_status = await tool.function(
+                operation="status", job_ids=interrupted_job_id
+            )
+            interrupted_status_items = (interrupted_status.metadata or {}).get(
+                "items"
+            ) or []
+            self.soft_assert_equal(
+                (
+                    interrupted_status_items[0].get("status")
+                    if interrupted_status_items
+                    else None
+                ),
+                "failed",
+                "Interrupted processing imports should become explicitly failed",
+            )
+
             runtime = get_runtime_context()
             with (
                 patch.object(runtime.scheduler, "modify_job") as modify_job,
@@ -318,7 +397,18 @@ class ContentImportToolScenario(BaseScenario):
                 "failed",
                 "Traversal should return a structured tool failure",
             )
+            escaped_scan = self.call_api(
+                "/api/import/scan",
+                method="POST",
+                data={"vault": "../outside", "queue_only": True},
+            )
+            self.soft_assert_equal(
+                escaped_scan.status_code,
+                400,
+                "Import inbox scan must reject vault traversal",
+            )
         finally:
+            ocr_unavailable.stop()
             await self.stop_system()
             self.teardown_scenario()
         self.assert_no_failures()

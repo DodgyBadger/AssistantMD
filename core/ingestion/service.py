@@ -15,6 +15,7 @@ import yaml
 from core.constants import ASSISTANTMD_ROOT_DIR, IMPORT_DIR
 from core.ingestion.jobs import (
     IngestionJob,
+    claim_queued_job,
     create_job,
     get_job,
     init_db,
@@ -44,6 +45,7 @@ from core.vault_state.file_mutations import (
     write_vault_file,
     write_vault_file_bytes,
 )
+from core.vault_state.pathing import resolve_configured_vault_root
 from core.web.security import resolve_public_url, sanitize_url_for_log
 
 
@@ -66,8 +68,11 @@ class IngestionService:
         mime_hint: str | None,
         options: dict[str, Any] | None,
     ) -> IngestionJob:
+        vault_root = resolve_configured_vault_root(
+            data_root=get_data_root(), vault_name=vault
+        )
         opts = options or {}
-        return create_job(source_uri, vault, source_type, mime_hint, opts)
+        return create_job(source_uri, vault_root.name, source_type, mime_hint, opts)
 
     def list_recent_jobs(self, limit: int = 50) -> list[IngestionJob]:
         return list_jobs(limit)
@@ -75,8 +80,9 @@ class IngestionService:
     def get_job(self, job_id: int) -> IngestionJob | None:
         return get_job(job_id)
 
-    def mark_processing(self, job_id: int) -> None:
-        update_job_status(job_id, JobStatus.PROCESSING)
+    def claim_job(self, job_id: int) -> bool:
+        """Atomically claim one queued job for processing."""
+        return claim_queued_job(job_id)
 
     def mark_completed(self, job_id: int) -> None:
         update_job_status(job_id, JobStatus.COMPLETED)
@@ -91,8 +97,11 @@ class IngestionService:
         job = self.get_job(job_id)
         if job is None:
             raise ValueError(f"Ingestion job {job_id} not found")
-
-        self.mark_processing(job_id)
+        if job.status != JobStatus.PROCESSING.value:
+            raise ValueError(
+                f"Ingestion job {job_id} must be claimed before processing; "
+                f"current status is {job.status}"
+            )
         log_context = self._job_log_context(job)
         self.logger.info(
             "ingestion_job_started",
@@ -110,7 +119,10 @@ class IngestionService:
             ingestion_settings = self._get_ingestion_settings()
 
             data_root = Path(get_data_root())
-            vault_root = (data_root / vault).resolve()
+            vault_root = resolve_configured_vault_root(
+                data_root=data_root, vault_name=vault
+            )
+            vault = vault_root.name
             import_root = vault_root / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
             legacy_import_root = data_root / vault / ASSISTANTMD_ROOT_DIR / "import"
             import_root.mkdir(parents=True, exist_ok=True)
@@ -144,7 +156,7 @@ class IngestionService:
                         timeout=url_cfg.get("read_timeout_seconds", 10),
                         connect_timeout=url_cfg.get("connect_timeout_seconds", 10),
                         strategy=url_cfg.get("fetch_strategy", "curl"),
-                        max_bytes=url_cfg.get("max_response_bytes", 5 * 1024 * 1024),
+                        max_bytes=url_cfg.get("max_response_bytes", 25 * 1024 * 1024),
                     )
                 self.logger.info(
                     "ingestion_remote_classified",
@@ -410,7 +422,7 @@ class IngestionService:
     def _direct_pdf_ocr_document(job: IngestionJob) -> RawDocument | None:
         """Build a URL-backed PDF document when OCR is the sole requested strategy."""
         options = job.options if isinstance(job.options, dict) else {}
-        strategies = options.get("strategies")
+        strategies = options.get("strategies") or options.get("pdf_strategies")
         if strategies != ["pdf_ocr"] or options.get("pdf_mode") == "page_images":
             return None
         parsed = urlsplit(job.source_uri)
@@ -502,12 +514,16 @@ class IngestionService:
             return
         try:
             data_root = Path(get_data_root())
-            vault_root = (data_root / vault).resolve()
+            vault_root = resolve_configured_vault_root(
+                data_root=data_root, vault_name=vault
+            )
             resolved_source = source_path.resolve()
             try:
                 relative_source = resolved_source.relative_to(vault_root).as_posix()
-            except ValueError:
-                return
+            except ValueError as exc:
+                raise RuntimeError(
+                    "Consumed ingestion source resolved outside its vault"
+                ) from exc
             if resolved_source.is_file():
                 delete_vault_file(
                     vault_path=vault_root,
@@ -537,6 +553,9 @@ class IngestionService:
                     "error": self._truncate_log_value(str(exc)),
                 },
             )
+            raise RuntimeError(
+                f"Imported content was written, but source cleanup failed: {exc}"
+            ) from exc
 
     def _render_pdf_page_images(
         self,
@@ -692,7 +711,7 @@ class IngestionService:
         url_read_timeout_seconds = 10
         url_connect_timeout_seconds = 10
         url_fetch_strategy = "curl"
-        url_max_response_mb = 5
+        url_max_response_mb = 25
         try:
             pdf_default_strategies = list(
                 setting_value("ingestion_pdf_default_strategies")
@@ -745,7 +764,7 @@ class IngestionService:
         try:
             url_max_response_mb = int(setting_value("ingestion_url_max_response_mb"))
         except Exception:
-            url_max_response_mb = 5
+            url_max_response_mb = 25
 
         return {
             "pdf": {
@@ -823,11 +842,14 @@ class IngestionService:
         )
         normalized_mime = (mime or "").strip().lower()
         if normalized_mime == "application/pdf" or suffix == ".pdf":
+            pdf_override = opts.get("pdf_strategies")
+            if isinstance(pdf_override, list) and pdf_override:
+                return [str(strategy) for strategy in pdf_override]
             cfg_strategies = pdf_cfg.get("default_strategies") or []
             default_strats = (
                 [str(s) for s in cfg_strategies]
                 if cfg_strategies
-                else ["pdf_text", "pdf_ocr"]
+                else ["pdf_ocr", "pdf_text"]
             )
             return default_strats
         if normalized_mime.startswith("image/") or suffix in {

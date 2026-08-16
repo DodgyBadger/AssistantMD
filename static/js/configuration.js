@@ -181,6 +181,7 @@
         importScanBtn: null,
         importRefreshVaultsBtn: null,
         importResults: null,
+        importUrlForm: null,
         importUrlInput: null,
         importUrlSubmit: null,
         importJobsSummary: null,
@@ -298,6 +299,7 @@
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
         elements.importResults = document.getElementById('import-results');
+        elements.importUrlForm = document.getElementById('import-url-form');
         elements.importUrlInput = document.getElementById('import-url-input');
         elements.importUrlSubmit = document.getElementById('import-url-submit');
         elements.importJobsSummary = document.getElementById('import-jobs-summary');
@@ -349,7 +351,10 @@
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
         elements.importVaultSelect?.addEventListener('change', handleImportVaultChange);
-        elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
+        elements.importUrlForm?.addEventListener('submit', (event) => {
+            event.preventDefault();
+            handleImportUrl();
+        });
         elements.importJobsRefreshBtn?.addEventListener('click', () => loadImportJobs());
         elements.importJobsRunNowBtn?.addEventListener('click', handleRunImportQueueNow);
         elements.importJobsStatusFilters?.addEventListener('change', handleImportJobFilterChange);
@@ -2336,6 +2341,9 @@ async function saveModelRow(rowKey) {
             if (!ocrAvailable && elements.importCaptureOcrImagesCheckbox) {
                 elements.importCaptureOcrImagesCheckbox.title = disabledReason;
             }
+        } else {
+            enrichmentControls.forEach(control => { control.removeAttribute('title'); });
+            elements.importCaptureOcrImagesCheckbox?.removeAttribute('title');
         }
         if (disableEnrichments) {
             if ((!ocrAvailable || isPageImagesMode) && elements.importCaptureOcrImagesCheckbox) {
@@ -3413,7 +3421,11 @@ async function saveModelRow(rowKey) {
             event.target.checked = true;
             return;
         }
-        loadImportJobs();
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+        } else {
+            loadImportJobs();
+        }
     }
 
     function syncImportJobPolling() {
@@ -3429,7 +3441,10 @@ async function saveModelRow(rowKey) {
     }
 
     async function loadImportJobs({ silent = false, append = false } = {}) {
-        if (state.isLoadingImportJobs) return;
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+            return;
+        }
         if (append && !state.importJobsNextCursor) return;
         const selectedVault = (elements.importVaultSelect?.value || '').trim();
         if (!selectedVault) {
@@ -3449,7 +3464,8 @@ async function saveModelRow(rowKey) {
                 : 25;
             const params = new URLSearchParams({ limit: String(refreshLimit) });
             params.set('vault', selectedVault);
-            selectedImportJobStatuses().forEach(status => params.append('status', status));
+            const selectedStatuses = selectedImportJobStatuses();
+            selectedStatuses.forEach(status => params.append('status', status));
             if (append) params.set('cursor', state.importJobsNextCursor);
             const scrollTop = elements.importJobsList
                 ?.querySelector('.import-jobs-table-wrap')?.scrollTop || 0;
@@ -3457,6 +3473,7 @@ async function saveModelRow(rowKey) {
             const data = await safeJson(response);
             if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
             if ((elements.importVaultSelect?.value || '').trim() !== selectedVault) return;
+            if (selectedImportJobStatuses().join('\u0000') !== selectedStatuses.join('\u0000')) return;
             const received = Array.isArray(data?.jobs) ? data.jobs : [];
             let nextJobs;
             if (append) {
@@ -3749,9 +3766,7 @@ async function saveModelRow(rowKey) {
         const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
         const pdfStrategies = selectedPdfStrategyOverride();
         const payload = { vault, url, clean_html: true, pdf_mode: pdfMode };
-        if (pdfStrategies && url.toLowerCase().split(/[?#]/, 1)[0].endsWith('.pdf')) {
-            payload.strategies = pdfStrategies;
-        }
+        if (pdfStrategies) payload.pdf_strategies = pdfStrategies;
         if (captureOcrImages) payload.capture_ocr_images = true;
         addOcrEnrichmentOptions(payload);
 

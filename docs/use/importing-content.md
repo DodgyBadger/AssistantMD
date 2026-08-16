@@ -6,9 +6,10 @@ section. All surfaces use the same durable ingestion job queue.
 
 ## Monitor and control imports
 
-Open **Dashboard > Import** to see recent jobs across vaults. The Import Status
-table shows queued, processing, completed, failed, and cancelled jobs, along
-with their outputs or errors.
+Open **Dashboard > Import** to see recent jobs for the selected vault. The vault
+selector controls the visible history, inbox processing, and manual URL imports.
+The Import Status table shows queued, processing, completed, failed, and
+cancelled jobs, along with their outputs or errors.
 
 - Use **Refresh Import Status** to reload the durable job list.
 - Use **Process Queue Now** to request an immediate run of the scheduled
@@ -35,4 +36,3 @@ external API usage.
 
 Scheduled worker runs do not overlap. Slow imports can therefore extend the
 effective wait for jobs left in the queue.
-

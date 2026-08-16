@@ -2,70 +2,61 @@
 
 ## Objective
 
-Modernize PDF import as a quality-aware, provider-extensible document conversion
+Modernize PDF import as an OCR-first, provider-extensible document conversion
 system while preserving the existing importer/extractor split and keeping heavy
 OCR runtimes outside the AssistantMD process.
 
-This is a design plan. It does not authorize implementation or change the
-current ingestion contract.
+This plan records the implemented contract and explicitly deferred PDF work.
 
 ## Current State
 
 PDFs from vault files and URLs converge on the same `RawDocument` path. Markdown
 mode runs an ordered list of strategies; the first strategy returning any
-non-empty text wins. The default order is `pdf_text`, then `pdf_ocr`. A separate
-`page_images` mode bypasses text extraction.
+non-empty text wins. The default order is `pdf_ocr`, then `pdf_text`; unavailable
+OCR is skipped, making local text extraction the credential-free fallback. A
+separate `page_images` mode bypasses text extraction.
 
 Current strategies:
 
 - `pdf_text`: PyMuPDF plain-text extraction
-- `pdf_ocr`: Mistral `/v1/ocr`, sending the complete PDF as a base64 data URL
+- `pdf_ocr`: Mistral `/v1/ocr`, using a direct public URL for explicitly
+  OCR-only `.pdf` imports and inline base64 for local or downloaded PDFs
 - `page_images`: deterministic local rendering with a Markdown image index
 
-The selected strategy is written to output frontmatter and activity events, but
-is not persisted on the ingestion job or shown in the Import table.
+The selected strategy, provider, model, attempts, and fallback reason are
+persisted on the ingestion job and exposed through the API, tool, and Import
+table.
 
-## Critical Findings
+## Design Findings
 
-### Strategy selection is success-aware, not quality-aware
+### Strategy selection is explicit and capability-aware
 
-`pdf_text` wins if it returns any non-whitespace text. This incorrectly accepts:
+Mistral OCR is the recommended default when it is configured because it is
+inexpensive and generally produces better Markdown than local text extraction.
+`pdf_text` remains the fallback when OCR credentials are unavailable or the
+provider call fails, and an explicit local-only choice remains available for
+privacy, offline, or latency-sensitive workflows.
 
-- scanned PDFs with a sparse or broken hidden text layer
-- mixed PDFs where only some pages contain native text
-- multi-column or table-heavy PDFs whose extracted reading order is unusable
-- documents with headers/page numbers but no meaningful body extraction
+Automatic quality scoring, guessed extraction thresholds, and mixed-page merge
+logic are not part of the planned routing architecture.
 
-An ordered fallback list cannot solve this by itself. Extraction results need an
-acceptance/quality contract, and PDF routing needs document evidence before it
-decides whether local text is sufficient.
+### Remaining Mistral adapter opportunities
 
-### The Mistral adapter is behind the current API
+The adapter retains page Markdown and can opt into images, blocks, confidence,
+separate tables, headers, and footers. It also records response model and usage
+metadata. Remaining optional capabilities are:
 
-The adapter currently retains page Markdown and optional image base64 payloads.
-It discards or does not request:
-
-- OCR 4 structural blocks, labels, reading order, and bounding boxes
-- page- or word-level confidence scores
-- explicit table output (`markdown` or `html`)
-- separated headers and footers
-- hyperlinks, page dimensions, response model identity, and usage information
 - document and bounding-box annotations
 - selective page ranges
+- provider file upload and asynchronous batch OCR
 
-The request uses a hard-coded 60-second timeout and always embeds the complete
-document in JSON, adding base64 overhead. It does not use Mistral file upload or
-direct document URLs, file upload, or batch OCR for large workloads.
-
-There is also a current option translation defect: direct manual URL imports
-place `capture_ocr_images` inside `extractor_options`, while the Mistral strategy
-expects the internal key `ocr_capture_images`. The shared `ContentImportService`
-does translate this correctly; the direct API path does not.
+The request timeout is editable. File upload and batch processing remain
+deferred until large-document usage demonstrates the need.
 
 ### “OCR provider” and “PDF policy” are conflated
 
-The UI exposes PDF mode and an OCR checkbox, while settings expose a raw ordered
-strategy list. These represent different decisions:
+The UI now separates PDF output mode, Markdown conversion strategy, and
+strategy-specific enrichments. These remain different decisions:
 
 - desired artifact: Markdown or page-image index
 - routing policy: automatic, local-only, OCR-first, or forced provider
@@ -202,38 +193,18 @@ strategy or assuming that a provider supports every format through every
 transport. Add strategy names only alongside implemented and validated formats;
 do not introduce speculative registrations.
 
-### 1. Introduce an explicit PDF routing policy
+### 1. Keep PDF routing explicit and capability-aware
 
-Replace raw strategy ordering as the main user concept with:
+Present the existing strategy behavior through user-facing choices:
 
-- `auto`: inspect native extraction quality, then accept local text or use the
-  configured OCR provider
+- configured default: use the editable strategy order, recommended as OCR first
+  with local text fallback; skip unavailable strategies
 - `local_text`: never send the document to a remote OCR provider
 - `ocr`: use the selected OCR provider directly
 - `page_images`: produce the deterministic page-image index
 
-Keep ordered strategies internally for compatibility and fallback, but resolve
-them from the policy plus provider configuration.
-
-### 2. Add a quality profile and acceptance decision
-
-Local PDF inspection should produce evidence such as:
-
-- page count and encrypted/password status
-- characters and words per page
-- pages with meaningful native text
-- printable/replacement-character ratios
-- image-dominant and text-sparse page counts
-- basic reading-order/layout risk signals
-
-An extraction result should carry a normalized quality summary. `auto` accepts
-`pdf_text` only when the local result passes configured policy; “non-empty” is
-not sufficient. Exact thresholds should be derived from a representative corpus
-rather than guessed in production code.
-
-Mixed PDFs should initially route to whole-document OCR when local quality is
-inconsistent. Selective page OCR and deterministic page merging can follow once
-the normalized page model is proven.
+Keep ordered strategies internally as the editable deployment policy rather
+than introducing a separate quality-policy layer.
 
 ### 3. Normalize provider results
 
@@ -364,13 +335,14 @@ additional source formats remain future work.
 Annotations should remain opt-in and schema-driven. They are valuable for
 specialized workflows but should not become part of baseline Markdown import.
 
-### Stage 3: Quality-aware automatic routing
+### Stage 3: Default routing and transport resilience
 
-1. Add local PDF profiling and a typed quality decision.
-2. Replace non-empty acceptance with policy-driven acceptance.
-3. Introduce the user-facing `auto`, `local_text`, `ocr`, and `page_images`
-   modes while preserving old strategy-list compatibility.
-4. Evaluate local-first versus OCR-first defaults using the validation corpus.
+1. Recommend `pdf_ocr`, then `pdf_text` as the configured default.
+2. Skip OCR cleanly when its credentials or configuration are unavailable.
+3. Preserve explicit configured-default, local-only, OCR-only, and page-images
+   choices.
+4. Add AssistantMD fetch/upload fallback when a provider cannot retrieve a
+   direct document URL and operational experience justifies the extra transport.
 
 ### Stage 4: Provider extensibility
 
@@ -385,7 +357,8 @@ specialized workflows but should not become part of baseline Markdown import.
 ### Stage 5: Scale features
 
 Consider provider batch APIs, document chunking, and selective-page OCR only
-after the synchronous normalized contract and quality routing are validated.
+after the synchronous normalized contract and OCR-first fallback behavior are
+validated.
 AssistantMD's durable ingestion queue remains the orchestration authority; a
 provider batch job is an execution detail, not a second user-facing queue.
 
@@ -407,17 +380,16 @@ The retained corpus should include:
 
 Contract assertions should cover:
 
-- profiling evidence and deterministic routing decision
-- local acceptance versus OCR fallback
+- OCR-first default ordering and credential-free local fallback
+- provider failure followed by local fallback
 - explicit forced-mode behavior
 - provider capability validation
 - normalized pages/blocks/tables/images/confidence
 - selected provider/model provenance in job API, frontmatter, and UI
 - preservation of source bytes and vault artifacts on failure
 
-Quality thresholds require human-reviewed corpus results. Maintainers should run
-the full validation suite; individual scenarios and provider-mocked contracts
-remain agent-owned during implementation.
+Maintainers should run the full validation suite; individual scenarios and
+provider-mocked contracts remain agent-owned during implementation.
 
 ## Affected Areas
 
@@ -434,6 +406,7 @@ remain agent-owned during implementation.
 
 ## Next Phase
 
-Proceed to Feature Development with Stage 1 only. Do not begin provider
-abstraction or automatic quality thresholds until selected-strategy provenance
-and the validation corpus contract are in place.
+Complete release hardening and validation of the implemented OCR-first strategy,
+credential-free local fallback, direct URL OCR transport, enrichment controls,
+and provenance contract. Defer provider abstraction, file-upload transport,
+annotations, and selective pages until concrete use cases justify them.

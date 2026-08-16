@@ -24,6 +24,7 @@ from core.runtime.context import RuntimeContext
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from core.scheduling.system_jobs import INGESTION_WORKER_JOB_ID
+from core.vault_state.pathing import resolve_configured_vault_root
 
 from .shared import logger
 
@@ -120,7 +121,7 @@ async def scan_import_folder(
                 runtime,
                 ingest_service,
                 job.id,
-                vault,
+                job.vault or vault,
                 authority=require_current_execution_authority(),
             )
             refreshed_jobs.append(ingest_service.get_job(job.id) or job)
@@ -148,7 +149,10 @@ def _enqueue_import_scan_jobs(
 ) -> tuple[RuntimeContext, IngestionService, list[IngestionJob], list[str]]:
     """Create ingestion jobs for supported files in a vault import folder."""
     runtime = get_runtime_context()
-    vault_root = Path(runtime.config.data_root) / vault
+    vault_root = resolve_configured_vault_root(
+        data_root=runtime.config.data_root, vault_name=vault
+    )
+    vault = vault_root.name
     import_root = vault_root / ASSISTANTMD_ROOT_DIR / IMPORT_DIR
     legacy_import_root = (
         Path(runtime.config.data_root) / vault / ASSISTANTMD_ROOT_DIR / "import"
@@ -221,6 +225,7 @@ async def import_url_direct(
     url: str,
     clean_html: bool = True,
     strategies: list[str] | None = None,
+    pdf_strategies: list[str] | None = None,
     capture_ocr_images: bool | None = None,
     pdf_mode: str | None = None,
     ocr_options: dict[str, Any] | None = None,
@@ -232,6 +237,8 @@ async def import_url_direct(
     options: dict[str, Any] = {"clean_html": clean_html}
     if strategies:
         options["strategies"] = strategies
+    if pdf_strategies:
+        options["pdf_strategies"] = pdf_strategies
     if capture_ocr_images is not None:
         options["capture_ocr_images"] = capture_ocr_images
     if pdf_mode:
@@ -258,6 +265,7 @@ async def import_url_direct(
             "outputs_count": len(outputs) if outputs is not None else 0,
             "clean_html": clean_html,
             "strategies": strategies or [],
+            "pdf_strategies": pdf_strategies or [],
             "capture_ocr_images": capture_ocr_images,
             "pdf_mode": pdf_mode,
         },
@@ -274,6 +282,12 @@ async def _process_ingestion_job_for_api(
     authority: ExecutionAuthority,
 ) -> None:
     """Process one API-triggered ingestion job under execution task context."""
+    if not ingest_service.claim_job(job_id):
+        logger.info(
+            "Ingestion job was not available for immediate processing",
+            data={"job_id": job_id, "vault": vault, "source": "api"},
+        )
+        return
     try:
         await process_ingestion_job_in_task(
             task_coordinator=runtime.task_coordinator,
@@ -283,6 +297,21 @@ async def _process_ingestion_job_for_api(
             source=ExecutionTaskSource.API,
             authority=authority,
         )
-    except Exception:
-        # process_job persists status/error; callers inspect the refreshed job.
-        pass
+    except Exception as exc:
+        # process_job persists its own failures. If task setup failed before the
+        # processor ran, close the claimed state here instead of stranding it.
+        current = ingest_service.get_job(job_id)
+        if current is not None and current.status == JobStatus.PROCESSING.value:
+            ingest_service.mark_failed(
+                job_id, f"Failed to start immediate ingestion task: {exc}"
+            )
+        logger.error(
+            "Immediate ingestion task failed",
+            data={
+                "job_id": job_id,
+                "vault": vault,
+                "source": "api",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )

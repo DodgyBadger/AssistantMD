@@ -29,6 +29,8 @@ Optional `options`:
   the configured `ingestion_output_path_pattern` is used
 - `pdf_mode`: `markdown` or `page_images`
 - `strategies`: ordered extraction strategy names
+- `pdf_strategies`: ordered extraction strategies applied only after a URL or
+  vault file is classified as a PDF; useful for extensionless document URLs
 - `capture_ocr_images`: save images extracted by Mistral under the import's
   assets directory and rewrite matching Markdown image links; increases the
   provider response size and vault storage

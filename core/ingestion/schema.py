@@ -33,14 +33,27 @@ def ensure_ingestion_jobs_schema(
                 namespace=MIGRATION_NAMESPACE,
                 migrations=INGESTION_JOB_MIGRATIONS,
             )
-        else:
-            _ensure_ingestion_jobs_table(conn)
+        elif not _table_exists(conn, "ingestion_jobs"):
+            _create_ingestion_jobs_table(conn)
         conn.commit()
     finally:
         conn.close()
 
 
 def _ensure_ingestion_jobs_table(conn: sqlite3.Connection) -> None:
+    _create_ingestion_jobs_table(conn)
+    for column_name, definition in (
+        ("selected_strategy", "VARCHAR"),
+        ("selected_provider", "VARCHAR"),
+        ("selected_model", "VARCHAR"),
+        ("strategy_attempts", "JSON"),
+        ("fallback_reason", "TEXT"),
+    ):
+        _ensure_column(conn, column_name, definition)
+
+
+def _create_ingestion_jobs_table(conn: sqlite3.Connection) -> None:
+    """Create the current table for a new database without migrating old tables."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ingestion_jobs (
@@ -63,14 +76,19 @@ def _ensure_ingestion_jobs_table(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    for column_name, definition in (
-        ("selected_strategy", "VARCHAR"),
-        ("selected_provider", "VARCHAR"),
-        ("selected_model", "VARCHAR"),
-        ("strategy_attempts", "JSON"),
-        ("fallback_reason", "TEXT"),
-    ):
-        _ensure_column(conn, column_name, definition)
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        LIMIT 1
+        """,
+        (table_name,),
+    ).fetchone()
+    return row is not None
 
 
 def _ensure_column(

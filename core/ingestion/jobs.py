@@ -295,6 +295,27 @@ def claim_queued_job(job_id: int) -> bool:
         raise RuntimeError(f"Failed to claim job {job_id}: {exc}") from exc
 
 
+def fail_processing_jobs(reason: str) -> list[int]:
+    """Mark processing jobs interrupted by a previous runtime as failed."""
+    session_factory = _get_session_factory()
+    try:
+        with session_factory() as session:
+            jobs = (
+                session.query(IngestionJob)
+                .filter(IngestionJob.status == JobStatus.PROCESSING.value)
+                .all()
+            )
+            job_ids = [job.id for job in jobs]
+            for job in jobs:
+                job.status = JobStatus.FAILED.value
+                job.error = reason
+                job.updated_at = datetime.utcnow()
+            session.commit()
+            return job_ids
+    except SQLAlchemyError as exc:
+        raise RuntimeError(f"Failed to reconcile processing jobs: {exc}") from exc
+
+
 def count_jobs(*, status: JobStatus | None = None) -> int:
     """Count durable ingestion jobs, optionally limited to one status."""
     session_factory = _get_session_factory()

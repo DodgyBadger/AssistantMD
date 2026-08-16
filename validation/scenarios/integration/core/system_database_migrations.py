@@ -9,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat import ChatStore
+from core.ingestion.service import IngestionService
+from core.runtime.paths import set_bootstrap_roots
 from core.system_migrations import get_system_migration_status, run_system_migrations
 from validation.core.base_scenario import BaseScenario
 
@@ -25,6 +27,16 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         self._create_legacy_ingestion_jobs_db(ingestion_db)
 
         ChatStore(str(system_root))
+        set_bootstrap_roots(self.artifacts_dir / "data", system_root)
+        IngestionService()
+        with sqlite3.connect(ingestion_db) as conn:
+            columns_before_migration = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(ingestion_jobs)")
+            }
+        self.soft_assert(
+            "selected_strategy" not in columns_before_migration,
+            "Ingestion service initialization must not bypass managed migrations",
+        )
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,

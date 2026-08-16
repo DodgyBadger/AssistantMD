@@ -8,6 +8,7 @@ and asserts the rendered markdown output exists while the source file is removed
 import sqlite3
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -34,11 +35,12 @@ class ImportPipelineScenario(BaseScenario):
         await self.start_system()
 
         # Trigger import scan (processes immediately by default)
-        response = self.call_api(
-            "/api/import/scan",
-            method="POST",
-            data={"vault": vault.name, "queue_only": False},
-        )
+        with patch("core.ingestion.service.secret_has_value", return_value=False):
+            response = self.call_api(
+                "/api/import/scan",
+                method="POST",
+                data={"vault": vault.name, "queue_only": False},
+            )
         assert response.status_code == 200, "Import scan should succeed"
         payload = response.json()
         jobs = payload.get("jobs_created") or []
@@ -47,7 +49,8 @@ class ImportPipelineScenario(BaseScenario):
         assert job.get("status") == "completed", "Job should complete inline"
         assert job.get("selected_strategy") == "pdf_text"
         assert job.get("selected_provider") == "local"
-        assert job.get("strategy_attempts") == ["pdf_text"]
+        assert job.get("strategy_attempts") == ["pdf_ocr", "pdf_text"]
+        assert job.get("fallback_reason") == "pdf_ocr:missing_secret:MISTRAL_API_KEY"
         outputs = job.get("outputs") or []
         assert len(outputs) > 0, "Import scan should return at least one output path"
         sample_rel_path = outputs[0]
@@ -121,14 +124,18 @@ class ImportPipelineScenario(BaseScenario):
             mime_hint=None,
             options={"consume_source": False},
         )
-        await process_ingestion_job_in_task(
-            task_coordinator=runtime.task_coordinator,
-            process_job_fn=runtime.ingestion.process_job,
-            job_id=preserved_job.id,
-            vault=vault.name,
-            source=ExecutionTaskSource.API,
-            authority=SYSTEM_AUTHORITY,
-        )
+        assert runtime.ingestion.claim_job(
+            preserved_job.id
+        ), "Preserved-source job should be claimed before processing"
+        with patch("core.ingestion.service.secret_has_value", return_value=False):
+            await process_ingestion_job_in_task(
+                task_coordinator=runtime.task_coordinator,
+                process_job_fn=runtime.ingestion.process_job,
+                job_id=preserved_job.id,
+                vault=vault.name,
+                source=ExecutionTaskSource.API,
+                authority=SYSTEM_AUTHORITY,
+            )
         preserved_result = runtime.ingestion.get_job(preserved_job.id)
         assert preserved_result is not None
         assert preserved_result.status == "completed"

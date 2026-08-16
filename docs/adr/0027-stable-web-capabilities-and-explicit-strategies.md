@@ -57,9 +57,8 @@ memory headroom before launch.
   shared transport policy.
 - Browser-capable deployments have a documented 2 GB baseline; lightweight
   deployments disable browser and retain static `web_extract`.
-- A future durable `content_import` capability can accept URLs and vault files
-  through ingestion without calling or extending the transient `web_extract`
-  tool.
+- The durable `content_import` capability accepts URLs and vault files through
+  ingestion without calling or extending the transient `web_extract` tool.
 
 ## Evidence
 
@@ -67,6 +66,7 @@ memory headroom before launch.
 - `core/tools/web_search.py`
 - `core/tools/web_extract.py`
 - `core/tools/web_crawl.py`
+- `core/tools/content_import.py`
 - `core/ingestion/sources/web.py`
 - `core/ingestion/strategies/html_raw.py`
 - `validation/scenarios/integration/core/web_capability_strategies.py`

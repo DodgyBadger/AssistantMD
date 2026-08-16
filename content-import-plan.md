@@ -14,9 +14,9 @@ Implemented on `dev/research-automation`:
 - removal of the obsolete `import_content` authoring helper
 - focused validation scenarios and architecture/tool documentation
 
-Local smoke probes and the complete Ruff, Black, and MyPy quality gate pass.
-Targeted harness scenarios and the maintainer-owned full validation suite remain
-to be run by maintainers before delivery is considered validated.
+Targeted harness scenarios and the complete Ruff, Black, and MyPy quality gate
+pass. The maintainer-owned full validation suite remains to be run before
+delivery is considered validated.
 
 ## Objective
 
@@ -105,9 +105,10 @@ Both operations return one structured item per source/job with:
 - `job_id`
 - `source`
 - `source_kind`: `url` or `vault_file`
-- `status`: `queued`, `processing`, `completed`, or `failed`
+- `status`: `queued`, `processing`, `completed`, `failed`, or `cancelled`
 - `outputs`: vault-relative output paths
 - `error`: safe failure text when present
+- selected strategy/provider/model, attempted strategies, and fallback reason
 
 The tool return should include concise model-readable text plus the structured
 items in metadata so chat and Monty do not need to parse prose to inspect job
@@ -471,7 +472,35 @@ Avoid asserting on free-form agent prose or full tool descriptions.
 
 ## Next Phase
 
-Move to Feature Development and begin with the failing source-disposition
-scenario. The first production change should remove cleanup responsibility from
-`core/ingestion/storage.py`; the tool adapter comes only after source lifecycle
-and remote routing contracts are safe.
+The initial content-import contract is implemented. Complete release hardening,
+request the maintainer-owned full validation run, and keep future work scoped to
+observed ingestion needs. Multi-artifact transactional storage is the remaining
+known hardening topic; provider expansion, browser fallback, and research
+orchestration remain separate efforts.
+
+### Deferred hardening: multi-artifact storage atomicity
+
+Imports may produce Markdown plus companion images, page renders, or structured
+OCR metadata. Storage currently writes those artifacts sequentially and records
+job outputs only after every write succeeds. If a later write fails, earlier
+artifacts can remain in the vault while the job is marked failed without a
+complete durable record of what was written.
+
+Address this as a dedicated vault-mutation contract rather than a local
+exception-handling patch:
+
+1. Resolve and reserve the complete output-path set before writing any artifact,
+   including collision suffixes shared by the Markdown and its assets.
+2. Execute the writes through a mutation batch that either completes or rolls
+   back files created by that import attempt.
+3. If rollback itself fails, persist every surviving output path and expose a
+   precise partial-mutation error instead of an unqualified import failure.
+4. Preserve Vault Activity attribution, snapshots, and undo behavior for both
+   successful batches and rollback operations.
+5. Add a deterministic scenario that forces a companion-artifact write failure
+   after the primary Markdown write and verifies the final vault contents, job
+   outputs/error, mutation history, and safe retry behavior.
+
+Do not implement independent best-effort deletion inside ingestion storage; the
+solution should reuse or extend the authoritative vault mutation and rollback
+machinery so other multi-file operations can share the same invariant.

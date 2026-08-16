@@ -229,7 +229,11 @@ def extract_with_mistral_ocr(
         ),
     )
     if resp.status_code >= 400:
-        raise RuntimeError(f"OCR request failed ({resp.status_code}): {resp.text}")
+        error_body = str(resp.text or "").strip()
+        if len(error_body) > 1000:
+            error_body = f"{error_body[:1000]}..."
+        detail = f": {error_body}" if error_body else ""
+        raise RuntimeError(f"OCR request failed ({resp.status_code}){detail}")
 
     try:
         body: dict[str, Any] = resp.json()

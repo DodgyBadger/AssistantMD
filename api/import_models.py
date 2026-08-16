@@ -67,6 +67,7 @@ class ImportUrlRequest(BaseModel):
     url: str
     clean_html: bool = True
     strategies: list[str] | None = None
+    pdf_strategies: list[str] | None = None
     capture_ocr_images: bool | None = None
     pdf_mode: str | None = None
     include_ocr_blocks: bool | None = None

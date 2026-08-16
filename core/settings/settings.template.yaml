@@ -236,9 +236,9 @@ settings:
     restart_required: false
   ingestion_pdf_default_strategies:
     value:
-      - pdf_text
       - pdf_ocr
-    description: "Available strategies and priority for PDF ingestion. JSON array. Remove value to disable or reorder as needed. E.g. [\"pdf_ocr\"] will force all imports through OCR."
+      - pdf_text
+    description: "Available strategies and priority for PDF ingestion. JSON array. OCR is recommended first when configured; unavailable strategies are skipped. Remove a value to disable it or reorder as needed. E.g. [\"pdf_ocr\"] forces all imports through OCR."
     category: "Import"
     restart_required: false
   ingestion_ocr_model:
@@ -288,8 +288,8 @@ settings:
     category: "Import"
     restart_required: false
   ingestion_url_max_response_mb:
-    value: 5
-    description: "Maximum response body size in megabytes for one URL ingestion request."
+    value: 25
+    description: "Maximum response body size in megabytes for one URL ingestion request. The 25 MB default accommodates typical research PDFs; lower it for tighter memory limits."
     category: "Import"
     restart_required: false
   content_import_max_batch_size:

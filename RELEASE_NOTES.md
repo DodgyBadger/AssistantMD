@@ -1,5 +1,94 @@
 # Release Notes
 
+## v0.7.2
+
+### Build research libraries from chat or workflows
+
+AssistantMD can now turn source lists into a durable Markdown library without
+requiring users to download and stage every document manually.
+
+- The new `content_import` tool lets chat agents and Monty workflows submit one
+  or many public web URLs or existing vault files, then inspect durable job
+  status using the returned job IDs.
+- Each import can choose its destination directory. When omitted, AssistantMD
+  uses the configured default import destination.
+- Remote HTML pages and PDFs use the same ingestion pipeline as manual imports.
+  Source vault files are preserved, generated Markdown lands directly in the
+  destination, and companion images or structured OCR data are kept in a named
+  `assets` directory.
+- Completed jobs report their output paths and the extraction strategy,
+  provider, and model that produced them, so agents and deterministic workflows
+  can continue organizing or reviewing the imported material.
+
+The import tool deliberately handles conversion rather than research policy.
+Agents, skills, playbooks, and workflows remain free to decide how sources are
+discovered, tracked, retried, and organized.
+
+### Import status and controls
+
+The Dashboard Import section now provides an operational view of the durable
+ingestion queue for the selected vault.
+
+- Filter recent jobs by status, load older history inside a bounded responsive
+  table, and inspect errors and extraction provenance.
+- Cancel jobs that are still queued, refresh status manually, or use **Process
+  Queue Now** when an interactive import should not wait for the next scheduled
+  worker interval.
+- Load any previous URL job back into the manual import form to adjust its PDF
+  or OCR settings and submit it again.
+- Source URLs are live external links. Completed output paths open directly in
+  the vault viewer from both the results area and import history.
+- Vault selection now consistently controls import history, inbox processing,
+  and manual URL imports.
+
+Import throughput remains configurable through
+`ingestion_worker_interval_seconds` and `ingestion_worker_batch_size`. URL
+response limits are now configured and reported in MB; new installations use a
+25 MB default suitable for typical research PDFs.
+
+### Improved PDF and Mistral OCR imports
+
+- PDF imports clearly separate the desired output—Markdown or page images—from
+  the Markdown extraction strategy and its applicable options.
+- Mistral OCR can receive public PDF URLs directly, avoiding an unnecessary
+  download and re-upload when OCR is explicitly selected.
+- Optional OCR enrichments can retain document images, structural blocks,
+  tables, separated headers and footers, and page- or word-level confidence.
+  Structured results are stored alongside the imported document for later
+  scripted analysis.
+- The Import UI derives OCR availability from backend configuration and explains
+  which options apply to the selected strategy.
+- New installations prefer Mistral OCR and fall back to local PDF text
+  extraction. If Mistral is not configured, OCR is skipped cleanly and local
+  extraction continues.
+
+### Reliability and development
+
+- `web_extract` now rejects PDFs and other binary responses with guidance to use
+  `content_import`, preventing oversized binary tool results from disrupting a
+  chat stream.
+- Browser storage is optional. AssistantMD continues initializing with in-memory
+  defaults when embedded in a restricted or opaque-origin frame where
+  `localStorage` is unavailable.
+- Imports left in progress by an application restart are marked failed with a
+  clear interruption reason instead of remaining stuck indefinitely.
+- `scripts/dev run` now uses the checkout's repository-local `data/` and
+  `system/` directories by default, matching the persistent development state
+  developers expect.
+
+### After upgrading
+
+1. Restart AssistantMD and apply any pending database migrations shown under
+   **System > Misc**.
+2. If System Notices offers **Repair settings from template**, run it to add the
+   `content_import` tool and new ingestion settings while retaining custom
+   configuration.
+3. Existing values of `ingestion_pdf_default_strategies` are preserved. To use
+   the new OCR-first recommendation, set the order to `pdf_ocr`, then `pdf_text`.
+   Keep `pdf_text` first or select **Local Text Only** when documents must not be
+   sent to Mistral.
+
+
 ## v0.7.1
 
 ### Backend authorization foundation

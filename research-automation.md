@@ -16,6 +16,22 @@ import primitives and status contracts. Search strategy, URL selection, library
 index generation, retry policy, and summarization should mostly live in Monty
 workflow templates and context/tool usage.
 
+## Implementation Status
+
+The focused `content_import` tool, shared URL/vault-file ingestion service,
+durable queue, selected-vault Import UI, status filters, cancellation, manual
+worker trigger, per-job destinations, and PDF OCR controls are implemented on
+`dev/research-automation`. Research tracking, deduplication, retry policy, and
+library organization remain intentionally outside the ingestion architecture.
+
+The design exploration below is retained as historical context. Its speculative
+research pipeline, Docling, quality-aware `auto` routing, batch database, and
+browser-fallback proposals are not the current implementation plan. The current
+contract is defined by `content-import-plan.md`, `pdf-import-design.md`, and the
+product documentation under `docs/`.
+
+## Historical Design Exploration
+
 ## Supported Scenarios
 
 The design should support these entry modes with the same backend import engine:
@@ -780,5 +796,6 @@ still mix completed noise into the operational view.
 
 No database migration or retention policy change is needed. Durable jobs remain
 in the subsystem-owned ingestion database; this work only changes how history
-is queried and presented. The next phase is Feature Development, beginning with
-the API scenario and persistence query contract.
+is queried and presented. This contract is implemented; remaining work is
+release validation and hardening rather than another Import UI implementation
+phase.

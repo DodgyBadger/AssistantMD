@@ -345,14 +345,14 @@
                                 <p class="font-semibold text-txt-primary">Import URL</p>
                                 <p class="text-xs text-txt-secondary">Fetches and imports one web page or document URL immediately into the selected vault.</p>
                             </div>
-                            <div class="flex flex-col md:flex-row gap-4 items-end">
+                            <form id="import-url-form" class="flex flex-col md:flex-row gap-4 items-end">
                                 <div class="md:flex-1 w-full">
-                                    <input id="import-url-input" type="text" placeholder="https://example.com/article-or-document.pdf" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
+                                    <input id="import-url-input" type="url" placeholder="https://example.com/article-or-document.pdf" class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary focus:outline-none focus:ring-2 focus:ring-accent">
                                 </div>
                                 <div class="flex items-end justify-end">
-                                    <button id="import-url-submit" type="button" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import URL"></button>
+                                    <button id="import-url-submit" type="submit" class="ui-icon-button is-primary" data-icon="fileDown" data-icon-label="Import URL"></button>
                                 </div>
-                            </div>
+                            </form>
                         </div>
 
                         <div class="text-sm text-txt-secondary">

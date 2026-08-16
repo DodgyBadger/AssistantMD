@@ -15,6 +15,7 @@ from core.authoring.template_discovery import WorkflowLoader, seed_system_templa
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
 from core.identity import AuthorizationService
+from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
@@ -113,6 +114,19 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         # Initialize ingestion service
         ingestion_service = IngestionService()
+        interrupted_job_ids = fail_processing_jobs(
+            "Import interrupted by an application restart"
+        )
+        if interrupted_job_ids:
+            logger.warning(
+                "Interrupted ingestion jobs reconciled",
+                data={
+                    "event": "ingestion_jobs_reconciled",
+                    "job_ids": interrupted_job_ids,
+                    "status": "failed",
+                    "reason": "application_restart",
+                },
+            )
         # Determine ingestion worker interval and batch size from settings (with safe fallbacks)
         ingestion_interval = 120
         ingestion_max_concurrent = (

@@ -14,7 +14,7 @@ In short: importers answer **"how do we load this source?"** and strategies answ
 Examples:
 
 - URL import: source importer fetches HTML, strategy `html_markdownify` extracts markdown text.
-- PDF import (`pdf_mode=markdown`): source importer loads PDF bytes, then strategies (for example `pdf_text`, then `pdf_ocr`) run in order until one succeeds.
+- PDF import (`pdf_mode=markdown`): source importer loads PDF bytes, then strategies (by default `pdf_ocr`, then `pdf_text`) run in order until one succeeds. Strategies whose required credentials are unavailable are skipped.
 - Image import: source importer loads image bytes, strategy `image_ocr` extracts text via OCR.
 
 URL transport and HTML conversion are implemented as shared primitives under
@@ -43,6 +43,11 @@ Immediate API processing runs ingestion jobs inside an execution task with
 the same execution-task wrapper with `task_source="scheduler"`. Vault writes and
 source cleanup therefore flow through the shared vault mutation recorder and
 appear in Vault Activity.
+
+Both paths atomically claim a `queued` job before processing. A cancelled or
+already-claimed job cannot be processed again. During runtime startup, jobs left
+in `processing` by an interrupted process are marked `failed` with an explicit
+restart reason rather than remaining permanently stuck.
 
 ## Job Model and Persistence
 
@@ -105,7 +110,7 @@ Built-in handlers are imported for registry side effects in `_load_builtin_handl
 Default strategy order:
 
 - URL: `html_markdownify`
-- PDF markdown mode: from `ingestion_pdf_default_strategies`, fallback `pdf_text`, `pdf_ocr`
+- PDF markdown mode: from `ingestion_pdf_default_strategies`, fallback `pdf_ocr`, `pdf_text`
 - Image files: from `ingestion_image_default_strategies`, fallback `image_ocr`
 
 URL fetching uses the independently configured

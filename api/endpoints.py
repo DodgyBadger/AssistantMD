@@ -42,6 +42,7 @@ from core.settings import (
     get_vault_upload_max_bytes_per_file,
     get_vault_upload_max_mb_per_file,
 )
+from core.vault_state.pathing import VaultRootResolutionError
 
 from .exceptions import (
     APIException,
@@ -925,6 +926,23 @@ async def import_scan(
             _import_job_info(job, fallback_vault=request.vault) for job in jobs
         ]
         return ImportScanResponse(jobs_created=job_infos, skipped=skipped)
+    except VaultRootResolutionError as e:
+        return create_error_response(
+            APIException(
+                status_code=404 if e.code == "vault_not_found" else 400,
+                error_type="InvalidImportVault",
+                message=str(e),
+                details={"vault_name": e.vault_name},
+            )
+        )
+    except ValueError as e:
+        return create_error_response(
+            APIException(
+                status_code=400,
+                error_type="InvalidImportRequest",
+                message=str(e),
+            )
+        )
     except Exception as e:
         return create_error_response(e)
 
@@ -939,12 +957,21 @@ async def import_url(
             url=request.url,
             clean_html=request.clean_html,
             strategies=request.strategies,
+            pdf_strategies=request.pdf_strategies,
             capture_ocr_images=request.capture_ocr_images,
             pdf_mode=request.pdf_mode,
             ocr_options=_ocr_options_from_request(request),
         )
         return ImportUrlResponse(
             **_import_job_info(job, fallback_vault=request.vault).model_dump()
+        )
+    except (ValueError, VaultRootResolutionError) as e:
+        return create_error_response(
+            APIException(
+                status_code=400,
+                error_type="InvalidImportRequest",
+                message=str(e),
+            )
         )
     except Exception as e:
         return create_error_response(e)

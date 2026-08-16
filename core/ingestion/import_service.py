@@ -24,6 +24,7 @@ _ALLOWED_OPTION_KEYS = {
     "ocr_confidence",
     "ocr_table_format",
     "pdf_mode",
+    "pdf_strategies",
     "strategies",
 }
 _ALLOWED_PDF_MODES = {"markdown", "page_images"}
@@ -250,16 +251,20 @@ class ContentImportService:
                 raise ValueError("pdf_mode must be markdown or page_images")
             translated["pdf_mode"] = normalized_pdf_mode
 
-        strategies = options.get("strategies")
-        if strategies is not None:
+        for option_name in ("strategies", "pdf_strategies"):
+            strategies = options.get(option_name)
+            if strategies is None:
+                continue
             if not isinstance(strategies, list) or not strategies:
-                raise ValueError("strategies must be a non-empty list")
+                raise ValueError(f"{option_name} must be a non-empty list")
             normalized_strategies: list[str] = []
             for strategy in strategies:
                 if not isinstance(strategy, str) or not strategy.strip():
-                    raise ValueError("each strategy must be a non-empty string")
+                    raise ValueError(
+                        f"each {option_name} item must be a non-empty string"
+                    )
                 normalized_strategies.append(strategy.strip())
-            translated["strategies"] = normalized_strategies
+            translated[option_name] = normalized_strategies
 
         extractor_options: dict[str, Any] = {}
         for public_name, internal_name in (
