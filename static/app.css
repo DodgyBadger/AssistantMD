@@ -2362,15 +2362,18 @@ details[open] summary.collapsible-summary .chevron {
     word-break: break-word;
 }
 .import-jobs-table-wrap th:nth-child(1) { width: 5%; }
-.import-jobs-table-wrap th:nth-child(2) { width: 21%; }
+.import-jobs-table-wrap th:nth-child(2) { width: 20%; }
 .import-jobs-table-wrap th:nth-child(3) { width: 10%; }
 .import-jobs-table-wrap th:nth-child(4) { width: 9%; }
-.import-jobs-table-wrap th:nth-child(5) { width: 16%; }
+.import-jobs-table-wrap th:nth-child(5) { width: 15%; }
 .import-jobs-table-wrap th:nth-child(6) { width: 13%; }
-.import-jobs-table-wrap th:nth-child(7) { width: 18%; }
-.import-jobs-table-wrap th:nth-child(8) { width: 8%; }
-.import-job-actions button + button {
-    margin-left: 0.25rem;
+.import-jobs-table-wrap th:nth-child(7) { width: 16%; }
+.import-jobs-table-wrap th:nth-child(8) { width: 12%; }
+.import-job-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.25rem;
 }
 @media (max-width: 760px) {
     .import-jobs-table-wrap .dashboard-table,

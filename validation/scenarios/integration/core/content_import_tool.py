@@ -298,8 +298,9 @@ class ContentImportToolScenario(BaseScenario):
             )
             self.soft_assert(
                 "data-import-job-edit" in import_script
+                and "Reload URL from import job" in import_script
                 and "Adjust PDF/OCR settings" in import_script,
-                "URL imports should load into the configurable manual form",
+                "URL imports should expose a recognizable reload action",
             )
             self.soft_assert(
                 "params.set('vault', selectedVault)" in import_script

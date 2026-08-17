@@ -3370,7 +3370,7 @@ async function saveModelRow(rowKey) {
                             <th>Strategy</th>
                             <th>Updated</th>
                             <th>Output / Error</th>
-                            <th class="cell-center" aria-label="Actions"></th>
+                            <th class="cell-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -3388,7 +3388,7 @@ async function saveModelRow(rowKey) {
                                 ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
                                 : '';
                             const editButton = job.source_type === 'url'
-                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('edit', `Load URL from import job ${job.id}`, 'is-primary')}>${iconSvg('edit')}</button>`
+                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('refresh', `Reload URL from import job ${job.id} into the import form`, 'is-primary')}>${iconSvg('refresh')}</button>`
                                 : '';
                             return `
                                 <tr>
@@ -3399,7 +3399,7 @@ async function saveModelRow(rowKey) {
                                     <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>
                                     <td data-label="Updated" class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
                                     <td data-label="Output / Error" class="cell-xs">${detail}</td>
-                                    <td data-label="Actions" class="cell-center import-job-actions">${cancelButton}${editButton}</td>
+                                    <td data-label="Actions" class="cell-center import-job-actions"><div class="import-job-action-buttons">${cancelButton}${editButton}</div></td>
                                 </tr>
                             `;
                         }).join('')}
