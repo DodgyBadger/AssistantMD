@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented and focused validation passing.
+Implemented, hardened, and focused validation passing.
 
 ## Goal
 
@@ -201,5 +201,4 @@ agent-owned static checks pass.
 
 ## Next step
 
-Run the production Python quality gate and cleanup review, then request the
-maintainer-owned full validation suite before release.
+Request the maintainer-owned full validation suite before release.

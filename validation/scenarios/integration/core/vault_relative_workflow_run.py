@@ -32,6 +32,8 @@ class VaultRelativeWorkflowRunScenario(BaseScenario):
             "Research/Forest/notes/code-example.md",
             ORDINARY_MARKDOWN,
         )
+        failing_workflow_path = "Research/Forest/automation/failing-workflow.md"
+        self.create_file(vault, failing_workflow_path, FAILING_WORKFLOW)
         outside_workflow = self.run_path / "outside-workflow.md"
         outside_workflow.write_text(PROJECT_WORKFLOW, encoding="utf-8")
         (vault / "Research/escape.md").symlink_to(outside_workflow)
@@ -93,6 +95,29 @@ class VaultRelativeWorkflowRunScenario(BaseScenario):
             task.get("metadata", {}).get("workflow_path"),
             workflow_path,
             "Execution task metadata should retain the workflow source path",
+        )
+
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            failing_start_out = await tool.function(
+                operation="start",
+                workflow_path=failing_workflow_path,
+            )
+        failing_task_id = self._parse_kv_response(failing_start_out).get("task_id", "")
+        self.soft_assert(
+            bool(failing_task_id),
+            "A failing path-based background workflow should return a task id",
+        )
+        failing_task = await self._wait_for_execution_task(failing_task_id)
+        self.soft_assert_equal(
+            failing_task.get("metadata", {})
+            .get("workflow_failure", {})
+            .get("workflow_path"),
+            failing_workflow_path,
+            "Structured workflow failures should retain the workflow source path",
+        )
+        self.assert_event_contains(
+            name="workflow_task_failed",
+            expected={"workflow_path": failing_workflow_path},
         )
 
         invalid_requests = (
@@ -188,5 +213,15 @@ This note contains Python documentation but is not a workflow.
 
 ```python
 print("example")
+```
+"""
+
+
+FAILING_WORKFLOW = """---
+run_type: workflow
+description: Project-local workflow that fails deterministically
+---
+```python
+raise RuntimeError("expected project workflow failure")
 ```
 """

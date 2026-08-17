@@ -150,6 +150,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -172,6 +173,7 @@ class WorkflowGovernor:
                     workflow_name=workflow_name,
                     source=source_value,
                     task_id=queued_task.task_id,
+                    workflow_path=workflow_path,
                     reason=f"workflow_vault_active:{vault_name}",
                 )
 
@@ -196,6 +198,7 @@ class WorkflowGovernor:
                                 workflow_name=workflow_name,
                                 source=source_value,
                                 task_id=active_task_id,
+                                workflow_path=workflow_path,
                                 reason="workflow_global_capacity_active",
                             )
                         await global_semaphore.acquire()
@@ -263,6 +266,7 @@ class WorkflowGovernor:
                                     global_id=global_id,
                                     vault_name=vault_name,
                                     workflow_name=workflow_name,
+                                    workflow_path=workflow_path,
                                     step_name=step_name,
                                     source=source_value,
                                     status="timed_out",
@@ -282,6 +286,7 @@ class WorkflowGovernor:
                                 global_id=global_id,
                                 vault_name=vault_name,
                                 workflow_name=workflow_name,
+                                workflow_path=workflow_path,
                                 step_name=step_name,
                                 source=source_value,
                                 status="timed_out",
@@ -365,6 +370,7 @@ class WorkflowGovernor:
                             global_id=global_id,
                             vault_name=vault_name,
                             workflow_name=workflow_name,
+                            workflow_path=workflow_path,
                             step_name=step_name,
                             source=source_value,
                             status=result.status,
@@ -448,6 +454,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -521,6 +528,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -608,6 +616,7 @@ class WorkflowGovernor:
         workflow_name: str,
         source: str,
         task_id: str,
+        workflow_path: str | None,
         reason: str,
     ) -> None:
         self._logger.add_sink("validation").info(
@@ -619,6 +628,7 @@ class WorkflowGovernor:
                 "vault": vault_name,
                 "source": source,
                 "task_id": task_id,
+                "workflow_path": workflow_path,
                 "reason": reason,
             },
         )
@@ -706,6 +716,7 @@ def _build_workflow_failure_metadata(
     global_id: str,
     vault_name: str,
     workflow_name: str,
+    workflow_path: str | None,
     step_name: str | None,
     source: str,
     status: str,
@@ -720,6 +731,7 @@ def _build_workflow_failure_metadata(
         {
             "workflow_id": global_id,
             "workflow_name": workflow_name,
+            "workflow_path": workflow_path,
             "vault": vault_name,
             "source": source,
             "status": status,
