@@ -19,6 +19,10 @@ from core.authoring.contracts import (
 )
 from core.authoring.service import run_authoring_template
 from core.authoring.template_discovery import discover_workflow_files
+from core.authoring.workflow_execution import (
+    WorkflowExecutionTarget,
+    resolve_vault_workflow_target,
+)
 from core.constants import ASSISTANTMD_ROOT_DIR, AUTHORING_DIR
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
@@ -99,6 +103,7 @@ class WorkflowRun(BaseTool):
             *,
             operation: str,
             workflow_name: str = "",
+            workflow_path: str = "",
             step_name: str = "",
             task_id: str = "",
         ) -> str | ToolReturn:
@@ -113,7 +118,8 @@ class WorkflowRun(BaseTool):
             operation='cancel' to stop a running background workflow.
 
             :param operation: Operation name (list, run, start, status, cancel, enable_workflow, disable_workflow)
-            :param workflow_name: Workflow name relative to AssistantMD/Authoring (required for run/start/enable/disable)
+            :param workflow_name: Managed workflow name relative to AssistantMD/Authoring (run/start/enable/disable)
+            :param workflow_path: Explicit vault-relative .md workflow path outside managed discovery (run/start only; mutually exclusive with workflow_name)
             :param step_name: Optional step name to execute (run/start only)
             :param task_id: Execution task id for status/cancel
             """
@@ -136,23 +142,51 @@ class WorkflowRun(BaseTool):
                     },
                 )
 
+                if str(workflow_path or "").strip() and op not in {"run", "start"}:
+                    return _workflow_run_failure(
+                        operation=op,
+                        message="workflow_path is only supported for run and start.",
+                    )
+
                 if op == "list":
                     return await cls._list_workflows(vault_name)
 
                 if op == "run":
-                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    name, execution_target, error = cls._resolve_execution_request(
+                        operation=op,
+                        workflow_name=workflow_name,
+                        workflow_path=workflow_path,
+                        vault_path=resolved_vault_path,
+                        vault_name=vault_name,
+                    )
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
 
-                    global_id = f"{vault_name}/{name}"
+                    global_id = (
+                        execution_target.global_id
+                        if execution_target is not None
+                        else f"{vault_name}/{name}"
+                    )
                     single_step = (step_name or "").strip() or None
                     try:
-                        result = await cls._execute_authoring_artifact(
-                            vault_path=resolved_vault_path,
-                            vault_name=vault_name,
-                            workflow_name=name,
-                            step_name=single_step,
-                        )
+                        if execution_target is not None:
+                            result = (
+                                await runtime.workflow_governor.execute_workflow(
+                                    global_id=global_id,
+                                    source=ExecutionTaskSource.TOOL,
+                                    step_name=single_step,
+                                    include_load_errors=True,
+                                    execution_target=execution_target,
+                                )
+                            ).to_dict()
+                            result["run_type"] = "workflow"
+                        else:
+                            result = await cls._execute_authoring_artifact(
+                                vault_path=resolved_vault_path,
+                                vault_name=vault_name,
+                                workflow_name=name,
+                                step_name=single_step,
+                            )
                         if (
                             not result.get("success", False)
                             or str(result.get("status") or "").strip().lower()
@@ -189,24 +223,35 @@ class WorkflowRun(BaseTool):
                         )
 
                 if op == "start":
-                    name, error = cls._resolve_valid_workflow_name(op, workflow_name)
+                    name, execution_target, error = cls._resolve_execution_request(
+                        operation=op,
+                        workflow_name=workflow_name,
+                        workflow_path=workflow_path,
+                        vault_path=resolved_vault_path,
+                        vault_name=vault_name,
+                    )
                     if error:
                         return _workflow_run_failure(operation=op, message=error)
-                    run_type = cls._read_run_type(
-                        cls._resolve_workflow_file_path(
-                            vault_path=resolved_vault_path,
-                            workflow_name=name,
+                    if execution_target is None:
+                        run_type = cls._read_run_type(
+                            cls._resolve_workflow_file_path(
+                                vault_path=resolved_vault_path,
+                                workflow_name=name,
+                            )
                         )
+                        if run_type == "context":
+                            return _workflow_run_failure(
+                                operation=op,
+                                message=(
+                                    "operation='start' is only supported for run_type='workflow'. "
+                                    "Use operation='run' to dry-run context templates."
+                                ),
+                            )
+                    global_id = (
+                        execution_target.global_id
+                        if execution_target is not None
+                        else f"{vault_name}/{name}"
                     )
-                    if run_type == "context":
-                        return _workflow_run_failure(
-                            operation=op,
-                            message=(
-                                "operation='start' is only supported for run_type='workflow'. "
-                                "Use operation='run' to dry-run context templates."
-                            ),
-                        )
-                    global_id = f"{vault_name}/{name}"
                     single_step = (step_name or "").strip() or None
                     task = await runtime.workflow_governor.start_workflow(
                         global_id=global_id,
@@ -214,6 +259,7 @@ class WorkflowRun(BaseTool):
                         step_name=single_step,
                         include_load_errors=True,
                         background_tasks=runtime.background_tasks,
+                        execution_target=execution_target,
                     )
                     return cls._format_task_start(task)
 
@@ -316,7 +362,7 @@ class WorkflowRun(BaseTool):
         return Tool(
             workflow_run,
             name="workflow_run",
-            description="List authored automations in the current vault and run, start, check, cancel, enable, or disable them.",
+            description="List managed automations and run, start, check, cancel, enable, or disable them; run/start can also execute an explicit vault-relative workflow path.",
         )
 
     @classmethod
@@ -404,6 +450,35 @@ Full documentation:
                 "(e.g. 'daily' or 'folder/daily') without '..'."
             )
         return normalized, None
+
+    @classmethod
+    def _resolve_execution_request(
+        cls,
+        *,
+        operation: str,
+        workflow_name: str,
+        workflow_path: str,
+        vault_path: str,
+        vault_name: str,
+    ) -> tuple[str, WorkflowExecutionTarget | None, str | None]:
+        """Resolve either a managed workflow name or an explicit vault path."""
+        clean_name = str(workflow_name or "").strip()
+        clean_path = str(workflow_path or "").strip()
+        if clean_name and clean_path:
+            return "", None, "Provide either workflow_name or workflow_path, not both."
+        if clean_path:
+            try:
+                target = resolve_vault_workflow_target(
+                    vault_path=vault_path,
+                    vault_name=vault_name,
+                    workflow_path=clean_path,
+                )
+            except (OSError, ValueError) as exc:
+                return "", None, str(exc)
+            return target.workflow_name, target, None
+
+        name, error = cls._resolve_valid_workflow_name(operation, clean_name)
+        return name, None, error
 
     @staticmethod
     async def _list_workflows(vault_name: str) -> str:

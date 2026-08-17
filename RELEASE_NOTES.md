@@ -26,6 +26,18 @@ The import tool deliberately handles conversion rather than research policy.
 Agents, skills, playbooks, and workflows remain free to decide how sources are
 discovered, tracked, retried, and organized.
 
+### Keep project workflows with their research
+
+- `workflow_run` can now run or start a workflow Markdown file from any
+  vault-relative path, allowing project-specific processing scripts to live
+  beside the library, notes, and outputs they manage.
+- Project-local workflows use the same sandbox, tools, timeout, cancellation,
+  rollback, and durable run history as managed workflows.
+- Explicit path-based workflows remain separate from the managed catalog: they
+  are not discovered, scheduled, enabled, disabled, or used as context
+  templates. Managed and scheduled workflows continue to live in
+  `AssistantMD/Authoring/`.
+
 ### Import status and controls
 
 The Dashboard Import section now provides an operational view of the durable

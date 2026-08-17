@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft design. No implementation has begun.
+Implemented and focused validation passing.
 
 ## Goal
 
@@ -201,6 +201,5 @@ agent-owned static checks pass.
 
 ## Next step
 
-Confirm the proposed managed-versus-ad-hoc contract, then begin with the
-execution-target resolver and a failing focused validation scenario for one
-successful external path and the containment/error cases.
+Run the production Python quality gate and cleanup review, then request the
+maintainer-owned full validation suite before release.
