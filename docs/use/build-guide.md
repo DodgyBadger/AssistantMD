@@ -92,7 +92,14 @@ Use a workflow script when you need a task to run on a schedule, or when the tas
 
 Skills and workflow scripts can work together. A skill can instruct the agent to trigger a specific workflow script as part of its procedure. A workflow script can read a skill file and follow its instructions as one of its steps. Mix and match however makes sense for the task.
 
-Workflow scripts live in `AssistantMD/Authoring/` with `run_type: workflow`.
+Reusable, discoverable, and scheduled workflow scripts live in
+`AssistantMD/Authoring/` with `run_type: workflow`. A workflow that belongs to a
+specific project can instead live beside that project's content anywhere in
+the vault. Run it explicitly with
+`workflow_run(operation="run", workflow_path="path/to/workflow.md")`, or use
+`operation="start"` for a background run. Project-local workflows must also
+declare `run_type: workflow`; they are not discovered, scheduled, enabled, or
+disabled automatically.
 
 You don't need to write the Python yourself: describe what you want to the chat
 agent and it will draft the file for you. You can then run it manually, refine
