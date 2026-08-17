@@ -3365,7 +3365,6 @@ async function saveModelRow(rowKey) {
                         <tr>
                             <th class="import-job-compact">Job</th>
                             <th class="import-job-source">Source</th>
-                            <th>Vault</th>
                             <th class="import-job-compact">Status</th>
                             <th>Strategy</th>
                             <th class="import-job-compact">Updated</th>
@@ -3394,7 +3393,6 @@ async function saveModelRow(rowKey) {
                                 <tr>
                                     <td data-label="Job" class="cell-xs cell-mono import-job-compact">${escapeHtml(job.id)}</td>
                                     <td data-label="Source" class="cell-xs import-job-source">${renderImportSource(job.source_uri)}</td>
-                                    <td data-label="Vault" class="cell-xs">${escapeHtml(job.vault || '—')}</td>
                                     <td data-label="Status" class="cell-xs import-job-compact">${escapeHtml(job.status || 'unknown')}</td>
                                     <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>
                                     <td data-label="Updated" class="cell-xs import-job-compact">${escapeHtml(formatDateTime(job.updated_at))}</td>
