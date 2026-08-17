@@ -3363,14 +3363,14 @@ async function saveModelRow(rowKey) {
                 <table class="dashboard-table">
                     <thead>
                         <tr>
-                            <th>Job</th>
+                            <th class="import-job-compact">Job</th>
                             <th>Source</th>
                             <th>Vault</th>
-                            <th>Status</th>
+                            <th class="import-job-compact">Status</th>
                             <th>Strategy</th>
-                            <th>Updated</th>
+                            <th class="import-job-compact">Updated</th>
                             <th>Output / Error</th>
-                            <th class="cell-center">Actions</th>
+                            <th class="cell-center import-job-compact">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -3392,14 +3392,14 @@ async function saveModelRow(rowKey) {
                                 : '';
                             return `
                                 <tr>
-                                    <td data-label="Job" class="cell-xs cell-mono">${escapeHtml(job.id)}</td>
+                                    <td data-label="Job" class="cell-xs cell-mono import-job-compact">${escapeHtml(job.id)}</td>
                                     <td data-label="Source" class="cell-xs">${renderImportSource(job.source_uri)}</td>
                                     <td data-label="Vault" class="cell-xs">${escapeHtml(job.vault || '—')}</td>
-                                    <td data-label="Status" class="cell-xs">${escapeHtml(job.status || 'unknown')}</td>
+                                    <td data-label="Status" class="cell-xs import-job-compact">${escapeHtml(job.status || 'unknown')}</td>
                                     <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>
-                                    <td data-label="Updated" class="cell-xs">${escapeHtml(formatDateTime(job.updated_at))}</td>
+                                    <td data-label="Updated" class="cell-xs import-job-compact">${escapeHtml(formatDateTime(job.updated_at))}</td>
                                     <td data-label="Output / Error" class="cell-xs">${detail}</td>
-                                    <td data-label="Actions" class="cell-center import-job-actions"><div class="import-job-action-buttons">${cancelButton}${editButton}</div></td>
+                                    <td data-label="Actions" class="cell-center import-job-actions import-job-compact"><div class="import-job-action-buttons">${cancelButton}${editButton}</div></td>
                                 </tr>
                             `;
                         }).join('')}

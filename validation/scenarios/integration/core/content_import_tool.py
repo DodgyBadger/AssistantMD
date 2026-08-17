@@ -290,8 +290,9 @@ class ContentImportToolScenario(BaseScenario):
             )
             self.soft_assert(
                 "max-height: 24rem" in import_styles
-                and ".import-jobs-table-wrap" in import_styles,
-                "Import history should remain inside a vertically bounded table",
+                and "table-layout: auto" in import_styles
+                and ".import-job-compact" in import_styles,
+                "Import history should be bounded with content-responsive columns",
             )
             import_script = (static_root / "js" / "configuration.js").read_text(
                 encoding="utf-8"

@@ -2348,7 +2348,7 @@ details[open] summary.collapsible-summary .chevron {
 .import-jobs-table-wrap .dashboard-table {
     margin-top: 0;
     min-width: 0;
-    table-layout: fixed;
+    table-layout: auto;
 }
 .import-jobs-table-wrap .dashboard-table th {
     position: sticky;
@@ -2361,14 +2361,10 @@ details[open] summary.collapsible-summary .chevron {
     white-space: normal;
     word-break: break-word;
 }
-.import-jobs-table-wrap th:nth-child(1) { width: 5%; }
-.import-jobs-table-wrap th:nth-child(2) { width: 20%; }
-.import-jobs-table-wrap th:nth-child(3) { width: 10%; }
-.import-jobs-table-wrap th:nth-child(4) { width: 9%; }
-.import-jobs-table-wrap th:nth-child(5) { width: 15%; }
-.import-jobs-table-wrap th:nth-child(6) { width: 13%; }
-.import-jobs-table-wrap th:nth-child(7) { width: 16%; }
-.import-jobs-table-wrap th:nth-child(8) { width: 12%; }
+.import-jobs-table-wrap .import-job-compact {
+    width: 1%;
+    white-space: nowrap;
+}
 .import-job-action-buttons {
     display: flex;
     flex-wrap: wrap;
