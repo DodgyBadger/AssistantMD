@@ -3364,7 +3364,7 @@ async function saveModelRow(rowKey) {
                     <thead>
                         <tr>
                             <th class="import-job-compact">Job</th>
-                            <th>Source</th>
+                            <th class="import-job-source">Source</th>
                             <th>Vault</th>
                             <th class="import-job-compact">Status</th>
                             <th>Strategy</th>
@@ -3388,12 +3388,12 @@ async function saveModelRow(rowKey) {
                                 ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
                                 : '';
                             const editButton = job.source_type === 'url'
-                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('refresh', `Reload URL from import job ${job.id} into the import form`, 'is-primary')}>${iconSvg('refresh')}</button>`
+                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('edit', `Edit import settings for job ${job.id}`, 'is-primary')}>${iconSvg('edit')}</button>`
                                 : '';
                             return `
                                 <tr>
                                     <td data-label="Job" class="cell-xs cell-mono import-job-compact">${escapeHtml(job.id)}</td>
-                                    <td data-label="Source" class="cell-xs">${renderImportSource(job.source_uri)}</td>
+                                    <td data-label="Source" class="cell-xs import-job-source">${renderImportSource(job.source_uri)}</td>
                                     <td data-label="Vault" class="cell-xs">${escapeHtml(job.vault || '—')}</td>
                                     <td data-label="Status" class="cell-xs import-job-compact">${escapeHtml(job.status || 'unknown')}</td>
                                     <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>

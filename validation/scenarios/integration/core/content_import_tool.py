@@ -294,14 +294,19 @@ class ContentImportToolScenario(BaseScenario):
                 and ".import-job-compact" in import_styles,
                 "Import history should be bounded with content-responsive columns",
             )
+            self.soft_assert(
+                ".import-job-source" in import_styles
+                and "max-width: 20rem" in import_styles,
+                "Import sources should wrap without dominating the job table",
+            )
             import_script = (static_root / "js" / "configuration.js").read_text(
                 encoding="utf-8"
             )
             self.soft_assert(
                 "data-import-job-edit" in import_script
-                and "Reload URL from import job" in import_script
+                and "Edit import settings for job" in import_script
                 and "Adjust PDF/OCR settings" in import_script,
-                "URL imports should expose a recognizable reload action",
+                "URL imports should expose a recognizable edit action",
             )
             self.soft_assert(
                 "params.set('vault', selectedVault)" in import_script

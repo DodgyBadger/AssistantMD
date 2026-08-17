@@ -2365,6 +2365,14 @@ details[open] summary.collapsible-summary .chevron {
     width: 1%;
     white-space: nowrap;
 }
+.import-jobs-table-wrap .import-job-source {
+    width: 22%;
+    max-width: 20rem;
+}
+.import-jobs-table-wrap .import-job-source a {
+    display: block;
+    max-width: 100%;
+}
 .import-job-action-buttons {
     display: flex;
     flex-wrap: wrap;
@@ -2390,6 +2398,10 @@ details[open] summary.collapsible-summary .chevron {
         display: grid;
         grid-template-columns: minmax(5rem, 30%) minmax(0, 1fr);
         gap: 0.5rem;
+        max-width: 100%;
+    }
+    .import-jobs-table-wrap .import-job-source {
+        width: 100%;
         max-width: 100%;
     }
     .import-jobs-table-wrap td::before {
