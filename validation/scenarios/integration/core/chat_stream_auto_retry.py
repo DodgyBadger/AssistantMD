@@ -164,7 +164,7 @@ class ChatStreamAutoRetryScenario(BaseScenario):
             ], "Completed tools must not be replayed"
             assert len(checkpoint_events) == 1
             assert len(selected_events) == 1
-            assert checkpoint_events[0].get("replay_scope") == "settled_checkpoint"
+            assert checkpoint_events[0].get("strategy") == "resume_snapshot"
             assert checkpoint_events[0].get("trimmed_failed_response") is True
 
             history = chat_executor._CHAT_STORE.get_history(

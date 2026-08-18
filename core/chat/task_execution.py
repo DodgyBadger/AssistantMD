@@ -39,6 +39,7 @@ from core.chat.deferred_reviews import (
     mark_deferred_review_terminal,
     summarize_deferred_review,
 )
+from core.chat.run_recovery import ChatRecoveryStrategy
 from core.chat.task_events import ChatTaskEventBuffer
 from core.identity import ExecutionAuthority
 from core.llm.capabilities.chat_context import build_context_template_error_details
@@ -749,21 +750,59 @@ async def _run_prepared_chat_stream_task(
                 except Exception as exc:
                     classification = classify_exception(exc, phase="agent_stream")
                     checkpoint = None
+                    recovery_decision = None
                     if classification.retryable and prepared.recovery is not None:
-                        checkpoint = await prepared.recovery.select_settled_checkpoint(
+                        recovery_decision = await prepared.recovery.decide(
                             conversation_id=session_id
                         )
+                        checkpoint = recovery_decision.checkpoint
                     replay_scope = "no_chat_tools"
                     if checkpoint is not None:
+                        assert recovery_decision is not None
                         attempt_prompt = None
                         attempt_history = checkpoint.messages
-                        replay_scope = "settled_checkpoint"
+                        replay_scope = str(recovery_decision.strategy)
+                    recovery_supported = recovery_decision is not None and (
+                        recovery_decision.strategy
+                        in {
+                            ChatRecoveryStrategy.RESUME_SNAPSHOT,
+                            ChatRecoveryStrategy.REPLAY_NO_EFFECT,
+                        }
+                    )
                     can_retry = (
                         classification.retryable
                         and attempt < max_attempts
-                        and (not prepared.tools or checkpoint is not None)
+                        and (not prepared.tools or recovery_supported)
                     )
                     if not can_retry:
+                        if prepared.tools and recovery_decision is not None:
+                            rejection_reason = (
+                                "retry_budget_exhausted"
+                                if attempt >= max_attempts
+                                else recovery_decision.reason
+                            )
+                            rejected_data = {
+                                "event": "chat_recovery_rejected",
+                                "task_id": task.task_id,
+                                "session_id": session_id,
+                                "strategy": str(recovery_decision.strategy),
+                                "reason": rejection_reason,
+                                "completed_tool_count": (
+                                    recovery_decision.completed_tool_count
+                                ),
+                                "unresolved_tool_count": (
+                                    recovery_decision.unresolved_tool_count
+                                ),
+                            }
+                            chat_executor.logger.warning(
+                                "Primary chat automatic recovery rejected",
+                                data=rejected_data,
+                            )
+                            await event_buffer.append(
+                                task.task_id,
+                                "chat_recovery_rejected",
+                                rejected_data,
+                            )
                         raise
                     delay_seconds = min(
                         max_delay_seconds,
@@ -781,9 +820,22 @@ async def _run_prepared_chat_stream_task(
                         "failure_kind": classification.failure_kind,
                         "error_type": classification.error_type,
                         "replay_scope": replay_scope,
+                        "strategy": replay_scope,
                         "reset_response": True,
                     }
+                    if recovery_decision is not None:
+                        retry_data.update(
+                            {
+                                "completed_tool_count": (
+                                    recovery_decision.completed_tool_count
+                                ),
+                                "unresolved_tool_count": (
+                                    recovery_decision.unresolved_tool_count
+                                ),
+                            }
+                        )
                     if checkpoint is not None:
+                        assert recovery_decision is not None
                         retry_data.update(
                             {
                                 "recovery_run_id": checkpoint.run_id,
@@ -802,6 +854,13 @@ async def _run_prepared_chat_stream_task(
                             "message_count": len(checkpoint.messages),
                             "trimmed_failed_response": (
                                 checkpoint.trimmed_failed_response
+                            ),
+                            "interrupted": checkpoint.interrupted,
+                            "completed_tool_count": (
+                                recovery_decision.completed_tool_count
+                            ),
+                            "unresolved_tool_count": (
+                                recovery_decision.unresolved_tool_count
                             ),
                         }
                         chat_executor.logger.info(

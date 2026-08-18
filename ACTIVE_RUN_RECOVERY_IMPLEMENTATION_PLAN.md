@@ -437,6 +437,13 @@ Foundation implemented: `BaseTool` owns a typed recovery policy with an
 tool metadata. Detailed `get_instructions()` payloads have been removed while
 the lightweight, description-derived capability summary remains intact.
 
+Coordinator matrix implemented: unresolved replay-safe effects select
+`replay_no_effect` from Harness's interrupted snapshot; unresolved vault
+effects select `terminal_rollback_restart`; external, manual, and unknown
+effects select `manual_required`. Pydantic's repair of interrupted history and
+exactly-once pending read-tool execution are pinned by targeted validation.
+Rollback/replacement-task execution remains Slice 3.
+
 ### Slice 3: vault rollback redirect
 
 Validate that an unresolved vault mutation:
