@@ -513,6 +513,23 @@ Maintainers retain ownership of the full validation suite.
 Slices 1-5 and the in-process portions of Slice 9 are complete. Slices 6-8 are
 not part of the current delivery.
 
+### Slice 5A: subscriber reconnect hardening
+
+Harden the existing process-local task subscription contract without adding
+durable recovery state:
+
+- reject replay cursors that precede the retained event window with a stable
+  `410 ChatTaskEventCursorExpired` response and sequence details;
+- retry transient browser SSE transport failures with a small bounded policy
+  while preserving the last acknowledged task-event sequence;
+- when a session is loaded and the page does not already own its stream, query
+  the active-task endpoint and attach to the running task;
+- fall back to persisted session reload after an event gap rather than
+  presenting a retained suffix as a complete response.
+
+Validation pins buffer-level cursor expiry and the API error envelope. Frontend
+syntax and focused manual contract review cover the browser reconnect path.
+
 Each slice must preserve a working manual-retry fallback and pass its targeted
 scenario before the next slice begins.
 

@@ -44,6 +44,10 @@ discovered, tracked, retried, and organized.
 - Tool-free primary chat and delegate runs automatically retry transient stream
   failures within the configured global retry limit while preserving one
   logical response and shared usage accounting.
+- Chat streaming reconnects transient browser transport failures from the last
+  received event, reattaches to active work when a session is reopened, and
+  falls back to canonical session history when older buffered events have
+  expired.
 - `web_extract` now rejects PDFs and other binary responses with guidance to use
   `content_import`, preventing oversized binary tool results from disrupting a
   chat stream.

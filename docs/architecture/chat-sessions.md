@@ -137,6 +137,13 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
   idle waits so long-running model or tool calls keep the response connection
   active without tying the model run to that subscriber.
 - If a subscriber disconnects, the chat task continues running unless cancelled.
+- Browser subscribers reconnect transient stream failures with the last received
+  sequence. Loading a session attaches to its active process-local chat task
+  when the page does not already own that subscription.
+- A replay cursor older than the retained event window returns
+  `410 ChatTaskEventCursorExpired`. The browser discards provisional output,
+  waits for the task to finish, and reloads canonical session history rather
+  than rendering an incomplete retained suffix.
 - Multiple chat starts for the same session are serialized by
   creation time. Later tasks stay `queued` until older non-terminal chat tasks
   in the same session finish, so each run prepares against completed prior

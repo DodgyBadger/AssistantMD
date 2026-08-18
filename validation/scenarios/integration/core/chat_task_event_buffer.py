@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.chat.task_events import ChatTaskEventBuffer
+from core.chat.task_events import ChatTaskEventBuffer, ChatTaskEventCursorExpired
 from validation.core.base_scenario import BaseScenario
 
 
@@ -79,12 +79,27 @@ class ChatTaskEventBufferScenario(BaseScenario):
         await retained.append("task-gamma", "delta", {"index": 1})
         await retained.append("task-gamma", "delta", {"index": 2})
         await retained.append("task-gamma", "done", {"index": 3})
-        gamma_events = await retained.events_after("task-gamma")
+        gamma_events = await retained.events_after("task-gamma", after_sequence=1)
         self.soft_assert_equal(
             [event.sequence for event in gamma_events],
             [2, 3],
             "Per-task event retention should keep the newest events",
         )
+        try:
+            await retained.events_after("task-gamma", after_sequence=0)
+        except ChatTaskEventCursorExpired as exc:
+            self.soft_assert_equal(
+                exc.oldest_available_sequence,
+                2,
+                "Expired cursors should identify the oldest retained event",
+            )
+            self.soft_assert_equal(
+                exc.latest_sequence,
+                3,
+                "Expired cursors should identify the latest retained event",
+            )
+        else:
+            self.soft_assert(False, "A cursor before the retained window should fail")
 
         await retained.append("task-delta", "done", {})
         self.soft_assert_equal(

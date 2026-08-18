@@ -22,6 +22,7 @@ from api.import_models import (
     ImportUrlResponse,
 )
 from core.chat.executor import UploadedImageAttachment
+from core.chat.task_events import ChatTaskEventCursorExpired
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
     start_chat_turn_retry_task,
@@ -695,6 +696,23 @@ async def chat_task_events(
                 message=f"Chat task events are no longer retained: {task_id}",
                 details={"task_id": task_id},
             )
+        try:
+            await CHAT_TASK_EVENT_BUFFER.ensure_cursor_available(
+                task_id,
+                after_sequence=after_sequence,
+            )
+        except ChatTaskEventCursorExpired as exc:
+            raise APIException(
+                status_code=410,
+                error_type="ChatTaskEventCursorExpired",
+                message="Chat task events are no longer retained from the requested cursor.",
+                details={
+                    "task_id": task_id,
+                    "after_sequence": exc.after_sequence,
+                    "oldest_available_sequence": exc.oldest_available_sequence,
+                    "latest_sequence": exc.latest_sequence,
+                },
+            ) from exc
         return StreamingResponse(
             stream_chat_task_sse(
                 task_id=task_id,

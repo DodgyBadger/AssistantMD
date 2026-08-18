@@ -40,7 +40,7 @@ from core.chat.deferred_reviews import (
     summarize_deferred_review,
 )
 from core.chat.run_recovery import ChatRecoveryStrategy
-from core.chat.task_events import ChatTaskEventBuffer
+from core.chat.task_events import ChatTaskEventBuffer, ChatTaskEventCursorExpired
 from core.identity import ExecutionAuthority
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
@@ -1441,6 +1441,16 @@ async def stream_chat_task_sse(
             except TimeoutError:
                 yield ": keepalive\n\n"
                 continue
+            except ChatTaskEventCursorExpired as exc:
+                pending_event = None
+                yield f"data: {json.dumps({
+                    'event': 'chat_event_cursor_expired',
+                    'task_id': task_id,
+                    'after_sequence': exc.after_sequence,
+                    'oldest_available_sequence': exc.oldest_available_sequence,
+                    'latest_sequence': exc.latest_sequence,
+                })}\n\n"
+                return
             except StopAsyncIteration:
                 pending_event = None
                 return
