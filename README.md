@@ -14,17 +14,17 @@ retaining access to the rest of the vault. Simple conventions such as
 `README.md` and `playbook.md` help it quickly understand the project and follow
 project-specific guidance.
 
+Your Markdown files remain the durable source of truth: readable, portable, and
+useful with or without AssistantMD. AssistantMD is the environment around them:
+available wherever you host it, adaptable to the way you work, and designed to
+give agents useful capabilities without handing them control of the host.
+
 AssistantMD is shaped through daily use on real knowledge-work projects. Its
 features grow from friction encountered there: copying useful material between
 chat and notes, manually importing dozens of research sources, switching
 applications just to make a small edit, or needing automation without giving an
 agent unrestricted access to the host. Its development is guided by a simple
 aim: keep removing the obstacles that interrupt productive work.
-
-Your Markdown files remain the durable source of truth: readable, portable, and
-useful with or without AssistantMD. AssistantMD is the environment around them:
-available wherever you host it, adaptable to the way you work, and designed to
-give agents useful capabilities without handing them control of the host.
 
 ## Features
 
