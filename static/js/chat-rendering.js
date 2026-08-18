@@ -911,6 +911,19 @@
             renderAssistantMarkdown(context);
         }
 
+        function resetAssistantStream(context) {
+            if (!context) {
+                return;
+            }
+            context.fullText = '';
+            context.thinkingText = '';
+            context.collapseThinking = false;
+            context.thinkingExpanded = false;
+            context.errorMessages = [];
+            renderAssistantMarkdown(context);
+            setAssistantStatus(context, 'Reconnecting to model', 'thinking');
+        }
+
         function renderAssistantMarkdown(context, options = {}) {
             const { finalize = false } = options;
             renderAssistantThinking(context);
@@ -1653,6 +1666,7 @@
             createAssistantStreamingMessage,
             appendAssistantDelta,
             appendAssistantThinkingDelta,
+            resetAssistantStream,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,

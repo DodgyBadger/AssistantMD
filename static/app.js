@@ -661,6 +661,13 @@ function applyChatStreamPayload(payload, assistantMessage) {
         return { finished: false, messageCount: 0 };
     }
 
+    if (eventType === 'chat_retry_scheduled') {
+        if (payload.reset_response) {
+            chatRendering.resetAssistantStream(assistantMessage);
+        }
+        return { finished: false, messageCount: 0 };
+    }
+
     if (eventType === 'tool_call_started' || eventType === 'tool_call_finished') {
         handleToolEvent(assistantMessage, payload);
         return { finished: false, messageCount: 0 };

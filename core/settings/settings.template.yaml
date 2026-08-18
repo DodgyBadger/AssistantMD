@@ -74,6 +74,21 @@ settings:
     description: "Maximum seconds allowed for one delegate child-agent run. 0 disables the delegate timeout. Increase for broad delegated searches or slower models."
     category: "Delegation"
     restart_required: false
+  model_stream_retries:
+    value: 1
+    description: "Retries after a retryable model-stream disconnection in tool-free primary chat and delegate runs. 0 disables automatic retries. Retries only run when the runtime can prove replay will not duplicate tool side effects."
+    category: "Resilience"
+    restart_required: false
+  model_stream_retry_base_delay_seconds:
+    value: 1.0
+    description: "Initial delay in seconds before retrying a retryable model-stream disconnection. Later retries use bounded exponential backoff."
+    category: "Resilience"
+    restart_required: false
+  model_stream_retry_max_delay_seconds:
+    value: 10.0
+    description: "Maximum delay in seconds between model-stream retry attempts."
+    category: "Resilience"
+    restart_required: false
   default_api_timeout:
     value: 120
     description: "Default timeout in seconds for external API calls."

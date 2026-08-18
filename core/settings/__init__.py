@@ -730,6 +730,39 @@ def get_delegate_timeout_seconds() -> float:
     return parsed if parsed > 0 else 0.0
 
 
+def get_model_stream_retries() -> int:
+    """Return retry attempts after the initial model stream; 0 disables retries."""
+    entry = get_general_settings().get("model_stream_retries")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = _setting_int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(0, min(parsed, 5))
+
+
+def get_model_stream_retry_base_delay_seconds() -> float:
+    """Return the initial delay for model-stream retries."""
+    entry = get_general_settings().get("model_stream_retry_base_delay_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = _setting_float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.0, min(parsed, 300.0))
+
+
+def get_model_stream_retry_max_delay_seconds() -> float:
+    """Return the maximum delay between model-stream retry attempts."""
+    entry = get_general_settings().get("model_stream_retry_max_delay_seconds")
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        parsed = _setting_float(value)
+    except (TypeError, ValueError):
+        return 10.0
+    return max(0.0, min(parsed, 300.0))
+
+
 def get_compaction_type() -> str:
     """Return the configured chat-history compaction policy."""
     entry = get_general_settings().get("compaction_type")

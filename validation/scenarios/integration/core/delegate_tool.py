@@ -33,6 +33,9 @@ class DelegateToolScenario(BaseScenario):
 
         configured_delegate_limit = 12
         configured_delegate_timeout = 90
+        configured_stream_retries = 1
+        configured_retry_base_delay = 0.0
+        configured_retry_max_delay = 10.0
         delegate_limit_update = self.call_api(
             "/api/system/settings/general/delegate_tool_calls_limit",
             method="PUT",
@@ -49,6 +52,32 @@ class DelegateToolScenario(BaseScenario):
         assert (
             delegate_timeout_update.status_code == 200
         ), "Delegate timeout setting updates"
+        for setting_name, value in (
+            ("model_stream_retries", configured_stream_retries),
+            ("model_stream_retry_base_delay_seconds", configured_retry_base_delay),
+            ("model_stream_retry_max_delay_seconds", configured_retry_max_delay),
+        ):
+            update = self.call_api(
+                f"/api/system/settings/general/{setting_name}",
+                method="PUT",
+                data={"value": str(value)},
+            )
+            assert update.status_code == 200, f"{setting_name} setting updates"
+
+        invalid_retries = self.call_api(
+            "/api/system/settings/general/model_stream_retries",
+            method="PUT",
+            data={"value": "6"},
+        )
+        assert invalid_retries.status_code == 400, "Stream retries reject unsafe bounds"
+        invalid_delay_bounds = self.call_api(
+            "/api/system/settings/general/model_stream_retry_max_delay_seconds",
+            method="PUT",
+            data={"value": "-1"},
+        )
+        assert (
+            invalid_delay_bounds.status_code == 400
+        ), "Stream retry delays reject negative values"
 
         from pydantic_ai.models.test import TestModel
 

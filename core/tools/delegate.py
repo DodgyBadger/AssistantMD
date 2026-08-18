@@ -16,7 +16,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from pydantic_ai.tools import Tool
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.authoring.helpers.runtime_common import coerce_output_data
 from core.authoring.shared.execution_prep import (
@@ -40,6 +40,9 @@ from core.settings import (
     get_delegate_model_requests_limit,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
+    get_model_stream_retries,
+    get_model_stream_retry_base_delay_seconds,
+    get_model_stream_retry_max_delay_seconds,
 )
 from core.tools.base import BaseTool
 from core.tools.failures import FailureClassification, classify_exception
@@ -156,7 +159,14 @@ class DelegateTool(BaseTool):
 
                 usage_limits = _delegate_usage_limits(max_tool_calls)
                 result = await asyncio.wait_for(
-                    collect_response(agent, prompt, usage_limits=usage_limits),
+                    _collect_delegate_response(
+                        agent=agent,
+                        prompt=prompt,
+                        usage_limits=usage_limits,
+                        allow_retry=not safe_tool_names,
+                        session_id=session_id,
+                        model=model_value or "default",
+                    ),
                     timeout=_delegate_wait_timeout(timeout_seconds),
                 )
                 output = result.output
@@ -286,12 +296,57 @@ class DelegateTool(BaseTool):
             description="Run a focused child agent over a prompt with optional tools.",
         )
 
-    @classmethod
-    def get_instructions(cls) -> str:
-        return """
-Full documentation:
-- `__virtual_docs__/tools/delegate.md`
-"""
+
+async def _collect_delegate_response(
+    *,
+    agent: Any,
+    prompt: str,
+    usage_limits: UsageLimits | None,
+    allow_retry: bool,
+    session_id: str,
+    model: str,
+) -> Any:
+    """Collect a child run, retrying only when replay cannot duplicate tools."""
+    usage = RunUsage()
+    max_attempts = 1 + get_model_stream_retries()
+    base_delay_seconds = get_model_stream_retry_base_delay_seconds()
+    max_delay_seconds = get_model_stream_retry_max_delay_seconds()
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await collect_response(
+                agent,
+                prompt,
+                usage_limits=usage_limits,
+                usage=usage,
+            )
+        except Exception as exc:
+            classification = classify_exception(exc, phase="delegate_child_run")
+            can_retry = (
+                allow_retry and classification.retryable and attempt < max_attempts
+            )
+            if not can_retry:
+                raise
+            delay_seconds = min(
+                max_delay_seconds,
+                base_delay_seconds * (2 ** (attempt - 1)),
+            )
+            logger.add_sink("validation").warning(
+                "delegate_retry_scheduled",
+                data={
+                    "event": "delegate_retry_scheduled",
+                    "workflow_id": session_id,
+                    "model": model,
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "max_attempts": max_attempts,
+                    "delay_seconds": delay_seconds,
+                    "failure_kind": classification.failure_kind,
+                    "error_type": classification.error_type,
+                    "replay_scope": "no_child_tools",
+                },
+            )
+            await asyncio.sleep(delay_seconds)
+    raise AssertionError("Delegate retry loop exhausted without returning or raising")
 
 
 def _failed_delegate_return(

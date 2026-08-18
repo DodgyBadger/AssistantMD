@@ -39,7 +39,7 @@ from core.memory.session_summary_status import session_summary_status
 from core.vault_state.service import VaultStateService
 from core.vector import VectorService
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 from .failures import classify_exception, tool_failure_return
 
 logger = UnifiedLogger(tag="session-ops-tool")
@@ -68,6 +68,10 @@ class SessionSummaryEmbeddingPreflightError(RuntimeError):
 
 class SessionOps(BaseTool):
     """Search and summarize chat sessions."""
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.MANUAL_REQUIRED
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -379,71 +383,6 @@ class SessionOps(BaseTool):
             name="session_ops",
             description="Search and summarize chat sessions.",
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for session lookup and summarization."""
-        return """
-Session summary field guidance:
-- `summary`: compact plain-language summary of the session's durable outcome;
-  target 500-800 characters and never exceed 1,000 characters.
-- `domain`: semicolon-separated subject-area tags; use one to three compact
-  noun phrases.
-- `work_product`: concrete thing the user wanted produced or answered.
-- `user_intent`: user's underlying goal or intent after clarification or drift;
-  write one concise primary intent phrase and never exceed 140 characters.
-- `named_entities`: only named people, organizations, and places.
-- `source_summary`: concise description of source material or prior context
-  identifiable from tool use. This is provenance returned with a summary, not an
-  indexed retrieval field.
-
-Use `list_sessions` for a compact browseable overview of chat sessions in the
-current vault. It returns one page of lightweight rows ordered by most recent
-activity, plus `total_count` and `next_cursor`. Use it when the user asks for an
-overview, inventory, recent sessions, or sessions with missing/stale summaries.
-By default, it lists only sessions with stored summaries. Rows include title,
-timestamps, message count, summary status, domain, and user_intent. It does not
-return full summaries or transcripts; call
-`get_session_summary` for full details about one selected session.
-
-Use `filter` only for deterministic metadata constraints. Supported filter key:
-`workspace`. Values are `current` for the active session workspace, an exact
-vault-relative workspace path, or a subtree path ending in `/*`. Do not use
-general glob patterns. Filtering changes which sessions are eligible; it is not
-semantic search.
-
-Use `upsert_session_summary` only when you already have the field values to store
-as the current session summary.
-Pass those values in `data`; supported keys are `summary`, `domain`,
-`work_product`, `user_intent`, `named_entities`, `source_summary`, `artifacts`,
-and `metadata`.
-It persists supplied values; it does not inspect the transcript or infer missing
-fields. When updating an existing summary, omitted fields are preserved; pass
-null or an empty string to explicitly clear a field.
-
-Use `search_sessions` for caller-driven lookup across indexed chat-session
-summaries. `search_sessions` has two modes:
-- `search`: default. Searches a user-provided query across all session-summary
-  fields.
-- `deep`: searches a user-provided query across all session-summary fields and
-  raw chat transcripts.
-Mode selection:
-- Use `search` for normal live-chat lookup when the current session does not
-  yet have a stored summary.
-- Use `deep` when the user asks for a broader or transcript-level search.
-Write `query` as a plain natural-language phrase. Do not use explicit boolean
-syntax such as uppercase AND/OR. Use a positive integer `limit`. Search and
-deep modes require a query. Without an explicit workspace filter,
-`search_sessions` may boost exact same-workspace matches when the active session
-has a workspace. Use `filter.workspace` only when the workspace is a hard
-boundary.
-
-For manual writes, include only fields you intend to create, replace, or clear.
-Leave unsupported or unchanged fields out of `data`.
-
-Full documentation:
-- `__virtual_docs__/tools/session_ops.md`
-"""
 
     @staticmethod
     def _parse_limit(value: int | str, *, default: int) -> int | str:

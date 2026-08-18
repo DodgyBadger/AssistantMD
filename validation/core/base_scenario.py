@@ -521,6 +521,10 @@ class BaseScenario(ABC):
                     event.setdefault("event", buffered_event.event)
                     event.setdefault("sequence", buffered_event.sequence)
                     result["events"].append(event)
+                    if event.get("event") == "chat_retry_scheduled" and event.get(
+                        "reset_response"
+                    ):
+                        result["text"] = ""
                     choices = event.get("choices") or []
                     if choices:
                         delta = choices[0].get("delta") or {}

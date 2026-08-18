@@ -7,7 +7,7 @@ import time
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
-from core.tools.base import BaseTool
+from core.tools.base import BaseTool, ToolRecoveryPolicy
 from core.tools.web_common import log_web_capability_completed, web_tool_failure
 from core.web.config import get_web_strategy_name
 from core.web.service import WebCapabilityService
@@ -67,8 +67,5 @@ class WebSearch(BaseTool):
         )
 
     @classmethod
-    def get_instructions(cls) -> str:
-        return """
-Full documentation:
-- `__virtual_docs__/tools/web_search.md`
-"""
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.REPLAY_SAFE

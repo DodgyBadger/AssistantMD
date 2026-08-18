@@ -5,8 +5,18 @@ Provides a standard interface for tool creation and instruction generation.
 """
 
 from abc import ABC, abstractmethod
+from enum import StrEnum
 
 from pydantic_ai.tools import Tool
+
+
+class ToolRecoveryPolicy(StrEnum):
+    """Developer-declared recovery semantics for an interrupted tool call."""
+
+    UNKNOWN = "unknown"
+    REPLAY_SAFE = "replay_safe"
+    VAULT_TRANSACTIONAL = "vault_transactional"
+    MANUAL_REQUIRED = "manual_required"
 
 
 class BaseTool(ABC):
@@ -23,7 +33,6 @@ class BaseTool(ABC):
         pass
 
     @classmethod
-    @abstractmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for this tool."""
-        pass
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        """Return interruption recovery semantics, failing closed by default."""
+        return ToolRecoveryPolicy.UNKNOWN

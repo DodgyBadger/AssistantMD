@@ -30,6 +30,7 @@ from core.chat.chat_store import ChatStore
 from core.chat.compaction import (
     maybe_auto_compact_after_turn,
 )
+from core.chat.run_recovery import ChatRunRecoveryCoordinator
 from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.identity import ExecutionAuthority
 from core.llm.agents import create_agent
@@ -135,6 +136,7 @@ class PreparedChatExecution:
     workspace_path: str = ""
     chat_mode: ChatMode = NORMAL_CHAT_MODE
     deferred_tool_results: DeferredToolResults | None = None
+    recovery: ChatRunRecoveryCoordinator | None = None
 
     def resume_config(self) -> dict[str, Any]:
         """Return JSON-safe config needed to resume a deferred review."""
@@ -952,6 +954,8 @@ async def _prepare_chat_execution(
         tool_instructions="",
         history_processor_factory=build_context_manager_history_processor,
     )
+    recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
+    capabilities.append(recovery.capability(session_id=session_id))
 
     agent = await create_agent(
         model=model_instance,
@@ -991,6 +995,7 @@ async def _prepare_chat_execution(
         context_template=context_template,
         workspace_path=workspace_path,
         chat_mode=normalize_chat_mode(chat_mode),
+        recovery=recovery,
     )
 
 
@@ -1033,6 +1038,8 @@ async def _prepare_deferred_review_resume_execution(
         tool_instructions="",
         history_processor_factory=build_context_manager_history_processor,
     )
+    recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
+    capabilities.append(recovery.capability(session_id=session_id))
 
     agent = await create_agent(
         model=model_instance,
@@ -1056,6 +1063,7 @@ async def _prepare_deferred_review_resume_execution(
         workspace_path=workspace_path,
         chat_mode=normalize_chat_mode(chat_mode),
         deferred_tool_results=deferred_tool_results,
+        recovery=recovery,
     )
 
 

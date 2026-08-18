@@ -23,7 +23,8 @@ from pydantic_ai import (
     ThinkingPartDelta,
 )
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ModelMessage, TextPart
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.authoring.context_manager import ContextTemplateExecutionError
 from core.chat import executor as chat_executor
@@ -55,6 +56,11 @@ from core.runtime.task_runner import (
     ExecutionGatePolicy,
     ExecutionTaskHooks,
     ExecutionTaskSpec,
+)
+from core.settings import (
+    get_model_stream_retries,
+    get_model_stream_retry_base_delay_seconds,
+    get_model_stream_retry_max_delay_seconds,
 )
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
@@ -658,6 +664,7 @@ async def _run_prepared_chat_stream_task(
     should_mark_started = task is None
     full_response = ""
     final_result = None
+    messages_for_canonical_commit: list[ModelMessage] | None = None
     deferred_review = None
     tool_activity: dict[str, dict[str, Any]] = {}
     session_buffer_store = get_session_buffer_store(session_id)
@@ -707,69 +714,114 @@ async def _run_prepared_chat_stream_task(
         )
 
         try:
-            async for event in prepared.agent.run_stream_events(
-                prepared.user_prompt,
-                message_history=prepared.message_history,
-                deferred_tool_results=prepared.deferred_tool_results,
-                deps=run_deps,
-                usage_limits=chat_executor._chat_usage_limits(),
-            ):
-                if isinstance(event, PartStartEvent):
-                    if isinstance(event.part, TextPart) and event.part.content:
-                        delta_text = event.part.content
-                        full_response += delta_text
-                        await event_buffer.append(
-                            task.task_id,
-                            "delta",
-                            _delta_event_data(delta_text),
-                        )
-                    elif isinstance(event.part, ThinkingPart) and event.part.content:
-                        await event_buffer.append(
-                            task.task_id,
-                            "thinking_delta",
-                            _thinking_delta_event_data(event.part.content),
-                        )
-
-                elif isinstance(event, PartDeltaEvent):
-                    if isinstance(event.delta, TextPartDelta):
-                        delta_text = event.delta.content_delta
-                        full_response += delta_text
-                        await event_buffer.append(
-                            task.task_id,
-                            "delta",
-                            _delta_event_data(delta_text),
-                        )
-                    elif isinstance(event.delta, ThinkingPartDelta):
-                        thinking_delta = event.delta.content_delta
-                        if thinking_delta:
-                            await event_buffer.append(
-                                task.task_id,
-                                "thinking_delta",
-                                _thinking_delta_event_data(thinking_delta),
-                            )
-
-                elif isinstance(event, FunctionToolCallEvent):
-                    await _publish_tool_call_started(
+            usage = RunUsage()
+            usage_limits = chat_executor._chat_usage_limits()
+            max_attempts = 1 + get_model_stream_retries()
+            base_delay_seconds = get_model_stream_retry_base_delay_seconds()
+            max_delay_seconds = get_model_stream_retry_max_delay_seconds()
+            attempt_prompt = prepared.user_prompt
+            attempt_history = prepared.message_history
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    final_result, full_response = await _collect_chat_stream_attempt(
+                        prepared=prepared,
+                        user_prompt=attempt_prompt,
+                        message_history=attempt_history,
+                        run_deps=run_deps,
+                        usage=usage,
+                        usage_limits=usage_limits,
                         task_id=task.task_id,
-                        event=event,
                         event_buffer=event_buffer,
                         tool_activity=tool_activity,
                         vault_name=vault_name,
                         session_id=session_id,
                     )
-
-                elif isinstance(event, FunctionToolResultEvent):
-                    await _publish_tool_call_finished(
-                        task_id=task.task_id,
-                        event=event,
-                        event_buffer=event_buffer,
-                        tool_activity=tool_activity,
-                        vault_name=vault_name,
-                        session_id=session_id,
+                    if (
+                        attempt_history is not None
+                        and attempt_history is not prepared.message_history
+                    ):
+                        history_prefix_length = len(prepared.message_history or [])
+                        messages_for_canonical_commit = [
+                            *attempt_history[history_prefix_length:],
+                            *final_result.new_messages(),
+                        ]
+                    break
+                except Exception as exc:
+                    classification = classify_exception(exc, phase="agent_stream")
+                    checkpoint = None
+                    if classification.retryable and prepared.recovery is not None:
+                        checkpoint = await prepared.recovery.select_settled_checkpoint(
+                            conversation_id=session_id
+                        )
+                    replay_scope = "no_chat_tools"
+                    if checkpoint is not None:
+                        attempt_prompt = None
+                        attempt_history = checkpoint.messages
+                        replay_scope = "settled_checkpoint"
+                    can_retry = (
+                        classification.retryable
+                        and attempt < max_attempts
+                        and (not prepared.tools or checkpoint is not None)
                     )
-
-                elif isinstance(event, AgentRunResultEvent):
-                    final_result = event.result
+                    if not can_retry:
+                        raise
+                    delay_seconds = min(
+                        max_delay_seconds,
+                        base_delay_seconds * (2 ** (attempt - 1)),
+                    )
+                    retry_data = {
+                        "event": "chat_retry_scheduled",
+                        "task_id": task.task_id,
+                        "session_id": session_id,
+                        "model": prepared.model,
+                        "attempt": attempt,
+                        "next_attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "delay_seconds": delay_seconds,
+                        "failure_kind": classification.failure_kind,
+                        "error_type": classification.error_type,
+                        "replay_scope": replay_scope,
+                        "reset_response": True,
+                    }
+                    if checkpoint is not None:
+                        retry_data.update(
+                            {
+                                "recovery_run_id": checkpoint.run_id,
+                                "recovery_step_index": checkpoint.step_index,
+                                "trimmed_failed_response": (
+                                    checkpoint.trimmed_failed_response
+                                ),
+                            }
+                        )
+                        checkpoint_data = {
+                            "event": "chat_recovery_checkpoint_selected",
+                            "task_id": task.task_id,
+                            "session_id": session_id,
+                            "run_id": checkpoint.run_id,
+                            "step_index": checkpoint.step_index,
+                            "message_count": len(checkpoint.messages),
+                            "trimmed_failed_response": (
+                                checkpoint.trimmed_failed_response
+                            ),
+                        }
+                        chat_executor.logger.info(
+                            "Primary chat recovery checkpoint selected",
+                            data=checkpoint_data,
+                        )
+                        await event_buffer.append(
+                            task.task_id,
+                            "chat_recovery_checkpoint_selected",
+                            checkpoint_data,
+                        )
+                    chat_executor.logger.warning(
+                        "Primary chat retry scheduled", data=retry_data
+                    )
+                    await event_buffer.append(
+                        task.task_id,
+                        "chat_retry_scheduled",
+                        retry_data,
+                    )
+                    await asyncio.sleep(delay_seconds)
 
             if final_result:
                 deferred_requests = getattr(final_result, "output", None)
@@ -781,7 +833,7 @@ async def _run_prepared_chat_stream_task(
                         session_id,
                         vault_name,
                         chat_executor._messages_after_accepted_user_request(
-                            final_result.new_messages()
+                            messages_for_canonical_commit or final_result.new_messages()
                         ),
                     )
                     chat_executor._clear_latest_turn_failure(
@@ -1047,6 +1099,84 @@ async def _run_prepared_chat_stream_task(
             vault_name=vault_name,
             vault_path=vault_path,
         )
+
+
+async def _collect_chat_stream_attempt(
+    *,
+    prepared: chat_executor.PreparedChatExecution,
+    user_prompt: chat_executor.PromptInput,
+    message_history: list[ModelMessage] | None,
+    run_deps: chat_executor.ChatRunDeps,
+    usage: RunUsage,
+    usage_limits: UsageLimits | None,
+    task_id: str,
+    event_buffer: ChatTaskEventBuffer,
+    tool_activity: dict[str, dict[str, Any]],
+    vault_name: str,
+    session_id: str,
+) -> tuple[Any, str]:
+    """Collect one Pydantic chat stream attempt and publish provisional events."""
+    final_result = None
+    full_response = ""
+    async with prepared.agent.run_stream_events(
+        user_prompt,
+        message_history=message_history,
+        deferred_tool_results=prepared.deferred_tool_results,
+        deps=run_deps,
+        usage_limits=usage_limits,
+        usage=usage,
+        conversation_id=session_id,
+    ) as stream_events:
+        async for event in stream_events:
+            if isinstance(event, PartStartEvent):
+                if isinstance(event.part, TextPart) and event.part.content:
+                    delta_text = event.part.content
+                    full_response += delta_text
+                    await event_buffer.append(
+                        task_id, "delta", _delta_event_data(delta_text)
+                    )
+                elif isinstance(event.part, ThinkingPart) and event.part.content:
+                    await event_buffer.append(
+                        task_id,
+                        "thinking_delta",
+                        _thinking_delta_event_data(event.part.content),
+                    )
+            elif isinstance(event, PartDeltaEvent):
+                if isinstance(event.delta, TextPartDelta):
+                    delta_text = event.delta.content_delta
+                    full_response += delta_text
+                    await event_buffer.append(
+                        task_id, "delta", _delta_event_data(delta_text)
+                    )
+                elif isinstance(event.delta, ThinkingPartDelta):
+                    thinking_delta = event.delta.content_delta
+                    if thinking_delta:
+                        await event_buffer.append(
+                            task_id,
+                            "thinking_delta",
+                            _thinking_delta_event_data(thinking_delta),
+                        )
+            elif isinstance(event, FunctionToolCallEvent):
+                await _publish_tool_call_started(
+                    task_id=task_id,
+                    event=event,
+                    event_buffer=event_buffer,
+                    tool_activity=tool_activity,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+            elif isinstance(event, FunctionToolResultEvent):
+                await _publish_tool_call_finished(
+                    task_id=task_id,
+                    event=event,
+                    event_buffer=event_buffer,
+                    tool_activity=tool_activity,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+            elif isinstance(event, AgentRunResultEvent):
+                final_result = event.result
+    return final_result, full_response
 
 
 async def stream_chat_task_sse(

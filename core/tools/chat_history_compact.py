@@ -18,7 +18,7 @@ from core.runtime.execution_tasks import (
 )
 from core.runtime.state import get_runtime_context
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 
 logger = UnifiedLogger(tag="chat-history-compact-tool")
 
@@ -89,9 +89,5 @@ class ChatHistoryCompact(BaseTool):
         )
 
     @classmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for chat history compaction."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/chat_history_compact.md`
-"""
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.MANUAL_REQUIRED
