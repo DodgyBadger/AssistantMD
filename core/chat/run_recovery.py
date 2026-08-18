@@ -15,6 +15,8 @@ from pydantic_ai_harness.step_persistence import (
 
 from core.tools.base import ToolRecoveryPolicy
 
+CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN = 8
+
 
 @dataclass(frozen=True)
 class ChatRecoveryCheckpoint:
@@ -53,7 +55,9 @@ class ChatRunRecoveryCoordinator:
     def __init__(
         self, *, tool_policies: dict[str, ToolRecoveryPolicy] | None = None
     ) -> None:
-        self.store = InMemoryStepStore()
+        self.store = InMemoryStepStore(
+            max_snapshots_per_run=CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN
+        )
         self.tool_policies = dict(tool_policies or {})
 
     @classmethod

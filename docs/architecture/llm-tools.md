@@ -143,6 +143,15 @@ construction fails with actionable reconnect/switch-auth guidance.
 
 `delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors. Bounded failures also include structured classification metadata such as failure kind, retryability, and suggested action.
 
+Primary chat attaches a task-scoped Harness `StepPersistence` capability. Its
+bounded in-memory snapshots preserve settled model/tool boundaries during the
+live execution task. A transient disconnect can continue after completed tool
+calls without re-executing them. Unsettled replay-safe tools may run again;
+unsettled vault mutations require terminal task rollback before one replacement
+task starts; unknown or external effects fail closed for manual recovery.
+Recovery state does not survive a process or container restart. Delegate runs
+currently apply automatic retry only while no child tool effect has occurred.
+
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
 `workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API, system-template, and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI, including heartbeat/progress metadata when available. `run` and `start` can resolve an explicit vault-relative Markdown workflow outside managed discovery. The resolver requires real-path containment, a `.md` file, and explicit `run_type: workflow`; path-based runs do not enter workflow discovery, scheduling, or lifecycle management.

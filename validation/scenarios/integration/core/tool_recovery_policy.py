@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.authoring.shared.tool_binding import resolve_tool_binding
 from core.chat.run_recovery import (
+    CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN,
     ChatRecoveryDecision,
     ChatRecoveryStrategy,
     ChatRunRecoveryCoordinator,
@@ -63,6 +64,7 @@ class ToolRecoveryPolicyScenario(BaseScenario):
             )
             assert coordinator.tool_policy("unregistered") is ToolRecoveryPolicy.UNKNOWN
             assert BaseTool.get_recovery_policy() is ToolRecoveryPolicy.UNKNOWN
+            await _assert_snapshot_retention_is_bounded()
 
             assert "Read, list, search, and inspect frontmatter" in (
                 binding.tool_instructions
@@ -160,6 +162,29 @@ async def _unresolved_decision(
         )
     )
     return await coordinator.decide(conversation_id=conversation_id)
+
+
+async def _assert_snapshot_retention_is_bounded() -> None:
+    """Pin the native Harness resource bound used by chat recovery."""
+    coordinator = ChatRunRecoveryCoordinator()
+    run_id = "bounded-snapshots"
+    conversation_id = "bounded-snapshots"
+    await coordinator.store.register_run(
+        RunRecord(run_id=run_id, conversation_id=conversation_id)
+    )
+    for step_index in range(CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN + 1):
+        await coordinator.store.save_snapshot(
+            ContinuableSnapshot(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                step_index=step_index,
+                state="complete",
+                messages=[ModelRequest(parts=[UserPromptPart(content="probe")])],
+            )
+        )
+    snapshots = await coordinator.store.list_snapshots(run_id=run_id)
+    assert len(snapshots) == CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN
+    assert snapshots[0].step_index == 1
 
 
 async def _assert_replay_executes_pending_tool(

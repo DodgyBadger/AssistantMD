@@ -1615,7 +1615,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", extras = ["mistral", "xai"], specifier = "==2.19.0" },
-    { name = "pydantic-ai-harness", extras = ["code-mode"], specifier = "==0.11.0" },
+    { name = "pydantic-ai-harness", extras = ["code-mode"], specifier = "==0.13.0" },
     { name = "pydantic-monty", specifier = "==0.0.21" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pymupdf", specifier = ">=1.24.10" },
@@ -1809,15 +1809,15 @@ xai = [
 
 [[package]]
 name = "pydantic-ai-harness"
-version = "0.11.0"
+version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic-ai-slim" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/99/25a7f4f4db7ed6e40785a2c2a02ca895e9ea810324bf3a82916e8ab2be6a/pydantic_ai_harness-0.11.0.tar.gz", hash = "sha256:2a36a7d4ae3b1f8cdf91bc4f19defe94b0bdb11e4b2a65da41e4e3efd88954f5", size = 1277646, upload-time = "2026-07-25T01:21:09.129Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/2a/a95e7f7a7591b141f02a1f050095a8e0fef11df4f0b7b02f0adab762f5b5/pydantic_ai_harness-0.13.0.tar.gz", hash = "sha256:10b2c1ef6463c7432750832d02e3f78172dd2bdee90163ed08c57547eb7661e0", size = 1341422, upload-time = "2026-07-29T03:36:52.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/8a/6bafcc983a227f01cdce28becc36ab6fe4baec365ae10bdbec70a986c5b8/pydantic_ai_harness-0.11.0-py3-none-any.whl", hash = "sha256:c849725d467a98fb01e035a526b7b7c488952935e3f5c9b74f517a3ec11fc47a", size = 402345, upload-time = "2026-07-25T01:21:07.18Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/3e/3cb9abfda328d66d9f2fc31dc75fe129e31c0bbb27ac1f8b34335a4e0826/pydantic_ai_harness-0.13.0-py3-none-any.whl", hash = "sha256:c688c3536017017e10947c5ea78085ca5fd9eb0e9f2b4ab3857df21a079ef5c8", size = 440704, upload-time = "2026-07-29T03:36:50.616Z" },
 ]
 
 [package.optional-dependencies]

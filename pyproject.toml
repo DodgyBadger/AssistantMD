@@ -13,7 +13,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic-settings>=2.0.0",
     "pydantic-ai[mistral,xai]==2.19.0",
-    "pydantic-ai-harness[code-mode]==0.11.0",
+    "pydantic-ai-harness[code-mode]==0.13.0",
     "fastapi>=0.100.0",
     "python-multipart",
     "logfire[fastapi,sqlalchemy]",

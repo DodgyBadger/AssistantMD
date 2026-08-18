@@ -3,7 +3,7 @@
 ## Status
 
 Phase 1 investigation is sufficient to define the recovery boundary. The
-foundational dependency migration now targets Pydantic AI 2.19, Harness 0.11,
+foundational dependency migration now targets Pydantic AI 2.19, Harness 0.13,
 and Monty 0.0.21. Provider construction, chat stream consumption, context
 history processing, and the Monty authoring runner have been adapted to their
 current APIs. Harness capability adoption remains gated on feature parity. A
@@ -93,7 +93,7 @@ the stack to guarantee recovery once response streaming has started.
 ## Pydantic AI Framework Assessment
 
 AssistantMD targets `pydantic-ai[mistral,xai]==2.19.0`,
-`pydantic-ai-harness[code-mode]==0.11.0`, and `pydantic-monty==0.0.21`.
+`pydantic-ai-harness[code-mode]==0.13.0`, and `pydantic-monty==0.0.21`.
 Dependency currency and adoption of individual Harness capabilities remain
 separate decisions.
 
@@ -230,7 +230,7 @@ an investigation artifact, not yet the stable regression contract.
 ### Phase 1B: Framework upgrade feasibility
 
 - Upgrade target evaluated on 2026-08-18: `pydantic-ai==2.19.0` and
-  `pydantic-ai-harness[code-mode]==0.11.0`, the current published releases.
+  `pydantic-ai-harness[code-mode]==0.13.0`, the adopted published releases.
   Resolution succeeds in an isolated environment after adding the explicit
   Pydantic `mistral` extra and moving Monty to a Harness-compatible version.
 - Treat this as a framework migration, not a patch bump. Harness documents that
@@ -272,7 +272,7 @@ an investigation artifact, not yet the stable regression contract.
   - `OpenAIModel` was replaced by `OpenAIChatModel`; Grok's former provider
     module is absent and must migrate to the current XAI/OpenAI-compatible
     provider contract.
-  - Harness 0.11 requires `pydantic-monty>=0.0.19`; `run_monty_async` is absent
+  - Harness requires `pydantic-monty>=0.0.19`; `run_monty_async` is absent
     there, so the authoring runtime must migrate to `AsyncMonty` pool/session
     execution (`checkout` plus `feed_run`) and retain its dataclass, type-check,
     external-function, print, and error contracts.

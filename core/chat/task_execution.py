@@ -163,16 +163,16 @@ async def _handle_failed_chat_task(
     event_buffer: ChatTaskEventBuffer,
 ) -> None:
     """Start whole-turn replay only after task-terminal rollback succeeds."""
+    if not isinstance(exc, ChatRollbackRestartRequired):
+        return
     chat_executor.logger.info(
-        "Chat failed-task recovery hook invoked",
+        "Chat rollback-restart recovery hook invoked",
         data={
             "event": "chat_failed_task_recovery_hook",
             "task_id": task_id,
             "error_type": type(exc).__name__,
         },
     )
-    if not isinstance(exc, ChatRollbackRestartRequired):
-        return
     try:
         rollback = rollback_task_file_mutations(
             task_id=task_id,

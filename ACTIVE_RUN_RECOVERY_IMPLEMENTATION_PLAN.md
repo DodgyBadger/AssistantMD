@@ -2,14 +2,14 @@
 
 ## Status
 
-Investigation complete. Slice 1 is implemented and targeted validation passes.
-Slice 2 is in progress: tool-owned recovery policy metadata and its fail-closed
-binding path are implemented. This document remains the implementation baseline. It is intentionally separate from
-`LONG_RUNNING_TASK_RESILIENCE_PLAN.md`, which remains the broader program record.
+Phase A in-process recovery is complete through Slice 3 and its targeted
+validation passes. This document remains the implementation baseline. It is
+intentionally separate from `LONG_RUNNING_TASK_RESILIENCE_PLAN.md`, which
+remains the broader program record.
 
-The next workflow phase is Slice 2's in-process safety matrix. Restart recovery
-and schema work must not begin until the Harness lifecycle gates in this plan
-are resolved.
+Durable restart recovery and schema work are explicitly deferred. They must not
+begin until the Harness lifecycle gates in this plan are resolved and an
+observed operational need justifies the additional durable state.
 
 ## Objective
 
@@ -74,7 +74,7 @@ to canonical history only when the logical turn completes.
 
 ## Pydantic AI Harness Assessment
 
-Harness `StepPersistence` is the persistence substrate. AssistantMD must not
+Harness 0.13 `StepPersistence` is the persistence substrate. AssistantMD must not
 replace its message, run, snapshot, or tool-effect types with parallel domain
 types.
 
@@ -89,7 +89,8 @@ It currently provides:
 - Interrupted snapshots for unsettled tool work.
 - A tool-effect ledger keyed by `(run_id, tool_call_id)` with `started`,
   `completed`, and `failed` states.
-- In-memory, file, and SQLite stores; the SQLite store externalizes large media
+- In-memory, file, and SQLite stores; all stores support a native per-run
+  snapshot bound, and the SQLite store externalizes large media
   through the Harness media store.
 - Continuation through Pydantic's `message_history=` rather than a replacement
   agent protocol.
@@ -105,7 +106,7 @@ Known gaps established by the parity probe:
   but that does not provide AssistantMD lifecycle ownership or cleanup.
 - Capability state beyond message history is not restored automatically.
 
-The durable implementation therefore requires a thin AssistantMD coordinator
+Any durable implementation therefore requires a thin AssistantMD coordinator
 and one narrow live-history adapter. It does not justify a second message or
 tool-effect schema.
 
@@ -462,7 +463,7 @@ event stream terminates with `chat_retry_redirect`, and browser plus validation
 consumers follow the replacement while preserving one logical response.
 Rollback-disabled and incomplete outcomes fail closed without replacement.
 
-### Slice 4: restart recovery
+### Slice 4: restart recovery (deferred)
 
 After the Harness lifecycle gate and schema migration:
 
@@ -500,14 +501,17 @@ Maintainers retain ownership of the full validation suite.
 4. **Effect classification:** add tool metadata and unresolved-effect routing.
 5. **Rollback redirect:** connect the decision layer to terminal task rollback
    and replacement-task events.
-6. **Harness lifecycle resolution:** add or adopt public deletion, retention,
-   and claim support.
+6. **Harness lifecycle resolution (deferred):** add or adopt public deletion,
+   retention, and claim support.
 7. **Durable catalog/migration:** introduce `chat_run_recovery.db` and startup
    reconciliation.
 8. **Restart recovery:** claim and resume eligible records during runtime
    bootstrap/session activation.
 9. **Hardening:** retention, redaction, metrics, compatibility fingerprints,
    dependency-upgrade parity, and ADR/architecture documentation.
+
+Slices 1-5 and the in-process portions of Slice 9 are complete. Slices 6-8 are
+not part of the current delivery.
 
 Each slice must preserve a working manual-retry fallback and pass its targeted
 scenario before the next slice begins.
@@ -569,8 +573,10 @@ restart-safe durable recovery.
 - Vault rollback/replay is a verified fallback, not the default continuation.
 - Retry settings, usage limits, cancellation, and UI events apply across all
   recovery attempts.
-- Restart recovery is single-consumer, migration-backed, retention-bounded, and
-  uses public Harness/Pydantic contracts.
+- In-process recovery state is bounded and discarded with the execution task.
+- If restart recovery is later adopted, it is single-consumer,
+  migration-backed, retention-bounded, and uses public Harness/Pydantic
+  contracts.
 - Manual retry remains available whenever automatic recovery is unsafe or
   exhausted.
 - The new ADR and current-contract architecture documentation match the shipped
