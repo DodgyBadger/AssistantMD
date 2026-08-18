@@ -495,6 +495,7 @@ class BaseScenario(ABC):
             "start_response": start_response,
             "session_id": None,
             "task_id": None,
+            "task_ids": [],
             "events": [],
             "terminal_event": None,
             "text": "",
@@ -506,6 +507,7 @@ class BaseScenario(ABC):
         task_id = payload.get("task", {}).get("task_id")
         result["session_id"] = payload.get("session_id")
         result["task_id"] = task_id
+        result["task_ids"].append(task_id)
         if not task_id:
             return result
 
@@ -513,18 +515,31 @@ class BaseScenario(ABC):
 
         async def _collect_events() -> None:
             cursor = 0
+            current_task_id = task_id
             while True:
-                events = await CHAT_TASK_EVENT_BUFFER.events_after(task_id, cursor)
+                redirected = False
+                events = await CHAT_TASK_EVENT_BUFFER.events_after(
+                    current_task_id, cursor
+                )
                 for buffered_event in events:
                     cursor = buffered_event.sequence
                     event = dict(buffered_event.data)
                     event.setdefault("event", buffered_event.event)
                     event.setdefault("sequence", buffered_event.sequence)
                     result["events"].append(event)
-                    if event.get("event") == "chat_retry_scheduled" and event.get(
-                        "reset_response"
-                    ):
+                    if event.get("reset_response") and event.get("event") in {
+                        "chat_retry_scheduled",
+                        "chat_retry_redirect",
+                    }:
                         result["text"] = ""
+                    if event.get("event") == "chat_retry_redirect":
+                        replacement_task_id = event.get("replacement_task_id")
+                        if isinstance(replacement_task_id, str) and replacement_task_id:
+                            current_task_id = replacement_task_id
+                            result["task_ids"].append(replacement_task_id)
+                            cursor = 0
+                            redirected = True
+                            break
                     choices = event.get("choices") or []
                     if choices:
                         delta = choices[0].get("delta") or {}
@@ -534,6 +549,8 @@ class BaseScenario(ABC):
                     if buffered_event.is_terminal:
                         result["terminal_event"] = event
                         return
+                if redirected:
+                    continue
                 await asyncio.sleep(0.01)
 
         try:

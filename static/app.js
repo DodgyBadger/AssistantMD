@@ -668,6 +668,17 @@ function applyChatStreamPayload(payload, assistantMessage) {
         return { finished: false, messageCount: 0 };
     }
 
+    if (eventType === 'chat_retry_redirect') {
+        if (payload.reset_response) {
+            chatRendering.resetAssistantStream(assistantMessage);
+        }
+        return {
+            finished: false,
+            messageCount: 0,
+            nextTaskId: payload.replacement_task_id || '',
+        };
+    }
+
     if (eventType === 'tool_call_started' || eventType === 'tool_call_finished') {
         handleToolEvent(assistantMessage, payload);
         return { finished: false, messageCount: 0 };
@@ -709,13 +720,15 @@ function applyChatStreamPayload(payload, assistantMessage) {
 }
 
 async function consumeChatTaskEvents(taskId, assistantMessage, abortController) {
+    let currentTaskId = taskId;
     let lastSequence = 0;
     let messageCount = 0;
     let finished = false;
     let finishReason = '';
 
     while (!finished) {
-        const streamUrl = `api/chat/tasks/${encodeURIComponent(taskId)}/events?after_sequence=${lastSequence}`;
+        let redirected = false;
+        const streamUrl = `api/chat/tasks/${encodeURIComponent(currentTaskId)}/events?after_sequence=${lastSequence}`;
         const response = await fetch(streamUrl, {
             method: 'GET',
             signal: abortController.signal,
@@ -748,6 +761,13 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                     lastSequence = Math.max(lastSequence, payload.sequence);
                 }
                 const result = applyChatStreamPayload(payload, assistantMessage);
+                if (result.nextTaskId) {
+                    currentTaskId = result.nextTaskId;
+                    state.activeChatTaskId = currentTaskId;
+                    lastSequence = 0;
+                    redirected = true;
+                    break;
+                }
                 messageCount = Math.max(messageCount, result.messageCount);
                 finishReason = result.finishReason || finishReason;
                 if (result.finished) {
@@ -755,8 +775,14 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                     break;
                 }
             }
+            if (redirected) {
+                await reader.cancel();
+                break;
+            }
             if (finished) break;
         }
+
+        if (redirected) continue;
 
         if (!finished && buffer.trim()) {
             const payload = parseSseEvent(buffer);
@@ -765,14 +791,22 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                     lastSequence = Math.max(lastSequence, payload.sequence);
                 }
                 const result = applyChatStreamPayload(payload, assistantMessage);
+                if (result.nextTaskId) {
+                    currentTaskId = result.nextTaskId;
+                    state.activeChatTaskId = currentTaskId;
+                    lastSequence = 0;
+                    redirected = true;
+                }
                 messageCount = Math.max(messageCount, result.messageCount);
                 finishReason = result.finishReason || finishReason;
                 finished = result.finished;
             }
         }
 
+        if (redirected) continue;
+
         if (!finished) {
-            const taskResponse = await fetch(`api/tasks/${encodeURIComponent(taskId)}`, {
+            const taskResponse = await fetch(`api/tasks/${encodeURIComponent(currentTaskId)}`, {
                 cache: 'no-store',
                 signal: abortController.signal
             });

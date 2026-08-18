@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -65,6 +65,7 @@ from core.settings import (
 )
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
+from core.vault_state.rollback import rollback_task_file_mutations
 
 _CHAT_STORE = ChatStore()
 
@@ -75,6 +76,16 @@ class ChatStreamTaskStart:
 
     task: ExecutionTaskSnapshot
     session_id: str
+
+
+class ChatRollbackRestartRequired(RuntimeError):
+    """Signal that a failed chat must roll back before whole-turn replay."""
+
+    def __init__(self, *, cause: Exception, attempt: int, max_attempts: int) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.attempt = attempt
+        self.max_attempts = max_attempts
 
 
 CHAT_TASK_EVENT_BUFFER = ChatTaskEventBuffer()
@@ -127,9 +138,104 @@ async def start_prepared_chat_stream_task(
         ),
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+            on_failed=lambda task_id, exc: _handle_failed_chat_task(
+                task_id=task_id,
+                exc=exc,
+                prepared=prepared,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                event_buffer=buffer,
+            ),
         ),
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _handle_failed_chat_task(
+    *,
+    task_id: str,
+    exc: BaseException,
+    prepared: chat_executor.PreparedChatExecution,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    event_buffer: ChatTaskEventBuffer,
+) -> None:
+    """Start whole-turn replay only after task-terminal rollback succeeds."""
+    chat_executor.logger.info(
+        "Chat failed-task recovery hook invoked",
+        data={
+            "event": "chat_failed_task_recovery_hook",
+            "task_id": task_id,
+            "error_type": type(exc).__name__,
+        },
+    )
+    if not isinstance(exc, ChatRollbackRestartRequired):
+        return
+    try:
+        rollback = rollback_task_file_mutations(
+            task_id=task_id,
+            terminal_status="failed",
+            reason="chat_recovery_restart",
+        )
+        rollback_succeeded = rollback.rollback_status == "completed" or (
+            rollback.skipped
+            and rollback.reason in {"already_rolled_back", "no_mutations"}
+        )
+        if not rollback_succeeded:
+            raise RuntimeError(rollback.reason or "rollback_incomplete")
+
+        replacement_prepared = replace(
+            prepared,
+            automatic_restart_count=prepared.automatic_restart_count + 1,
+        )
+        replacement = await start_prepared_chat_stream_task(
+            prepared=replacement_prepared,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=event_buffer,
+            persist_user_request=False,
+        )
+        await event_buffer.append(
+            task_id,
+            "chat_retry_redirect",
+            {
+                "event": "chat_retry_redirect",
+                "source_task_id": task_id,
+                "replacement_task_id": replacement.task.task_id,
+                "session_id": session_id,
+                "strategy": "terminal_rollback_restart",
+                "rollback_status": rollback.rollback_status or rollback.reason,
+                "attempt": exc.attempt,
+                "max_attempts": exc.max_attempts,
+                "reset_response": True,
+            },
+        )
+    except Exception as rollback_exc:
+        chat_executor.logger.error(
+            "Primary chat rollback recovery abandoned",
+            data={
+                "event": "chat_recovery_abandoned",
+                "task_id": task_id,
+                "session_id": session_id,
+                "reason": "rollback_unavailable",
+                "error_type": type(rollback_exc).__name__,
+            },
+        )
+        if not await event_buffer.is_terminal(task_id):
+            await event_buffer.append(
+                task_id,
+                "error",
+                _error_event_data(
+                    "\n\nError: Automatic recovery could not safely roll back vault changes.",
+                    {
+                        "strategy": "manual_required",
+                        "reason": "rollback_unavailable",
+                    },
+                ),
+            )
 
 
 async def start_chat_turn_retry_task(
@@ -431,9 +537,11 @@ async def start_queued_chat_stream_task(
     """Start a streaming chat task that waits behind earlier tasks in its session."""
     runtime = get_runtime_context()
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+    prepared_for_failure: chat_executor.PreparedChatExecution | None = None
 
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
+            nonlocal prepared_for_failure
             try:
                 if has_pending_deferred_review(
                     vault_name=vault_name, session_id=session_id
@@ -458,6 +566,7 @@ async def start_queued_chat_stream_task(
                     chat_mode=chat_mode,
                     display_prompt=display_prompt,
                 )
+                prepared_for_failure = prepared
             except asyncio.CancelledError:
                 raise
             except (
@@ -501,6 +610,19 @@ async def start_queued_chat_stream_task(
             _run_in_session_gate,
         )
 
+    async def _on_failed(task_id: str, exc: BaseException) -> None:
+        if prepared_for_failure is None:
+            return
+        await _handle_failed_chat_task(
+            task_id=task_id,
+            exc=exc,
+            prepared=prepared_for_failure,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=buffer,
+        )
+
     task = await runtime.task_runner.start_background(
         ExecutionTaskSpec(
             kind=ExecutionTaskKind.CHAT,
@@ -520,6 +642,7 @@ async def start_queued_chat_stream_task(
         _run,
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+            on_failed=_on_failed,
         ),
         start_immediately=False,
     )
@@ -769,6 +892,22 @@ async def _run_prepared_chat_stream_task(
                             ChatRecoveryStrategy.REPLAY_NO_EFFECT,
                         }
                     )
+                    rollback_restart = recovery_decision is not None and (
+                        recovery_decision.strategy
+                        is ChatRecoveryStrategy.TERMINAL_ROLLBACK_RESTART
+                    )
+                    if (
+                        classification.retryable
+                        and rollback_restart
+                        and attempt < max_attempts
+                        and prepared.automatic_restart_count
+                        < get_model_stream_retries()
+                    ):
+                        raise ChatRollbackRestartRequired(
+                            cause=exc,
+                            attempt=attempt,
+                            max_attempts=max_attempts,
+                        ) from exc
                     can_retry = (
                         classification.retryable
                         and attempt < max_attempts
@@ -999,6 +1138,47 @@ async def _run_prepared_chat_stream_task(
                             "finish_reason": "cancelled",
                         }
                     ],
+                },
+            )
+            raise
+        except ChatRollbackRestartRequired as exc:
+            classification = classify_exception(exc.cause, phase="agent_stream")
+            chat_executor._log_chat_failure(
+                "Streaming chat requires rollback before automatic restart",
+                vault_name=vault_name,
+                session_id=session_id,
+                model=prepared.model,
+                tools=prepared.tools,
+                streaming=True,
+                phase="agent_stream",
+                prompt_length=len(prepared.prompt_for_history),
+                attached_image_count=prepared.attached_image_count,
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
+                extra={
+                    **chat_executor._summarize_tool_activity(tool_activity),
+                    "task_id": task.task_id,
+                    "strategy": "terminal_rollback_restart",
+                },
+                exc=exc.cause,
+            )
+            chat_executor._record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc.cause,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
+            )
+            chat_executor.logger.info(
+                "Primary chat awaiting task rollback",
+                data={
+                    "event": "chat_recovery_awaiting_rollback",
+                    "task_id": task.task_id,
+                    "session_id": session_id,
+                    "failure_kind": classification.failure_kind,
                 },
             )
             raise

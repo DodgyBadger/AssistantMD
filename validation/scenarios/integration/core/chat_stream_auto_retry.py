@@ -18,11 +18,19 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai_harness.step_persistence import (
+    ContinuableSnapshot,
+    RunRecord,
+    StepEvent,
+    ToolEffectRecord,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat.executor import PreparedChatExecution
 from core.chat.run_recovery import ChatRunRecoveryCoordinator
+from core.tools.base import ToolRecoveryPolicy
+from core.vault_state.file_mutations import write_vault_file
 from validation.core.base_scenario import BaseScenario
 from validation.core.streaming import stream_events_context
 
@@ -56,6 +64,40 @@ class _FlakyStreamAgent:
             request = httpx.Request("POST", "https://provider.invalid/stream")
             raise httpx.ReadError("stream disconnected", request=request)
         response = "recovered primary response"
+        yield PartStartEvent(index=0, part=TextPart(response))
+        yield AgentRunResultEvent(result=_FakeStreamResult(prompt, response))
+
+
+class _RollbackRestartAgent:
+    def __init__(
+        self,
+        *,
+        vault_path: Path,
+        recovery: ChatRunRecoveryCoordinator,
+        mutation_path: str = "notes/rollback-restart.md",
+    ):
+        self.vault_path = vault_path
+        self.recovery = recovery
+        self.mutation_path = mutation_path
+        self.attempts = 0
+
+    @stream_events_context
+    async def run_stream_events(self, prompt, **kwargs):
+        self.attempts += 1
+        if self.attempts == 1:
+            write_vault_file(
+                vault_path=self.vault_path,
+                path=self.mutation_path,
+                content="must be rolled back\n",
+            )
+            await _seed_unresolved_vault_effect(
+                self.recovery,
+                conversation_id=str(kwargs.get("conversation_id")),
+            )
+            yield PartStartEvent(index=0, part=TextPart("discarded before rollback"))
+            request = httpx.Request("POST", "https://provider.invalid/stream")
+            raise httpx.ReadError("stream disconnected", request=request)
+        response = "recovered after rollback restart"
         yield PartStartEvent(index=0, part=TextPart(response))
         yield AgentRunResultEvent(result=_FakeStreamResult(prompt, response))
 
@@ -178,6 +220,115 @@ class ChatStreamAutoRetryScenario(BaseScenario):
                 for part in parts
             )
 
+            rollback_recovery = ChatRunRecoveryCoordinator(
+                tool_policies={"file_write": ToolRecoveryPolicy.VAULT_TRANSACTIONAL}
+            )
+            rollback_agent = _RollbackRestartAgent(
+                vault_path=Path(vault),
+                recovery=rollback_recovery,
+            )
+
+            async def _prepared_rollback(*args, **kwargs):
+                del args, kwargs
+                return PreparedChatExecution(
+                    agent=rollback_agent,
+                    message_history=None,
+                    prompt_for_history="recover vault mutation",
+                    user_prompt="recover vault mutation",
+                    attached_image_count=0,
+                    model="test",
+                    tools=["file_write"],
+                    recovery=rollback_recovery,
+                )
+
+            chat_executor._prepare_chat_execution = _prepared_rollback
+            rollback_recovered = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "recover vault mutation",
+                    "session_id": "primary_rollback_restart",
+                    "tools": ["file_write"],
+                    "model": "test",
+                }
+            )
+            redirects = [
+                event
+                for event in rollback_recovered["events"]
+                if event.get("event") == "chat_retry_redirect"
+            ]
+            assert rollback_recovered["terminal_event"].get("event") == "done"
+            assert rollback_recovered["text"] == "recovered after rollback restart"
+            assert rollback_agent.attempts == 2
+            assert len(rollback_recovered["task_ids"]) == 2
+            assert len(redirects) == 1
+            assert redirects[0].get("strategy") == "terminal_rollback_restart"
+            assert not (Path(vault) / "notes/rollback-restart.md").exists()
+            rollback_history = chat_executor._CHAT_STORE.get_history(
+                "primary_rollback_restart", vault.name
+            )
+            rollback_parts = [
+                part for message in rollback_history for part in message.parts
+            ]
+            assert sum(isinstance(part, UserPromptPart) for part in rollback_parts) == 1
+            assert (
+                sum(
+                    isinstance(part, TextPart)
+                    and part.content == "recovered after rollback restart"
+                    for part in rollback_parts
+                )
+                == 1
+            )
+
+            rollback_disabled_update = self.call_api(
+                "/api/system/settings/general/task_rollback_enabled",
+                method="PUT",
+                data={"value": "false"},
+            )
+            assert rollback_disabled_update.status_code == 200
+            disabled_recovery = ChatRunRecoveryCoordinator(
+                tool_policies={"file_write": ToolRecoveryPolicy.VAULT_TRANSACTIONAL}
+            )
+            disabled_rollback_agent = _RollbackRestartAgent(
+                vault_path=Path(vault),
+                recovery=disabled_recovery,
+                mutation_path="notes/rollback-disabled.md",
+            )
+
+            async def _prepared_disabled_rollback(*args, **kwargs):
+                del args, kwargs
+                return PreparedChatExecution(
+                    agent=disabled_rollback_agent,
+                    message_history=None,
+                    prompt_for_history="do not restart without rollback",
+                    user_prompt="do not restart without rollback",
+                    attached_image_count=0,
+                    model="test",
+                    tools=["file_write"],
+                    recovery=disabled_recovery,
+                )
+
+            chat_executor._prepare_chat_execution = _prepared_disabled_rollback
+            rollback_blocked = await self.run_chat_task(
+                {
+                    "vault_name": vault.name,
+                    "prompt": "do not restart without rollback",
+                    "session_id": "primary_rollback_disabled",
+                    "tools": ["file_write"],
+                    "model": "test",
+                }
+            )
+            assert rollback_blocked["terminal_event"].get("event") == "error"
+            assert disabled_rollback_agent.attempts == 1
+            assert len(rollback_blocked["task_ids"]) == 1
+            assert (Path(vault) / "notes/rollback-disabled.md").exists()
+
+            rollback_enabled_update = self.call_api(
+                "/api/system/settings/general/task_rollback_enabled",
+                method="PUT",
+                data={"value": "true"},
+            )
+            assert rollback_enabled_update.status_code == 200
+
             disabled_update = self.call_api(
                 "/api/system/settings/general/model_stream_retries",
                 method="PUT",
@@ -251,3 +402,58 @@ def _checkpoint_recovery_agent(
         return "read complete"
 
     return (agent, recovery), tool_effects
+
+
+async def _seed_unresolved_vault_effect(
+    recovery: ChatRunRecoveryCoordinator,
+    *,
+    conversation_id: str,
+) -> None:
+    run_id = "rollback-source-run"
+    await recovery.store.register_run(
+        RunRecord(run_id=run_id, conversation_id=conversation_id)
+    )
+    await recovery.store.append_event(
+        StepEvent(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            kind="run_started",
+            step_index=0,
+        )
+    )
+    await recovery.store.save_snapshot(
+        ContinuableSnapshot(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            step_index=1,
+            state="interrupted",
+            messages=[
+                ModelRequest(parts=[UserPromptPart(content="recover vault mutation")]),
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="file_write",
+                            args={"operation": "write"},
+                            tool_call_id="write-1",
+                        )
+                    ]
+                ),
+            ],
+        )
+    )
+    await recovery.store.record_tool_effect(
+        ToolEffectRecord(
+            run_id=run_id,
+            tool_call_id="write-1",
+            tool_name="file_write",
+            status="started",
+        )
+    )
+    await recovery.store.append_event(
+        StepEvent(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            kind="run_failed",
+            step_index=1,
+        )
+    )

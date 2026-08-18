@@ -51,6 +51,7 @@ class TaskRollbackResult:
     paths_restored: int
     paths_deleted: int
     vaults_refreshed: int
+    rollback_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -239,6 +240,7 @@ def rollback_task_file_mutations(
         paths_restored=paths_restored,
         paths_deleted=paths_deleted,
         vaults_refreshed=vaults_refreshed,
+        rollback_status=("partial" if nonrollbackable_rows else "completed"),
     )
     rollback_status = "partial" if nonrollbackable_rows else "completed"
     service.finish_task_activities(
@@ -347,4 +349,5 @@ def _skipped_result(
         paths_restored=0,
         paths_deleted=0,
         vaults_refreshed=0,
+        rollback_status=None,
     )

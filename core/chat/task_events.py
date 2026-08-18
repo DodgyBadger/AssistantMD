@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-CHAT_TASK_TERMINAL_EVENTS = frozenset({"done", "cancelled", "error"})
+CHAT_TASK_TERMINAL_EVENTS = frozenset(
+    {"done", "cancelled", "error", "chat_retry_redirect"}
+)
 
 
 @dataclass(frozen=True)

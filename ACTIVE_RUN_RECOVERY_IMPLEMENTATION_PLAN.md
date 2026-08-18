@@ -455,6 +455,13 @@ Validate that an unresolved vault mutation:
 - produces one final canonical turn,
 - remains failed/manual when rollback is partial or disabled.
 
+Implemented in process: the source task reaches terminal failure first, the
+existing task rollback observer restores vault state, and a failed-task hook
+verifies the rollback outcome before creating a replacement task. The source
+event stream terminates with `chat_retry_redirect`, and browser plus validation
+consumers follow the replacement while preserving one logical response.
+Rollback-disabled and incomplete outcomes fail closed without replacement.
+
 ### Slice 4: restart recovery
 
 After the Harness lifecycle gate and schema migration:

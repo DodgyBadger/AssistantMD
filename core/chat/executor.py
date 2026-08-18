@@ -137,6 +137,7 @@ class PreparedChatExecution:
     chat_mode: ChatMode = NORMAL_CHAT_MODE
     deferred_tool_results: DeferredToolResults | None = None
     recovery: ChatRunRecoveryCoordinator | None = None
+    automatic_restart_count: int = 0
 
     def resume_config(self) -> dict[str, Any]:
         """Return JSON-safe config needed to resume a deferred review."""
