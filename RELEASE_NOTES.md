@@ -1,5 +1,44 @@
 # Release Notes
 
+## v0.7.3
+
+### More resilient long-running chats
+
+- Long primary-chat runs now recover from transient provider disconnections at
+  settled model/tool boundaries without repeating completed tool calls.
+- Tool-free primary chat and delegate runs automatically retry transient stream
+  failures within the configured global retry limit while preserving one
+  logical response and shared usage accounting.
+- Recovery follows each tool's declared safety policy. Replay-safe unfinished
+  operations may run again, vault mutations restart only after successful task
+  rollback, and unknown or external effects fail closed for manual recovery.
+- Chat streaming reconnects transient browser transport failures from the last
+  received event. Reopening a session reattaches to its active chat task, so a
+  browser reload or dropped SSE connection no longer stops background work.
+- Expired event cursors are detected explicitly. AssistantMD discards
+  provisional output and reloads canonical session history rather than showing
+  an incomplete retained fragment as the finished response.
+
+Active-run recovery is bounded and process-local. It improves ordinary API and
+browser disconnections but does not resume a task after the AssistantMD process
+or container restarts.
+
+### Runtime updates
+
+- Updated to Pydantic AI 2.19, Pydantic AI Harness 0.13, and Pydantic Monty
+  0.0.21. The Harness integration uses bounded in-memory recovery snapshots;
+  no new database migration or durable provider-specific chat history is
+  introduced.
+- Detailed tool guidance remains available through tool documentation while
+  system instructions contain only lightweight capability descriptions.
+
+### After upgrading
+
+Restart AssistantMD to load the updated Pydantic AI, Harness, and Monty
+runtimes. Existing chat history and vault data require no migration for this
+release.
+
+
 ## v0.7.2
 
 ### Huge update to import pipeline
@@ -37,17 +76,6 @@ discovered, tracked, retried, and organized.
 
 ### Reliability and development
 
-- Long primary-chat runs now recover from transient provider disconnections at
-  settled model/tool boundaries without repeating completed tools. Recovery is
-  bounded to the live task; unsafe or unknown in-flight effects still fail
-  closed, and vault mutations restart only after task rollback succeeds.
-- Tool-free primary chat and delegate runs automatically retry transient stream
-  failures within the configured global retry limit while preserving one
-  logical response and shared usage accounting.
-- Chat streaming reconnects transient browser transport failures from the last
-  received event, reattaches to active work when a session is reopened, and
-  falls back to canonical session history when older buffered events have
-  expired.
 - `web_extract` now rejects PDFs and other binary responses with guidance to use
   `content_import`, preventing oversized binary tool results from disrupting a
   chat stream.
