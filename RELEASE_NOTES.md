@@ -1,5 +1,65 @@
 # Release Notes
 
+## v0.7.2
+
+### Huge update to import pipeline
+
+- The chat agent and workflow scripts can now batch import local PDFs or URLs
+  that resolve to HTML or PDF using the new content_import tool.
+- Each import can choose its destination directory. When omitted, AssistantMD
+  uses the configured default import destination.
+- Upgraded the pdf_ocr import strategy to take advantage of the latest Mistral
+  OCR features (OCR enrichments, structural blocks, tables, separated headers and
+  footers, and page- or word-level confidence).
+- Revamped the Import panel in the UI. Now reports all import jobs with live
+  links to source and destination files, option to reload / edit the job and
+  clearer presentation of import options.
+- New installations prefer Mistral OCR and fall back to local PDF text
+  extraction. If Mistral is not configured, OCR is skipped cleanly and local
+  extraction continues.
+- Added new global import settings.
+
+The import tool deliberately handles conversion rather than research policy.
+Agents, skills, playbooks, and workflows remain free to decide how sources are
+discovered, tracked, retried, and organized.
+
+### Workflow scripts can now live anywhere in the vault
+
+- `workflow_run` can now run or start a workflow Markdown file from any
+  vault-relative path, allowing project-specific processing scripts to live
+  beside the library, notes, and outputs they manage.
+- Project-local workflows use the same sandbox, tools, timeout, cancellation,
+  rollback, and durable run history as managed workflows.
+- Explicit path-based workflows remain separate from the managed catalog: they
+  are not discovered, scheduled, enabled, disabled, or used as context
+  templates. Managed and scheduled workflows continue to live in
+  `AssistantMD/Authoring/`.
+
+### Reliability and development
+
+- `web_extract` now rejects PDFs and other binary responses with guidance to use
+  `content_import`, preventing oversized binary tool results from disrupting a
+  chat stream.
+- Browser storage is optional. AssistantMD continues initializing with in-memory
+  defaults when embedded in a restricted or opaque-origin frame where
+  `localStorage` is unavailable.
+- `scripts/dev run` now uses the checkout's repository-local `data/` and
+  `system/` directories by default, matching the persistent development state
+  developers expect.
+
+### After upgrading
+
+1. Restart AssistantMD and apply any pending database migrations shown under
+   **System > Misc**.
+2. If System Notices offers **Repair settings from template**, run it to add the
+   `content_import` tool and new ingestion settings while retaining custom
+   configuration.
+3. Existing values of `ingestion_pdf_default_strategies` are preserved. To use
+   the new OCR-first recommendation, set the order to `pdf_ocr`, then `pdf_text`.
+   Keep `pdf_text` first or select **Local Text Only** when documents must not be
+   sent to Mistral.
+
+
 ## v0.7.1
 
 ### Backend authorization foundation

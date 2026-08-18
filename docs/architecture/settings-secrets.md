@@ -46,6 +46,12 @@ Runtime-relevant general settings include:
   selection is explicit; failures do not trigger another provider.
 - `ingestion_url_fetch_strategy`: URL transport used by durable ingestion,
   independently of agent web extraction.
+- `ingestion_url_connect_timeout_seconds`,
+  `ingestion_url_read_timeout_seconds`, and
+  `ingestion_url_max_response_mb`: bounded URL-ingestion transport limits.
+- `ingestion_ocr_timeout_seconds`: maximum duration of one OCR provider request.
+- `content_import_max_batch_size`: maximum sources or job ids accepted by one
+  `content_import` tool call.
 - `browser_max_concurrent_sessions`, `browser_max_calls_per_turn`, and
   `browser_min_memory_headroom_mb`: Chromium concurrency, task budget, and
   cgroup launch-admission controls.

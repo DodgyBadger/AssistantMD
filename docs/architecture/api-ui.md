@@ -42,11 +42,19 @@ surface used by endpoints and validation.
 
 ## Operational notes
 
+- First-party frontend code accesses browser persistence through
+  `static/js/browser-storage.js`. The boundary catches storage access failures
+  and uses page-lifetime memory when local storage is unavailable, including in
+  opaque-origin sandboxed iframes. Browser storage is never required for UI
+  initialization.
 - Endpoint logic is intentionally thin; most behavior should live in services/core modules.
 - Error responses keep the stable top-level `success`, `error`, and `message` fields. `details` includes an agent-safe recovery envelope with `status`, `error_type`, `phase`, `failure_kind`, `retryable`, `suggested_action`, and relevant ids when available. Unexpected errors keep tracebacks in server logs and debug responses only.
 - Config and secret updates trigger reload through runtime reload service.
 - Ingestion and workflow manual runs are surfaced via API services.
 - The Dashboard tab hosts vault overview, workflow controls, import controls, and vault activity.
+- The Import section reads durable ingestion status from `/api/import/jobs`,
+  cancels queued work through `/api/import/jobs/{job_id}/cancel`, and requests a
+  scheduler-owned worker run through `/api/import/run-now`.
 - The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
 - OpenAI OAuth controls live in the System provider configuration surface and call the provider OAuth endpoints; API responses expose only sanitized OAuth status, not token material.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.

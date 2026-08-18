@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import yaml
 
+from core.ingestion.capabilities import get_pdf_ocr_capability
 from core.llm.openai_auth import (
     openai_oauth_enabled_from_settings,
     openai_provider_api_key_available,
@@ -70,6 +71,7 @@ from core.settings.upgrades import upgrade_settings_mapping
 
 from ..exceptions import SystemConfigurationError
 from ..models import (
+    IngestionCapabilityInfo,
     MetadataResponse,
     ModelConfigRequest,
     ModelInfo,
@@ -911,6 +913,7 @@ async def get_metadata() -> MetadataResponse:
         if default_entry is not None and default_entry.value
         else None
     )
+    pdf_ocr = get_pdf_ocr_capability()
     return MetadataResponse(
         vaults=vaults,
         models=models,
@@ -924,6 +927,15 @@ async def get_metadata() -> MetadataResponse:
             "auto_cache_max_tokens": getattr(
                 general_settings.get("auto_cache_max_tokens"), "value", 0
             ),
+        },
+        ingestion_capabilities={
+            "pdf_ocr": IngestionCapabilityInfo(
+                available=pdf_ocr.available,
+                provider=pdf_ocr.provider,
+                missing=list(pdf_ocr.missing),
+                features=list(pdf_ocr.features),
+                default_order=list(pdf_ocr.default_order),
+            )
         },
         default_context_script=default_context_script,
     )

@@ -31,6 +31,16 @@ from core.goals.schema import (
 from core.goals.schema import (
     MIGRATION_NAMESPACE as GOAL_OPS_MIGRATION_NAMESPACE,
 )
+from core.ingestion.schema import (
+    DB_NAME as INGESTION_JOBS_DB_NAME,
+)
+from core.ingestion.schema import (
+    INGESTION_JOB_MIGRATIONS,
+    ensure_ingestion_jobs_schema,
+)
+from core.ingestion.schema import (
+    MIGRATION_NAMESPACE as INGESTION_JOBS_MIGRATION_NAMESPACE,
+)
 from core.logger import UnifiedLogger
 from core.memory.schema import (
     DB_NAME as SESSION_SUMMARIES_DB_NAME,
@@ -144,6 +154,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         namespace=WORKFLOW_RUNS_MIGRATION_NAMESPACE,
         migrations=WORKFLOW_RUN_MIGRATIONS,
         ensure_schema=lambda system_root: ensure_workflow_run_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=INGESTION_JOBS_DB_NAME,
+        namespace=INGESTION_JOBS_MIGRATION_NAMESPACE,
+        migrations=INGESTION_JOB_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_ingestion_jobs_schema(
             system_root,
             apply_migrations=True,
         ),

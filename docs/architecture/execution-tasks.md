@@ -142,6 +142,11 @@ result details are attached to task metadata as `workflow_result` when available
 Failed or timed-out workflow terminal metadata also includes `workflow_failure`
 when the governor can classify the failure.
 
+Tool-triggered project-local workflows include their canonical vault-relative
+`workflow_path` in task metadata. Their path-based identity is also retained in
+durable workflow run history. They otherwise use the same workflow task kind,
+vault lane, timeout, cancellation, and rollback policy as discovered workflows.
+
 Workflow execution also creates a durable workflow run record. The execution
 task id is retained as provenance on that record, but the two lifecycles have
 different purposes: execution tasks provide live process-local cancellation and

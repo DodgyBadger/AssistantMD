@@ -9,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat import ChatStore
+from core.ingestion.service import IngestionService
+from core.runtime.paths import set_bootstrap_roots
 from core.system_migrations import get_system_migration_status, run_system_migrations
 from validation.core.base_scenario import BaseScenario
 
@@ -21,12 +23,24 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         system_root.mkdir(parents=True, exist_ok=True)
         chat_db = system_root / "chat_sessions.db"
         self._create_legacy_chat_sessions_db(chat_db)
+        ingestion_db = system_root / "ingestion_jobs.db"
+        self._create_legacy_ingestion_jobs_db(ingestion_db)
 
         ChatStore(str(system_root))
+        set_bootstrap_roots(self.artifacts_dir / "data", system_root)
+        IngestionService()
+        with sqlite3.connect(ingestion_db) as conn:
+            columns_before_migration = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(ingestion_jobs)")
+            }
+        self.soft_assert(
+            "selected_strategy" not in columns_before_migration,
+            "Ingestion service initialization must not bypass managed migrations",
+        )
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            11,
+            12,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -41,6 +55,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         goal_target = target_by_db["goal_ops"]
         vault_target = target_by_db["vault_state"]
         workflow_runs_target = target_by_db["workflow_runs"]
+        ingestion_target = target_by_db["ingestion_jobs"]
         self.soft_assert(
             chat_target.backup_path is not None, "Existing chat DB should be backed up"
         )
@@ -59,6 +74,10 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         self.soft_assert(
             workflow_runs_target.backup_path is None,
             "New workflow-runs DB should not create an empty backup",
+        )
+        self.soft_assert(
+            ingestion_target.backup_path is not None,
+            "Existing ingestion jobs DB should be backed up",
         )
         if chat_target.backup_path:
             self.soft_assert(
@@ -120,6 +139,26 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
                 "Workflow run migration versions should be recorded",
             )
 
+        with sqlite3.connect(ingestion_db) as conn:
+            columns = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(ingestion_jobs)")
+            }
+            self.soft_assert(
+                {
+                    "selected_strategy",
+                    "selected_provider",
+                    "selected_model",
+                    "strategy_attempts",
+                    "fallback_reason",
+                }.issubset(columns),
+                "Ingestion provenance columns should be added",
+            )
+            self.soft_assert_equal(
+                self._migration_versions(conn, "ingestion_jobs"),
+                [1],
+                "Ingestion migration version should be recorded",
+            )
+
         second = run_system_migrations(system_root, backup=True)
         self.soft_assert_equal(
             second.pending_count, 0, "Second run should remain fully applied"
@@ -150,6 +189,27 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
                 """
                 INSERT INTO chat_sessions (session_id, vault_name)
                 VALUES ('legacy', 'MigrationVault')
+                """
+            )
+
+    @staticmethod
+    def _create_legacy_ingestion_jobs_db(db_path: Path) -> None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE ingestion_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_uri VARCHAR NOT NULL,
+                    vault VARCHAR,
+                    source_type VARCHAR NOT NULL,
+                    mime_hint VARCHAR,
+                    options JSON,
+                    status VARCHAR NOT NULL,
+                    error TEXT,
+                    outputs JSON,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
                 """
             )
 

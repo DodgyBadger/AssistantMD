@@ -24,6 +24,7 @@ class JobStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -67,4 +68,6 @@ class RenderOptions:
     title: str | None = None
     vault: str | None = None
     source_filename: str | None = None
+    source_uri: str | None = None
+    effective_source_uri: str | None = None
     relative_dir: str = ""

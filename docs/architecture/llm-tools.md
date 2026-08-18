@@ -10,7 +10,7 @@ This subsystem builds agents, resolves model aliases, binds settings-backed tool
 - `core/authoring/shared/tool_binding.py`
 - `core/tools/`
 
-Configured built-in tools include vault inspection (`file_read`), vault mutations (`file_write`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), goal tracking (`goal_ops`), session lookup and summarization (`session_ops`), and web retrieval (`web_search`, `web_extract`, `web_crawl`, and `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
+Configured built-in tools include vault inspection (`file_read`), vault mutations (`file_write`), durable content ingestion (`content_import`), constrained local Python (`code_execution`), child-agent delegation (`delegate`), workflow execution (`workflow_run`), chat history compaction (`chat_history_compact`), goal tracking (`goal_ops`), session lookup and summarization (`session_ops`), and web retrieval (`web_search`, `web_extract`, `web_crawl`, and `browser`). Additional tool modules may exist under `core/tools/`, but they are available to agents only when present in the settings-backed tool registry.
 
 ## Responsibilities
 
@@ -145,7 +145,7 @@ construction fails with actionable reconnect/switch-auth guidance.
 
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 
-`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API, system-template, and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI, including heartbeat/progress metadata when available.
+`workflow_run` delegates workflow execution to `RuntimeContext.workflow_governor`, so tool-triggered runs use the same vault-level execution lane and task lifecycle policy as API, system-template, and scheduled runs. Its blocking `run` operation waits for completion. Its asynchronous `start`, `status`, and `cancel` operations expose the same process-local workflow task records used by the UI, including heartbeat/progress metadata when available. `run` and `start` can resolve an explicit vault-relative Markdown workflow outside managed discovery. The resolver requires real-path containment, a `.md` file, and explicit `run_type: workflow`; path-based runs do not enter workflow discovery, scheduling, or lifecycle management.
 
 `chat_history_compact` checks or compacts the active chat session after explicit user approval. Compaction records a replay checkpoint so default future history starts with a summary plus recent raw messages, and records a process-local history-compaction task.
 

@@ -9,7 +9,6 @@ from pathlib import Path
 from core.ingestion.models import RenderOptions
 from core.runtime.paths import get_data_root
 from core.vault_state.file_mutations import (
-    delete_vault_file,
     write_vault_file,
     write_vault_file_bytes,
 )
@@ -64,26 +63,5 @@ def default_storage(rendered: list[dict], options: RenderOptions) -> list[str]:
             )
         # Return vault-relative path for API/status reporting
         outputs.append(rel_path.as_posix())
-
-    # Clean up source file after successful write to avoid clutter in vaults
-    if options.source_filename:
-        try:
-            source_path = Path(options.source_filename).resolve()
-            # Only delete files under the current vault to avoid unintended removals
-            try:
-                relative_source = source_path.relative_to(
-                    vault_root.resolve()
-                ).as_posix()
-            except ValueError:
-                relative_source = None
-            if relative_source and source_path.is_file():
-                delete_vault_file(
-                    vault_path=vault_root,
-                    path=relative_source,
-                    warn_without_task=False,
-                )
-        except Exception:
-            # Swallow cleanup errors; ingestion output already written
-            pass
 
     return outputs

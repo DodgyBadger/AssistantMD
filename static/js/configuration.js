@@ -7,6 +7,7 @@
 
 (function configurationModule(window, document) {
     const ACTIVITY_LOG_LEVELS = ['critical', 'error', 'warning', 'warn', 'info', 'debug', 'fatal'];
+    const DEFAULT_IMPORT_JOB_STATUSES = ['queued', 'processing', 'failed'];
     const state = {
         initialized: false,
         hasLoadedOnce: false,
@@ -30,6 +31,10 @@
         isRunningSystemMigrations: false,
         isScanningImport: false,
         isLoadingImportVaults: false,
+        isLoadingImportJobs: false,
+        pendingImportJobsReload: false,
+        hasLoadedImportJobs: false,
+        isTriggeringImportQueue: false,
         isImportingUrl: false,
         settings: [],
         models: [],
@@ -38,6 +43,10 @@
         importVaults: [],
         importResults: null,
         importUrlResult: null,
+        importJobs: [],
+        importJobsNextCursor: null,
+        importJobsTotalMatching: 0,
+        importJobStatusCounts: {},
         activityLogEntries: [],
         activityLogNextCursor: null,
         activityLogTotalMatching: 0,
@@ -91,9 +100,11 @@
 
     const callbacks = {
         refreshMetadata: null,
-        refreshStatus: null
+        refreshStatus: null,
+        openFile: null
     };
     let activityLogSearchTimer = null;
+    let importJobPollTimer = null;
 
     const elements = {
         activityLogViewer: null,
@@ -153,15 +164,33 @@
 
         importVaultSelect: null,
         importPdfModeSelect: null,
+        importPdfStrategySelect: null,
+        importPdfStrategyHelp: null,
+        importMarkdownOptions: null,
+        importOcrOptions: null,
+        importPdfOcrEnrichments: null,
+        importPageImageOptions: null,
         importQueueCheckbox: null,
-        importUseOcrCheckbox: null,
         importCaptureOcrImagesCheckbox: null,
+        importIncludeOcrBlocksCheckbox: null,
+        importExtractOcrHeaderCheckbox: null,
+        importExtractOcrFooterCheckbox: null,
+        importOcrTableFormatSelect: null,
+        importOcrConfidenceSelect: null,
         importStatus: null,
         importScanBtn: null,
         importRefreshVaultsBtn: null,
         importResults: null,
+        importUrlForm: null,
         importUrlInput: null,
-        importUrlSubmit: null
+        importUrlSubmit: null,
+        importJobsSummary: null,
+        importJobsFeedback: null,
+        importJobsList: null,
+        importJobsRefreshBtn: null,
+        importJobsRunNowBtn: null,
+        importJobsStatusFilters: null,
+        importJobsLoadOlderBtn: null
     };
 
     const toneClasses = {
@@ -181,6 +210,7 @@
             clean: icon.CLEAN_ICON_SVG,
             database: icon.DATABASE_ICON_SVG,
             edit: icon.EDIT_ICON_SVG,
+            play: icon.PLAY_ICON_SVG,
             refresh: icon.REFRESH_ICON_SVG,
             save: icon.SAVE_ICON_SVG,
             trash: icon.TRASH_ICON_SVG,
@@ -252,15 +282,33 @@
 
         elements.importVaultSelect = document.getElementById('import-vault-select');
         elements.importPdfModeSelect = document.getElementById('import-pdf-mode');
+        elements.importPdfStrategySelect = document.getElementById('import-pdf-strategy');
+        elements.importPdfStrategyHelp = document.getElementById('import-pdf-strategy-help');
+        elements.importMarkdownOptions = document.getElementById('import-markdown-options');
+        elements.importOcrOptions = document.getElementById('import-ocr-options');
+        elements.importPdfOcrEnrichments = document.getElementById('import-pdf-ocr-enrichments');
+        elements.importPageImageOptions = document.getElementById('import-page-image-options');
         elements.importQueueCheckbox = document.getElementById('import-queue');
-        elements.importUseOcrCheckbox = document.getElementById('import-use-ocr');
         elements.importCaptureOcrImagesCheckbox = document.getElementById('import-capture-ocr-images');
+        elements.importIncludeOcrBlocksCheckbox = document.getElementById('import-include-ocr-blocks');
+        elements.importExtractOcrHeaderCheckbox = document.getElementById('import-extract-ocr-header');
+        elements.importExtractOcrFooterCheckbox = document.getElementById('import-extract-ocr-footer');
+        elements.importOcrTableFormatSelect = document.getElementById('import-ocr-table-format');
+        elements.importOcrConfidenceSelect = document.getElementById('import-ocr-confidence');
         elements.importStatus = document.getElementById('import-status');
         elements.importScanBtn = document.getElementById('import-scan');
         elements.importRefreshVaultsBtn = document.getElementById('import-refresh-vaults');
         elements.importResults = document.getElementById('import-results');
+        elements.importUrlForm = document.getElementById('import-url-form');
         elements.importUrlInput = document.getElementById('import-url-input');
         elements.importUrlSubmit = document.getElementById('import-url-submit');
+        elements.importJobsSummary = document.getElementById('import-jobs-summary');
+        elements.importJobsFeedback = document.getElementById('import-jobs-feedback');
+        elements.importJobsList = document.getElementById('import-jobs-list');
+        elements.importJobsRefreshBtn = document.getElementById('import-jobs-refresh');
+        elements.importJobsRunNowBtn = document.getElementById('import-jobs-run-now');
+        elements.importJobsStatusFilters = document.getElementById('import-jobs-status-filters');
+        elements.importJobsLoadOlderBtn = document.getElementById('import-jobs-load-older');
     }
 
     function bindEvents() {
@@ -302,8 +350,19 @@
 
         elements.importScanBtn?.addEventListener('click', handleImportScan);
         elements.importRefreshVaultsBtn?.addEventListener('click', handleImportVaultRescan);
-        elements.importUrlSubmit?.addEventListener('click', handleImportUrl);
+        elements.importVaultSelect?.addEventListener('change', handleImportVaultChange);
+        elements.importUrlForm?.addEventListener('submit', (event) => {
+            event.preventDefault();
+            handleImportUrl();
+        });
+        elements.importJobsRefreshBtn?.addEventListener('click', () => loadImportJobs());
+        elements.importJobsRunNowBtn?.addEventListener('click', handleRunImportQueueNow);
+        elements.importJobsStatusFilters?.addEventListener('change', handleImportJobFilterChange);
+        elements.importJobsLoadOlderBtn?.addEventListener('click', () => loadImportJobs({ append: true }));
+        elements.importJobsList?.addEventListener('click', handleImportJobAction);
+        elements.importResults?.addEventListener('click', handleImportJobAction);
         elements.importPdfModeSelect?.addEventListener('change', updateImportOcrAvailability);
+        elements.importPdfStrategySelect?.addEventListener('change', updateImportOcrAvailability);
     }
 
     const restartNoticeText = 'Restart recommended: restart the container to apply pending changes.';
@@ -423,6 +482,7 @@
             state.settingEditKey = null;
             state.settingDraftValue = '';
             renderSettings();
+            updateImportOcrAvailability();
             setStatus(elements.settingsFeedback, '', 'info');
         } catch (error) {
             renderSettings(true);
@@ -634,6 +694,7 @@
 
             const result = await response.json();
             state.settings = state.settings.map((setting) => (setting.key === result.key ? result : setting));
+            updateImportOcrAvailability();
             cancelSettingEdit(false);
             renderSettings();
             await notifyConfigChanged();
@@ -2240,39 +2301,78 @@ async function saveModelRow(rowKey) {
     }
 
     function updateImportOcrAvailability() {
-        if (!elements.importUseOcrCheckbox) return;
-        const hasMistral = state.secrets.some(
-            (entry) => entry.name === 'MISTRAL_API_KEY' && entry.has_value
-        );
+        if (!elements.importPdfModeSelect || !elements.importPdfStrategySelect) return;
+        const capability = window.App?.metadata?.ingestion_capabilities?.pdf_ocr;
         const isPageImagesMode = (elements.importPdfModeSelect?.value || 'markdown') === 'page_images';
-        const disableOcrControls = !hasMistral || isPageImagesMode;
+        const selectedStrategy = elements.importPdfStrategySelect.value || 'default';
+        const defaultOrder = Array.isArray(capability?.default_order)
+            ? capability.default_order.map(value => String(value))
+            : [];
+        const defaultIncludesOcr = defaultOrder.includes('pdf_ocr');
+        const selectedPathUsesOcr = selectedStrategy === 'ocr'
+            || (selectedStrategy === 'default' && defaultIncludesOcr);
+        const missingRequirements = Array.isArray(capability?.missing)
+            ? capability.missing.map(value => String(value))
+            : ['OCR capability metadata'];
+        const ocrAvailable = capability?.available === true;
+        const disableEnrichments = !ocrAvailable || !selectedPathUsesOcr || isPageImagesMode;
+        const disabledReason = !ocrAvailable
+            ? `OCR unavailable: configure ${missingRequirements.join(', ')}`
+            : 'Select a conversion strategy that can invoke Mistral OCR.';
+        const enrichmentControls = [
+            elements.importIncludeOcrBlocksCheckbox,
+            elements.importExtractOcrHeaderCheckbox,
+            elements.importExtractOcrFooterCheckbox,
+            elements.importOcrTableFormatSelect,
+            elements.importOcrConfidenceSelect
+        ].filter(Boolean);
 
-        elements.importUseOcrCheckbox.disabled = disableOcrControls;
+        elements.importMarkdownOptions?.classList.toggle('hidden', isPageImagesMode);
+        elements.importPageImageOptions?.classList.toggle('hidden', !isPageImagesMode);
+        elements.importPdfOcrEnrichments?.classList.toggle('hidden', !selectedPathUsesOcr);
+        const ocrOption = elements.importPdfStrategySelect.querySelector('option[value="ocr"]');
+        if (ocrOption instanceof HTMLOptionElement) ocrOption.disabled = !ocrAvailable;
         if (elements.importCaptureOcrImagesCheckbox) {
-            elements.importCaptureOcrImagesCheckbox.disabled = disableOcrControls;
+            elements.importCaptureOcrImagesCheckbox.disabled = !ocrAvailable || isPageImagesMode;
         }
-        if (isPageImagesMode) {
-            elements.importUseOcrCheckbox.title = 'Disabled for PDF mode: Page Images';
-            if (elements.importCaptureOcrImagesCheckbox) {
-                elements.importCaptureOcrImagesCheckbox.title = 'Disabled for PDF mode: Page Images';
+        enrichmentControls.forEach(control => { control.disabled = disableEnrichments; });
+        if (disableEnrichments) {
+            enrichmentControls.forEach(control => { control.title = disabledReason; });
+            if (!ocrAvailable && elements.importCaptureOcrImagesCheckbox) {
+                elements.importCaptureOcrImagesCheckbox.title = disabledReason;
             }
         } else {
-            elements.importUseOcrCheckbox.title = hasMistral
-                ? ''
-                : 'Requires MISTRAL_API_KEY secret';
-            if (elements.importCaptureOcrImagesCheckbox) {
-                elements.importCaptureOcrImagesCheckbox.title = hasMistral
-                    ? ''
-                    : 'Requires MISTRAL_API_KEY secret';
-            }
+            enrichmentControls.forEach(control => { control.removeAttribute('title'); });
+            elements.importCaptureOcrImagesCheckbox?.removeAttribute('title');
         }
-        if (elements.importCaptureOcrImagesCheckbox) {
-            // title is set above to keep mode/secret messaging consistent
-        }
-        if (disableOcrControls) {
-            elements.importUseOcrCheckbox.checked = false;
-            if (elements.importCaptureOcrImagesCheckbox) {
+        if (disableEnrichments) {
+            if ((!ocrAvailable || isPageImagesMode) && elements.importCaptureOcrImagesCheckbox) {
                 elements.importCaptureOcrImagesCheckbox.checked = false;
+            }
+            enrichmentControls.forEach(control => {
+                if (control instanceof HTMLInputElement) control.checked = false;
+                if (control instanceof HTMLSelectElement) control.value = '';
+            });
+        }
+        if (elements.importPdfStrategyHelp) {
+            const orderLabel = defaultOrder.length ? defaultOrder.join(' → ') : 'no strategies configured';
+            if (selectedStrategy === 'local_text') {
+                elements.importPdfStrategyHelp.textContent = 'Uses local PDF text extraction only. PDF OCR enrichments do not apply.';
+            } else if (selectedStrategy === 'ocr') {
+                elements.importPdfStrategyHelp.textContent = ocrAvailable
+                    ? 'Uses Mistral OCR only. OCR enrichment options apply to this import.'
+                    : disabledReason;
+            } else {
+                const ocrIndex = defaultOrder.indexOf('pdf_ocr');
+                elements.importPdfStrategyHelp.textContent = ocrIndex < 0
+                    ? `Configured default: ${orderLabel}. PDF OCR enrichments do not apply.`
+                    : ocrIndex === 0
+                        ? `Configured default: ${orderLabel}. OCR runs first, so enrichment options apply.`
+                        : `Configured default: ${orderLabel}. Enrichment options apply only if earlier strategies fall through to OCR.`;
+            }
+            const defaultOption = elements.importPdfStrategySelect.querySelector('option[value="default"]');
+            if (defaultOption instanceof HTMLOptionElement) {
+                defaultOption.textContent = `Configured default (${orderLabel})`;
             }
         }
     }
@@ -3003,6 +3103,7 @@ async function saveModelRow(rowKey) {
 
         callbacks.refreshMetadata = options.refreshMetadata || null;
         callbacks.refreshStatus = options.refreshStatus || null;
+        callbacks.openFile = options.openFile || null;
 
         cacheElements();
         bindEvents();
@@ -3019,11 +3120,13 @@ async function saveModelRow(rowKey) {
         if (!state.initialized) return;
         await loadSecrets();
         await loadImportVaults();
+        await loadImportJobs();
     }
 
     function renderImportVaults() {
         const select = elements.importVaultSelect;
         if (!select) return;
+        const selectedVault = select.value;
         select.innerHTML = '<option value="">Select vault…</option>';
         if (!state.importVaults || state.importVaults.length === 0) {
             const opt = document.createElement('option');
@@ -3039,6 +3142,20 @@ async function saveModelRow(rowKey) {
             opt.textContent = vault;
             select.appendChild(opt);
         });
+        if (state.importVaults.includes(selectedVault)) {
+            select.value = selectedVault;
+        }
+    }
+
+    function handleImportVaultChange() {
+        state.importResults = null;
+        state.importUrlResult = null;
+        renderImportResults();
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+        } else {
+            loadImportJobs();
+        }
     }
 
     async function loadImportVaults(force = false) {
@@ -3149,8 +3266,7 @@ async function saveModelRow(rowKey) {
             if (!commonDir.length) break;
         }
 
-        // Import outputs generally live under Imported/<import-set>/...
-        // Prefer showing that root folder instead of deep subfolders like /pages.
+        // Collapse companion assets to a useful import destination summary.
         const destinationSegments = (
             commonDir.length >= 2 && commonDir[0] === 'Imported'
                 ? commonDir.slice(0, 2)
@@ -3180,6 +3296,318 @@ async function saveModelRow(rowKey) {
         return { destinationLabel, filesLabel };
     }
 
+    function renderImportOutputLinks(outputs, vault, { compact = false } = {}) {
+        const paths = normalizeOutputPaths(outputs);
+        if (!paths.length) return '<span class="subtle">No output files</span>';
+        const listClass = compact ? 'space-y-1' : 'space-y-1 ml-4';
+        return `
+            <ul class="${listClass}">
+                ${paths.map((path) => `
+                    <li class="break-words">
+                        <button
+                            type="button"
+                            class="vault-file-link vault-file-link-code text-left break-all"
+                            data-import-output-path="${escapeHtml(path)}"
+                            data-import-output-vault="${escapeHtml(vault || '')}"
+                            title="Open ${escapeHtml(path)} in the vault viewer"
+                        >${escapeHtml(path)}</button>
+                    </li>
+                `).join('')}
+            </ul>
+        `;
+    }
+
+    function renderImportSource(source) {
+        const value = String(source || 'unknown');
+        let isWebUrl = false;
+        try {
+            const parsed = new URL(value);
+            isWebUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        } catch (_error) {
+            // Local inbox paths are expected and remain plain text.
+        }
+        if (!isWebUrl) return escapeHtml(value);
+        return `<a class="vault-file-link break-all" href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
+    }
+
+    function renderImportJobs() {
+        if (!elements.importJobsList) return;
+        const jobs = Array.isArray(state.importJobs) ? state.importJobs : [];
+        const selectedVault = (elements.importVaultSelect?.value || '').trim();
+        if (!selectedVault) {
+            if (elements.importJobsSummary) {
+                elements.importJobsSummary.textContent = 'Select a vault to view import jobs.';
+            }
+            elements.importJobsLoadOlderBtn?.classList.add('hidden');
+            elements.importJobsList.innerHTML = '<p>Select a vault to load its import history.</p>';
+            syncImportJobPolling();
+            return;
+        }
+        if (elements.importJobsSummary) {
+            const selectedCounts = selectedImportJobStatuses().map(status => (
+                `${Number(state.importJobStatusCounts[status] || 0)} ${status}`
+            ));
+            elements.importJobsSummary.textContent = state.importJobsTotalMatching
+                ? `${selectedCounts.join(' · ')} · ${jobs.length} loaded`
+                : 'No recent imports.';
+        }
+        elements.importJobsLoadOlderBtn?.classList.toggle('hidden', !state.importJobsNextCursor);
+        if (!jobs.length) {
+            elements.importJobsList.innerHTML = '<p>No import jobs match the selected statuses.</p>';
+            syncImportJobPolling();
+            return;
+        }
+
+        elements.importJobsList.innerHTML = `
+            <div class="dashboard-table-wrap import-jobs-table-wrap" role="region" aria-label="Recent import jobs" tabindex="0">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th class="import-job-compact">Job</th>
+                            <th class="import-job-source">Source</th>
+                            <th class="import-job-compact">Status</th>
+                            <th>Strategy</th>
+                            <th class="import-job-compact">Updated</th>
+                            <th>Output / Error</th>
+                            <th class="cell-center import-job-compact">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${jobs.map(job => {
+                            const outputs = Array.isArray(job.outputs) ? job.outputs : [];
+                            const detail = job.error
+                                ? escapeHtml(job.error)
+                                : renderImportOutputLinks(outputs, job.vault, { compact: true });
+                            const strategy = [
+                                job.selected_strategy,
+                                job.selected_provider,
+                                job.selected_model
+                            ].filter(Boolean).join(' · ') || '—';
+                            const cancelButton = job.status === 'queued'
+                                ? `<button data-import-job-cancel="${escapeHtml(job.id)}" ${iconButton('x', `Cancel import job ${job.id}`, 'is-danger')}>${iconSvg('x')}</button>`
+                                : '';
+                            const editButton = job.source_type === 'url'
+                                ? `<button data-import-job-edit="${escapeHtml(job.id)}" ${iconButton('edit', `Edit import settings for job ${job.id}`, 'is-primary')}>${iconSvg('edit')}</button>`
+                                : '';
+                            return `
+                                <tr>
+                                    <td data-label="Job" class="cell-xs cell-mono import-job-compact">${escapeHtml(job.id)}</td>
+                                    <td data-label="Source" class="cell-xs import-job-source">${renderImportSource(job.source_uri)}</td>
+                                    <td data-label="Status" class="cell-xs import-job-compact">${escapeHtml(job.status || 'unknown')}</td>
+                                    <td data-label="Strategy" class="cell-xs">${escapeHtml(strategy)}</td>
+                                    <td data-label="Updated" class="cell-xs import-job-compact">${escapeHtml(formatDateTime(job.updated_at))}</td>
+                                    <td data-label="Output / Error" class="cell-xs">${detail}</td>
+                                    <td data-label="Actions" class="cell-center import-job-actions import-job-compact"><div class="import-job-action-buttons">${cancelButton}${editButton}</div></td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        syncImportJobPolling();
+    }
+
+    function selectedImportJobStatuses() {
+        if (!elements.importJobsStatusFilters) return [...DEFAULT_IMPORT_JOB_STATUSES];
+        return Array.from(elements.importJobsStatusFilters.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(input => input.value);
+    }
+
+    function handleImportJobFilterChange(event) {
+        if (!selectedImportJobStatuses().length && event.target instanceof HTMLInputElement) {
+            event.target.checked = true;
+            return;
+        }
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+        } else {
+            loadImportJobs();
+        }
+    }
+
+    function syncImportJobPolling() {
+        const hasActiveJobs = (state.importJobs || []).some(
+            job => job.status === 'queued' || job.status === 'processing'
+        );
+        if (hasActiveJobs && !importJobPollTimer) {
+            importJobPollTimer = window.setInterval(() => loadImportJobs({ silent: true }), 3000);
+        } else if (!hasActiveJobs && importJobPollTimer) {
+            window.clearInterval(importJobPollTimer);
+            importJobPollTimer = null;
+        }
+    }
+
+    async function loadImportJobs({ silent = false, append = false } = {}) {
+        if (state.isLoadingImportJobs) {
+            state.pendingImportJobsReload = true;
+            return;
+        }
+        if (append && !state.importJobsNextCursor) return;
+        const selectedVault = (elements.importVaultSelect?.value || '').trim();
+        if (!selectedVault) {
+            state.importJobs = [];
+            state.importJobsNextCursor = null;
+            state.importJobsTotalMatching = 0;
+            state.importJobStatusCounts = {};
+            state.hasLoadedImportJobs = true;
+            renderImportJobs();
+            return;
+        }
+        state.isLoadingImportJobs = true;
+        if (!silent) setStatus(elements.importJobsFeedback, 'Refreshing import status…', 'info');
+        try {
+            const refreshLimit = silent && !append
+                ? Math.min(Math.max(state.importJobs.length, 25), 100)
+                : 25;
+            const params = new URLSearchParams({ limit: String(refreshLimit) });
+            params.set('vault', selectedVault);
+            const selectedStatuses = selectedImportJobStatuses();
+            selectedStatuses.forEach(status => params.append('status', status));
+            if (append) params.set('cursor', state.importJobsNextCursor);
+            const scrollTop = elements.importJobsList
+                ?.querySelector('.import-jobs-table-wrap')?.scrollTop || 0;
+            const response = await fetch(`api/import/jobs?${params.toString()}`, { cache: 'no-store' });
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            if ((elements.importVaultSelect?.value || '').trim() !== selectedVault) return;
+            if (selectedImportJobStatuses().join('\u0000') !== selectedStatuses.join('\u0000')) return;
+            const received = Array.isArray(data?.jobs) ? data.jobs : [];
+            let nextJobs;
+            if (append) {
+                const knownIds = new Set(state.importJobs.map(job => job.id));
+                nextJobs = [
+                    ...state.importJobs,
+                    ...received.filter(job => !knownIds.has(job.id))
+                ];
+            } else {
+                nextJobs = received;
+            }
+            const nextCursor = data?.next_cursor || null;
+            const nextTotalMatching = Number(data?.total_matching || 0);
+            const nextStatusCounts = data?.status_counts || {};
+            const viewChanged = (
+                !state.hasLoadedImportJobs
+                || JSON.stringify(nextJobs) !== JSON.stringify(state.importJobs)
+                || nextCursor !== state.importJobsNextCursor
+                || nextTotalMatching !== state.importJobsTotalMatching
+                || JSON.stringify(nextStatusCounts) !== JSON.stringify(state.importJobStatusCounts)
+            );
+            state.importJobs = nextJobs;
+            state.importJobsNextCursor = nextCursor;
+            state.importJobsTotalMatching = nextTotalMatching;
+            state.importJobStatusCounts = nextStatusCounts;
+            state.hasLoadedImportJobs = true;
+            if (viewChanged) {
+                renderImportJobs();
+                const tableWrap = elements.importJobsList?.querySelector('.import-jobs-table-wrap');
+                if (tableWrap) tableWrap.scrollTop = scrollTop;
+            }
+            if (!silent) setStatus(elements.importJobsFeedback, '', 'info');
+        } catch (error) {
+            if (!silent) setStatus(elements.importJobsFeedback, `Failed to load imports: ${error.message}`, 'error');
+        } finally {
+            state.isLoadingImportJobs = false;
+            if (state.pendingImportJobsReload) {
+                state.pendingImportJobsReload = false;
+                loadImportJobs();
+            }
+        }
+    }
+
+    async function handleImportJobAction(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const outputLink = target.closest('[data-import-output-path]');
+        if (outputLink instanceof HTMLElement) {
+            const path = outputLink.getAttribute('data-import-output-path');
+            const vault = outputLink.getAttribute('data-import-output-vault');
+            if (path && callbacks.openFile) callbacks.openFile(path, vault || undefined);
+            return;
+        }
+        const button = target.closest('[data-import-job-cancel], [data-import-job-edit]');
+        if (!(button instanceof HTMLElement) || button.disabled) return;
+        const editJobId = button.getAttribute('data-import-job-edit');
+        if (editJobId) {
+            const job = state.importJobs.find(item => String(item.id) === editJobId);
+            if (!job || job.source_type !== 'url') return;
+            if (elements.importVaultSelect) elements.importVaultSelect.value = job.vault || '';
+            if (elements.importPdfModeSelect && elements.importPdfStrategySelect) {
+                if (job.selected_strategy === 'pdf_page_images') {
+                    elements.importPdfModeSelect.value = 'page_images';
+                } else {
+                    elements.importPdfModeSelect.value = 'markdown';
+                    if (job.selected_strategy === 'pdf_ocr') {
+                        elements.importPdfStrategySelect.value = 'ocr';
+                    } else if (job.selected_strategy === 'pdf_text') {
+                        elements.importPdfStrategySelect.value = 'local_text';
+                    } else {
+                        elements.importPdfStrategySelect.value = 'default';
+                    }
+                }
+                updateImportOcrAvailability();
+            }
+            if (elements.importUrlInput) {
+                elements.importUrlInput.value = job.source_uri || '';
+                elements.importUrlInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                elements.importUrlInput.focus({ preventScroll: true });
+            }
+            setStatus(
+                elements.importStatus,
+                `Loaded URL from job ${editJobId}. Adjust PDF/OCR settings and import again.`,
+                'info'
+            );
+            return;
+        }
+        const jobId = button.getAttribute('data-import-job-cancel');
+        if (!jobId) return;
+        button.disabled = true;
+        setStatus(elements.importJobsFeedback, `Cancelling import job ${jobId}…`, 'info');
+        try {
+            const response = await fetch(
+                `api/import/jobs/${encodeURIComponent(jobId)}/cancel`,
+                { method: 'POST' }
+            );
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            setStatus(elements.importJobsFeedback, `Import job ${jobId} cancelled.`, 'success');
+            await loadImportJobs({ silent: true });
+        } catch (error) {
+            setStatus(
+                elements.importJobsFeedback,
+                `Could not cancel import: ${error.message}`,
+                'error'
+            );
+            button.disabled = false;
+        }
+    }
+
+    async function handleRunImportQueueNow() {
+        if (!elements.importJobsRunNowBtn || state.isTriggeringImportQueue) return;
+        state.isTriggeringImportQueue = true;
+        elements.importJobsRunNowBtn.disabled = true;
+        setStatus(elements.importJobsFeedback, 'Requesting an ingestion worker run…', 'info');
+        try {
+            const response = await fetch('api/import/run-now', { method: 'POST' });
+            const data = await safeJson(response);
+            if (!response.ok) throw new Error(data?.message || `HTTP ${response.status}`);
+            const queuedCount = Number(data?.queued_count || 0);
+            setStatus(
+                elements.importJobsFeedback,
+                queuedCount
+                    ? `Worker run requested for ${queuedCount} queued import${queuedCount === 1 ? '' : 's'}.`
+                    : 'Worker run requested; the queue is currently empty.',
+                'success'
+            );
+            await loadImportJobs({ silent: true });
+        } catch (error) {
+            setStatus(elements.importJobsFeedback, `Could not run imports: ${error.message}`, 'error');
+        } finally {
+            state.isTriggeringImportQueue = false;
+            elements.importJobsRunNowBtn.disabled = false;
+        }
+    }
+
     function renderImportResults() {
         if (!elements.importResults) return;
         const results = state.importResults;
@@ -3201,7 +3629,7 @@ async function saveModelRow(rowKey) {
                         const source = job.source_uri || 'unknown';
                         return `
                             <li>
-                                <span class="text-txt-primary font-medium">${escapeHtml(source)}</span>
+                                <span class="text-txt-primary font-medium">${renderImportSource(source)}</span>
                                 <span class="subtle">(${escapeHtml(status)})</span>
                                 <div class="text-xs text-txt-secondary ml-4">
                                     Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span>
@@ -3209,6 +3637,8 @@ async function saveModelRow(rowKey) {
                                 <div class="text-xs text-txt-secondary ml-4">
                                     Files: ${escapeHtml(outputSummary.filesLabel)}
                                 </div>
+                                <div class="text-xs text-txt-secondary ml-4">Import path:</div>
+                                ${renderImportOutputLinks(job.outputs, job.vault)}
                             </li>
                         `;
                     })
@@ -3231,9 +3661,11 @@ async function saveModelRow(rowKey) {
             const source = urlResult.source_uri || urlResult.url || 'unknown';
 
             let html = `<div class="space-y-2"><div class="font-medium text-txt-primary">Latest URL import</div>`;
-            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${escapeHtml(source)}</span> <span class="subtle">(${escapeHtml(status)})</span></div>`;
+            html += `<div class="text-sm"><span class="text-txt-primary font-medium">${renderImportSource(source)}</span> <span class="subtle">(${escapeHtml(status)})</span></div>`;
             html += `<div class="text-sm text-txt-secondary">Destination: <span class="text-txt-primary">${escapeHtml(outputSummary.destinationLabel)}</span></div>`;
             html += `<div class="text-sm text-txt-secondary">Files: ${escapeHtml(outputSummary.filesLabel)}</div>`;
+            html += '<div class="text-sm text-txt-secondary">Import path:</div>';
+            html += renderImportOutputLinks(urlResult.outputs, urlResult.vault);
             if (error) {
                 html += `<div class="text-sm state-error">Error: ${escapeHtml(error)}</div>`;
             }
@@ -3254,20 +3686,19 @@ async function saveModelRow(rowKey) {
         }
 
         const queueOnly = Boolean(elements.importQueueCheckbox?.checked);
-        const useOcr = Boolean(elements.importUseOcrCheckbox?.checked);
         const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
         const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
+        const pdfStrategies = selectedPdfStrategyOverride();
 
         const payload = { vault, queue_only: queueOnly };
         if (pdfMode === 'page_images') {
             payload.pdf_mode = 'page_images';
         }
-        if (useOcr) {
-            payload.strategies = ["pdf_ocr", "pdf_text", "image_ocr"];
-        }
+        if (pdfStrategies) payload.strategies = pdfStrategies;
         if (captureOcrImages) {
             payload.capture_ocr_images = true;
         }
+        addOcrEnrichmentOptions(payload);
 
         state.isScanningImport = true;
         // Reset URL status when starting a file import
@@ -3293,6 +3724,7 @@ async function saveModelRow(rowKey) {
             const data = await response.json();
             state.importResults = data;
             renderImportResults();
+            await loadImportJobs({ silent: true });
             setStatus(
                 elements.importStatus,
                 queueOnly ? 'Jobs queued.' : 'Import completed.',
@@ -3328,15 +3760,24 @@ async function saveModelRow(rowKey) {
         setIconButtonLabel(btn, 'Ingesting URL...');
         setStatus(elements.importStatus, 'Ingesting URL…', 'info');
 
+        const captureOcrImages = Boolean(elements.importCaptureOcrImagesCheckbox?.checked);
+        const pdfMode = (elements.importPdfModeSelect?.value || 'markdown').trim();
+        const pdfStrategies = selectedPdfStrategyOverride();
+        const payload = { vault, url, clean_html: true, pdf_mode: pdfMode };
+        if (pdfStrategies) payload.pdf_strategies = pdfStrategies;
+        if (captureOcrImages) payload.capture_ocr_images = true;
+        addOcrEnrichmentOptions(payload);
+
         try {
             const response = await fetch('api/import/url', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vault, url, clean_html: true })
+                body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             state.importUrlResult = data;
+            await loadImportJobs({ silent: true });
             setStatus(elements.importStatus, 'URL ingested.', data.error ? 'warning' : 'success');
             if (callbacks.refreshStatus) callbacks.refreshStatus();
             renderImportResults();
@@ -3349,11 +3790,29 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    function addOcrEnrichmentOptions(payload) {
+        if (elements.importIncludeOcrBlocksCheckbox?.checked) payload.include_ocr_blocks = true;
+        if (elements.importExtractOcrHeaderCheckbox?.checked) payload.extract_ocr_header = true;
+        if (elements.importExtractOcrFooterCheckbox?.checked) payload.extract_ocr_footer = true;
+        const tableFormat = (elements.importOcrTableFormatSelect?.value || '').trim();
+        const confidence = (elements.importOcrConfidenceSelect?.value || '').trim();
+        if (tableFormat) payload.ocr_table_format = tableFormat;
+        if (confidence) payload.ocr_confidence = confidence;
+    }
+
+    function selectedPdfStrategyOverride() {
+        const selected = elements.importPdfStrategySelect?.value || 'default';
+        if (selected === 'local_text') return ['pdf_text'];
+        if (selected === 'ocr') return ['pdf_ocr'];
+        return null;
+    }
+
     window.ConfigurationPanel = {
         init,
         onTabActivated,
         onDashboardActivated,
         refreshActivityLog,
+        onMetadataUpdated: updateImportOcrAvailability,
         setRestartRequired: externalSetRestartRequired
     };
 }(window, document));

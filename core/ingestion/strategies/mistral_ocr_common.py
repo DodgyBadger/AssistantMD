@@ -29,6 +29,14 @@ def _setting_bool(settings: Any, key: str, default: bool) -> bool:
     return default
 
 
+def _setting_positive_int(settings: Any, key: str, default: int) -> int:
+    try:
+        value = int(settings.get(key).value)
+    except (AttributeError, TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 def _extract_base64_and_media(value: Any) -> tuple[str | None, str | None]:
     if not isinstance(value, str):
         return None, None
@@ -166,33 +174,66 @@ def extract_with_mistral_ocr(
         else _setting_bool(settings, "ingestion_ocr_capture_images", False)
     )
 
-    payload_bytes = (
-        raw.payload
-        if isinstance(raw.payload, bytes | bytearray)
-        else raw.payload.encode("utf-8")
-    )
-    data_url = (
-        f"data:{data_url_mime};base64,{base64.b64encode(payload_bytes).decode('utf-8')}"
-    )
+    direct_document_url = raw.meta.get("ocr_document_url")
+    if direct_document_url:
+        document_value = str(direct_document_url)
+        transport = "direct_url"
+    else:
+        payload_bytes = (
+            raw.payload
+            if isinstance(raw.payload, bytes | bytearray)
+            else raw.payload.encode("utf-8")
+        )
+        document_value = (
+            f"data:{data_url_mime};base64,"
+            f"{base64.b64encode(payload_bytes).decode('utf-8')}"
+        )
+        transport = "inline_base64"
 
     request_payload = {
         "model": model,
         "document": {
             "type": document_type,
-            document_value_key: data_url,
+            document_value_key: document_value,
         },
         "include_image_base64": include_image_base64,
+        "include_blocks": False,
     }
+    options = raw.meta.get("ocr_options")
+    if isinstance(options, dict):
+        request_payload.update(options)
+    retained_page_fields: set[str] = set()
+    if request_payload.get("include_blocks"):
+        retained_page_fields.add("blocks")
+    if request_payload.get("table_format"):
+        retained_page_fields.add("tables")
+    if request_payload.get("extract_header"):
+        retained_page_fields.add("header")
+    if request_payload.get("extract_footer"):
+        retained_page_fields.add("footer")
+    if request_payload.get("confidence_scores_granularity"):
+        retained_page_fields.add("confidence_scores")
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
     resp = requests.post(
-        endpoint, headers=headers, data=json.dumps(request_payload), timeout=60
+        endpoint,
+        headers=headers,
+        data=json.dumps(request_payload),
+        timeout=_setting_positive_int(
+            settings,
+            "ingestion_ocr_timeout_seconds",
+            120,
+        ),
     )
     if resp.status_code >= 400:
-        raise RuntimeError(f"OCR request failed ({resp.status_code}): {resp.text}")
+        error_body = str(resp.text or "").strip()
+        if len(error_body) > 1000:
+            error_body = f"{error_body[:1000]}..."
+        detail = f": {error_body}" if error_body else ""
+        raise RuntimeError(f"OCR request failed ({resp.status_code}){detail}")
 
     try:
         body: dict[str, Any] = resp.json()
@@ -202,6 +243,7 @@ def extract_with_mistral_ocr(
     pages = body.get("pages") or []
     texts: list[str] = []
     ocr_images: list[dict[str, Any]] = []
+    structured_pages: list[dict[str, Any]] = []
     for page_idx, page in enumerate(pages, start=1):
         if not isinstance(page, dict):
             continue
@@ -215,6 +257,17 @@ def extract_with_mistral_ocr(
             page_number = page_idx
         if include_image_base64:
             ocr_images.extend(_collect_page_images(page, page_number))
+        if retained_page_fields:
+            structured_page = {
+                key: page.get(key)
+                for key in retained_page_fields
+                if page.get(key) is not None
+            }
+            for key in ("hyperlinks", "dimensions"):
+                if page.get(key) is not None:
+                    structured_page[key] = page[key]
+            structured_page["index"] = page.get("index", page_idx - 1)
+            structured_pages.append(structured_page)
 
     combined = "\n\n".join(texts).strip()
     if not combined:
@@ -225,7 +278,11 @@ def extract_with_mistral_ocr(
         "ocr_image_count": len(ocr_images),
         "ocr_images": ocr_images,
         "provider": "mistral",
-        "model": model,
+        "model": str(body.get("model") or model),
+        "requested_model": model,
+        "transport": transport,
+        "usage_info": body.get("usage_info"),
+        "ocr_pages": structured_pages,
     }
 
     return ExtractedDocument(

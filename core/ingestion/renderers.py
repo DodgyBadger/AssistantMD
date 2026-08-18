@@ -4,6 +4,7 @@ Render extracted chunks to markdown artifacts.
 
 import base64
 import binascii
+import json
 import os
 import re
 from datetime import datetime
@@ -24,7 +25,6 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
         source_filename=options.source_filename,
         title=options.title,
     )
-    job_dir = paths.job_dir
     rel_path = paths.markdown_path
 
     display_source_path = None
@@ -46,9 +46,24 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
             if display_source_path is None:
                 display_source_path = options.source_filename
 
+    is_remote_source = bool(
+        options.source_uri
+        and options.source_uri.lower().startswith(("http://", "https://"))
+    )
+    source_value = (
+        options.source_uri
+        if is_remote_source
+        else os.path.basename(options.source_filename or "")
+    )
+    effective_source = options.effective_source_uri
     frontmatter: dict[str, object | None] = {
-        "source": os.path.basename(options.source_filename or ""),
-        "source_path": display_source_path,
+        "source": source_value,
+        "source_path": None if is_remote_source else display_source_path,
+        "final_url": (
+            effective_source
+            if is_remote_source and effective_source != options.source_uri
+            else None
+        ),
         "mime": doc.mime,
         "strategy": doc.strategy_id,
         "fetched_at": datetime.utcnow().isoformat(),
@@ -65,10 +80,14 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
 
     image_artifacts, image_count, image_link_map = _render_ocr_image_artifacts(
         doc=doc,
-        job_dir=job_dir,
+        asset_dir=paths.asset_dir,
+        markdown_dir=paths.rel_dir,
     )
     if image_count:
         frontmatter["ocr_images_saved"] = image_count
+    metadata_artifact = _render_ocr_metadata_artifact(doc, paths.asset_dir)
+    if metadata_artifact is not None:
+        frontmatter["ocr_metadata"] = metadata_artifact["path"]
 
     content = "---\n"
     for key, val in frontmatter.items():
@@ -78,7 +97,7 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
     rewritten_text = _rewrite_ocr_image_links(doc.plain_text or "", image_link_map)
     content += rewritten_text
 
-    artifacts = [
+    artifacts: list[dict[str, object]] = [
         {
             "path": rel_path,
             "content": content,
@@ -86,12 +105,37 @@ def default_renderer(doc: ExtractedDocument, options: RenderOptions) -> list[dic
         }
     ]
     artifacts.extend(image_artifacts)
+    if metadata_artifact is not None:
+        artifacts.append(metadata_artifact)
     return artifacts
+
+
+def _render_ocr_metadata_artifact(
+    doc: ExtractedDocument,
+    asset_dir: str,
+) -> dict[str, object] | None:
+    pages = doc.meta.get("ocr_pages") if isinstance(doc.meta, dict) else None
+    if not isinstance(pages, list) or not any(bool(page) for page in pages):
+        return None
+    payload = {
+        "provider": doc.meta.get("provider"),
+        "model": doc.meta.get("model"),
+        "requested_model": doc.meta.get("requested_model"),
+        "transport": doc.meta.get("transport"),
+        "usage_info": doc.meta.get("usage_info"),
+        "pages": pages,
+    }
+    return {
+        "path": f"{asset_dir.rstrip('/')}/ocr.json",
+        "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        "meta": {"kind": "ocr_metadata", "source_strategy": doc.strategy_id},
+    }
 
 
 def _render_ocr_image_artifacts(
     doc: ExtractedDocument,
-    job_dir: str,
+    asset_dir: str,
+    markdown_dir: str,
 ) -> tuple[list[dict], int, dict[str, str]]:
     if not isinstance(doc.meta, dict):
         return [], 0, {}
@@ -103,7 +147,7 @@ def _render_ocr_image_artifacts(
     artifacts: list[dict] = []
     link_map: dict[str, str] = {}
     image_count = 0
-    asset_dir = os.path.join(job_dir, "assets")
+    link_dir = os.path.relpath(asset_dir, start=markdown_dir)
     used_filenames: set[str] = set()
     for item in raw_items:
         if not isinstance(item, dict):
@@ -131,7 +175,7 @@ def _render_ocr_image_artifacts(
             filename = f"page_{page_number:04d}_img_{image_index:02d}{ext}"
         filename = _dedupe_filename(filename, used_filenames)
         rel_path = os.path.join(asset_dir, filename).lstrip("/")
-        link_target = f"assets/{filename}"
+        link_target = os.path.join(link_dir, filename).replace(os.sep, "/")
 
         if isinstance(source_name, str) and source_name.strip():
             source_basename = os.path.basename(source_name.strip())

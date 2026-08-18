@@ -367,6 +367,27 @@ def validate_settings(
     _warn_extras("models", models, default_user_editable=True)
     _warn_extras("providers", providers, default_user_editable=False)
 
+    general_settings = get_general_settings() or {}
+    for setting_key in (
+        "content_import_max_batch_size",
+        "ingestion_ocr_timeout_seconds",
+        "ingestion_url_connect_timeout_seconds",
+        "ingestion_url_max_response_mb",
+        "ingestion_url_read_timeout_seconds",
+    ):
+        entry = general_settings.get(setting_key)
+        if entry is None:
+            continue
+        try:
+            value = int(entry.value)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            status.add_issue(
+                name=f"setting:{setting_key}",
+                message=f"Setting '{setting_key}' must be a positive integer.",
+            )
+
     return status
 
 

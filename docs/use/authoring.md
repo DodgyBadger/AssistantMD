@@ -1,6 +1,11 @@
 # Authoring: Workflow Scripts and Context Assembly Scripts
 
-AssistantMD has a unified authoring surface for two types of automation: **workflow scripts** and **context assembly scripts**. Both are markdown files with a Python code block. Both live in `AssistantMD/Authoring/` inside your vault.
+AssistantMD has a unified authoring surface for two types of automation:
+**workflow scripts** and **context assembly scripts**. Managed and scheduled
+scripts live in `AssistantMD/Authoring/` inside your vault. A workflow that
+belongs to one project may instead live with that project and be run explicitly
+by vault-relative path. Context scripts always remain in the managed Authoring
+location.
 
 You don't need to write these files by hand. Describe what you want to the chat agent — it will draft, edit, and help you test. Use this document as orientation.
 
@@ -46,6 +51,14 @@ A workflow script is an automation that runs Python code against your vault. Use
 - Generate or transform files on a schedule (daily notes, weekly summaries, reports)
 - Process a batch of files (inbox triage, tagging, indexing)
 - Chain multiple LLM calls with conditional logic
+
+Reusable, discoverable, or scheduled workflows belong in
+`AssistantMD/Authoring/`. Project-local workflows can live anywhere inside the
+vault and run through `workflow_run(operation="run" | "start",
+workflow_path="...")`. They must use a `.md` extension and explicitly declare
+`run_type: workflow`. Project-local workflows use the same sandbox, tools,
+timeouts, cancellation, rollback, and run history, but are not discovered,
+scheduled, enabled, disabled, or shown as managed workflows.
 
 **Frontmatter for workflow scripts:**
 

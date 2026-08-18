@@ -13,6 +13,9 @@
 - Prefer narrow, explicit helpers over broad catch-all logic.
 - Add or update decision-boundary logging where the changed behavior needs observability.
 - Keep temporary probes or scaffolding easy to remove.
+- When a coherent slice is working and validated, commit it before beginning a
+  separate experiment or redesign, especially if the next round overlaps the
+  same files.
 - Use targeted Ruff, Black, and MyPy checks while iterating; before committing,
   run the complete [Production Python Quality Gate](coding-standards.md#production-python-quality-gate).
 

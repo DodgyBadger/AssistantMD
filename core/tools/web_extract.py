@@ -82,8 +82,8 @@ class WebExtract(BaseTool):
             web_extract,
             name="web_extract",
             description=(
-                "Extract readable content from known web page URLs using the configured "
-                "strategy. This retrieves content transiently and does not import it into the vault."
+                "Transiently extract readable web pages from known URLs. For PDFs, "
+                "downloadable files, or durable vault content, use content_import instead."
             ),
         )
 

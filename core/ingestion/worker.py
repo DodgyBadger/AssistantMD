@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import Callable
 
 from core.identity import SYSTEM_AUTHORITY
-from core.ingestion.jobs import get_job, list_jobs
+from core.ingestion.jobs import claim_queued_job, get_job, list_jobs, update_job_status
 from core.ingestion.models import JobStatus
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import (
@@ -46,7 +46,22 @@ class IngestionWorker:
             return
 
         selected_jobs = queued[: self.max_concurrent]
-        tracked_tasks = [await self._start_tracked_job(job.id) for job in selected_jobs]
+        tracked_tasks = []
+        for job in selected_jobs:
+            if not claim_queued_job(job.id):
+                continue
+            try:
+                tracked_tasks.append(await self._start_tracked_job(job.id))
+            except Exception as exc:
+                update_job_status(
+                    job.id,
+                    JobStatus.FAILED,
+                    f"Failed to start ingestion task: {exc}",
+                )
+                self.logger.error(
+                    "Failed to start ingestion task",
+                    metadata={"job_id": job.id, "error": str(exc)},
+                )
         await asyncio.gather(
             *(self._wait_for_task_terminal(task.task_id) for task in tracked_tasks)
         )

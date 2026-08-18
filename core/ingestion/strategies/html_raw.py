@@ -46,7 +46,11 @@ def extract_html_markdownify(
         mime=raw.mime or "text/html",
         strategy_id="html_markdownify",
         blocks=None,
-        meta={"source_uri": raw.source_uri, "clean_html": clean_html},
+        meta={
+            "source_uri": raw.source_uri,
+            "clean_html": clean_html,
+            "provider": "local",
+        },
     )
 
 

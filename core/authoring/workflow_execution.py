@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from core.authoring.service import run_authoring_template
+from core.authoring.template_loader import load_authoring_template_file
 from core.runtime.state import get_runtime_context
+from core.vault_state.pathing import resolve_vault_relative_path
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,59 @@ class WorkflowExecutionResult:
             "details": list(self.details),
             "message": self.message,
         }
+
+
+@dataclass(frozen=True)
+class WorkflowExecutionTarget:
+    """One explicitly resolved workflow file outside managed discovery."""
+
+    global_id: str
+    vault_name: str
+    workflow_name: str
+    vault_relative_path: str
+    vault_root: Path
+    file_path: Path
+
+
+def resolve_vault_workflow_target(
+    *,
+    vault_path: str | Path,
+    vault_name: str,
+    workflow_path: str,
+) -> WorkflowExecutionTarget:
+    """Resolve and validate an explicit workflow path inside one vault."""
+    normalized = str(workflow_path or "").strip().replace("\\", "/")
+    if not normalized:
+        raise ValueError("workflow_path is required")
+    if not normalized.lower().endswith(".md"):
+        raise ValueError("workflow_path must reference a Markdown (.md) file")
+
+    vault_root = Path(vault_path).resolve()
+    file_path = resolve_vault_relative_path(
+        vault_path=vault_root,
+        path=normalized,
+        markdown_only=True,
+    )
+    if not file_path.is_file():
+        raise ValueError(f"Workflow file not found: {normalized}")
+
+    source = load_authoring_template_file(file_path)
+    run_type = str(source.frontmatter.get("run_type") or "").strip().lower()
+    if run_type != "workflow":
+        raise ValueError(
+            "Vault-relative workflow files must declare run_type: workflow"
+        )
+
+    relative_path = file_path.relative_to(vault_root).as_posix()
+    workflow_name = f"@path:{relative_path}"
+    return WorkflowExecutionTarget(
+        global_id=f"{vault_name}/{workflow_name}",
+        vault_name=vault_name,
+        workflow_name=workflow_name,
+        vault_relative_path=relative_path,
+        vault_root=vault_root,
+        file_path=file_path,
+    )
 
 
 def format_workflow_load_errors(loader: Any, global_id: str) -> str:
@@ -131,6 +187,48 @@ async def execute_workflow_by_id(
         details=[],
         message=(
             f"Workflow '{target.global_id}' {terminal_status} in {elapsed:.2f} seconds"
+            + (f": {terminal_reason}" if terminal_reason else "")
+        ),
+    )
+
+
+async def execute_workflow_target(
+    target: WorkflowExecutionTarget,
+    *,
+    step_name: str | None = None,
+    expect_failure: bool = False,
+) -> WorkflowExecutionResult:
+    """Execute one already validated vault-relative workflow target."""
+    target = resolve_vault_workflow_target(
+        vault_path=target.vault_root,
+        vault_name=target.vault_name,
+        workflow_path=target.vault_relative_path,
+    )
+    started = perf_counter()
+    execution_result = await run_authoring_template(
+        workflow_id=target.global_id,
+        file_path=str(target.file_path),
+        step_name=step_name,
+        expect_failure=expect_failure,
+    )
+    elapsed = perf_counter() - started
+    terminal_status = (
+        str(getattr(execution_result, "status", "completed") or "completed")
+        .strip()
+        .lower()
+    )
+    terminal_reason = str(getattr(execution_result, "reason", "") or "")
+    succeeded = terminal_status in {"completed", "skipped"}
+    return WorkflowExecutionResult(
+        success=succeeded,
+        global_id=target.global_id,
+        status=terminal_status,
+        execution_time_seconds=elapsed,
+        output_files=[],
+        reason=terminal_reason or None,
+        details=[f"workflow_path: {target.vault_relative_path}"],
+        message=(
+            f"Workflow '{target.vault_relative_path}' {terminal_status} in {elapsed:.2f} seconds"
             + (f": {terminal_reason}" if terminal_reason else "")
         ),
     )

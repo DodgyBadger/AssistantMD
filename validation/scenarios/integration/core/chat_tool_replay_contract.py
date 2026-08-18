@@ -1,6 +1,7 @@
 """Integration scenario for deterministic persisted chat tool replay."""
 
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -113,6 +114,7 @@ class ChatToolReplayContractScenario(BaseScenario):
             tool_name="probe_alpha",
             event_type="result",
             result_text="alpha result",
+            result_metadata={"fetched_at": datetime(2026, 8, 9, 1, 2, tzinfo=UTC)},
         )
 
         detail_response = self.call_api(
@@ -165,6 +167,16 @@ class ChatToolReplayContractScenario(BaseScenario):
             {event["tool_call_id"] for event in detail["tool_events"]},
             {"probe-a", "probe-b"},
             "Session detail should expose all committed tool events",
+        )
+        alpha_result = next(
+            event
+            for event in detail["tool_events"]
+            if event["tool_call_id"] == "probe-a" and event["event_type"] == "result"
+        )
+        self.soft_assert_equal(
+            alpha_result["result_metadata"]["fetched_at"],
+            "2026-08-09T01:02:00Z",
+            "Tool-event persistence should normalize temporal metadata without aborting chat",
         )
 
         await self.stop_system()

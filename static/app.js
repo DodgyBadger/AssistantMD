@@ -8,6 +8,12 @@ const {
     formatShortDate,
 } = window.AssistantMDUtils;
 
+const browserStorage = window.AssistantMDBrowserStorage || Object.freeze({
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+});
+
 // State management
 const RESTART_NOTICE_TEXT = 'Restart the container to apply changes.';
 const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
@@ -312,20 +318,11 @@ function clampChatComposerHeight(value) {
 }
 
 function persistChatComposerHeight(height) {
-    try {
-        localStorage.setItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY, String(Math.round(height)));
-    } catch (error) {
-        console.warn('Failed to persist chat composer height:', error);
-    }
+    browserStorage.setItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY, String(Math.round(height)));
 }
 
 function readStoredChatComposerHeight() {
-    try {
-        return localStorage.getItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY);
-    } catch (error) {
-        console.warn('Failed to read chat composer height:', error);
-        return null;
-    }
+    return browserStorage.getItem(CHAT_COMPOSE_HEIGHT_STORAGE_KEY);
 }
 
 function setChatComposerHeight(height, { persist = true } = {}) {
@@ -955,19 +952,11 @@ const themeManager = {
     current: null,
 
     safeGet(key) {
-        try {
-            return localStorage.getItem(key);
-        } catch {
-            return null;
-        }
+        return browserStorage.getItem(key);
     },
 
     safeSet(key, value) {
-        try {
-            localStorage.setItem(key, value);
-        } catch {
-            // Ignore storage errors (e.g., private mode) but keep UI responsive
-        }
+        browserStorage.setItem(key, value);
     },
 
     init() {
@@ -1024,7 +1013,8 @@ async function init() {
     if (window.ConfigurationPanel) {
         window.ConfigurationPanel.init({
             refreshMetadata: () => fetchMetadata(),
-            refreshStatus: () => fetchSystemStatus()
+            refreshStatus: () => fetchSystemStatus(),
+            openFile: (path, vaultName) => fileReferences.openFile(path, { vaultName })
         });
     }
     await fetchMetadata();
@@ -1100,6 +1090,7 @@ async function fetchMetadata() {
         // Expose for other modules (e.g., configuration import panel) to avoid duplicate fetches.
         window.App = window.App || {};
         window.App.metadata = state.metadata;
+        window.ConfigurationPanel?.onMetadataUpdated?.();
         populateSelectors();
         updateStatus();
     } catch (error) {
@@ -1999,7 +1990,7 @@ function setRestartRequired(required = true) {
 
     if (!required) {
         state.restartRequired = false;
-        localStorage.removeItem(RESTART_STORAGE_KEY);
+        browserStorage.removeItem(RESTART_STORAGE_KEY);
         if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
             window.ConfigurationPanel.setRestartRequired(false);
         }
@@ -2008,11 +1999,7 @@ function setRestartRequired(required = true) {
     }
 
     const payload = { required: true, startupTime: currentStartup };
-    try {
-        localStorage.setItem(RESTART_STORAGE_KEY, JSON.stringify(payload));
-    } catch (error) {
-        console.warn('Failed to persist restart-required flag:', error);
-    }
+    browserStorage.setItem(RESTART_STORAGE_KEY, JSON.stringify(payload));
 
     state.restartRequired = true;
     if (window.ConfigurationPanel && typeof window.ConfigurationPanel.setRestartRequired === 'function') {
@@ -2024,11 +2011,11 @@ function setRestartRequired(required = true) {
 function syncRestartFlagWithStorage() {
     let stored = null;
     try {
-        const raw = localStorage.getItem(RESTART_STORAGE_KEY);
+        const raw = browserStorage.getItem(RESTART_STORAGE_KEY);
         stored = raw ? JSON.parse(raw) : null;
     } catch (error) {
         console.warn('Failed to read restart-required flag:', error);
-        localStorage.removeItem(RESTART_STORAGE_KEY);
+        browserStorage.removeItem(RESTART_STORAGE_KEY);
     }
 
     const currentStartup = state.systemStatus?.system?.startup_time || null;
@@ -2037,11 +2024,7 @@ function syncRestartFlagWithStorage() {
 
     if (isValid) {
         if (currentStartup && stored.startupTime !== currentStartup) {
-            try {
-                localStorage.setItem(RESTART_STORAGE_KEY, JSON.stringify({ required: true, startupTime: currentStartup }));
-            } catch (error) {
-                console.warn('Failed to update restart-required flag:', error);
-            }
+            browserStorage.setItem(RESTART_STORAGE_KEY, JSON.stringify({ required: true, startupTime: currentStartup }));
         }
         if (!state.restartRequired) {
             state.restartRequired = true;
@@ -2061,7 +2044,7 @@ function syncRestartFlagWithStorage() {
         updateStatus();
     }
 
-    localStorage.removeItem(RESTART_STORAGE_KEY);
+    browserStorage.removeItem(RESTART_STORAGE_KEY);
 }
 
 // Start app

@@ -8,7 +8,9 @@ from typing import Any, cast
 
 from core.authoring.workflow_execution import (
     WorkflowExecutionResult,
+    WorkflowExecutionTarget,
     execute_workflow_by_id,
+    execute_workflow_target,
 )
 from core.identity import (
     SYSTEM_AUTHORITY,
@@ -89,9 +91,17 @@ class WorkflowGovernor:
         include_load_errors: bool = False,
         task_id: str | None = None,
         authority: ExecutionAuthority | None = None,
+        execution_target: WorkflowExecutionTarget | None = None,
     ) -> WorkflowExecutionResult:
         """Execute one workflow after waiting for its vault and global lanes."""
         vault_name, workflow_name = self._split_workflow_identity(global_id)
+        if execution_target is not None and execution_target.global_id != global_id:
+            raise ValueError("Workflow execution target does not match global_id")
+        workflow_path = (
+            execution_target.vault_relative_path
+            if execution_target is not None
+            else None
+        )
         authority = _authority_for_workflow_source(source, authority=authority)
         source_value = str(source)
         active_task_id = task_id or ""
@@ -108,6 +118,7 @@ class WorkflowGovernor:
                     "workflow_id": global_id,
                     "vault": vault_name,
                     "step_name": step_name,
+                    "workflow_path": workflow_path,
                 },
                 start_immediately=False,
             )
@@ -139,6 +150,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -161,6 +173,7 @@ class WorkflowGovernor:
                     workflow_name=workflow_name,
                     source=source_value,
                     task_id=queued_task.task_id,
+                    workflow_path=workflow_path,
                     reason=f"workflow_vault_active:{vault_name}",
                 )
 
@@ -185,6 +198,7 @@ class WorkflowGovernor:
                                 workflow_name=workflow_name,
                                 source=source_value,
                                 task_id=active_task_id,
+                                workflow_path=workflow_path,
                                 reason="workflow_global_capacity_active",
                             )
                         await global_semaphore.acquire()
@@ -201,6 +215,7 @@ class WorkflowGovernor:
                             "workflow_name": workflow_name,
                             "vault": vault_name,
                             "step_name": step_name,
+                            "workflow_path": workflow_path,
                         },
                     )
                     self._log_workflow_event(
@@ -210,6 +225,7 @@ class WorkflowGovernor:
                         workflow_name=workflow_name,
                         source=source_value,
                         task_id=active_task_id,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         expect_failure=expect_failure,
                         include_load_errors=include_load_errors,
@@ -250,6 +266,7 @@ class WorkflowGovernor:
                                     global_id=global_id,
                                     vault_name=vault_name,
                                     workflow_name=workflow_name,
+                                    workflow_path=workflow_path,
                                     step_name=step_name,
                                     source=source_value,
                                     status="timed_out",
@@ -269,6 +286,7 @@ class WorkflowGovernor:
                                 global_id=global_id,
                                 vault_name=vault_name,
                                 workflow_name=workflow_name,
+                                workflow_path=workflow_path,
                                 step_name=step_name,
                                 source=source_value,
                                 status="timed_out",
@@ -287,6 +305,7 @@ class WorkflowGovernor:
                             workflow_name=workflow_name,
                             source=source_value,
                             task_id=active_task_id,
+                            workflow_path=workflow_path,
                             status="timed_out",
                             reason=reason,
                             step_name=step_name,
@@ -300,6 +319,20 @@ class WorkflowGovernor:
                         )
                         return timeout_result
 
+                    async def _execute_selected_workflow() -> WorkflowExecutionResult:
+                        if execution_target is not None:
+                            return await execute_workflow_target(
+                                execution_target,
+                                step_name=step_name,
+                                expect_failure=expect_failure,
+                            )
+                        return await execute_workflow_by_id(
+                            global_id,
+                            step_name=step_name,
+                            expect_failure=expect_failure,
+                            include_load_errors=include_load_errors,
+                        )
+
                     result = await self._task_runner.run_with_timeout(
                         task,
                         ExecutionTaskSpec(
@@ -312,12 +345,7 @@ class WorkflowGovernor:
                             timeout_seconds=timeout,
                             timeout_reason=f"workflow_task_timeout:{timeout:g}s",
                         ),
-                        lambda: execute_workflow_by_id(
-                            global_id,
-                            step_name=step_name,
-                            expect_failure=expect_failure,
-                            include_load_errors=include_load_errors,
-                        ),
+                        _execute_selected_workflow,
                         hooks=ExecutionTaskHooks(on_timed_out=_record_workflow_timeout),
                     )
                     if (
@@ -342,6 +370,7 @@ class WorkflowGovernor:
                             global_id=global_id,
                             vault_name=vault_name,
                             workflow_name=workflow_name,
+                            workflow_path=workflow_path,
                             step_name=step_name,
                             source=source_value,
                             status=result.status,
@@ -371,6 +400,7 @@ class WorkflowGovernor:
                         workflow_name=workflow_name,
                         source=source_value,
                         task_id=active_task_id,
+                        workflow_path=workflow_path,
                         status=result.status,
                         reason=result.reason,
                         step_name=step_name,
@@ -409,6 +439,7 @@ class WorkflowGovernor:
                         workflow_name=workflow_name,
                         source=source_value,
                         task_id=active_task_id,
+                        workflow_path=workflow_path,
                         status="cancelled",
                         reason="cancelled",
                         step_name=step_name,
@@ -423,6 +454,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -442,6 +474,7 @@ class WorkflowGovernor:
                         workflow_name=workflow_name,
                         source=source_value,
                         task_id=active_task_id,
+                        workflow_path=workflow_path,
                         status="failed",
                         reason=reason,
                         step_name=step_name,
@@ -495,6 +528,7 @@ class WorkflowGovernor:
                         global_id=global_id,
                         vault_name=vault_name,
                         workflow_name=workflow_name,
+                        workflow_path=workflow_path,
                         step_name=step_name,
                         source=source_value,
                         status="failed",
@@ -517,6 +551,7 @@ class WorkflowGovernor:
         include_load_errors: bool = False,
         background_tasks: set[asyncio.Task] | None = None,
         authority: ExecutionAuthority | None = None,
+        execution_target: WorkflowExecutionTarget | None = None,
     ) -> ExecutionTaskSnapshot:
         """Start one workflow in the background and return its execution task."""
         del background_tasks
@@ -533,6 +568,7 @@ class WorkflowGovernor:
                     include_load_errors=include_load_errors,
                     task_id=task.task_id,
                     authority=authority,
+                    execution_target=execution_target,
                 )
             except asyncio.CancelledError:
                 raise
@@ -550,6 +586,11 @@ class WorkflowGovernor:
                     "workflow_id": global_id,
                     "vault": vault_name,
                     "step_name": step_name,
+                    "workflow_path": (
+                        execution_target.vault_relative_path
+                        if execution_target is not None
+                        else None
+                    ),
                 },
             ),
             _run,
@@ -575,6 +616,7 @@ class WorkflowGovernor:
         workflow_name: str,
         source: str,
         task_id: str,
+        workflow_path: str | None,
         reason: str,
     ) -> None:
         self._logger.add_sink("validation").info(
@@ -586,6 +628,7 @@ class WorkflowGovernor:
                 "vault": vault_name,
                 "source": source,
                 "task_id": task_id,
+                "workflow_path": workflow_path,
                 "reason": reason,
             },
         )
@@ -599,6 +642,7 @@ class WorkflowGovernor:
         workflow_name: str,
         source: str,
         task_id: str,
+        workflow_path: str | None = None,
         status: str | None = None,
         reason: str | None = None,
         step_name: str | None = None,
@@ -619,6 +663,7 @@ class WorkflowGovernor:
                 "vault": vault_name,
                 "source": source,
                 "task_id": task_id,
+                "workflow_path": workflow_path,
                 "status": status,
                 "reason": reason,
                 "step_name": step_name,
@@ -671,6 +716,7 @@ def _build_workflow_failure_metadata(
     global_id: str,
     vault_name: str,
     workflow_name: str,
+    workflow_path: str | None,
     step_name: str | None,
     source: str,
     status: str,
@@ -685,6 +731,7 @@ def _build_workflow_failure_metadata(
         {
             "workflow_id": global_id,
             "workflow_name": workflow_name,
+            "workflow_path": workflow_path,
             "vault": vault_name,
             "source": source,
             "status": status,

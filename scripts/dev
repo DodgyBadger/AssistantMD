@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
-RUNTIME_ROOT="${ASSISTANTMD_DEV_RUNTIME_ROOT:-${REPO_ROOT}/.runtime}"
+RUNTIME_ROOT="${ASSISTANTMD_DEV_RUNTIME_ROOT:-${REPO_ROOT}}"
 DATA_ROOT="${CONTAINER_DATA_ROOT:-${RUNTIME_ROOT}/data}"
 SYSTEM_ROOT="${CONTAINER_SYSTEM_ROOT:-${RUNTIME_ROOT}/system}"
 
@@ -28,7 +28,7 @@ Run options:
   --                       Pass remaining arguments to Uvicorn
 
 Environment:
-  ASSISTANTMD_DEV_RUNTIME_ROOT  Override the default .runtime directory
+  ASSISTANTMD_DEV_RUNTIME_ROOT  Use an alternate parent for data/ and system/
   CONTAINER_DATA_ROOT          Override the development vault root
   CONTAINER_SYSTEM_ROOT        Override the development system-state root
   ASSISTANTMD_DEV_HOST         Development server host (default: 127.0.0.1)

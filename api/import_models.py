@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -13,15 +15,46 @@ class ImportScanRequest(BaseModel):
     pdf_mode: str | None = (
         None  # Optional per-run PDF mode override: markdown|page_images
     )
+    include_ocr_blocks: bool | None = None
+    ocr_table_format: str | None = None
+    extract_ocr_header: bool | None = None
+    extract_ocr_footer: bool | None = None
+    ocr_confidence: str | None = None
 
 
 class ImportJobInfo(BaseModel):
     id: int
     source_uri: str
     vault: str
+    source_type: str
     status: str
     error: str | None = None
     outputs: list[str] | None = None
+    selected_strategy: str | None = None
+    selected_provider: str | None = None
+    selected_model: str | None = None
+    strategy_attempts: list[str] | None = None
+    fallback_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportJobListResponse(BaseModel):
+    jobs: list[ImportJobInfo]
+    next_cursor: str | None = None
+    total_matching: int
+    status_counts: dict[str, int]
+
+
+class ImportJobCancelResponse(BaseModel):
+    job: ImportJobInfo
+    cancelled: bool
+
+
+class ImportRunNowResponse(BaseModel):
+    accepted: bool
+    queued_count: int
+    triggered_at: datetime
 
 
 class ImportScanResponse(BaseModel):
@@ -33,12 +66,16 @@ class ImportUrlRequest(BaseModel):
     vault: str
     url: str
     clean_html: bool = True
+    strategies: list[str] | None = None
+    pdf_strategies: list[str] | None = None
+    capture_ocr_images: bool | None = None
+    pdf_mode: str | None = None
+    include_ocr_blocks: bool | None = None
+    ocr_table_format: str | None = None
+    extract_ocr_header: bool | None = None
+    extract_ocr_footer: bool | None = None
+    ocr_confidence: str | None = None
 
 
-class ImportUrlResponse(BaseModel):
-    id: int
-    source_uri: str
-    vault: str
-    status: str
-    error: str | None = None
-    outputs: list[str] | None = None
+class ImportUrlResponse(ImportJobInfo):
+    pass

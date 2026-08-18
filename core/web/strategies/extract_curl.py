@@ -14,6 +14,25 @@ from core.web.models import (
     WebItemFailure,
 )
 
+_TEXT_APPLICATION_MIMES = {
+    "application/javascript",
+    "application/json",
+    "application/ld+json",
+    "application/xhtml+xml",
+    "application/xml",
+}
+
+
+def _is_readable_text(*, mime: str, body: bytes) -> bool:
+    """Return whether a response is suitable for transient text extraction."""
+    if body.lstrip().startswith(b"%PDF-"):
+        return False
+    if mime.startswith("text/") or mime in _TEXT_APPLICATION_MIMES:
+        return True
+    if mime:
+        return False
+    return b"\x00" not in body[:4096]
+
 
 async def extract_with_curl(
     *,
@@ -44,7 +63,14 @@ async def extract_with_curl(
                     f"URL fetch failed with status {fetched.status_code}"
                 )
             content_type = fetched.headers.get("content-type", "")
-            mime = content_type.split(";", 1)[0].strip() or "text/html"
+            mime = content_type.split(";", 1)[0].strip().lower()
+            if not _is_readable_text(mime=mime, body=fetched.body):
+                kind = mime or "binary content"
+                raise RuntimeError(
+                    f"web_extract only accepts readable web pages; received {kind}. "
+                    "Use content_import to import PDFs and other downloadable files."
+                )
+            mime = mime or "text/html"
             text = fetched.body.decode("utf-8", errors="replace")
             content = (
                 html_to_markdown(text)

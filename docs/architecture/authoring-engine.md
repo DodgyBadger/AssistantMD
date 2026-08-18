@@ -21,7 +21,11 @@ Every authoring file has:
 - `run_type: workflow` or `run_type: context` in frontmatter
 - Exactly one fenced `python` block containing the executable body
 
-Workflows live in `AssistantMD/Authoring/` per vault (or `system/Authoring/` for system-level defaults). Context templates use the same location and format.
+Managed workflows live in `AssistantMD/Authoring/` per vault (or
+`system/Authoring/` for system-level defaults). Context templates use the same
+managed location and format. The `workflow_run` tool can explicitly execute a
+`run_type: workflow` Markdown file elsewhere in the current vault by path; this
+does not add that file to discovery or scheduling.
 
 ## Capability functions
 
@@ -87,6 +91,9 @@ the context script includes it in assembled messages or instructions.
 ## Discovery and precedence
 
 - `template_discovery.py` scans `AssistantMD/Authoring/` (one level deep) per vault.
+- Explicit vault-relative workflow paths are resolved with real-path vault
+  containment and parsed as authoring files, but are never scanned or inserted
+  into the managed workflow registry.
 - System templates in `system/Authoring/` provide defaults. Startup creates missing packaged templates only; existing system templates are refreshed by an explicit maintenance action.
 - Vault files take precedence when names match.
 - On first access, `ensure_vault_directories()` creates `AssistantMD/Authoring/` and `AssistantMD/Skills/` for each vault, seeding starter files from `core/authoring/seed_templates/`.
@@ -116,5 +123,5 @@ Expired artifacts are purged on a schedule via `purge_expired_cache_artifacts`.
 - Scheduler sync (`setup_scheduler_jobs`) loads workflow definitions and reconciles APScheduler jobs.
 - Workflow execution flows through `RuntimeContext.workflow_governor`, which uses the runtime task runner for process-local workflow task execution, serializes runs by vault, and returns `WorkflowExecutionResult` to internal callers.
 - Manual API runs start a background workflow task through the same governor and return the task snapshot immediately. Manual system-template runs are normalized to a vault-scoped virtual workflow id before they enter the governor; disabled system templates can be run manually, but `enabled: false` still excludes them from scheduling.
-- The `workflow_run` tool keeps the blocking `run` operation for direct execution and exposes `start`, `status`, and `cancel` for task-based asynchronous workflow control. Scheduled jobs await the shared workflow execution path directly.
+- The `workflow_run` tool keeps the blocking `run` operation for direct execution and exposes `start`, `status`, and `cancel` for task-based asynchronous workflow control. `run` and `start` accept either a managed workflow name or an explicit vault-relative workflow path. Both converge on the same governor and task lifecycle. Scheduled jobs await the shared workflow execution path directly.
 - Chat sessions invoke the context manager, which runs the matching context template (or the default) to assemble the agent's starting context.

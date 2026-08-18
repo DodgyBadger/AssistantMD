@@ -14,11 +14,12 @@ from core.ingestion.strategies.html_raw import extract_html_markdownify
 from core.settings.upgrades import upgrade_settings_mapping
 from core.tools.web_extract import WebExtract
 from core.web.errors import WebUrlPolicyError
-from core.web.fetchers.curl import _fetch_once
+from core.web.fetchers.curl import _fetch_once, _map_curl_error
 from core.web.html import html_to_markdown
 from core.web.models import (
     WebExtractionItem,
     WebExtractionResult,
+    WebFetchResult,
     WebSearchItem,
     WebSearchResult,
 )
@@ -29,6 +30,7 @@ from core.web.security import (
     sanitize_urls_in_text_for_log,
 )
 from core.web.service import WebCapabilityService
+from core.web.strategies.extract_curl import extract_with_curl
 from validation.core.base_scenario import BaseScenario
 
 
@@ -152,6 +154,35 @@ class WebCapabilityStrategiesScenario(BaseScenario):
             "Shared clean_html policy should remove script content",
         )
 
+        pdf_url = "https://example.com/report.pdf"
+        with patch(
+            "core.web.strategies.extract_curl.fetch_url_with_curl",
+            return_value=WebFetchResult(
+                source_url=pdf_url,
+                effective_url=pdf_url,
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                body=b"%PDF-1.7 binary content",
+            ),
+        ):
+            binary_result = await extract_with_curl(
+                urls=[pdf_url], include_images=False
+            )
+        self.soft_assert_equal(
+            binary_result.items,
+            [],
+            "web_extract should not decode binary document responses as readable text",
+        )
+        self.soft_assert_equal(
+            len(binary_result.failures),
+            1,
+            "A binary response should remain visible as a per-URL extraction failure",
+        )
+        self.soft_assert(
+            "content_import" in binary_result.failures[0].error,
+            "Binary extraction failures should direct callers to durable content import",
+        )
+
         try:
             resolve_public_url("http://127.0.0.1/private")
         except WebUrlPolicyError:
@@ -176,6 +207,19 @@ class WebCapabilityStrategiesScenario(BaseScenario):
             ),
             "request failed for https://example.com/page",
             "URLs embedded in provider diagnostics should use shared sanitization",
+        )
+        self.soft_assert_equal(
+            str(
+                _map_curl_error(
+                    63,
+                    "curl write limit",
+                    "https://example.com/report.pdf",
+                    20,
+                    5 * 1024 * 1024,
+                )
+            ),
+            "Response exceeded 5 MB limit",
+            "URL response-limit failures should use the configured setting unit",
         )
 
         captured_command: list[str] = []

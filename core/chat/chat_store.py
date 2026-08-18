@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_core import to_jsonable_python
 
 from core.database import connect_sqlite_from_system_db
 from core.identity import normalize_principal_id
@@ -36,6 +37,15 @@ _MODEL_MESSAGE_LIST_ADAPTER: TypeAdapter[list[ModelMessage]] = TypeAdapter(
     list[ModelMessage]
 )
 HistoryMode = Literal["effective", "raw"]
+
+
+def _json_dumps(value: Any) -> str:
+    """Serialize diagnostic values without rejecting valid Python data types."""
+    return json.dumps(
+        to_jsonable_python(value, serialize_unknown=True),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -655,19 +665,9 @@ class ChatStore:
                     tool_call_id,
                     tool_name,
                     event_type,
-                    (
-                        None
-                        if args is None
-                        else json.dumps(args, ensure_ascii=False, sort_keys=True)
-                    ),
+                    (None if args is None else _json_dumps(args)),
                     result_text,
-                    (
-                        None
-                        if result_metadata is None
-                        else json.dumps(
-                            result_metadata, ensure_ascii=False, sort_keys=True
-                        )
-                    ),
+                    (None if result_metadata is None else _json_dumps(result_metadata)),
                     artifact_ref,
                 ),
             )
