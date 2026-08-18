@@ -16,11 +16,13 @@ from core.chat.task_execution import (
 )
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _DelayedStreamAgent:
     """Fake agent that stays idle long enough to require a keepalive."""
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         await asyncio.sleep(0.05)
         if False:
@@ -30,6 +32,7 @@ class _DelayedStreamAgent:
 class _HangingStreamAgent:
     """Fake streaming agent that stays active until cancelled."""
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         await asyncio.Event().wait()
         if False:

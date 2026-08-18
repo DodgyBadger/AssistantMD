@@ -22,6 +22,7 @@ from core.chat.surface_adapter import (
 from core.identity import LOCAL_USER_AUTHORITY, LOCAL_USER_PRINCIPAL_ID
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FakeStreamResult:
@@ -37,6 +38,7 @@ class _FakeStreamResult:
 
 
 class _CompletingSurfaceAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("surface delta"))
         yield AgentRunResultEvent(
@@ -48,6 +50,7 @@ class _CompletingSurfaceAgent:
 
 
 class _BlockingSurfaceAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("blocked surface delta"))
         await asyncio.Event().wait()

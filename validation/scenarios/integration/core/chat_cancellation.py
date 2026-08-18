@@ -12,6 +12,7 @@ from core.runtime.state import get_runtime_context
 from core.utils.messages import extract_role_and_text
 from core.vault_state.file_mutations import write_vault_file
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _HangingAgent:
@@ -28,6 +29,7 @@ class _HangingAgent:
         )
         await asyncio.Event().wait()
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         write_vault_file(
             vault_path=self._vault_path,

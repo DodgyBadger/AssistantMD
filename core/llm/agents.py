@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessage, UserContent
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
@@ -154,6 +154,7 @@ async def collect_response(
     message_history: Sequence[ModelMessage] | None = None,
     deps: Any = None,
     usage_limits: UsageLimits | None = None,
+    usage: RunUsage | None = None,
 ) -> CollectedAgentRun:
     """Run an agent through the streaming transport and return one final result.
 
@@ -167,6 +168,8 @@ async def collect_response(
         kwargs["message_history"] = message_history
     if usage_limits is not None:
         kwargs["usage_limits"] = usage_limits
+    if usage is not None:
+        kwargs["usage"] = usage
 
     async with agent.run_stream(prompt, **kwargs) as result:
         async for _ in result.stream_output(debounce_by=None):

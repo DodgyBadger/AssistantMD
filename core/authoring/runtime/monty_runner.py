@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic_monty import Monty, run_monty_async
+from pydantic_monty import AsyncMonty
 
 from core.authoring.contracts import (
     AuthoringExecutionContext,
@@ -97,25 +97,24 @@ async def run_authoring_monty(
     terminal_reason = ""
     value: Any = None
     try:
-        runner = Monty(
-            code,
-            script_name=script_name,
-            inputs=sorted(effective_inputs) if effective_inputs else None,
-            type_check=type_check,
-            type_check_stubs=(
-                _build_type_check_stubs(direct_tool_stubs) if type_check else None
-            ),
-        )
-        for dataclass_type in host.get_monty_dataclasses():
-            runner.register_dataclass(dataclass_type)
-
         try:
-            value = await run_monty_async(
-                runner,
-                inputs=effective_inputs or None,
-                external_functions=external_functions,
-                print_callback=capture.callback,
-            )
+            async with AsyncMonty() as pool:
+                async with pool.checkout(
+                    script_name=script_name,
+                    type_check=type_check,
+                    type_check_stubs=(
+                        _build_type_check_stubs(direct_tool_stubs)
+                        if type_check
+                        else None
+                    ),
+                    dataclass_registry=list(host.get_monty_dataclasses()),
+                ) as session:
+                    value = await session.feed_run(
+                        code,
+                        inputs=effective_inputs or None,
+                        external_lookup=external_functions,
+                        print_callback=capture.callback,
+                    )
         except Exception as exc:
             parsed_finish = _extract_finish_signal(exc)
             if parsed_finish is not None:

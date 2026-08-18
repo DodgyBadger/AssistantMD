@@ -10,11 +10,13 @@ from pydantic_ai.exceptions import ModelHTTPError
 
 from core.chat.executor import PreparedChatExecution
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _BillingFailureStreamAgent:
     """Fake agent that raises a provider billing-style model error."""
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         raise ModelHTTPError(
             status_code=400,

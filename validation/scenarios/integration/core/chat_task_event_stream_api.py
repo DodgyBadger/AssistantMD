@@ -28,6 +28,7 @@ from core.chat.task_execution import (
 )
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FakeStreamResult:
@@ -43,6 +44,7 @@ class _FakeStreamResult:
 
 
 class _CompletingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=ThinkingPart("thinking start "))
         yield PartDeltaEvent(
@@ -59,6 +61,7 @@ class _CompletingStreamAgent:
 
 
 class _DeltaThenHangingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("still running"))
         await asyncio.Event().wait()

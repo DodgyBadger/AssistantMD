@@ -17,6 +17,7 @@ from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FakeStreamResult:
@@ -40,6 +41,7 @@ class _BlockingStreamAgent:
         self._prompt = prompt
         self._response = response
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart(self._delta))
         await self._release.wait()
@@ -52,6 +54,7 @@ class _BlockingStreamAgent:
 
 
 class _CompletingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("second delta"))
         yield AgentRunResultEvent(

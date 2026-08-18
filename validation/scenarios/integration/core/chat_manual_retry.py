@@ -14,11 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from core.chat.executor import PreparedChatExecution
 from core.utils.messages import extract_role_and_text
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _InterruptedStreamAgent:
     """Fake agent that fails with a retryable provider SDK error."""
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         raise openai.APIError(
             "An error occurred while processing your request.",

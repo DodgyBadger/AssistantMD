@@ -9,6 +9,7 @@ from core.chat.executor import PreparedChatExecution
 from core.runtime.execution_tasks import chat_session_scope
 from core.vault_state.file_mutations import write_vault_file
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FailingAgent:
@@ -25,6 +26,7 @@ class _FailingAgent:
         )
         raise RuntimeError("forced chat failure after mutation")
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         await self.run(*args, **kwargs)
         if False:

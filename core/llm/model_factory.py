@@ -10,18 +10,20 @@ from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.models.openai import (
-    OpenAIModel,
+    OpenAIChatModel,
+    OpenAIChatModelSettings,
     OpenAIResponsesModel,
     OpenAIResponsesModelSettings,
 )
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.xai import XaiModel, XaiModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
-from pydantic_ai.providers.grok import GrokProvider
 from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
+from pydantic_ai.providers.xai import XaiProvider
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from pydantic_ai.settings import ModelSettings
 from tenacity import RetryCallState, retry_if_exception, stop_after_attempt
@@ -208,6 +210,8 @@ def build_model_instance(
     if provider == "google":
         settings_kwargs = _base_settings_kwargs(thinking)
         api_key = get_secret_value("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY is required for the Google provider")
         http_client = _build_retrying_model_http_client()
         return GoogleModel(
             model_string,
@@ -255,14 +259,13 @@ def build_model_instance(
         api_key = get_secret_value("GROK_API_KEY")
         if not api_key:
             raise ValueError("GROK_API_KEY is required for the Grok provider")
-        http_client = _build_retrying_model_http_client()
-        return OpenAIModel(
+        return XaiModel(
             model_string,
-            provider=_mark_provider_owns_http_client(
-                GrokProvider(api_key=api_key, http_client=http_client),
-                http_client,
+            provider=XaiProvider(
+                api_key=api_key,
+                timeout=float(get_default_api_timeout()),
             ),
-            settings=cast(ModelSettings, settings_kwargs),
+            settings=cast(XaiModelSettings, settings_kwargs),
         )
 
     elif provider == "mistral":
@@ -311,7 +314,7 @@ def build_model_instance(
 
         api_key = _resolve_config_value(provider_config.get("api_key"))
         http_client = _build_retrying_model_http_client()
-        return OpenAIModel(
+        return OpenAIChatModel(
             model_string,
             provider=_mark_provider_owns_http_client(
                 OpenAIProvider(
@@ -319,5 +322,5 @@ def build_model_instance(
                 ),
                 http_client,
             ),
-            settings=cast(ModelSettings, settings_kwargs),
+            settings=cast(OpenAIChatModelSettings, settings_kwargs),
         )

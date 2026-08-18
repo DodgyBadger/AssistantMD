@@ -162,8 +162,9 @@ class DeferredToolReviewProbeScenario(BaseScenario):
         ], "Neither denial variant should execute the reviewed tool"
 
         stream_events: list[Any] = []
-        async for event in agent.run_stream_events("stream one deferred call"):
-            stream_events.append(event)
+        async with agent.run_stream_events("stream one deferred call") as events:
+            async for event in events:
+                stream_events.append(event)
 
         assert any(
             isinstance(event, FunctionToolCallEvent) for event in stream_events

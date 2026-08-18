@@ -35,6 +35,7 @@ from core.chat.task_execution import (
 from core.constants import INLINE_EDIT_DENIAL_MESSAGE
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _DeferredReviewResult:
@@ -74,6 +75,7 @@ class _DeferredReviewResult:
 
 
 class _DeferredReviewAgent:
+    @stream_events_context
     async def run_stream_events(self, prompt, **kwargs):
         del kwargs
         yield AgentRunResultEvent(result=_DeferredReviewResult(str(prompt)))
@@ -118,6 +120,7 @@ class _ResumeAgent:
     def __init__(self, capture: dict) -> None:
         self.capture = capture
 
+    @stream_events_context
     async def run_stream_events(self, prompt, **kwargs):
         self.capture["prompt"] = prompt
         deferred_tool_results = kwargs.get("deferred_tool_results")
