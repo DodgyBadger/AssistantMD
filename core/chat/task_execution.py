@@ -23,7 +23,7 @@ from pydantic_ai import (
     ThinkingPartDelta,
 )
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import ModelMessage, TextPart
+from pydantic_ai.messages import ModelMessage, TextPart, ToolReturnPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.authoring.context_manager import ContextTemplateExecutionError
@@ -1583,18 +1583,20 @@ async def _publish_tool_call_finished(
     session_id: str,
 ) -> None:
     tool_id = event.tool_call_id
-    result_part = getattr(event, "result", None)
+    result_part = event.part
     tool_name = getattr(result_part, "tool_name", "tool")
     result_content = None
-    if result_part is not None:
-        try:
+    try:
+        if isinstance(result_part, ToolReturnPart):
             result_content = result_part.model_response_str()
-        except Exception as exc:  # noqa: BLE001 - defensive fallback
-            chat_executor.logger.debug(
-                "model_response_str failed; using raw content",
-                data={"error": str(exc)},
-            )
-            result_content = getattr(result_part, "content", None)
+        else:
+            result_content = result_part.model_response()
+    except Exception as exc:  # noqa: BLE001 - defensive fallback
+        chat_executor.logger.debug(
+            "Tool result rendering failed; using raw content",
+            data={"error": str(exc)},
+        )
+        result_content = getattr(result_part, "content", None)
     tool_activity[tool_id] = {
         "tool_name": tool_name,
         "status": "completed",
