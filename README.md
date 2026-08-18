@@ -1,22 +1,30 @@
 # AssistantMD
 
-> ✨ **Highlights:** Browse and edit vault files without leaving AssistantMD,
-> review agent changes inline, restore revisions, and roll back completed
-> activities. Chat agents and workflow scripts can batch-import PDFs and web
-> sources into Markdown, monitor durable import jobs, and run project-specific
-> workflows stored beside the content they process.
+**AssistantMD aims to be the most productive AI harness for knowledge work.**
 
-AssistantMD is a self-hosted AI chat interface and Markdown editor in one
-focused work environment. Chat with an assistant, browse and edit
-files, review proposed changes, and automate recurring work without moving
-between separate applications.
+It brings AI chat, your Markdown knowledge base, and safe automation into one
+self-hosted environment. Instead of copying results between chat, notes,
+research tools, and scripts, you can let an agent work directly with the
+material you care about and turn useful work into durable, inspectable
+knowledge and repeatable processes.
 
-Any folder in a vault can be selected as the workspace for a chat session,
-giving the assistant focused project context. Add a `README.md` or `playbook.md`
-to the workspace to describe the project and guide how the assistant works there.
+When you begin a chat session, you can select any folder in your vault as its
+workspace. The assistant uses that folder as the default project context, while
+retaining access to the rest of the vault. Simple conventions such as
+`README.md` and `playbook.md` help it quickly understand the project and follow
+project-specific guidance.
+
+AssistantMD is shaped through daily use on real knowledge-work projects. Its
+features grow from friction encountered there: copying useful material between
+chat and notes, manually importing dozens of research sources, switching
+applications just to make a small edit, or needing automation without giving an
+agent unrestricted access to the host. Its development is guided by a simple
+aim: keep removing the obstacles that interrupt productive work.
 
 Your Markdown files remain the durable source of truth: readable, portable, and
-useful with or without AssistantMD.
+useful with or without AssistantMD. AssistantMD is the environment around them:
+available wherever you host it, adaptable to the way you work, and designed to
+give agents useful capabilities without handing them control of the host.
 
 ## Features
 
