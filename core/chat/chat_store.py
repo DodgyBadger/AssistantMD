@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass, replace
 from typing import Any, Literal, cast
 
@@ -124,6 +125,20 @@ class ChatStore:
         self.system_root = system_root
         ensure_chat_sessions_schema(system_root)
 
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Own one atomic mutation spanning related chat-session artifacts."""
+        conn = self._connect()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def get_history(
         self,
         session_id: str,
@@ -169,62 +184,65 @@ class ChatStore:
         session_id: str,
         vault_name: str,
         messages: list[ModelMessage],
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> None:
         """Append provider-native messages to one session."""
         if not messages:
             return
-        conn = self._connect()
-        try:
-            conn.execute("PRAGMA foreign_keys = ON")
-            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
-            next_index = self._next_sequence_index(
-                conn, session_id=session_id, vault_name=vault_name
+        if connection is None:
+            with self.transaction() as conn:
+                self.add_messages(
+                    session_id,
+                    vault_name,
+                    messages,
+                    connection=conn,
+                )
+            return
+        self._upsert_session(connection, session_id=session_id, vault_name=vault_name)
+        next_index = self._next_sequence_index(
+            connection, session_id=session_id, vault_name=vault_name
+        )
+        persist_reasoning = get_persist_model_reasoning_parts()
+        for offset, message in enumerate(messages):
+            message = _message_for_persistence(
+                message,
+                persist_reasoning_parts=persist_reasoning,
             )
-            persist_reasoning = get_persist_model_reasoning_parts()
-            for offset, message in enumerate(messages):
-                message = _message_for_persistence(
-                    message,
-                    persist_reasoning_parts=persist_reasoning,
-                )
-                role, content_text = _extract_role_and_text(message)
-                direction = (
-                    "response"
-                    if type(message).__name__ == "ModelResponse"
-                    else "request"
-                )
-                conn.execute(
-                    """
-                    INSERT INTO chat_messages (
-                        session_id,
-                        vault_name,
-                        sequence_index,
-                        direction,
-                        message_type,
-                        role,
-                        content_text,
-                        message_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        session_id,
-                        vault_name,
-                        next_index + offset,
-                        direction,
-                        type(message).__name__,
-                        role,
-                        content_text,
-                        _MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
-                    ),
-                )
-            self._touch_session(
-                conn,
-                session_id=session_id,
-                vault_name=vault_name,
-                advance_history_revision=True,
+            role, content_text = _extract_role_and_text(message)
+            direction = (
+                "response" if type(message).__name__ == "ModelResponse" else "request"
             )
-            conn.commit()
-        finally:
-            conn.close()
+            connection.execute(
+                """
+                INSERT INTO chat_messages (
+                    session_id,
+                    vault_name,
+                    sequence_index,
+                    direction,
+                    message_type,
+                    role,
+                    content_text,
+                    message_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    vault_name,
+                    next_index + offset,
+                    direction,
+                    type(message).__name__,
+                    role,
+                    content_text,
+                    _MODEL_MESSAGE_ADAPTER.dump_json(message).decode("utf-8"),
+                ),
+            )
+        self._touch_session(
+            connection,
+            session_id=session_id,
+            vault_name=vault_name,
+            advance_history_revision=True,
+        )
 
     def ensure_session(
         self,
@@ -892,8 +910,20 @@ class ChatStore:
             metadata_json=None if metadata_json is None else str(metadata_json),
         )
 
-    def get_session_metadata(self, session_id: str, vault_name: str) -> dict[str, Any]:
+    def get_session_metadata(
+        self,
+        session_id: str,
+        vault_name: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
         """Return parsed session metadata, ignoring malformed stored JSON."""
+        if connection is not None:
+            return self._session_metadata(
+                connection,
+                session_id=session_id,
+                vault_name=vault_name,
+            )
         session = self.get_session(session_id, vault_name)
         if session is None or not session.metadata_json:
             return {}
@@ -911,38 +941,44 @@ class ChatStore:
         metadata_update: dict[str, Any] | None = None,
         remove_keys: tuple[str, ...] = (),
         advance_history_revision: bool = False,
+        connection: sqlite3.Connection | None = None,
     ) -> None:
         """Merge or remove session metadata keys."""
-        conn = self._connect()
-        try:
-            conn.execute("PRAGMA foreign_keys = ON")
-            self._upsert_session(conn, session_id=session_id, vault_name=vault_name)
-            metadata = self._session_metadata(
-                conn,
-                session_id=session_id,
-                vault_name=vault_name,
-            )
-            for key in remove_keys:
-                metadata.pop(key, None)
-            if metadata_update:
-                metadata.update(metadata_update)
-            if advance_history_revision:
-                metadata["history_revision"] = _metadata_history_revision(metadata) + 1
-            conn.execute(
-                """
-                UPDATE chat_sessions
-                SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
-                WHERE session_id = ? AND vault_name = ?
-                """,
-                (
-                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-                    session_id,
-                    vault_name,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        if connection is None:
+            with self.transaction() as conn:
+                self.update_session_metadata(
+                    session_id=session_id,
+                    vault_name=vault_name,
+                    metadata_update=metadata_update,
+                    remove_keys=remove_keys,
+                    advance_history_revision=advance_history_revision,
+                    connection=conn,
+                )
+            return
+        self._upsert_session(connection, session_id=session_id, vault_name=vault_name)
+        metadata = self._session_metadata(
+            connection,
+            session_id=session_id,
+            vault_name=vault_name,
+        )
+        for key in remove_keys:
+            metadata.pop(key, None)
+        if metadata_update:
+            metadata.update(metadata_update)
+        if advance_history_revision:
+            metadata["history_revision"] = _metadata_history_revision(metadata) + 1
+        connection.execute(
+            """
+            UPDATE chat_sessions
+            SET last_activity_at = CURRENT_TIMESTAMP, metadata_json = ?
+            WHERE session_id = ? AND vault_name = ?
+            """,
+            (
+                json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                session_id,
+                vault_name,
+            ),
+        )
 
     def set_session_workspace(
         self,

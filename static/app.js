@@ -727,6 +727,27 @@ function applyChatStreamPayload(payload, assistantMessage) {
     return { finished: false, messageCount: 0 };
 }
 
+function applyConsumedChatStreamEvent(
+    payload,
+    assistantMessage,
+    { currentTaskId, lastSequence, messageCount, finishReason }
+) {
+    const nextSequence = Number.isInteger(payload.sequence)
+        ? Math.max(lastSequence, payload.sequence)
+        : lastSequence;
+    const result = applyChatStreamPayload(payload, assistantMessage);
+    return {
+        currentTaskId: result.nextTaskId || currentTaskId,
+        lastSequence: result.nextTaskId ? 0 : nextSequence,
+        messageCount: Math.max(messageCount, result.messageCount),
+        finishReason: result.finishReason || finishReason,
+        finished: Boolean(result.finished),
+        eventGap: Boolean(result.eventGap),
+        redirected: Boolean(result.nextTaskId),
+        receivedSequence: Number.isInteger(payload.sequence),
+    };
+}
+
 async function consumeChatTaskEvents(taskId, assistantMessage, abortController) {
     let currentTaskId = taskId;
     let lastSequence = 0;
@@ -795,29 +816,26 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
                 for (const rawEvent of events) {
                     const payload = parseSseEvent(rawEvent);
                     if (!payload) continue;
-                    if (Number.isInteger(payload.sequence)) {
-                        lastSequence = Math.max(lastSequence, payload.sequence);
+                    const transition = applyConsumedChatStreamEvent(
+                        payload,
+                        assistantMessage,
+                        { currentTaskId, lastSequence, messageCount, finishReason }
+                    );
+                    currentTaskId = transition.currentTaskId;
+                    lastSequence = transition.lastSequence;
+                    messageCount = transition.messageCount;
+                    finishReason = transition.finishReason;
+                    finished = transition.finished;
+                    eventGap = transition.eventGap;
+                    redirected = transition.redirected;
+                    if (transition.receivedSequence) {
                         reconnectAttempts = 0;
                     }
-                    const result = applyChatStreamPayload(payload, assistantMessage);
-                    if (result.eventGap) {
-                        eventGap = true;
-                        break;
-                    }
-                    if (result.nextTaskId) {
-                        currentTaskId = result.nextTaskId;
+                    if (redirected) {
                         state.activeChatTaskId = currentTaskId;
-                        lastSequence = 0;
                         reconnectAttempts = 0;
-                        redirected = true;
-                        break;
                     }
-                    messageCount = Math.max(messageCount, result.messageCount);
-                    finishReason = result.finishReason || finishReason;
-                    if (result.finished) {
-                        finished = true;
-                        break;
-                    }
+                    if (finished || eventGap || redirected) break;
                 }
                 if (redirected) {
                     await reader.cancel();
@@ -845,22 +863,21 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
         if (!finished && buffer.trim()) {
             const payload = parseSseEvent(buffer);
             if (payload) {
-                if (Number.isInteger(payload.sequence)) {
-                    lastSequence = Math.max(lastSequence, payload.sequence);
-                }
-                const result = applyChatStreamPayload(payload, assistantMessage);
-                if (result.eventGap) {
-                    eventGap = true;
-                }
-                if (result.nextTaskId) {
-                    currentTaskId = result.nextTaskId;
+                const transition = applyConsumedChatStreamEvent(
+                    payload,
+                    assistantMessage,
+                    { currentTaskId, lastSequence, messageCount, finishReason }
+                );
+                currentTaskId = transition.currentTaskId;
+                lastSequence = transition.lastSequence;
+                messageCount = transition.messageCount;
+                finishReason = transition.finishReason;
+                finished = transition.finished;
+                eventGap = transition.eventGap;
+                redirected = transition.redirected;
+                if (redirected) {
                     state.activeChatTaskId = currentTaskId;
-                    lastSequence = 0;
-                    redirected = true;
                 }
-                messageCount = Math.max(messageCount, result.messageCount);
-                finishReason = result.finishReason || finishReason;
-                finished = result.finished;
             }
         }
 
@@ -905,6 +922,16 @@ function waitForChatStreamReconnect(attempt, signal) {
     });
 }
 
+function releaseActiveChatStream(abortController) {
+    if (state.activeChatAbortController !== abortController) return false;
+    state.isLoading = false;
+    state.isCancellingChat = false;
+    state.activeChatSessionId = null;
+    state.activeChatTaskId = null;
+    state.activeChatAbortController = null;
+    return true;
+}
+
 async function waitForChatTaskTerminal(taskId, signal) {
     let pollFailures = 0;
     while (!signal.aborted) {
@@ -913,14 +940,18 @@ async function waitForChatTaskTerminal(taskId, signal) {
                 cache: 'no-store',
                 signal,
             });
-            if (!response.ok) return;
+            if (!response.ok) {
+                throw new Error(`Could not read background chat task: HTTP ${response.status}`);
+            }
             const task = await response.json();
             pollFailures = 0;
             if (!['queued', 'running'].includes(task.status)) return;
         } catch (error) {
             if (signal.aborted) throw error;
             pollFailures += 1;
-            if (pollFailures >= CHAT_STREAM_MAX_RECONNECTS) return;
+            if (pollFailures >= CHAT_STREAM_MAX_RECONNECTS) {
+                throw new Error('Could not confirm that the background chat task finished.');
+            }
         }
         await waitForChatStreamReconnect(2, signal);
     }
@@ -1109,14 +1140,9 @@ async function reattachActiveChatTask(sessionId, vault) {
             addChatErrorMessage(error.message);
         }
     } finally {
-        if (state.activeChatTaskId === task.task_id) {
-            state.activeChatTaskId = null;
-            state.activeChatSessionId = null;
-            state.activeChatAbortController = null;
+        if (releaseActiveChatStream(abortController)) {
+            syncChatControlLocks();
         }
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        syncChatControlLocks();
     }
 }
 
@@ -1794,15 +1820,12 @@ async function streamDeferredReviewTask(started) {
         }
         return false;
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        chatElements.sendBtn.disabled = false;
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
+        if (releaseActiveChatStream(abortController)) {
+            chatElements.sendBtn.disabled = false;
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
+        }
     }
 }
 
@@ -1845,18 +1868,15 @@ async function retryLatestFailure(button = null) {
             addChatErrorMessage(error.message);
         }
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        if (button) {
-            button.disabled = false;
-            window.AssistantMDIcons.setIconButtonLabel(button, 'Retry interrupted turn');
+        if (releaseActiveChatStream(abortController)) {
+            if (button) {
+                button.disabled = false;
+                window.AssistantMDIcons.setIconButtonLabel(button, 'Retry interrupted turn');
+            }
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
         }
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
     }
 }
 
@@ -1975,15 +1995,12 @@ async function sendMessage(promptOverride = null) {
         }
         return false;
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        chatElements.sendBtn.disabled = false;
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
+        if (releaseActiveChatStream(abortController)) {
+            chatElements.sendBtn.disabled = false;
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
+        }
     }
 }
 

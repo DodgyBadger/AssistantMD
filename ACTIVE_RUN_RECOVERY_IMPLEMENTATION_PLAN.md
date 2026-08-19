@@ -11,6 +11,38 @@ Durable restart recovery and schema work are explicitly deferred. They must not
 begin until the Harness lifecycle gates in this plan are resolved and an
 observed operational need justifies the additional durable state.
 
+The post-implementation hardening pass is complete for the recovery and browser
+reconnection lifecycles. Replacement-task creation is now isolated from
+best-effort redirect publication so a notification failure cannot misclassify
+a live replacement as abandoned. Browser reattachment cleanup is owned by the
+active stream controller, which remains stable when a rollback restart changes
+the task ID. Tool recovery metadata now has one fail-closed encoder/decoder,
+and `code_execution` is classified as `unknown` because its effects are not
+limited to tracked vault mutations. Primary chat and delegate retries share one
+bounded budget/backoff policy while retaining their distinct replay-safety
+decisions. The browser uses one parsed-event transition and one owner-aware
+stream cleanup operation across send, retry, deferred review, and reattachment
+flows.
+
+The focused contract review also closes four failure-boundary gaps:
+
+- canonical assistant messages, failure-marker clearing, and deferred-review
+  creation commit in one chat-database transaction;
+- unresolved `unknown` or manual effects dominate mixed recovery decisions and
+  cannot be overridden by a simultaneous vault-transactional effect;
+- session active-task lookup prefers the task that is currently running, then
+  the oldest queued task, so reload and cancellation follow execution order;
+- recovery lifecycle logs carry stable status, task, session, vault, decision,
+  replacement, and failure fields, while degraded browser polling fails
+  explicitly when task completion cannot be confirmed.
+
+Dependency review found production recovery uses the public Harness
+`StepPersistence` and store methods only. A separate compatibility refresh
+should evaluate Pydantic AI 2.27.1 and Harness 0.18.1 (the newest stable
+releases older than one week at review time) against the existing parity probes
+before changing pins. Monty 0.0.21 is current. This refresh is deliberately not
+part of the recovery hardening diff.
+
 ## Objective
 
 Recover a long-running chat or delegate run from its latest settled Pydantic AI

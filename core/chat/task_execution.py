@@ -36,6 +36,7 @@ from core.chat.deferred_reviews import (
     capture_deferred_review_context,
     create_deferred_review,
     has_pending_deferred_review,
+    log_deferred_review_created,
     mark_deferred_review_terminal,
     summarize_deferred_review,
 )
@@ -44,6 +45,7 @@ from core.chat.task_events import ChatTaskEventBuffer, ChatTaskEventCursorExpire
 from core.identity import ExecutionAuthority
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
+from core.llm.stream_retry import ModelStreamRetryPolicy
 from core.runtime.buffers import get_session_buffer_store
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -57,11 +59,6 @@ from core.runtime.task_runner import (
     ExecutionGatePolicy,
     ExecutionTaskHooks,
     ExecutionTaskSpec,
-)
-from core.settings import (
-    get_model_stream_retries,
-    get_model_stream_retry_base_delay_seconds,
-    get_model_stream_retry_max_delay_seconds,
 )
 from core.tools.failures import classify_exception
 from core.tools.utils import estimate_token_count
@@ -169,7 +166,10 @@ async def _handle_failed_chat_task(
         "Chat rollback-restart recovery hook invoked",
         data={
             "event": "chat_failed_task_recovery_hook",
+            "status": "started",
             "task_id": task_id,
+            "session_id": session_id,
+            "vault_name": vault_name,
             "error_type": type(exc).__name__,
         },
     )
@@ -198,30 +198,18 @@ async def _handle_failed_chat_task(
             event_buffer=event_buffer,
             persist_user_request=False,
         )
-        await event_buffer.append(
-            task_id,
-            "chat_retry_redirect",
-            {
-                "event": "chat_retry_redirect",
-                "source_task_id": task_id,
-                "replacement_task_id": replacement.task.task_id,
-                "session_id": session_id,
-                "strategy": "terminal_rollback_restart",
-                "rollback_status": rollback.rollback_status or rollback.reason,
-                "attempt": exc.attempt,
-                "max_attempts": exc.max_attempts,
-                "reset_response": True,
-            },
-        )
     except Exception as rollback_exc:
         chat_executor.logger.error(
             "Primary chat rollback recovery abandoned",
             data={
                 "event": "chat_recovery_abandoned",
+                "status": "failed",
                 "task_id": task_id,
                 "session_id": session_id,
-                "reason": "rollback_unavailable",
+                "vault_name": vault_name,
+                "reason": "rollback_or_restart_unavailable",
                 "error_type": type(rollback_exc).__name__,
+                "error": str(rollback_exc),
             },
         )
         if not await event_buffer.is_terminal(task_id):
@@ -229,13 +217,56 @@ async def _handle_failed_chat_task(
                 task_id,
                 "error",
                 _error_event_data(
-                    "\n\nError: Automatic recovery could not safely roll back vault changes.",
+                    "\n\nError: Automatic recovery could not safely restart after "
+                    "rolling back vault changes.",
                     {
                         "strategy": "manual_required",
-                        "reason": "rollback_unavailable",
+                        "reason": "rollback_or_restart_unavailable",
                     },
                 ),
             )
+        return
+
+    redirect_data = {
+        "event": "chat_retry_redirect",
+        "source_task_id": task_id,
+        "replacement_task_id": replacement.task.task_id,
+        "session_id": session_id,
+        "strategy": "terminal_rollback_restart",
+        "rollback_status": rollback.rollback_status or rollback.reason,
+        "attempt": exc.attempt,
+        "max_attempts": exc.max_attempts,
+        "reset_response": True,
+    }
+    try:
+        await event_buffer.append(
+            task_id,
+            "chat_retry_redirect",
+            redirect_data,
+        )
+        chat_executor.logger.info(
+            "Primary chat redirected to rollback-restart replacement",
+            data={
+                **redirect_data,
+                "event": "chat_recovery_redirected",
+                "status": "completed",
+                "vault_name": vault_name,
+            },
+        )
+    except RuntimeError as redirect_exc:
+        chat_executor.logger.error(
+            "Primary chat replacement started but redirect publication failed",
+            data={
+                "event": "chat_recovery_redirect_failed",
+                "status": "failed",
+                "task_id": task_id,
+                "replacement_task_id": replacement.task.task_id,
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "error_type": type(redirect_exc).__name__,
+                "error": str(redirect_exc),
+            },
+        )
 
 
 async def start_chat_turn_retry_task(
@@ -840,12 +871,10 @@ async def _run_prepared_chat_stream_task(
         try:
             usage = RunUsage()
             usage_limits = chat_executor._chat_usage_limits()
-            max_attempts = 1 + get_model_stream_retries()
-            base_delay_seconds = get_model_stream_retry_base_delay_seconds()
-            max_delay_seconds = get_model_stream_retry_max_delay_seconds()
+            retry_policy = ModelStreamRetryPolicy.from_settings()
             attempt_prompt = prepared.user_prompt
             attempt_history = prepared.message_history
-            for attempt in range(1, max_attempts + 1):
+            for attempt in range(1, retry_policy.max_attempts + 1):
                 try:
                     final_result, full_response = await _collect_chat_stream_attempt(
                         prepared=prepared,
@@ -899,31 +928,32 @@ async def _run_prepared_chat_stream_task(
                     if (
                         classification.retryable
                         and rollback_restart
-                        and attempt < max_attempts
-                        and prepared.automatic_restart_count
-                        < get_model_stream_retries()
+                        and retry_policy.can_retry_after(attempt)
+                        and prepared.automatic_restart_count < retry_policy.retries
                     ):
                         raise ChatRollbackRestartRequired(
                             cause=exc,
                             attempt=attempt,
-                            max_attempts=max_attempts,
+                            max_attempts=retry_policy.max_attempts,
                         ) from exc
                     can_retry = (
                         classification.retryable
-                        and attempt < max_attempts
+                        and retry_policy.can_retry_after(attempt)
                         and (not prepared.tools or recovery_supported)
                     )
                     if not can_retry:
                         if prepared.tools and recovery_decision is not None:
                             rejection_reason = (
                                 "retry_budget_exhausted"
-                                if attempt >= max_attempts
+                                if not retry_policy.can_retry_after(attempt)
                                 else recovery_decision.reason
                             )
                             rejected_data = {
                                 "event": "chat_recovery_rejected",
+                                "status": "rejected",
                                 "task_id": task.task_id,
                                 "session_id": session_id,
+                                "vault_name": vault_name,
                                 "strategy": str(recovery_decision.strategy),
                                 "reason": rejection_reason,
                                 "completed_tool_count": (
@@ -943,10 +973,7 @@ async def _run_prepared_chat_stream_task(
                                 rejected_data,
                             )
                         raise
-                    delay_seconds = min(
-                        max_delay_seconds,
-                        base_delay_seconds * (2 ** (attempt - 1)),
-                    )
+                    delay_seconds = retry_policy.delay_after(attempt)
                     retry_data = {
                         "event": "chat_retry_scheduled",
                         "task_id": task.task_id,
@@ -954,7 +981,7 @@ async def _run_prepared_chat_stream_task(
                         "model": prepared.model,
                         "attempt": attempt,
                         "next_attempt": attempt + 1,
-                        "max_attempts": max_attempts,
+                        "max_attempts": retry_policy.max_attempts,
                         "delay_seconds": delay_seconds,
                         "failure_kind": classification.failure_kind,
                         "error_type": classification.error_type,
@@ -986,8 +1013,10 @@ async def _run_prepared_chat_stream_task(
                         )
                         checkpoint_data = {
                             "event": "chat_recovery_checkpoint_selected",
+                            "status": "selected",
                             "task_id": task.task_id,
                             "session_id": session_id,
+                            "vault_name": vault_name,
                             "run_id": checkpoint.run_id,
                             "step_index": checkpoint.step_index,
                             "message_count": len(checkpoint.messages),
@@ -1027,30 +1056,38 @@ async def _run_prepared_chat_stream_task(
                     session_id=session_id,
                     vault_name=vault_name,
                 ):
-                    _CHAT_STORE.add_messages(
-                        session_id,
-                        vault_name,
-                        chat_executor._messages_after_accepted_user_request(
-                            messages_for_canonical_commit or final_result.new_messages()
-                        ),
-                    )
-                    chat_executor._clear_latest_turn_failure(
-                        session_id=session_id,
-                        vault_name=vault_name,
-                    )
-                    if isinstance(deferred_requests, DeferredToolRequests):
-                        deferred_review = create_deferred_review(
-                            vault_name=vault_name,
-                            session_id=session_id,
-                            originating_task_id=task.task_id,
-                            requests=deferred_requests,
-                            resume_messages=list(final_result.all_messages()),
-                            resume_config=prepared.resume_config(),
-                            review_context=capture_deferred_review_context(
-                                vault_path=vault_path,
-                                requests=deferred_requests,
+                    with _CHAT_STORE.transaction() as connection:
+                        _CHAT_STORE.add_messages(
+                            session_id,
+                            vault_name,
+                            chat_executor._messages_after_accepted_user_request(
+                                messages_for_canonical_commit
+                                or final_result.new_messages()
                             ),
+                            connection=connection,
                         )
+                        chat_executor._clear_latest_turn_failure(
+                            session_id=session_id,
+                            vault_name=vault_name,
+                            connection=connection,
+                        )
+                        if isinstance(deferred_requests, DeferredToolRequests):
+                            deferred_review = create_deferred_review(
+                                vault_name=vault_name,
+                                session_id=session_id,
+                                originating_task_id=task.task_id,
+                                requests=deferred_requests,
+                                resume_messages=list(final_result.all_messages()),
+                                resume_config=prepared.resume_config(),
+                                review_context=capture_deferred_review_context(
+                                    vault_path=vault_path,
+                                    requests=deferred_requests,
+                                ),
+                                connection=connection,
+                                log_created=False,
+                            )
+                if deferred_review is not None:
+                    log_deferred_review_created(deferred_review)
                 chat_executor._log_chat_lifecycle(
                     (
                         "Streaming chat execution paused for inline review"
@@ -1176,8 +1213,10 @@ async def _run_prepared_chat_stream_task(
                 "Primary chat awaiting task rollback",
                 data={
                     "event": "chat_recovery_awaiting_rollback",
+                    "status": "waiting",
                     "task_id": task.task_id,
                     "session_id": session_id,
+                    "vault_name": vault_name,
                     "failure_kind": classification.failure_kind,
                 },
             )

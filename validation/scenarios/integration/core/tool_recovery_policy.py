@@ -32,7 +32,13 @@ from core.chat.run_recovery import (
     ChatRecoveryStrategy,
     ChatRunRecoveryCoordinator,
 )
-from core.tools.base import BaseTool, ToolRecoveryPolicy
+from core.tools.base import (
+    BaseTool,
+    ToolRecoveryPolicy,
+    recovery_policy_from_tool_metadata,
+    tool_recovery_metadata,
+)
+from core.tools.code_execution import CodeExecution
 from validation.core.base_scenario import BaseScenario
 
 
@@ -64,6 +70,22 @@ class ToolRecoveryPolicyScenario(BaseScenario):
             )
             assert coordinator.tool_policy("unregistered") is ToolRecoveryPolicy.UNKNOWN
             assert BaseTool.get_recovery_policy() is ToolRecoveryPolicy.UNKNOWN
+            assert CodeExecution.get_recovery_policy() is ToolRecoveryPolicy.UNKNOWN
+            assert tool_recovery_metadata(ToolRecoveryPolicy.REPLAY_SAFE) == {
+                "recovery_policy": "replay_safe"
+            }
+            assert (
+                recovery_policy_from_tool_metadata(
+                    {"assistantmd": {"recovery_policy": "replay_safe"}}
+                )
+                is ToolRecoveryPolicy.REPLAY_SAFE
+            )
+            assert (
+                recovery_policy_from_tool_metadata(
+                    {"assistantmd": {"recovery_policy": "invalid"}}
+                )
+                is ToolRecoveryPolicy.UNKNOWN
+            )
             await _assert_snapshot_retention_is_bounded()
 
             assert "Read, list, search, and inspect frontmatter" in (
@@ -91,6 +113,13 @@ class ToolRecoveryPolicyScenario(BaseScenario):
             assert manual.strategy is ChatRecoveryStrategy.MANUAL_REQUIRED
             unknown = await _unresolved_decision(ToolRecoveryPolicy.UNKNOWN)
             assert unknown.strategy is ChatRecoveryStrategy.MANUAL_REQUIRED
+            mixed = await _unresolved_decision(
+                ToolRecoveryPolicy.VAULT_TRANSACTIONAL,
+                additional_policy=ToolRecoveryPolicy.UNKNOWN,
+            )
+            assert mixed.strategy is ChatRecoveryStrategy.MANUAL_REQUIRED
+            assert mixed.reason == "unresolved_external_or_unknown_effect"
+            assert mixed.unresolved_tool_count == 2
         finally:
             await self.stop_system()
             self.teardown_scenario()
@@ -98,9 +127,11 @@ class ToolRecoveryPolicyScenario(BaseScenario):
 
 async def _unresolved_decision(
     policy: ToolRecoveryPolicy,
+    *,
+    additional_policy: ToolRecoveryPolicy | None = None,
 ) -> ChatRecoveryDecision:
     """Build one interrupted Harness frontier and return its policy decision."""
-    conversation_id = f"policy-{policy.value}"
+    conversation_id = f"policy-{policy.value}-{additional_policy or 'single'}"
     run_id = f"run-{policy.value}"
     tool_name = "probe"
     coordinator = ChatRunRecoveryCoordinator(tool_policies={tool_name: policy})
@@ -153,6 +184,26 @@ async def _unresolved_decision(
             status="started",
         )
     )
+    if additional_policy is not None:
+        coordinator.tool_policies["second_probe"] = additional_policy
+        await coordinator.store.append_event(
+            StepEvent(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                kind="tool_call_started",
+                step_index=1,
+                tool_call_id="probe-2",
+                tool_name="second_probe",
+            )
+        )
+        await coordinator.store.record_tool_effect(
+            ToolEffectRecord(
+                run_id=run_id,
+                tool_call_id="probe-2",
+                tool_name="second_probe",
+                status="started",
+            )
+        )
     await coordinator.store.append_event(
         StepEvent(
             run_id=run_id,

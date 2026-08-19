@@ -26,7 +26,7 @@ from pydantic_ai.messages import (
 
 from core.chat import executor as chat_executor
 from core.chat.chat_store import ChatStore
-from core.chat.deferred_reviews import get_deferred_review
+from core.chat.deferred_reviews import create_deferred_review, get_deferred_review
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
@@ -147,6 +147,7 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
             vault.name,
             owner_principal_id="local-user",
         )
+        await _assert_deferred_review_commit_is_atomic(vault.name)
 
         original_prepare = chat_executor._prepare_chat_execution
         original_prepare_resume = (
@@ -571,3 +572,60 @@ class DeferredReviewTaskSkeletonScenario(BaseScenario):
                 return task
             await asyncio.sleep(0.02)
         return None
+
+
+async def _assert_deferred_review_commit_is_atomic(vault_name: str) -> None:
+    """Prove messages, marker clearing, and review creation roll back together."""
+    store = ChatStore()
+    session_id = "deferred-atomicity-session"
+    store.ensure_session(session_id, vault_name, owner_principal_id="local-user")
+    store.update_session_metadata(
+        session_id=session_id,
+        vault_name=vault_name,
+        metadata_update={"latest_turn_failure": {"status": "failed"}},
+    )
+    result = _DeferredReviewResult("atomic review")
+    review = None
+    try:
+        with store.transaction() as connection:
+            store.add_messages(
+                session_id,
+                vault_name,
+                result.new_messages(),
+                connection=connection,
+            )
+            store.update_session_metadata(
+                session_id=session_id,
+                vault_name=vault_name,
+                remove_keys=("latest_turn_failure",),
+                connection=connection,
+            )
+            review = create_deferred_review(
+                vault_name=vault_name,
+                session_id=session_id,
+                originating_task_id="atomicity-probe",
+                requests=result.output,
+                resume_messages=result.all_messages(),
+                resume_config={},
+                connection=connection,
+                log_created=False,
+            )
+            raise RuntimeError("force atomic rollback")
+    except RuntimeError as exc:
+        assert str(exc) == "force atomic rollback"
+    else:
+        raise AssertionError("Atomicity probe should force a rollback")
+
+    assert review is not None
+    assert store.get_history(session_id, vault_name) is None
+    assert store.get_session_metadata(session_id, vault_name).get(
+        "latest_turn_failure"
+    ) == {"status": "failed"}
+    assert (
+        get_deferred_review(
+            vault_name=vault_name,
+            session_id=session_id,
+            artifact_ref=review.artifact_ref,
+        )
+        is None
+    )

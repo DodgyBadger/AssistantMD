@@ -6,6 +6,7 @@ Persists canonical chat history in the structured chat store.
 """
 
 import json
+import sqlite3
 import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -324,9 +325,18 @@ def _record_latest_turn_failure(
     )
 
 
-def _clear_latest_turn_failure(*, session_id: str, vault_name: str) -> None:
+def _clear_latest_turn_failure(
+    *,
+    session_id: str,
+    vault_name: str,
+    connection: sqlite3.Connection | None = None,
+) -> None:
     """Clear any internal failure marker after a successful assistant outcome."""
-    metadata = _CHAT_STORE.get_session_metadata(session_id, vault_name)
+    metadata = _CHAT_STORE.get_session_metadata(
+        session_id,
+        vault_name,
+        connection=connection,
+    )
     if _LATEST_TURN_FAILURE_METADATA_KEY not in metadata:
         return
     _CHAT_STORE.update_session_metadata(
@@ -334,6 +344,7 @@ def _clear_latest_turn_failure(*, session_id: str, vault_name: str) -> None:
         vault_name=vault_name,
         remove_keys=(_LATEST_TURN_FAILURE_METADATA_KEY,),
         advance_history_revision=True,
+        connection=connection,
     )
 
 

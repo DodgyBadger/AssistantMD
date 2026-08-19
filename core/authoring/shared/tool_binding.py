@@ -18,7 +18,7 @@ from core.settings.store import (
     get_enabled_tool_names,
     get_enabled_tools_config,
 )
-from core.tools.base import BaseTool, ToolRecoveryPolicy
+from core.tools.base import BaseTool, ToolRecoveryPolicy, tool_recovery_metadata
 from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
@@ -451,7 +451,7 @@ def _wrap_tool_function(
             **dict(getattr(tool, "metadata", None) or {}),
             "assistantmd": {
                 **dict((getattr(tool, "metadata", None) or {}).get("assistantmd", {})),
-                "recovery_policy": recovery_policy.value,
+                **tool_recovery_metadata(recovery_policy),
             },
         },
     )

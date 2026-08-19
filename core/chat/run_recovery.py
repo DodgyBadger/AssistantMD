@@ -13,7 +13,7 @@ from pydantic_ai_harness.step_persistence import (
     is_provider_valid,
 )
 
-from core.tools.base import ToolRecoveryPolicy
+from core.tools.base import ToolRecoveryPolicy, recovery_policy_from_tool_metadata
 
 CHAT_RECOVERY_MAX_SNAPSHOTS_PER_RUN = 8
 
@@ -66,24 +66,11 @@ class ChatRunRecoveryCoordinator:
         policies: dict[str, ToolRecoveryPolicy] = {}
         for tool in tools:
             name = str(getattr(tool, "name", "") or "").strip()
-            metadata = getattr(tool, "metadata", None)
-            assistantmd = (
-                metadata.get("assistantmd") if isinstance(metadata, dict) else None
-            )
-            raw_policy = (
-                assistantmd.get("recovery_policy")
-                if isinstance(assistantmd, dict)
-                else None
-            )
             if not name:
                 continue
-            if not isinstance(raw_policy, str):
-                policies[name] = ToolRecoveryPolicy.UNKNOWN
-                continue
-            try:
-                policies[name] = ToolRecoveryPolicy(raw_policy)
-            except ValueError:
-                policies[name] = ToolRecoveryPolicy.UNKNOWN
+            policies[name] = recovery_policy_from_tool_metadata(
+                getattr(tool, "metadata", None)
+            )
         return cls(tool_policies=policies)
 
     def tool_policy(self, tool_name: str) -> ToolRecoveryPolicy:
@@ -133,6 +120,16 @@ class ChatRunRecoveryCoordinator:
         unresolved = await self.store.list_unresolved_tool_effects(run_id=run.run_id)
         if unresolved:
             policies = {self.tool_policy(effect.tool_name) for effect in unresolved}
+            if policies & {
+                ToolRecoveryPolicy.UNKNOWN,
+                ToolRecoveryPolicy.MANUAL_REQUIRED,
+            }:
+                return ChatRecoveryDecision(
+                    strategy=ChatRecoveryStrategy.MANUAL_REQUIRED,
+                    reason="unresolved_external_or_unknown_effect",
+                    completed_tool_count=completed_tool_count,
+                    unresolved_tool_count=len(unresolved),
+                )
             if policies == {ToolRecoveryPolicy.REPLAY_SAFE}:
                 snapshot = await self.store.latest_snapshot(
                     run_id=run.run_id,
@@ -167,7 +164,7 @@ class ChatRunRecoveryCoordinator:
                 )
             return ChatRecoveryDecision(
                 strategy=ChatRecoveryStrategy.MANUAL_REQUIRED,
-                reason="unresolved_external_or_unknown_effect",
+                reason="unresolved_effect_policy_invalid",
                 completed_tool_count=completed_tool_count,
                 unresolved_tool_count=len(unresolved),
             )

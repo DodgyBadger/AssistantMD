@@ -33,6 +33,7 @@ from core.llm.agents import collect_response, create_agent
 from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
+from core.llm.stream_retry import ModelStreamRetryPolicy
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
 from core.settings import (
@@ -40,9 +41,6 @@ from core.settings import (
     get_delegate_model_requests_limit,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
-    get_model_stream_retries,
-    get_model_stream_retry_base_delay_seconds,
-    get_model_stream_retry_max_delay_seconds,
 )
 from core.tools.base import BaseTool
 from core.tools.failures import FailureClassification, classify_exception
@@ -308,10 +306,8 @@ async def _collect_delegate_response(
 ) -> Any:
     """Collect a child run, retrying only when replay cannot duplicate tools."""
     usage = RunUsage()
-    max_attempts = 1 + get_model_stream_retries()
-    base_delay_seconds = get_model_stream_retry_base_delay_seconds()
-    max_delay_seconds = get_model_stream_retry_max_delay_seconds()
-    for attempt in range(1, max_attempts + 1):
+    retry_policy = ModelStreamRetryPolicy.from_settings()
+    for attempt in range(1, retry_policy.max_attempts + 1):
         try:
             return await collect_response(
                 agent,
@@ -322,14 +318,13 @@ async def _collect_delegate_response(
         except Exception as exc:
             classification = classify_exception(exc, phase="delegate_child_run")
             can_retry = (
-                allow_retry and classification.retryable and attempt < max_attempts
+                allow_retry
+                and classification.retryable
+                and retry_policy.can_retry_after(attempt)
             )
             if not can_retry:
                 raise
-            delay_seconds = min(
-                max_delay_seconds,
-                base_delay_seconds * (2 ** (attempt - 1)),
-            )
+            delay_seconds = retry_policy.delay_after(attempt)
             logger.add_sink("validation").warning(
                 "delegate_retry_scheduled",
                 data={
@@ -338,7 +333,7 @@ async def _collect_delegate_response(
                     "model": model,
                     "attempt": attempt,
                     "next_attempt": attempt + 1,
-                    "max_attempts": max_attempts,
+                    "max_attempts": retry_policy.max_attempts,
                     "delay_seconds": delay_seconds,
                     "failure_kind": classification.failure_kind,
                     "error_type": classification.error_type,

@@ -86,7 +86,7 @@ async def cancel_execution_task(task_id: str) -> ExecutionTaskCancelResponse:
 
 
 async def get_active_chat_task(session_id: str) -> ExecutionTaskInfo:
-    """Return the active task for a chat session."""
+    """Return the running task, or the oldest queued task, for a chat session."""
     runtime = get_runtime_context()
     snapshots = await runtime.execution_task_access.list_tasks(
         scope=chat_session_scope(session_id),
@@ -99,7 +99,9 @@ async def get_active_chat_task(session_id: str) -> ExecutionTaskInfo:
             message=f"No active execution task for chat session: {session_id}",
             details={"session_id": session_id},
         )
-    return _execution_task_info(snapshots[-1])
+    running = [snapshot for snapshot in snapshots if snapshot.status == "running"]
+    selected = running[-1] if running else snapshots[0]
+    return _execution_task_info(selected)
 
 
 async def cancel_chat_session_task(session_id: str) -> ExecutionTaskCancelResponse:

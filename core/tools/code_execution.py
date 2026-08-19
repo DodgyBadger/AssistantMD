@@ -148,4 +148,4 @@ class CodeExecution(BaseTool):
 
     @classmethod
     def get_recovery_policy(cls) -> ToolRecoveryPolicy:
-        return ToolRecoveryPolicy.VAULT_TRANSACTIONAL
+        return ToolRecoveryPolicy.UNKNOWN

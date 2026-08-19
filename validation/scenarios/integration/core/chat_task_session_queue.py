@@ -11,10 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from pydantic_ai import AgentRunResultEvent, PartStartEvent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
+from api.services.execution_tasks import get_active_chat_task
 from core.chat import executor as chat_executor
 from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
 from core.chat.task_execution import start_queued_chat_stream_task, stream_chat_task_sse
+from core.identity import LOCAL_USER_AUTHORITY, use_execution_authority
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
 from validation.core.streaming import stream_events_context
@@ -186,6 +188,13 @@ class ChatTaskSessionQueueScenario(BaseScenario):
             self.soft_assert(
                 "second prompt" not in prepare_history_counts,
                 "Queued chat task should not prepare before earlier task completes",
+            )
+            with use_execution_authority(LOCAL_USER_AUTHORITY):
+                active = await get_active_chat_task("queued-chat-session")
+            self.soft_assert_equal(
+                active.task_id,
+                first.task.task_id,
+                "Session active-task lookup should prefer the running task over queued work",
             )
 
             release_first.set()

@@ -75,6 +75,8 @@ def create_deferred_review(
     resume_messages: list[ModelMessage],
     resume_config: dict[str, Any],
     review_context: dict[str, Any] | None = None,
+    connection: sqlite3.Connection | None = None,
+    log_created: bool = True,
 ) -> StoredDeferredReview:
     """Persist one pending deferred review request and return it."""
     artifact_ref = f"deferred-review-{uuid.uuid4().hex}"
@@ -87,8 +89,10 @@ def create_deferred_review(
         review_context or {}, ensure_ascii=False, sort_keys=True
     )
 
-    ensure_chat_sessions_schema()
-    conn = connect_sqlite_from_system_db(DB_NAME)
+    if connection is None:
+        ensure_chat_sessions_schema()
+    conn = connection or connect_sqlite_from_system_db(DB_NAME)
+    owns_connection = connection is None
     conn.row_factory = _dict_row_factory
     try:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -137,24 +141,32 @@ def create_deferred_review(
             """,
             (artifact_ref,),
         ).fetchone()
-        conn.commit()
+        if owns_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
     review = _review_from_row(row)
+    if log_created:
+        log_deferred_review_created(review)
+    return review
+
+
+def log_deferred_review_created(review: StoredDeferredReview) -> None:
+    """Log deferred-review creation only after its owning transaction commits."""
     logger.info(
         "chat_deferred_review_created",
         data={
             "event": "chat_deferred_review_created",
             "artifact_ref": review.artifact_ref,
-            "vault_name": vault_name,
-            "session_id": session_id,
-            "originating_task_id": originating_task_id,
+            "vault_name": review.vault_name,
+            "session_id": review.session_id,
+            "originating_task_id": review.originating_task_id,
             "review_count": review.review_count,
             "tool_names": _tool_names(review.requests),
         },
     )
-    return review
 
 
 def get_deferred_review(
