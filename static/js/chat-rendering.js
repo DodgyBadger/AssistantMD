@@ -5,6 +5,7 @@
         let mathTypesetQueue = Promise.resolve();
         let currentEmptyStateMessage = CHAT_EMPTY_STATE_MESSAGE;
         let workspaceEditorOpen = false;
+        let activeToolDetailEntry = null;
 
         function isChatPlaceholderNode(node) {
             if (!node || !(node instanceof HTMLElement)) return false;
@@ -427,8 +428,6 @@
                     });
                 }
 
-                entry.container.classList.remove('tool-status-running');
-                entry.container.classList.add('tool-status-complete');
                 entry.events.push(event);
 
                 if (event.args) {
@@ -450,9 +449,16 @@
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
                     entry.detailResult = entry.result;
                     entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
+                    setToolEntryState(entry, 'completed');
                 }
 
                 updateToolDetail(entry);
+            });
+
+            context.toolStatusMap.forEach((entry) => {
+                if (entry.state === 'running') {
+                    setToolEntryState(entry, 'interrupted');
+                }
             });
 
             updateToolCallsSummary(context);
@@ -838,6 +844,7 @@
                 errorMessages: [],
                 toolSummary: null,
                 postProcessTimer: null,
+                toolElapsedTimer: null,
                 archivedToolEvents: false
             };
         }
@@ -883,7 +890,17 @@
 
             const total = context.toolStatusMap.size;
             const label = context.archivedToolEvents ? 'Archived tool calls' : 'Tool calls';
-            context.toolCallsSummaryTitle.textContent = `${label} (${total})`;
+            const counts = { running: 0, completed: 0, interrupted: 0 };
+            context.toolStatusMap.forEach((entry) => {
+                if (Object.hasOwn(counts, entry.state)) {
+                    counts[entry.state] += 1;
+                }
+            });
+            const details = [];
+            if (counts.running) details.push(`${counts.running} running`);
+            if (counts.completed) details.push(`${counts.completed} complete`);
+            if (counts.interrupted) details.push(`${counts.interrupted} interrupted`);
+            context.toolCallsSummaryTitle.textContent = `${label} (${total})${details.length ? ` · ${details.join(' · ')}` : ''}`;
         }
 
         function appendAssistantDelta(context, delta) {
@@ -1059,6 +1076,77 @@
             context.indicator.innerHTML = '';
         }
 
+        function formatToolElapsed(entry) {
+            const end = entry.finishedAt || Date.now();
+            const elapsedSeconds = Math.max(0, Math.floor((end - entry.startedAt) / 1000));
+            if (elapsedSeconds < 60) return `${elapsedSeconds}s`;
+            const minutes = Math.floor(elapsedSeconds / 60);
+            return `${minutes}m ${elapsedSeconds % 60}s`;
+        }
+
+        function setToolEntryState(entry, nextState) {
+            if (!entry) return;
+            entry.state = nextState;
+            if (nextState === 'running') {
+                entry.finishedAt = null;
+            } else if (!entry.finishedAt) {
+                entry.finishedAt = Date.now();
+            }
+            entry.container.classList.remove(
+                'tool-status-running',
+                'tool-status-complete',
+                'tool-status-interrupted'
+            );
+            const className = nextState === 'completed' ? 'tool-status-complete' : `tool-status-${nextState}`;
+            entry.container.classList.add(className);
+            const labels = {
+                running: 'Running',
+                completed: 'Complete',
+                interrupted: 'Interrupted'
+            };
+            const symbols = { running: '', completed: '✓', interrupted: '!' };
+            entry.stateIcon.textContent = symbols[nextState] || '';
+            entry.stateLabel.textContent = labels[nextState] || nextState;
+            updateToolElapsed(entry);
+            if (activeToolDetailEntry === entry) {
+                refreshToolCallDetails(entry);
+            }
+        }
+
+        function updateToolElapsed(entry) {
+            if (!entry) return;
+            entry.elapsed.textContent = formatToolElapsed(entry);
+            entry.container.setAttribute(
+                'aria-label',
+                `${entry.toolName}: ${entry.stateLabel.textContent}, ${entry.elapsed.textContent}`
+            );
+            if (activeToolDetailEntry === entry) {
+                const elapsedBlock = document.querySelector(
+                    '#chat-tool-call-modal [data-tool-call-elapsed] .tool-status-block'
+                );
+                if (elapsedBlock) elapsedBlock.textContent = formatToolElapsed(entry);
+            }
+        }
+
+        function startToolElapsedTimer(context) {
+            if (context.toolElapsedTimer) return;
+            context.toolElapsedTimer = window.setInterval(() => {
+                let hasRunning = false;
+                context.toolStatusMap.forEach((entry) => {
+                    if (entry.state !== 'running') return;
+                    hasRunning = true;
+                    updateToolElapsed(entry);
+                });
+                if (!hasRunning) stopToolElapsedTimer(context);
+            }, 1000);
+        }
+
+        function stopToolElapsedTimer(context) {
+            if (!context.toolElapsedTimer) return;
+            window.clearInterval(context.toolElapsedTimer);
+            context.toolElapsedTimer = null;
+        }
+
         function handleToolEvent(context, payload) {
             const toolId = payload.tool_call_id || `tool-${context.toolStatusMap.size + 1}`;
             if (!toolId) return;
@@ -1074,8 +1162,6 @@
             }
 
             if (payload.event === 'tool_call_finished') {
-                entry.container.classList.remove('tool-status-running');
-                entry.container.classList.add('tool-status-complete');
                 if (payload.result !== undefined && payload.result !== null) {
                     entry.result = payload.result;
                     entry.detailResult = payload.result_detail !== undefined && payload.result_detail !== null
@@ -1084,11 +1170,13 @@
                 }
                 entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
                 entry.events.push(payload);
+                setToolEntryState(entry, 'completed');
                 updateToolDetail(entry);
 
                 const hasRunning = Array.from(context.toolStatusMap.values())
-                    .some(item => item.container.classList.contains('tool-status-running'));
+                    .some(item => item.state === 'running');
                 if (!hasRunning) {
+                    stopToolElapsedTimer(context);
                     setAssistantStatus(context, 'Continuing response', 'thinking');
                 }
             } else if (payload.event === 'tool_call_started') {
@@ -1099,7 +1187,9 @@
                         : payload.arguments;
                 }
                 entry.events.push(payload);
+                setToolEntryState(entry, 'running');
                 updateToolDetail(entry);
+                startToolElapsedTimer(context);
             }
             updateToolCallsSummary(context);
         }
@@ -1115,7 +1205,24 @@
             const line = document.createElement('span');
             line.className = 'tool-status-line';
 
+            const stateIcon = document.createElement('span');
+            stateIcon.className = 'tool-status-state-icon';
+            stateIcon.setAttribute('aria-hidden', 'true');
+
+            const stateMeta = document.createElement('span');
+            stateMeta.className = 'tool-status-state-meta';
+
+            const stateLabel = document.createElement('span');
+            stateLabel.className = 'tool-status-state-label';
+
+            const elapsed = document.createElement('span');
+            elapsed.className = 'tool-status-elapsed';
+
+            stateMeta.appendChild(stateLabel);
+            stateMeta.appendChild(elapsed);
+            summary.appendChild(stateIcon);
             summary.appendChild(line);
+            summary.appendChild(stateMeta);
 
             container.appendChild(summary);
             container.addEventListener('click', () => {
@@ -1132,6 +1239,9 @@
                 artifactContainer,
                 summary,
                 line,
+                stateIcon,
+                stateLabel,
+                elapsed,
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
                 args: payload.arguments || null,
@@ -1142,8 +1252,12 @@
                 detailResult: null,
                 artifactRef: payload.artifact_ref || '',
                 archived: Boolean(context.archivedToolEvents),
+                state: 'running',
+                startedAt: Date.now(),
+                finishedAt: null,
                 events: []
             };
+            setToolEntryState(entry, 'running');
             updateToolDetail(entry);
             context.toolStatusMap.set(toolId, entry);
 
@@ -1151,6 +1265,13 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
+            stopToolElapsedTimer(context);
+            context.toolStatusMap.forEach((entry) => {
+                if (entry.state === 'running') {
+                    setToolEntryState(entry, 'interrupted');
+                }
+            });
+            updateToolCallsSummary(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1394,31 +1515,7 @@
         function openToolCallDetails(entry) {
             if (!entry) return;
             closeToolCallDetails();
-
-            const sections = [];
-            sections.push({ label: 'Tool', value: entry.toolName || 'Tool call' });
-            sections.push({ label: 'Tool call ID', value: entry.toolId || '' });
-            sections.push({
-                label: 'Context',
-                value: entry.archived
-                    ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
-                    : 'Retained in active chat context.'
-            });
-            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
-                ? entry.detailArgs
-                : entry.args;
-            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
-                ? entry.detailResult
-                : entry.result;
-            if (!isEmptyToolValue(argsForDetail)) {
-                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
-            }
-            if (!isEmptyToolValue(resultForDetail)) {
-                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
-            }
-            if (entry.events.length > 0) {
-                sections.push({ label: 'Events', value: entry.events });
-            }
+            activeToolDetailEntry = entry;
 
             const overlay = document.createElement('div');
             overlay.id = 'chat-tool-call-modal';
@@ -1440,12 +1537,6 @@
                     <div class="p-4" data-tool-call-modal-body></div>
                 </section>
             `;
-            const body = overlay.querySelector('[data-tool-call-modal-body]');
-            if (body) {
-                sections.forEach(({ label, value, kind }) => {
-                    body.appendChild(createToolDetailSection(label, value, { kind }));
-                });
-            }
             overlay.addEventListener('click', (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
@@ -1455,6 +1546,48 @@
             });
             document.addEventListener('keydown', handleToolCallModalKeydown);
             document.body.appendChild(overlay);
+            refreshToolCallDetails(entry);
+        }
+
+        function refreshToolCallDetails(entry) {
+            if (!entry || activeToolDetailEntry !== entry) return;
+            const body = document.querySelector('#chat-tool-call-modal [data-tool-call-modal-body]');
+            if (!body) return;
+
+            const sections = [
+                { label: 'Tool', value: entry.toolName || 'Tool call' },
+                { label: 'Tool call ID', value: entry.toolId || '' },
+                { label: 'Status', value: entry.stateLabel.textContent },
+                { label: 'Elapsed', value: formatToolElapsed(entry), elapsed: true },
+                {
+                    label: 'Context',
+                    value: entry.archived
+                        ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
+                        : 'Retained in active chat context.'
+                }
+            ];
+            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
+                ? entry.detailArgs
+                : entry.args;
+            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
+                ? entry.detailResult
+                : entry.result;
+            if (!isEmptyToolValue(argsForDetail)) {
+                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
+            }
+            if (!isEmptyToolValue(resultForDetail)) {
+                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
+            }
+            if (entry.events.length > 0) {
+                sections.push({ label: 'Events', value: entry.events });
+            }
+
+            body.replaceChildren();
+            sections.forEach(({ label, value, kind, elapsed }) => {
+                const section = createToolDetailSection(label, value, { kind });
+                if (elapsed) section.dataset.toolCallElapsed = 'true';
+                body.appendChild(section);
+            });
         }
 
         function closeToolCallDetails() {
@@ -1462,6 +1595,7 @@
             if (modal) {
                 modal.remove();
             }
+            activeToolDetailEntry = null;
             document.removeEventListener('keydown', handleToolCallModalKeydown);
         }
 

@@ -43,6 +43,100 @@ releases older than one week at review time) against the existing parity probes
 before changing pins. Monty 0.0.21 is current. This refresh is deliberately not
 part of the recovery hardening diff.
 
+## Tool Progress Visibility Investigation
+
+### Current observable contract
+
+- Primary chat receives `FunctionToolCallEvent` before each tool executes and
+  `FunctionToolResultEvent` when that tool finishes. Parallel tools therefore
+  already have independently correlated start/finish boundaries through
+  `tool_call_id`.
+- AssistantMD publishes those boundaries as buffered `tool_call_started` and
+  `tool_call_finished` task events. The browser keeps one entry per call and
+  exposes its state with an icon, elapsed time, and aggregate per-state counts.
+- The tool modal can open while a call is running and show its current status,
+  elapsed time, arguments, and start event. Existing finish events refresh an
+  open modal with the final result.
+- Pydantic AI does not provide a generic incremental function-tool result
+  stream between those two events. A Python tool returns one final value.
+- `delegate` internally consumes the child agent stream and returns only the
+  completed output plus audit metadata. Child model/tool lifecycle events are
+  not forwarded to the parent chat task.
+- `code_execution` captures Monty `print()` callbacks, but returns the captured
+  lines only with the final result. They are not currently routed to the chat
+  event buffer while execution is active.
+
+### Recommended delivery stages
+
+#### Stage 1: explicit per-call state from existing events (implemented)
+
+Every tool row now has an animated spinner while running, a check mark when
+completed, and a warning state when the enclosing chat ends without a matching
+result. The tool-list summary shows per-state counts, active calls show elapsed
+time, and an open modal updates its status, elapsed time, events, and final
+result as existing events arrive. Persisted unmatched starts are also shown as
+interrupted rather than completed.
+
+This stage requires no new backend payload, persistence, settings, or provider
+contract.
+
+#### Stage 2: bounded structured progress events
+
+Introduce an opt-in `tool_call_progress` task event correlated by
+`tool_call_id`. Its stable payload should contain only:
+
+- `tool_call_id` and `tool_name`;
+- a bounded phase/status label;
+- optional numeric completed/total units;
+- an optional short, sanitized message;
+- a per-call progress sequence and timestamp.
+
+Progress is transient UI/task state, not canonical model history or a partial
+tool return. The event buffer should coalesce or rate-limit updates so verbose
+tools cannot evict answer/tool-boundary events. Reload after buffer expiry may
+show only `running` until the next progress or finish event.
+
+Initial producers should be `delegate` and `code_execution` only. Delegate can
+translate selected child run/model/tool boundaries into parent-safe summaries;
+it must not expose child prompts, reasoning, raw arguments, or raw results.
+Code execution can translate explicit lifecycle phases and optionally bounded
+print previews; arbitrary print output must be treated as potentially
+sensitive and untrusted.
+
+#### Stage 3: optional live detail panes for supported tools
+
+For tools with a deliberate streaming contract, the open modal may append a
+bounded transient progress log. This is not a generic tool-result stream and
+must not change the final `FunctionToolResultEvent`, caching, canonical history,
+or recovery semantics. Keep a fixed byte/line ceiling, label truncation, and
+render content as text rather than HTML.
+
+### Options and tradeoffs
+
+1. **State icons only:** smallest and safest; immediately answers which parallel
+   calls are still running, but gives no internal progress for one long call.
+2. **State icons plus elapsed time/counts (recommended first slice):** materially
+   better visibility using current events, with only frontend timer lifecycle
+   complexity.
+3. **Structured delegate/code progress:** best operational visibility without
+   leaking raw output, but requires a new event contract and explicit
+   cancellation/reconnect/rate-limit behavior.
+4. **Raw live output streaming:** not recommended as a general contract. It is
+   unavailable for ordinary tools, risks sensitive/noisy output, complicates
+   replay and retention, and can imply that provisional output is canonical.
+
+### Validation target and next phase
+
+Extend `chat_stream_auto_retry` or add a focused parallel-tool scenario that
+asserts independently ordered start/finish events and unmatched-call terminal
+handling. Add a small frontend harness/smoke test for running, completed,
+failed/interrupted, modal-open-during-update, and timer cleanup states. For
+Stage 2, assert bounded/coalesced `tool_call_progress` payloads and verify they
+never enter canonical chat history or persisted tool results.
+
+Exercise Stage 1 in the production workload before deciding whether the added
+complexity and data-exposure surface of Stage 2 is warranted.
+
 ## Objective
 
 Recover a long-running chat or delegate run from its latest settled Pydantic AI
