@@ -42,6 +42,12 @@ The main tables are:
   system-maintained replacement history and the raw-message sequence boundary
   covered by that checkpoint
 
+The session API exposes tool-call detail through a session- and vault-owned
+read boundary keyed by `tool_call_id`. The chat stream remains preview-sized;
+the UI loads persisted full arguments and normal-sized results only when a user
+opens the tool modal. Oversized results remain represented by their cache or
+artifact reference.
+
 Provider reasoning/thinking parts are transient by default. Chat persistence
 removes `ThinkingPart` entries from assistant responses before writing durable
 history so replay remains portable across providers and avoids recurring

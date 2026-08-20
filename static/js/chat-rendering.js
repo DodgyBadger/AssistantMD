@@ -1172,6 +1172,9 @@
                 entry.events.push(payload);
                 setToolEntryState(entry, 'completed');
                 updateToolDetail(entry);
+                if (activeToolDetailEntry === entry) {
+                    void loadToolCallDetail(entry, { force: true });
+                }
 
                 const hasRunning = Array.from(context.toolStatusMap.values())
                     .some(item => item.state === 'running');
@@ -1255,6 +1258,10 @@
                 state: 'running',
                 startedAt: Date.now(),
                 finishedAt: null,
+                detailLoaded: Boolean(context.archivedToolEvents),
+                detailLoading: false,
+                detailError: '',
+                detailRequestId: 0,
                 events: []
             };
             setToolEntryState(entry, 'running');
@@ -1547,6 +1554,53 @@
             document.addEventListener('keydown', handleToolCallModalKeydown);
             document.body.appendChild(overlay);
             refreshToolCallDetails(entry);
+            void loadToolCallDetail(entry);
+        }
+
+        async function loadToolCallDetail(entry, options = {}) {
+            const vault = elements.vaultSelector?.value || '';
+            const sessionId = state.sessionId || '';
+            if (!entry || !vault || !sessionId || (entry.detailLoaded && !options.force)) return;
+
+            const requestId = entry.detailRequestId + 1;
+            entry.detailRequestId = requestId;
+            entry.detailLoading = true;
+            entry.detailError = '';
+            refreshToolCallDetails(entry);
+            try {
+                const response = await fetch(
+                    `api/chat/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(entry.toolId)}?vault_name=${encodeURIComponent(vault)}`
+                );
+                if (!response.ok) {
+                    if (response.status === 404 && entry.state === 'running') return;
+                    throw new Error(`Full tool detail is unavailable (HTTP ${response.status}).`);
+                }
+                const payload = await response.json();
+                if (entry.detailRequestId !== requestId) return;
+                if (payload.args !== undefined && payload.args !== null) {
+                    entry.detailArgs = payload.args;
+                }
+                if (payload.result_text !== undefined && payload.result_text !== null) {
+                    entry.detailResult = {
+                        text: payload.result_text,
+                        ...(payload.result_metadata && Object.keys(payload.result_metadata).length > 0
+                            ? { metadata: payload.result_metadata }
+                            : {}),
+                        ...(payload.artifact_ref ? { artifact_ref: payload.artifact_ref } : {})
+                    };
+                }
+                entry.artifactRef = payload.artifact_ref || entry.artifactRef || '';
+                entry.detailLoaded = true;
+            } catch (error) {
+                if (entry.detailRequestId === requestId) {
+                    entry.detailError = error.message || 'Full tool detail is unavailable.';
+                }
+            } finally {
+                if (entry.detailRequestId === requestId) {
+                    entry.detailLoading = false;
+                    refreshToolCallDetails(entry);
+                }
+            }
         }
 
         function refreshToolCallDetails(entry) {
@@ -1577,6 +1631,11 @@
             }
             if (!isEmptyToolValue(resultForDetail)) {
                 sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
+            }
+            if (entry.detailLoading) {
+                sections.push({ label: 'Full detail', value: 'Loading…' });
+            } else if (entry.detailError) {
+                sections.push({ label: 'Full detail', value: entry.detailError });
             }
             if (entry.events.length > 0) {
                 sections.push({ label: 'Events', value: entry.events });
@@ -1696,9 +1755,32 @@
             block.className = options.kind === 'code'
                 ? 'tool-status-block tool-status-block-code'
                 : 'tool-status-block';
-            block.textContent = value;
-            const copyButton = createCopyButton(() => utils.getCopyableText(block), 'code-copy-button');
-            block.appendChild(copyButton);
+            const fullText = String(value ?? '');
+            const displayLimit = 4000;
+            let expanded = fullText.length <= displayLimit;
+
+            const renderBlock = (focusToggle = false) => {
+                block.textContent = expanded
+                    ? fullText
+                    : `${fullText.slice(0, displayLimit).trimEnd()}\n… [display collapsed]`;
+                if (fullText.length > displayLimit) {
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'copy-button tool-detail-toggle';
+                    toggle.textContent = expanded ? 'Show less' : 'Show all';
+                    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                    toggle.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        expanded = !expanded;
+                        renderBlock(true);
+                    });
+                    block.appendChild(toggle);
+                    if (focusToggle) toggle.focus();
+                }
+                const copyButton = createCopyButton(() => fullText, 'code-copy-button');
+                block.appendChild(copyButton);
+            };
+            renderBlock();
             return block;
         }
 

@@ -1176,6 +1176,29 @@ class ChatSessionToolEventInfo(BaseModel):
     )
 
 
+class ChatToolCallDetailResponse(BaseModel):
+    """Persisted full-detail payload for one session-owned tool call."""
+
+    session_id: str = Field(..., description="Session identifier")
+    tool_call_id: str = Field(..., description="Tool call identifier")
+    tool_name: str = Field(..., description="Tool name")
+    args: dict[str, Any] | None = Field(
+        None, description="Complete persisted tool arguments"
+    )
+    result_text: str | None = Field(
+        None, description="Complete persisted result or cache notice"
+    )
+    result_metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Structured result metadata"
+    )
+    artifact_ref: str | None = Field(
+        None, description="Cache/artifact reference when present"
+    )
+    events: list[ChatSessionToolEventInfo] = Field(
+        default_factory=list, description="Persisted events for this tool call"
+    )
+
+
 class ChatSessionFailureInfo(BaseModel):
     """Internal recovery marker for an accepted chat turn that did not complete."""
 

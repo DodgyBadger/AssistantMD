@@ -2327,6 +2327,19 @@ details summary::-webkit-details-marker {
     background: rgb(var(--accent-primary) / 0.2);
     border-color: rgb(var(--accent-primary));
 }
+.tool-status-block .tool-detail-toggle {
+    position: sticky;
+    left: 0;
+    bottom: 0;
+    margin-top: 0.75rem;
+    margin-right: 0.45rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
+    border: 1px solid rgb(var(--border-primary));
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 12px;
+}
 .tool-status-placeholder {
     font-size: 0.8rem;
     color: rgb(var(--text-secondary));

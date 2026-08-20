@@ -9,7 +9,11 @@ from typing import Any, Literal
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 
 from core.chat import export_chat_transcript, remove_chat_transcript_exports
-from core.chat.chat_store import StoredChatMessage, StoredChatSession
+from core.chat.chat_store import (
+    StoredChatMessage,
+    StoredChatSession,
+    StoredChatToolEvent,
+)
 from core.chat.compaction import compact_chat_history, get_compaction_status
 from core.chat.deferred_reviews import (
     StoredDeferredReview,
@@ -48,6 +52,7 @@ from ..models import (
     ChatSessionMessageInfo,
     ChatSessionsPurgeResponse,
     ChatSessionToolEventInfo,
+    ChatToolCallDetailResponse,
     ChatWorkspaceInfo,
     DeferredReviewCallInfo,
     DeferredReviewResponse,
@@ -639,19 +644,79 @@ def get_chat_session_detail(
             )
             for message in messages
         ],
-        tool_events=[
-            ChatSessionToolEventInfo(
-                tool_call_id=event.tool_call_id,
-                tool_name=event.tool_name,
-                event_type=event.event_type,
-                created_at=event.created_at,
-                args=_load_json_object(event.args_json),
-                result_text=event.result_text,
-                result_metadata=_load_json_object(event.result_metadata_json) or {},
-                artifact_ref=event.artifact_ref,
-            )
-            for event in tool_events
-        ],
+        tool_events=[_tool_event_info(event) for event in tool_events],
+    )
+
+
+def get_chat_tool_call_detail(
+    vault_name: str,
+    session_id: str,
+    tool_call_id: str,
+) -> ChatToolCallDetailResponse:
+    """Return complete persisted detail for one session-owned tool call."""
+    _require_chat_session_access(vault_name, session_id)
+    events = _chat_store.get_tool_events_for_call(
+        session_id,
+        vault_name,
+        tool_call_id,
+    )
+    if not events:
+        logger.debug(
+            "Chat tool detail not found",
+            data={"session_id": session_id, "tool_call_id": tool_call_id},
+        )
+        raise APIException(
+            status_code=404,
+            error_type="ChatToolCallNotFound",
+            message=f"Tool call not found: {tool_call_id}",
+            details={"session_id": session_id, "tool_call_id": tool_call_id},
+        )
+
+    args = next(
+        (_load_json_object(event.args_json) for event in events if event.args_json),
+        None,
+    )
+    result_event = next(
+        (event for event in reversed(events) if event.event_type != "call"),
+        None,
+    )
+    logger.debug(
+        "Chat tool detail loaded",
+        data={
+            "session_id": session_id,
+            "tool_call_id": tool_call_id,
+            "event_count": len(events),
+            "has_result": result_event is not None,
+            "has_artifact_ref": bool(result_event and result_event.artifact_ref),
+        },
+    )
+    return ChatToolCallDetailResponse(
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+        tool_name=events[0].tool_name,
+        args=args,
+        result_text=result_event.result_text if result_event else None,
+        result_metadata=(
+            _load_json_object(result_event.result_metadata_json) or {}
+            if result_event
+            else {}
+        ),
+        artifact_ref=result_event.artifact_ref if result_event else None,
+        events=[_tool_event_info(event) for event in events],
+    )
+
+
+def _tool_event_info(event: StoredChatToolEvent) -> ChatSessionToolEventInfo:
+    """Convert one stored tool event into the shared API representation."""
+    return ChatSessionToolEventInfo(
+        tool_call_id=event.tool_call_id,
+        tool_name=event.tool_name,
+        event_type=event.event_type,
+        created_at=event.created_at,
+        args=_load_json_object(event.args_json),
+        result_text=event.result_text,
+        result_metadata=_load_json_object(event.result_metadata_json) or {},
+        artifact_ref=event.artifact_ref,
     )
 
 

@@ -71,6 +71,7 @@ from .models import (
     ChatSessionWorkspaceRequest,
     ChatTaskRequest,
     ChatTaskStartResponse,
+    ChatToolCallDetailResponse,
     ChatWorkspaceInfo,
     DeferredReviewResponse,
     DeferredReviewSubmitRequest,
@@ -160,6 +161,7 @@ from .services import (
     get_chat_history_compaction_status,
     get_chat_session_detail,
     get_chat_session_summary,
+    get_chat_tool_call_detail,
     get_configurable_models,
     get_configurable_providers,
     get_enabled_chat_tool_names,
@@ -1832,6 +1834,22 @@ async def chat_session_detail(
     """
     try:
         return get_chat_session_detail(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/chat/sessions/{session_id}/tools/{tool_call_id}",
+    response_model=ChatToolCallDetailResponse,
+)
+async def chat_tool_call_detail(
+    session_id: str,
+    tool_call_id: str,
+    vault_name: str,
+) -> ChatToolCallDetailResponse | JSONResponse:
+    """Load complete persisted detail for one session-owned tool call."""
+    try:
+        return get_chat_tool_call_detail(vault_name, session_id, tool_call_id)
     except Exception as e:
         return create_error_response(e)
 

@@ -137,6 +137,55 @@ never enter canonical chat history or persisted tool results.
 Exercise Stage 1 in the production workload before deciding whether the added
 complexity and data-exposure surface of Stage 2 is warranted.
 
+## Tool Modal Full-Detail Follow-up (implemented)
+
+### Finding
+
+The modal is not primarily truncating content through CSS. Except for
+`code_execution`, active task events carry only the normalized argument and
+result previews (200 and 240 characters). The modal and its copy button both
+receive that already-truncated value, so copying the rendered block cannot
+recover the omitted content. Normal-sized full arguments/results are already
+persisted in `chat_tool_events`; oversized results are deliberately represented
+by an output-cache reference.
+
+### Implemented behavior
+
+The modal remains compact by default while making full detail available on demand:
+
+- render a useful bounded preview with an explicit `Show all` control when the
+  value is longer than the display threshold;
+- make Copy operate on the full serialized section value, independent of the
+  visible DOM or its collapsed state;
+- load full detail through a narrowly authorized session/tool-call detail API
+  when the modal opens, rather than adding large values to every replayable task
+  event;
+- show loading and unavailable states honestly, and label values that are
+  themselves tool-produced/cache notices rather than implying the UI clipped
+  them;
+- when an oversized result has an `artifact_ref`, offer the existing artifact
+  access path rather than duplicating the cached payload into chat events.
+
+The existing `<pre>` maximum height and scrolling can remain as a safety net
+after expansion. Copy should close over the canonical full value supplied to
+the section renderer, not call `getCopyableText()` on a preview DOM node.
+
+### Affected surfaces and validation
+
+- A session-owned tool-detail read boundary in the chat-session API/service and
+  store is keyed by session and tool-call ID.
+- The modal renderer fetches persisted detail on demand, caches it for the
+  entry, renders preview/expanded states, and copies the full formatted value.
+- Preserve the current task-event and persistence contracts; this is a read/UI
+  enhancement and must not enlarge stream buffers or canonical model history.
+- The chat-session persistence scenario covers ownership, missing calls, full
+  results, and ordered call/result events. Frontend syntax and review cover the
+  preview, expand/collapse, full-value copy, loading/failure, and live-result
+  refresh paths until a purpose-built DOM harness exists.
+
+Do not add generic full-result streaming as a follow-up without separately
+evaluating its buffer, retention, and data-exposure costs.
+
 ## Objective
 
 Recover a long-running chat or delegate run from its latest settled Pydantic AI

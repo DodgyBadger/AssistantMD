@@ -175,7 +175,7 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
 
                 tool_event_rows = conn.execute(
                     """
-                    SELECT event_type, tool_name, result_text, artifact_ref
+                    SELECT event_type, tool_name, result_text, artifact_ref, tool_call_id
                     FROM chat_tool_events
                     WHERE session_id = ? AND vault_name = ?
                     ORDER BY id ASC
@@ -203,6 +203,40 @@ class ChatSessionPersistenceContractScenario(BaseScenario):
                 result_rows[0][3],
                 None,
                 "Non-overflow tool results should not create an artifact ref",
+            )
+            tool_call_id = str(result_rows[0][4])
+            tool_detail_response = self.call_api(
+                f"/api/chat/sessions/{session_id}/tools/{tool_call_id}?vault_name={vault.name}",
+            )
+            assert (
+                tool_detail_response.status_code == 200
+            ), "Session-owned full tool detail should load"
+            tool_detail = tool_detail_response.json()
+            self.soft_assert_equal(
+                tool_detail.get("result_text"),
+                "SESSION_PROBE_RESULT",
+                "Tool detail should return the complete persisted result",
+            )
+            self.soft_assert_equal(
+                [event.get("event_type") for event in tool_detail.get("events", [])],
+                ["call", "result"],
+                "Tool detail should preserve the call/result event order",
+            )
+            foreign_tool_detail = self.call_api(
+                f"/api/chat/sessions/{session_id}/tools/{tool_call_id}?vault_name={other_vault.name}",
+            )
+            self.soft_assert_equal(
+                foreign_tool_detail.status_code,
+                409,
+                "Tool detail should enforce the existing session/vault mismatch contract",
+            )
+            missing_tool_detail = self.call_api(
+                f"/api/chat/sessions/{session_id}/tools/missing-call?vault_name={vault.name}",
+            )
+            self.soft_assert_equal(
+                missing_tool_detail.status_code,
+                404,
+                "Missing tool detail should return not found",
             )
 
             transcript_dir = Path(vault) / ASSISTANTMD_ROOT_DIR / CHAT_SESSIONS_DIR

@@ -105,6 +105,20 @@ class StoredChatToolEvent:
     artifact_ref: str | None = None
 
 
+def _stored_tool_event_from_row(row: Any) -> StoredChatToolEvent:
+    """Convert a chat-tool-event query row through one stable mapping."""
+    return StoredChatToolEvent(
+        tool_call_id=str(row[0]),
+        tool_name=str(row[1]),
+        event_type=str(row[2]),
+        created_at=str(row[3] or ""),
+        args_json=None if row[4] is None else str(row[4]),
+        result_text=None if row[5] is None else str(row[5]),
+        result_metadata_json=None if row[6] is None else str(row[6]),
+        artifact_ref=None if row[7] is None else str(row[7]),
+    )
+
+
 @dataclass(frozen=True)
 class StoredChatSession:
     """One stored chat session summary."""
@@ -751,30 +765,31 @@ class ChatStore:
         finally:
             conn.close()
 
-        return [
-            StoredChatToolEvent(
-                tool_call_id=str(tool_call_id),
-                tool_name=str(tool_name),
-                event_type=str(event_type),
-                created_at=str(created_at or ""),
-                args_json=None if args_json is None else str(args_json),
-                result_text=None if result_text is None else str(result_text),
-                result_metadata_json=(
-                    None if result_metadata_json is None else str(result_metadata_json)
-                ),
-                artifact_ref=None if artifact_ref is None else str(artifact_ref),
-            )
-            for (
-                tool_call_id,
-                tool_name,
-                event_type,
-                created_at,
-                args_json,
-                result_text,
-                result_metadata_json,
-                artifact_ref,
-            ) in rows
-        ]
+        return [_stored_tool_event_from_row(row) for row in rows]
+
+    def get_tool_events_for_call(
+        self,
+        session_id: str,
+        vault_name: str,
+        tool_call_id: str,
+    ) -> list[StoredChatToolEvent]:
+        """Return persisted events for one tool call in insertion order."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT tool_call_id, tool_name, event_type, created_at, args_json,
+                       result_text, result_metadata_json, artifact_ref
+                FROM chat_tool_events
+                WHERE session_id = ? AND vault_name = ? AND tool_call_id = ?
+                ORDER BY id ASC
+                """,
+                (session_id, vault_name, tool_call_id),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        return [_stored_tool_event_from_row(row) for row in rows]
 
     def _committed_tool_call_ids(
         self,
