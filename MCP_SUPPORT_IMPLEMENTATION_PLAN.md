@@ -446,11 +446,14 @@ inventory below supplies the requirements assigned to these slices.
    tool-, and schedule-triggered ownership. This establishes the prerequisite
    but does not yet expose MCP tools to workflows.
 
-6. **MCP connection domain and management API**
+6. **MCP connection domain and basic management UI**
    Add principal-owned connection persistence, immutable slugs, allowlists,
    encrypted static credentials, authorization-aware services/endpoints,
    credential-presence reporting, enable/disable/delete semantics, sanitized
-   test contracts, and synthetic-principal isolation checks.
+   test contracts, and synthetic-principal isolation checks. Add the single-user
+   UI for URL/transport settings, display name, allowlist, static credentials,
+   enable/disable, and deletion. Define the connection-test response contract in
+   this slice, but add the working UI action with the transport manager.
 
 7. **MCP transport and connection manager**
    Implement Streamable HTTP/SSE clients and the lazy principal-scoped manager,
@@ -458,20 +461,22 @@ inventory below supplies the requirements assigned to these slices.
    invalidation, idle/shutdown cleanup, and unavailable-server isolation. Build
    HTTPS, loopback-development, DNS-rebinding/SSRF, timeout, response-size,
    concurrency, and redaction controls into this slice rather than postponing
-   them to final hardening.
+   them to final hardening. Add the connection-test UI action, wire it to this
+   runtime, and return sanitized tool-list/readiness results.
 
 8. **Chat tool-search vertical slice**
    Compose filtered, prefixed, individually deferred MCP tools with `ToolSearch`;
    preserve provenance and integrate initial/continued chats, budgets, events,
    output handling, cancellation, caching, recovery, and history replay. Finish
-   with a credential-free or static-credential local HTTP MCP chat smoke test.
+   with a UI-configured credential-free or static-credential local HTTP MCP chat
+   smoke test.
 
-9. **MCP OAuth and single-user management UI**
+9. **MCP OAuth and OAuth management UI**
    Deliver encrypted token storage, PKCE/state and pending-flow handling,
    callback plus headless manual completion, refresh/disconnect/status, and the
-   configuration UI for unauthenticated, static, and OAuth connections. Finish
-   with user-level smoke contracts for a remote OAuth service such as Gmail and
-   an independently running local URL service such as Marimo.
+   OAuth-specific additions to the existing connection UI: connect URL/status,
+   callback/manual completion, refresh, reconnect, and disconnect. Finish with a
+   user-level smoke contract for a remote OAuth service such as Gmail.
 
 10. **End-to-end hardening and documentation**
     Verify cross-principal isolation, malformed servers, cancellation/shutdown,
@@ -577,8 +582,11 @@ are a completeness inventory, not additional sequential milestones.
      disabled for MCP until their authority and effect boundaries are tested.
 
 - **Management surface**
-   - Add principal-scoped API models/endpoints and the configuration UI.
-   - Support sanitized connection tests and credential-presence reporting.
+   - Add principal-scoped API models/endpoints and the basic connection UI in
+     slice 6; extend that UI with OAuth-specific actions and states in slice 9.
+   - Define sanitized connection-test and credential-presence contracts in slice
+     6, then make connection tests operational through the transport manager in
+     slice 7.
    - Ensure removal/disable closes active resources and affects subsequent runs
      without leaking state across principals.
    - Do not add principal IDs, owner selectors, user creation, or user switching
