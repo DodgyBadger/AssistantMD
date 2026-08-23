@@ -445,16 +445,18 @@ inventory below supplies the requirements assigned to these slices.
    final consumer cutover so no runnable milestone deletes the file while live
    code still depends on it.
 
-4. **Existing secret-consumer migration**
-   Move model/provider configuration, OAuth state, configuration health, tool
-   binding, web, ingestion, vectors, and logging onto authority-aware encrypted
-   lookups. Remove runtime YAML compatibility after every consumer is covered.
-
-5. **Workflow ownership foundation**
+4. **Workflow ownership foundation**
    Persist and propagate immutable workflow ownership, seed existing workflows
    as `local-user`, remove implicit scheduler system authority, and prove API-,
    tool-, and schedule-triggered ownership. This establishes the prerequisite
    but does not yet expose MCP tools to workflows.
+
+5. **Existing secret-consumer migration**
+   Move model/provider configuration, OAuth state, configuration health, tool
+   binding, web, ingestion, vectors, and logging onto authority-aware encrypted
+   lookups. Remove runtime YAML compatibility and activate verified YAML
+   retirement only after every consumer and scheduled execution owner is
+   covered.
 
 6. **MCP connection domain and basic management UI**
    Add principal-owned connection persistence, immutable slugs, allowlists,
