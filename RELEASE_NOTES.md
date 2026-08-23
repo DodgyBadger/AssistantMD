@@ -2,41 +2,54 @@
 
 ## v0.7.3
 
-### More resilient long-running chats
+### Long-running chats recover more reliably
 
-- Long primary-chat runs now recover from transient provider disconnections at
-  settled model/tool boundaries without repeating completed tool calls.
-- Tool-free primary chat and delegate runs automatically retry transient stream
-  failures within the configured global retry limit while preserving one
-  logical response and shared usage accounting.
-- Recovery follows each tool's declared safety policy. Replay-safe unfinished
-  operations may run again, vault mutations restart only after successful task
-  rollback, and unknown or external effects fail closed for manual recovery.
-- Chat streaming reconnects transient browser transport failures from the last
-  received event. Reopening a session reattaches to its active chat task, so a
-  browser reload or dropped SSE connection no longer stops background work.
-- Expired event cursors are detected explicitly. AssistantMD discards
-  provisional output and reloads canonical session history rather than showing
-  an incomplete retained fragment as the finished response.
+- Chats can recover from temporary model-stream interruptions without repeating
+  tool calls that already finished.
+- Dropped browser connections reconnect to the running chat. Reloading a
+  session also reattaches to its active task instead of abandoning the work.
+- If live updates are no longer available, the UI waits for the background task
+  and reloads the saved conversation rather than presenting an incomplete
+  response.
+- Recovery protects side effects: safe unfinished work may retry, interrupted
+  vault changes are rolled back before the chat restarts, and uncertain
+  external actions stop with a clear failure instead of being repeated.
 
-Active-run recovery is bounded and process-local. It improves ordinary API and
-browser disconnections but does not resume a task after the AssistantMD process
-or container restarts.
+Recovery covers interruptions while AssistantMD is still running. An active
+task cannot resume after the server or container itself restarts.
 
-### Runtime updates
+### Better visibility into tool calls
 
-- Updated to Pydantic AI 2.19, Pydantic AI Harness 0.13, and Pydantic Monty
-  0.0.21. The Harness integration uses bounded in-memory recovery snapshots;
-  no new database migration or durable provider-specific chat history is
-  introduced.
-- Detailed tool guidance remains available through tool documentation while
-  system instructions contain only lightweight capability descriptions.
+- The chat tool list now shows which calls are still running and whether each
+  finished successfully, failed, or was interrupted.
+- Tool details include status and elapsed time. Full stored arguments and
+  results can be opened and copied even when the chat preview is shortened;
+  oversized outputs continue to use their saved artifact reference.
+- Structured tool failures are shown as failures instead of appearing as
+  successful calls merely because the tool returned a response.
+
+### Safer, more useful delegates
+
+- Delegate agents receive their tool budget and are prompted to stop in time to
+  return a concise handoff.
+- Separate limits for tool calls, model requests, running time, and repeated
+  identical failures help contain runaway delegate loops. These limits remain
+  configurable in System settings.
+- When a delegate reaches a limit or fails, it now returns available partial
+  progress, usage, completed-call evidence, and artifact references so the
+  parent can continue with a narrower follow-up instead of repeating all the
+  work.
+
+### Runtime compatibility
+
+- Updated Pydantic AI, Pydantic AI Harness, and Pydantic Monty for the recovery
+  and delegate reliability improvements.
+- Existing chat history and vault data remain compatible; this release adds no
+  database migration.
 
 ### After upgrading
 
-Restart AssistantMD to load the updated Pydantic AI, Harness, and Monty
-runtimes. Existing chat history and vault data require no migration for this
-release.
+Restart AssistantMD to load the updated runtimes. No data migration is needed.
 
 
 ## v0.7.2

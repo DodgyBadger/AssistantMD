@@ -107,6 +107,17 @@ SSE reconnect and canonical-history fallback belong to the existing canonical
 task-owned chat decision in ADR 0020. Rollback redirects, effect policy, and
 bounded live checkpoints are already covered by ADR 0032.
 
+### Release-notes review
+
+The v0.7.3 entry has been reconciled with the complete branch and simplified
+around user-visible outcomes. It covers interruption recovery and its
+process-restart boundary, browser reconnect/session reattachment, live and
+persisted tool-call visibility, full detail copy, structured failure status,
+delegate guardrails and partial handoffs, runtime dependency updates, and the
+absence of a database migration. Internal checkpoint, event-buffer, and
+instruction-layering mechanics remain in architecture documentation rather than
+the user-facing release summary.
+
 ## Tool Progress Visibility Investigation
 
 ### Current observable contract
