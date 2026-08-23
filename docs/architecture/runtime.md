@@ -132,6 +132,11 @@ Runtime owns a process-local `TaskCoordinator`, `RuntimeBackgroundSpawner`,
 
 `TaskCoordinator` tracks active and recently terminal work for API/UI visibility and cancellation. It records task kind, scope, source, label, timestamps, terminal reason, metadata, and lifecycle events. Runtime bootstrap attaches terminal observers for task-level follow-up policies such as vault mutation rollback. Observers run from terminal lifecycle transitions after live worker coroutines have unwound. See [Execution Tasks](execution-tasks.md) for the task contract and [Vault State](vault-state.md) for mutation rollback behavior.
 
+Active chat recovery checkpoints belong to the prepared chat run and execution
+task, not to `RuntimeContext` or a durable runtime service. Terminal observer
+ordering lets an effect-unsafe interrupted chat fail, complete vault rollback,
+and only then start its replacement task.
+
 Execution tasks also carry a principal authority distinct from their source.
 Interactive work currently uses `local-user`; scheduler and system maintenance
 use `system`. The coordinator installs this authority through a context-local

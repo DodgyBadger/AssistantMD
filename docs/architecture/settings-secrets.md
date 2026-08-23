@@ -58,6 +58,13 @@ Runtime-relevant general settings include:
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
 - `chat_model_requests_limit`: maximum model requests allowed in one chat
   response; `0` disables the circuit breaker.
+- `model_stream_retries`: retries after a retryable model-stream disconnect in
+  primary chat and delegate runs; `0` disables automatic retries. Primary chat
+  uses effect-aware checkpoints, while a delegate retries only before any child
+  tool effect. Both paths must prove that retry will not duplicate tool effects.
+- `model_stream_retry_base_delay_seconds` and
+  `model_stream_retry_max_delay_seconds`: initial and maximum delays for bounded
+  exponential stream-retry backoff.
 - `file_list_max_results`: maximum structured results returned by
   `file_read(list)`; `0` disables the cap.
 - `file_search_timeout_seconds`: timeout for `file_read(search)`.

@@ -49,8 +49,11 @@ Direct tool functions resolve from the registry after applying the app-wide
 signatures make sense in scripts.
 Authoring execution is non-interactive: workflows and context scripts execute
 tool calls directly and never pause for chat inline review. `delegate(...)` is
-the model-inference tool for scripts; it returns text plus metadata, including a
-compact `metadata["audit"]` summary of child tool calls and errors.
+the model-inference tool for scripts; successful and bounded-failure returns
+include structured status, usage, references, and a compact
+`metadata["audit"]` summary that distinguishes settled and unsettled child tool
+calls. Delegate execution remains process-local and does not replay child tools
+to manufacture a failure handoff.
 
 Model-facing tools retain structured `ToolReturn` failures so an agent can
 inspect or retry them. The Monty direct-tool adapter translates results whose

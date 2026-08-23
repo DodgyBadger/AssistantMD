@@ -43,6 +43,70 @@ releases older than one week at review time) against the existing parity probes
 before changing pins. Monty 0.0.21 is current. This refresh is deliberately not
 part of the recovery hardening diff.
 
+## Architecture Documentation Audit
+
+### Scope
+
+Audit every file under `docs/architecture/` against the complete branch delta
+from `origin/main`, both root implementation plans, ADR 0032, and the current
+production code. The review covers chat task ownership and reconnect behavior,
+active-run recovery and rollback redirects, tool lifecycle event/detail
+contracts, delegate limits and failure handoffs, settings, API/UI surfaces,
+runtime ownership, validation artifacts, and explicitly unchanged subsystems.
+
+### Contract-sensitive checks
+
+- Architecture indexes and subsystem ownership links identify the active-run
+  recovery and delegate reliability boundaries.
+- Chat/session, execution-task, API/UI, runtime, LLM/tool, settings, and
+  validation documents agree on lifecycle states, persistence boundaries,
+  reconnect semantics, cancellation, rollback, and process-restart limits.
+- Documentation describes only the current contract and does not retain
+  superseded implementation proposals from the planning files.
+- Unaffected architecture documents are checked for claims invalidated by the
+  Pydantic AI/Monty upgrades or shared tool-binding changes.
+
+### Validation and next phase
+
+Use a branch-to-document coverage matrix, targeted source inspection, internal
+link/path checks, `git diff --check`, and the documentation-relevant portion of
+the production static gate. The next phase is documentation implementation,
+followed by a cleanup/hardening pass over the complete architecture set.
+
+### Completed coverage
+
+The audit is complete for every page in `docs/architecture/`.
+
+- Updated: `README.md`, `api-ui.md`, `authoring-engine.md`,
+  `chat-sessions.md`, `execution-tasks.md`, `llm-tools.md`, `runtime.md`,
+  `settings-secrets.md`, `validation.md`, and `vault-state.md`.
+- Reviewed with no branch-driven contract change required: `goals.md`,
+  `ingestion-pipeline.md`, `multimodal.md`, `scheduler.md`, and
+  `session-summaries.md`.
+
+The changed pages now align on process-local recovery ownership, bounded
+checkpoint and event retention, sequence reconnect and redirect behavior,
+tool-detail persistence/UI state, delegate circuit breakers and failure
+handoffs, shared usage limits, and rollback-before-replacement ordering. The
+unchanged pages retain accurate ownership and persistence boundaries after the
+Pydantic AI and Monty dependency refresh.
+
+### Pre-merge ADR review
+
+One additional durable decision merits an ADR before merge: delegate child-run
+containment and failure handoff. The decision spans model instruction layering,
+four independent runtime guards, shared structured result classification,
+bounded partial-progress salvage, cancellation ownership, and the explicit
+choice not to replay or durably checkpoint child tools. ADR 0033 records this
+decision with the current implementation and `integration/core/delegate_tool`
+as evidence.
+
+No separate ADR is needed for tool progress rendering or full-detail copy;
+those are UI/API expressions of persisted tool lifecycle data. Sequence-based
+SSE reconnect and canonical-history fallback belong to the existing canonical
+task-owned chat decision in ADR 0020. Rollback redirects, effect policy, and
+bounded live checkpoints are already covered by ADR 0032.
+
 ## Tool Progress Visibility Investigation
 
 ### Current observable contract

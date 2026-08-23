@@ -10,6 +10,8 @@ The API + UI layer exposes runtime features to users and keeps web interactions 
   `api.services`
 - `api/models.py`
 - `static/`
+- `static/app.js` — chat task submission, event-stream reconnect, and canonical reload
+- `static/js/chat-rendering.js` — message, tool-row, and tool-detail rendering
 - `static/js/deferred-reviews.js` — inline tool-review cards and submission
 - `static/js/file-references.js` — chat path resolution and file view
 - `static/js/vault-path-picker.js` — shared Vault Explorer tree and path actions
@@ -61,6 +63,20 @@ surface used by endpoints and validation.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
 - `/api/chat/tasks` is the canonical chat execution entrypoint. It creates a task-owned streaming chat run; clients observe live events through `/api/chat/tasks/{task_id}/events`, task status through `/api/tasks/{task_id}`, or persisted history through session detail endpoints.
 - `/api/chat/tasks/{task_id}/events` returns `410 ChatTaskEventsExpired` when a known terminal chat task still exists but its process-local event buffer has been pruned.
+- Chat event subscribers reconnect from the last observed sequence. Session
+  reload attaches to the session's active task; an expired replay cursor clears
+  provisional output, lets the task finish in the background, and reloads
+  canonical persisted history.
+- A recovery attempt may reset the provisional assistant response. Recovery
+  that requires rollback ends the source stream with `chat_retry_redirect`; the
+  browser follows the replacement task and resets its event sequence.
+- Tool rows are created from `tool_call_started` and finalized from
+  `tool_call_finished`. Their icon reflects `running`, `completed`, `failed`, or
+  `interrupted`; elapsed time and the status label live in the detail modal.
+- `GET /api/chat/sessions/{session_id}/tools/{tool_call_id}?vault_name=...`
+  returns the session-owned persisted tool detail. The UI keeps inline previews
+  bounded, loads full stored arguments and normal-sized results when the modal
+  opens, and copies that full content rather than the truncated preview.
 - Chat sessions persist `normal` or `inline_edit` mode through
   `/api/chat/sessions/{session_id}/mode`. In inline edit mode, a `review_required`
   task event renders a structured `file_write` review card inside the assistant

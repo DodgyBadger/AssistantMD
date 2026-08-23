@@ -45,6 +45,8 @@ AssistantMD-owned Pydantic AI capabilities live under `core/llm/capabilities/`.
 - `chat_tool_output_cache.py` persists tool call/result events and routes oversized chat tool output to cache through tool lifecycle hooks.
 - `assistant_tools.py` exposes settings-resolved AssistantMD tools through Pydantic AI `Toolset(FunctionToolset(...))` and applies shared tool-definition policy through `PrepareTools(...)`.
 - `factory.py` composes chat capabilities for normal and streaming chat execution.
+- `delegate_repeated_failure_guard.py` blocks repeated delegate child-tool calls
+  that return the same structured failure with identical arguments.
 
 These capabilities preserve the existing chat contracts while moving cross-cutting
 agent behavior toward Pydantic AI's composable capability model.
@@ -147,8 +149,9 @@ and timeout guardrails. Every child receives a compact system-owned flight card
 and its effective tool-call budget. Completed and bounded-failure returns include
 compact audit metadata summarizing child tool calls, return previews, and tool
 errors. Failures include structured classification, usage, and the latest
-bounded partial output, settled audit, and cache/artifact references available
-in process. Delegate progress is not persisted and child tools are never replayed
+bounded partial output, an audit that distinguishes settled from unsettled
+calls, and cache/artifact references available in process. Delegate progress is
+not persisted and child tools are never replayed
 to construct a failure handoff.
 
 Primary chat attaches a task-scoped Harness `StepPersistence` capability. Its

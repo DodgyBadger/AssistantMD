@@ -177,6 +177,13 @@ self.assert_event_contains(
 
 ## Running Scenarios
 
+`validation/core/streaming.py` provides the shared task-owned chat SSE helpers
+used by scenarios to submit chat tasks, reconnect from event sequences, follow
+retry redirects, and resolve terminal output. Recovery scenarios cover safe
+checkpoint resume, replay-safe interruption, rollback-before-replacement,
+fail-closed effects, retained-event cursor expiry, delegate failure handoff,
+and retry-budget enforcement.
+
 ```bash
 # List available scenarios with descriptions
 python validation/run_validation.py list

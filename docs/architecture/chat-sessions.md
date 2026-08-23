@@ -13,6 +13,7 @@ Chat session state is persisted canonically in SQLite. Markdown transcripts are 
 - `core/chat/compaction.py` — summarize long sessions and record replay checkpoints
 - `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
 - `core/chat/task_execution.py` — task-owned chat execution, event buffering, and per-session queueing
+- `core/chat/run_recovery.py` — bounded live-run checkpoints and effect-aware recovery selection
 - `core/chat/deferred_reviews.py` — durable deferred-tool review state and
   reviewed-target conflict detection
 
@@ -34,7 +35,9 @@ The main tables are:
 - **`chat_sessions`** — one row per session: identity, vault binding, timestamps,
   title, and JSON metadata such as workspace and chat mode
 - **`chat_messages`** — full provider-native message objects stored as JSON, plus extracted `content_text`, `role`, `direction`, and `sequence_index` for querying
-- **`chat_tool_events`** — structured tool call and result events keyed by `tool_call_id`, with `args_json`, `result_text`, and optional `artifact_ref`
+- **`chat_tool_events`** — structured tool call and result events keyed by
+  `tool_call_id`, with `args_json`, `result_text`, `result_metadata_json`, and
+  optional `artifact_ref`
 - **`chat_deferred_reviews`** — pending and terminal Pydantic AI deferred-tool
   requests, serialized continuation messages/configuration, review-time target
   state, submitted results, and resumed task identity
@@ -42,8 +45,9 @@ The main tables are:
   system-maintained replacement history and the raw-message sequence boundary
   covered by that checkpoint
 
-The session API exposes tool-call detail through a session- and vault-owned
-read boundary keyed by `tool_call_id`. The chat stream remains preview-sized;
+`GET /api/chat/sessions/{session_id}/tools/{tool_call_id}?vault_name=...`
+exposes tool-call detail through a session- and vault-owned read boundary. The
+chat stream remains preview-sized;
 the UI loads persisted full arguments and normal-sized results only when a user
 opens the tool modal. Oversized results remain represented by their cache or
 artifact reference.
@@ -158,13 +162,39 @@ Chat execution registers a process-local task scoped to `chat_session:<session_i
   resumes with stored messages and `DeferredToolResults` without persisting a
   second user request.
 - `chat_tool_calls_limit` applies Pydantic AI `UsageLimits(tool_calls_limit=...)` to chat runs when the setting is positive; `0` disables this guard.
-- `delegate_tool_calls_limit` and `delegate_timeout_seconds` separately bound child agents launched by `delegate(...)`.
+- `chat_model_requests_limit` bounds model requests across one chat run,
+  including recovery attempts.
+- Delegate child runs have independent model-request, tool-call, consecutive
+  identical-failure, and timeout guards.
 - `/api/chat/sessions/{session_id}/active-task` returns the active chat task for a session.
 - `/api/chat/sessions/{session_id}/cancel` requests cancellation for the active chat task.
 - `/api/tasks/{task_id}/cancel` cancels a known chat task id directly.
 - A cancelled chat task reaches terminal status `cancelled`; the session remains queryable through normal session detail endpoints.
 
 See [Execution Tasks](execution-tasks.md) for task lifecycle and cancellation semantics.
+
+## Active-run recovery
+
+Primary chat attaches task-scoped Pydantic AI `StepPersistence` backed by a
+bounded in-memory store. At most eight snapshots are retained for one live run;
+the durable chat database remains the canonical session record, and recovery
+checkpoints do not survive a process or container restart.
+
+Retryable model-stream failures share the run's request/tool usage budget and
+are handled according to the latest checkpoint and unresolved tool effects:
+
+- a settled checkpoint resumes after completed calls without executing them again;
+- an unsettled replay-safe call may replay from its interrupted checkpoint;
+- an unsettled vault-transactional call fails the source task, waits for
+  terminal mutation rollback, and starts one replacement task without storing
+  the accepted user request a second time;
+- unknown, manual, or external effects fail closed for manual recovery.
+
+Trailing partial model output is removed from a selected checkpoint before
+resume. Recovery decisions emit `chat_retry_scheduled`,
+`chat_recovery_checkpoint_selected`, or `chat_recovery_rejected`. A rollback
+replacement terminates the source stream with `chat_retry_redirect` so clients
+can follow the already-started replacement task.
 
 ## Session ownership
 

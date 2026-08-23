@@ -32,6 +32,9 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
    app-wide tool disablement, context-template capability, tool-output cache hooks,
    execution task tracking, and canonical session persistence. Inline edit mode
    can persist a deferred `file_write` review and resume it through a later task.
+   Task-owned event streams remain reconnectable while retained, expose live
+   tool-call state, and use bounded process-local checkpoints to recover safe
+   model-stream interruptions without replaying settled tool effects.
 6. Workflow triggers execute through the workflow governor and runtime task runner before running user-authored Python in a Monty sandbox with host-provided capability functions and vault writes.
 
 ## Subsystems at a Glance
@@ -39,12 +42,12 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | Area | Responsibility | Primary code |
 | --- | --- | --- |
 | [Runtime](runtime.md) | Bootstrap, global context, path roots, config reload | `core/runtime/` |
-| [API + UI](api-ui.md) | Endpoints, chat review UI, unified Vault Explorer, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
-| [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/task_runner.py`, `core/runtime/workflow_governor.py` |
+| [API + UI](api-ui.md) | Endpoints, reconnectable chat/tool progress UI, chat review UI, unified Vault Explorer, exception and lifecycle wiring | `api/`, `main.py`, `static/` |
+| [Execution Tasks](execution-tasks.md) | Process-local task snapshots, cancellation, buffered event replay, and task lifecycle events | `core/runtime/execution_tasks.py`, `core/runtime/task_runner.py`, `core/runtime/workflow_governor.py`, `core/chat/task_events.py` |
 | [Vault State](vault-state.md) | Vault manifest, change feed, attributed activity, snapshots, and rollback | `core/vault_state/` |
 | [Authoring](authoring-engine.md) | Discover/parse/execute workflows and context templates in the Monty sandbox, including script helpers | `core/authoring/` |
 | [Scheduler](scheduler.md) | Persistent APScheduler jobs and synchronization | `core/scheduling/` |
-| [Chat Sessions](chat-sessions.md) | SQLite session/history store, persisted modes, deferred reviews, and transcript rendering | `core/chat/` |
+| [Chat Sessions](chat-sessions.md) | SQLite session/history store, active-run recovery, persisted modes, deferred reviews, and transcript rendering | `core/chat/` |
 | [Session Summaries](session-summaries.md) | Derived chat-session summary storage, indexing, and retrieval | `core/memory/`, `core/chat/history_service.py` |
 | [Goals](goals.md) | Lightweight durable goal state, checkpoints, source provenance, and goal-related activity | `core/goals/`, `core/tools/goal_ops.py` |
 | [LLM + Tools](llm-tools.md) | Agent creation, settings-backed tool binding, capability composition, model resolution | `core/llm/`, `core/tools/` |
