@@ -60,6 +60,7 @@ _FORBIDDEN_CHILD_TOOLS = frozenset({"delegate", "code_execution"})
 _SUPPORTED_OPTION_KEYS = frozenset({"thinking"})
 _DELEGATE_PARTIAL_OUTPUT_MAX_CHARS = 4_000
 _DELEGATE_MAX_HANDOFF_REFERENCES = 20
+_DELEGATE_MAX_HANDOFF_REFERENCE_NODES = 1_000
 
 
 class DelegateTool(BaseTool):
@@ -687,27 +688,40 @@ def _child_run_references(messages: Sequence[ModelMessage]) -> list[str]:
 
 
 def _collect_handoff_references(value: Any, references: list[str]) -> None:
-    if len(references) >= _DELEGATE_MAX_HANDOFF_REFERENCES:
-        return
-    if isinstance(value, dict):
-        for key, item in value.items():
-            normalized_key = str(key).strip().lower()
-            if normalized_key in {"artifact_ref", "cache_ref", "ref"} and isinstance(
-                item, str
-            ):
-                if item and item not in references:
-                    references.append(item)
-            else:
-                _collect_handoff_references(item, references)
-    elif isinstance(value, list | tuple):
-        for item in value:
-            _collect_handoff_references(item, references)
-    elif isinstance(value, str) and value.lstrip().startswith(("{", "[")):
-        try:
-            parsed = json.loads(value)
-        except (TypeError, ValueError):
-            return
-        _collect_handoff_references(parsed, references)
+    pending: list[tuple[str | None, Any]] = [(None, value)]
+    visited_container_ids: set[int] = set()
+    visited_nodes = 0
+    while (
+        pending
+        and len(references) < _DELEGATE_MAX_HANDOFF_REFERENCES
+        and visited_nodes < _DELEGATE_MAX_HANDOFF_REFERENCE_NODES
+    ):
+        key, item = pending.pop()
+        visited_nodes += 1
+        if key in {"artifact_ref", "cache_ref", "ref"} and isinstance(item, str):
+            if item and item not in references:
+                references.append(item)
+            continue
+        if isinstance(item, dict):
+            container_id = id(item)
+            if container_id in visited_container_ids:
+                continue
+            visited_container_ids.add(container_id)
+            pending.extend(
+                (str(child_key).strip().lower(), child)
+                for child_key, child in reversed(tuple(item.items()))
+            )
+        elif isinstance(item, list | tuple):
+            container_id = id(item)
+            if container_id in visited_container_ids:
+                continue
+            visited_container_ids.add(container_id)
+            pending.extend((None, child) for child in reversed(item))
+        elif isinstance(item, str) and item.lstrip().startswith(("{", "[")):
+            try:
+                pending.append((None, json.loads(item)))
+            except (TypeError, ValueError):
+                continue
 
 
 def _compact_value(value: Any, *, max_chars: int) -> str:
@@ -716,7 +730,7 @@ def _compact_value(value: Any, *, max_chars: int) -> str:
     else:
         try:
             text = json.dumps(value, ensure_ascii=False, sort_keys=True)
-        except TypeError:
+        except (TypeError, ValueError):
             text = str(value)
     if len(text) <= max_chars:
         return text

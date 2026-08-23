@@ -81,7 +81,15 @@ class DelegateRepeatedFailureGuard:
                 },
             )
 
-        result = await handler(args)
+        try:
+            result = await handler(args)
+        except Exception:
+            # Only consecutive structured returns participate in this guard. An
+            # exception follows a separate failure contract and breaks the streak.
+            async with self._lock:
+                self._last_failed_fingerprint = None
+                self._consecutive_failures = 0
+            raise
         async with self._lock:
             if _is_structured_failure(result):
                 if fingerprint == self._last_failed_fingerprint:

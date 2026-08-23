@@ -361,10 +361,12 @@ safety contract in arbitrary prompt assembly.
 
 ## Objective
 
-Recover a long-running chat or delegate run from its latest settled Pydantic AI
-model/tool boundary after a retryable provider-stream failure. Completed tool
-work must remain completed and visible to the model. Whole-task rollback and
-replay remains a fallback, not the normal recovery path.
+Recover a long-running primary chat run from its latest settled Pydantic AI
+model/tool boundary after a retryable provider-stream failure. Preserve a
+delegate run's latest in-process progress as a bounded failure handoff without
+replaying child tools; settled-boundary delegate continuation remains deferred.
+Completed tool work must remain completed and visible to the model. Whole-task
+rollback and replay remains a fallback, not the normal recovery path.
 
 The design must retain AssistantMD's portable canonical chat history. Exact,
 provider-bound state needed for recovery is staged separately and is committed
@@ -406,8 +408,8 @@ to canonical history only when the logical turn completes.
   consuming streamed output.
 - `core/tools/delegate.py`: unified lifecycle boundary, partial handoff
   assembly, usage/audit/reference metadata, and cancellation event.
-- `core/tools/tool_results.py` (new shared helper): authoritative structured
-  terminal-state classification.
+- `core/tools/failures.py`: authoritative structured terminal-state
+  classification alongside the shared failure envelope.
 - `core/chat/task_execution.py` and
   `core/llm/capabilities/delegate_repeated_failure_guard.py`: consume the shared
   classification contract.
@@ -956,6 +958,11 @@ Maintainers retain ownership of the full validation suite.
 
 Slices 1-5 and the in-process portions of Slice 9 are complete. Slices 6-8 are
 not part of the current delivery.
+
+The delegate failure-handoff hardening pass additionally bounds traversal of
+untrusted nested tool results, tolerates cyclic/non-JSON payloads without
+masking the original failure, and resets repeated-structured-failure tracking
+when an intervening tool execution raises.
 
 ### Slice 5A: subscriber reconnect hardening
 

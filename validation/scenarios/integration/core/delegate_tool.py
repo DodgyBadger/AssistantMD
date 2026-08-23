@@ -1021,6 +1021,39 @@ async def _assert_repeated_failure_guard() -> None:
         )
     assert repeated_successes == 3, "Repeated successful calls must remain allowed"
 
+    exception_guard = DelegateRepeatedFailureGuard(
+        limit=1,
+        session_id="guard-exception-reset",
+    )
+    await exception_guard.execute(
+        tool_name="probe",
+        args={"same": True},
+        handler=fail,
+    )
+
+    async def raise_failure(args):
+        raise RuntimeError("unstructured execution failure")
+
+    try:
+        await exception_guard.execute(
+            tool_name="other",
+            args={},
+            handler=raise_failure,
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Tool execution exceptions must propagate")
+    executions_before_retry = len(executed)
+    await exception_guard.execute(
+        tool_name="probe",
+        args={"same": True},
+        handler=fail,
+    )
+    assert (
+        len(executed) == executions_before_retry + 1
+    ), "An intervening exception must reset the structured-failure streak"
+
     parallel_started = 0
     parallel_release = asyncio.Event()
 
@@ -1068,7 +1101,11 @@ def _assert_delegate_flight_card(tool_call_limit: int) -> None:
 
 
 def _assert_shared_tool_result_classification() -> None:
-    from core.tools.delegate import _build_child_run_audit
+    from core.tools.delegate import (
+        _build_child_run_audit,
+        _child_run_references,
+        _compact_value,
+    )
     from core.tools.failures import classify_tool_result_state
 
     assert classify_tool_result_state(metadata={"status": "completed"}) == "completed"
@@ -1105,6 +1142,22 @@ def _assert_shared_tool_result_classification() -> None:
         ]
     )
     assert benign_audit["tool_error_count"] == 0
+
+    cyclic_result: dict[str, object] = {"artifact_ref": "artifact://kept"}
+    cyclic_result["cycle"] = cyclic_result
+    cyclic_messages = [
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="probe",
+                    content=cyclic_result,
+                    tool_call_id="cyclic-result",
+                )
+            ]
+        )
+    ]
+    assert _child_run_references(cyclic_messages) == ["artifact://kept"]
+    assert _compact_value(cyclic_result, max_chars=200).startswith("{")
     unresolved_audit = _build_child_run_audit(
         [
             ModelResponse(
