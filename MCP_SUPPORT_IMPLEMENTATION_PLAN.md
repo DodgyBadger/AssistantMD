@@ -256,7 +256,9 @@ YAML namespace or use prefixed YAML keys as isolation.
 Key material must remain outside the encrypted database. The implementation ADR
 must define rotation/versioning, startup behavior when the key is absent or
 wrong, backup/restore expectations, and file permissions. Initial installation
-generates one installation-level master key into the deployment's `.env` file.
+requires one user-generated installation-level master key in the deployment's
+`.env` file; `.env.example` and platform-specific secure generation commands
+make that step explicit.
 Production/container deployments may inject the same environment setting through
 their normal mounted-secret or environment-secret mechanism. The `.env` file and
 master key must remain uncommitted and outside persistent application data. No
@@ -265,17 +267,19 @@ silent plaintext fallback is allowed.
 Each secret record uses authenticated encryption with a fresh random nonce and
 stores a key-version identifier. The first release needs one active key and an
 explicit rotation operation; it does not need per-principal encryption keys.
-Startup and secret access fail clearly for a missing/wrong key or failed
-ciphertext authentication. A usable backup consists of both the SQLite database
-and the separately protected installation key.
+Missing/wrong keys or failed ciphertext authentication enter an explicit locked
+state: API/UI diagnostics remain available, but model/provider execution and
+secret mutation are disabled and migration does not run. A usable backup
+consists of both the SQLite database and the separately protected installation
+key.
 
 Use AES-256-GCM through a directly declared `cryptography` dependency. Bind each
 ciphertext to its principal, namespace, and secret name as authenticated
-associated data. Installation generates the first 32-byte random key
-automatically, base64-encodes it, writes a versioned key setting and active-key
-version to `.env`, and never replaces an existing key implicitly. Rotation adds
-a generated next-version key, re-encrypts and authenticates every row in one
-transaction, then retires the prior version only after verification.
+associated data. Installation instructions have the user generate the first
+32-byte random key directly into `.env` without printing it. AssistantMD never
+replaces an existing key implicitly. Rotation adds a generated next-version key,
+re-encrypts and authenticates every row in one transaction, then retires the
+prior version only after verification.
 
 Key loss affects credentials only, not vaults, chats, workflows, or other user
 content; recovery is re-entry/reconnection. Setup must clearly report that the
@@ -430,10 +434,13 @@ inventory below supplies the requirements assigned to these slices.
    migrate existing consumers.
 
 3. **Bootstrap and one-time YAML migration**
-   Generate the installation key, initialize the database before secret
-   consumers run, implement the transactional/idempotent YAML import and ledger,
-   update validation isolation, and cover fresh, successful-upgrade,
-   failed-upgrade, and restart paths.
+   Supply `.env.example` and documented secure key-generation commands,
+   initialize the database before secret consumers run, implement the
+   transactional/idempotent YAML import and ledger, update validation isolation,
+   and cover fresh, successful-upgrade, failed-upgrade, locked-secrets, and
+   restart paths. Missing or unusable keys keep the API/UI available but disable
+   model/provider execution and secret mutation; they never select plaintext
+   storage or mutate/migrate existing secret state.
 
 4. **Existing secret-consumer migration**
    Move model/provider configuration, OAuth state, configuration health, tool

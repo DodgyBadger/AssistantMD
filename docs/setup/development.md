@@ -51,6 +51,22 @@ cd AssistantMD
 scripts/dev setup
 ```
 
+Create a local encryption key before starting the application. The same
+restricted-file command used by production installations works on Linux:
+
+```bash
+umask 077
+key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
+unset key
+```
+
+`.env.example` documents the required names but contains no usable key.
+`scripts/dev run` loads `.env` when it exists. A missing or unusable key leaves
+the application in secrets-locked mode: the UI remains available for diagnosis,
+but providers and models are unavailable and secret state is not migrated or
+mutated.
+
 `scripts/dev setup` is idempotent. It:
 
 - installs or locates UV-managed Python 3.13;

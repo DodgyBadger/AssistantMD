@@ -21,6 +21,7 @@ from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
+from core.secrets import initialize_secrets_bootstrap
 from core.settings import validate_settings
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
@@ -70,6 +71,15 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
     try:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
+        secrets_status = initialize_secrets_bootstrap(config.system_root)
+        if not secrets_status.ready:
+            logger.warning(
+                "Encrypted secrets are locked",
+                data={
+                    "event": "secrets_locked",
+                    "reason": secrets_status.reason,
+                },
+            )
         refresh_settings_cache()
 
         # Ensure packaged system templates exist without overwriting runtime edits.

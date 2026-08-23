@@ -12,6 +12,9 @@ services:
     volumes:
       - /absolute/path/to/your/vaults:/app/data   # Pre-create path on the left of the colon & ensure owned by your user
       - ./system:/app/system                      # Pre-create path on the left of the colon & ensure owned by your user
+    env_file:
+      - path: .env
+        required: false
     environment:
       - TZ=UTC
       - API_PORT=8000

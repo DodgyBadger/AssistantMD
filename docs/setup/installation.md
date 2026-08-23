@@ -12,6 +12,7 @@
 ```
 AssistantMD
 ├── system/
+├── .env
 └── docker-compose.yml
 ```
 _Pre-creating the `system` folder is important to avoid a "permission denied" error. See the section below on file permission and customizing the runtime user._
@@ -27,6 +28,23 @@ nano docker-compose.yml
 ```
 _Or alternate text editor if you don't have nano._
 
+Create the installation encryption key in `.env` before starting AssistantMD.
+On Linux with OpenSSL installed, run:
+
+```bash
+umask 077
+key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
+unset key
+```
+
+This command writes the key directly to a user-readable-only file without
+printing it. Keep `.env` separate from `system/secrets.db` backups. If `.env` is
+lost, AssistantMD can still start and display system diagnostics, but providers
+and models remain unavailable until the matching key is restored or encrypted
+credentials are reset and re-entered. AssistantMD does not provide key export or
+managed key backup.
+
 ### Open `docker-compose.yml` and update the following:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your
@@ -34,6 +52,8 @@ _Or alternate text editor if you don't have nano._
 - If you have directories in that path that should not be treated as vaults, create a `.vaultignore` file in the directory and it will be ignored.
 - **Do not** change the right hand side: `/app/data` or the `./system:/app/system` mount.
 - Set `TZ` to your local [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so that scheduled workflows run when you expect them to.
+- Keep the `env_file: .env` entry so the container receives the installation
+  encryption key.
 
 **Optional**
 - Change the host side (the left side) of `127.0.0.1:8000:8000` if you want to expose the UI on a different IP/port (e.g. `192.168.0.1:1234:8000`).

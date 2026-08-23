@@ -173,10 +173,15 @@ run_server() {
   cd "${REPO_ROOT}"
   export CONTAINER_DATA_ROOT="${DATA_ROOT}"
   export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
+  local -a env_file_args=()
+  if [ -f "${REPO_ROOT}/.env" ]; then
+    env_file_args=(--env-file "${REPO_ROOT}/.env")
+  fi
   exec uv run uvicorn main:app \
     --host "${address}" \
     --port "${port}" \
     --reload \
+    "${env_file_args[@]}" \
     "${uvicorn_args[@]}"
 }
 

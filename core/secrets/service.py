@@ -225,6 +225,14 @@ class EncryptedSecretsService:
             conn.close()
         return rotated
 
+    def verify_all(self) -> None:
+        """Authenticate every stored record without returning secret values."""
+        conn = connect_secrets(self._system_root)
+        try:
+            self._verify_all(conn)
+        finally:
+            conn.close()
+
     def _verify_all(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute(
             """

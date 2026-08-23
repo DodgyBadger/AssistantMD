@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -30,6 +31,13 @@ from core.secrets import (  # noqa: E402
     EncryptedSecretsService,
     SecretIntegrityError,
     SecretKeyring,
+    initialize_secrets_bootstrap,
+    require_secrets_ready,
+    reset_secrets_bootstrap_status,
+)
+from core.secrets.crypto import (  # noqa: E402
+    ACTIVE_KEY_VERSION_ENV,
+    KEYRING_ENV,
 )
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -38,6 +46,33 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
     """Prove ownership, integrity, and rotation without exposing values."""
 
     async def test_scenario(self) -> None:
+        locked_root = self.run_path / "locked-system"
+        with patch.dict(
+            "os.environ",
+            {KEYRING_ENV: "", ACTIVE_KEY_VERSION_ENV: ""},
+            clear=False,
+        ):
+            locked_status = initialize_secrets_bootstrap(locked_root)
+        self.soft_assert_equal(
+            locked_status.state,
+            "locked",
+            "Missing key configuration should enter secrets-locked mode",
+        )
+        self.soft_assert(
+            not (locked_root / "secrets.db").exists(),
+            "Locked bootstrap must not create or mutate the secrets database",
+        )
+        execution_blocked = False
+        try:
+            require_secrets_ready()
+        except SecretIntegrityError:
+            execution_blocked = True
+        self.soft_assert(
+            execution_blocked,
+            "Secrets-locked bootstrap must block model/secret execution",
+        )
+        reset_secrets_bootstrap_status()
+
         owner = ExecutionAuthority("secret-owner")
         other = ExecutionAuthority("secret-other")
         key_v1 = bytes(range(32))

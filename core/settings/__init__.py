@@ -176,6 +176,20 @@ def validate_settings(
         ConfigurationStatus describing any issues discovered.
     """
     status = ConfigurationStatus()
+    from core.secrets import get_secrets_bootstrap_status
+
+    secrets_status = get_secrets_bootstrap_status()
+    secrets_locked = secrets_status is not None and not secrets_status.ready
+    if secrets_locked:
+        status.add_issue(
+            name="SECRETS_ENCRYPTION_LOCKED",
+            message=(
+                "Encrypted secrets are locked. Restore or configure the installation "
+                "key in .env, then restart AssistantMD. Providers and models are "
+                "unavailable; existing secret state has not been changed."
+            ),
+            severity="warning",
+        )
     template_sections = _load_template_sections()
 
     tools = tools_config or get_tools_config()
@@ -244,6 +258,9 @@ def validate_settings(
             model_config.get("provider") if isinstance(model_config, dict) else None
         )
         status.model_availability[model_name] = True
+        if secrets_locked:
+            status.model_availability[model_name] = False
+            continue
         if not provider_name:
             continue
 

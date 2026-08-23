@@ -46,18 +46,23 @@ contain envelope version, key version, nonce, ciphertext, and created/updated
 timestamps. Secret values are UTF-8 text at the service boundary. Internal OAuth
 namespaces are not returned by generic enumeration APIs.
 
-The installer generates the initial 32-byte key with a cryptographically secure
-random source and writes it to `.env`. The application reads a versioned keyring
-from `ASSISTANTMD_SECRETS_KEYS`, encoded as a compact JSON object whose string
-keys are positive integer versions and whose values are unpadded URL-safe
+Installation instructions require the user to generate the initial 32-byte key
+with a cryptographically secure platform command that writes directly to
+`.env` without printing the key. A committed `.env.example` supplies placeholders
+only. The application reads a versioned keyring from
+`ASSISTANTMD_SECRETS_KEYS`, encoded as a compact JSON object whose string keys
+are positive integer versions and whose values are unpadded URL-safe
 base64-encoded 32-byte keys. `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` selects the
 key for new writes. Initial installation creates version `1` and selects it.
 
-Startup fails before configuration or logging secret lookup when the keyring is
-missing, malformed, contains a non-32-byte key, omits the active version, or
-cannot authenticate an existing record. Errors identify the recovery action but
-never include key material, plaintext, ciphertext, OAuth payloads, or credential
-values.
+When the keyring is missing, malformed, contains a non-32-byte key, omits the
+active version, or cannot authenticate existing records, startup enters an
+explicit secrets-locked state. The API and UI remain available for diagnosis,
+but model/provider execution and secret mutation are disabled, the YAML import
+is not attempted or marked complete, and encrypted state remains untouched. The
+System tab identifies the recovery action but never includes key material,
+plaintext, ciphertext, OAuth payloads, or credential values. There is no
+plaintext or newly generated-key fallback.
 
 Rotation is explicit and versioned:
 
@@ -95,16 +100,18 @@ UI convention. Keeping `local-user` as the only interactive resolver preserves
 the current product while avoiding another secrets migration when multiple users
 are introduced.
 
-An installation-generated `.env` key minimizes setup friction. Excluding key
-export and escrow keeps AssistantMD out of the backup-key-management business;
-all encrypted values are credentials that can be re-entered or reauthorized.
+A documented one-command `.env` key setup fits the existing Compose installation
+model without introducing a separate installer. Excluding key export and escrow
+keeps AssistantMD out of the backup-key-management business; all encrypted
+values are credentials that can be re-entered or reauthorized.
 
 ## Consequences
 
 - `secrets.db` and `.env` must be backed up separately to preserve encrypted
   credentials across disaster recovery.
 - Database-only backups intentionally cannot decrypt secret values.
-- Restoring a database with the wrong or missing key fails fast.
+- Restoring a database with the wrong or missing key leaves secrets locked and
+  disables model/provider execution until the matching keyring is restored.
 - Model API keys and provider OAuth state become principal-owned even while the
   frontend exposes only `local-user`.
 - Operational secrets remain explicitly system-owned and unavailable to user
