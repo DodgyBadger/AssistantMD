@@ -48,7 +48,6 @@ separate parity review.
 
 ## Evidence
 
-- Implementation plan: `ACTIVE_RUN_RECOVERY_IMPLEMENTATION_PLAN.md`
 - Validation:
   `validation/scenarios/integration/core/chat_stream_auto_retry.py`,
   `validation/scenarios/integration/core/tool_recovery_policy.py`

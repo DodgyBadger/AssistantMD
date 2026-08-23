@@ -83,4 +83,3 @@ possibly unsettled mutation.
   `core/tools/failures.py`,
   `core/llm/capabilities/delegate_repeated_failure_guard.py`
 - Validation: `validation/scenarios/integration/core/delegate_tool.py`
-- Implementation plan: `ACTIVE_RUN_RECOVERY_IMPLEMENTATION_PLAN.md`
