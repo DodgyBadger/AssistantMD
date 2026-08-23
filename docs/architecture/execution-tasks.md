@@ -15,6 +15,7 @@ Execution tasks are process-local runtime records for long-running or cancellabl
 - `core/chat/executor.py` — shared chat preparation, model/tool configuration, and history helpers
 - `core/chat/task_execution.py` — task-owned chat execution, per-session chat queueing, and SSE event serialization
 - `core/chat/task_events.py` — process-local replay buffer for streaming chat task events
+- `core/chat/run_recovery.py` — task-local recovery checkpoints and effect policy
 - `core/chat/surface_adapter.py` — normalized adapter contract for non-web chat surfaces
 - `core/chat/compaction.py` — automatic compaction task registration
 - `api/services/execution_tasks.py` — API adapters for task listing, detail,
@@ -127,6 +128,19 @@ execution path.
 For a given chat session, task-owned chat runs are serialized by task creation
 time. Later runs remain `queued` until older non-terminal chat tasks in the same
 `chat_session:<session_id>` scope finish.
+
+The active-task lookup returns a running task when present, otherwise the
+oldest queued task. Chat event buffers retain at most 500 sequenced events per
+task and 100 terminal task streams in the current process. `done`, `cancelled`,
+`error`, and `chat_retry_redirect` terminate a stream; clients reconnect with
+the last sequence and reload canonical history if that cursor has expired.
+
+When effect-aware chat recovery requires vault rollback, the source task fails
+first. Its terminal observer rolls back the source task's mutations and starts
+one replacement task only after rollback reports `completed`, `no_mutations`,
+or `already_rolled_back`. The replacement reuses the accepted request without
+persisting it again. The source stream then publishes `chat_retry_redirect`;
+failure to publish that final redirect does not cancel the replacement task.
 
 Deferred-review resume tasks use the same session gate and task kind. They do
 not persist another user request, and their terminal state is mirrored into the

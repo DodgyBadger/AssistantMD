@@ -9,7 +9,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-CHAT_TASK_TERMINAL_EVENTS = frozenset({"done", "cancelled", "error"})
+CHAT_TASK_TERMINAL_EVENTS = frozenset(
+    {"done", "cancelled", "error", "chat_retry_redirect"}
+)
+
+
+class ChatTaskEventCursorExpired(ValueError):
+    """A replay cursor precedes the oldest retained event for a task."""
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        after_sequence: int,
+        oldest_available_sequence: int,
+        latest_sequence: int,
+    ) -> None:
+        super().__init__(
+            f"Chat task event cursor {after_sequence} expired for task {task_id}"
+        )
+        self.task_id = task_id
+        self.after_sequence = after_sequence
+        self.oldest_available_sequence = oldest_available_sequence
+        self.latest_sequence = latest_sequence
 
 
 @dataclass(frozen=True)
@@ -106,7 +128,20 @@ class ChatTaskEventBuffer:
             stream = self._streams.get(task_id)
             if stream is None:
                 return []
+            self._raise_if_cursor_expired(stream, after_sequence=after_sequence)
             return [event for event in stream.events if event.sequence > after_sequence]
+
+    async def ensure_cursor_available(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+    ) -> None:
+        """Reject a cursor when retained replay can no longer be complete."""
+        async with self._lock:
+            stream = self._streams.get(task_id)
+            if stream is not None:
+                self._raise_if_cursor_expired(stream, after_sequence=after_sequence)
 
     async def is_terminal(self, task_id: str) -> bool:
         """Return whether a task stream has received a terminal event."""
@@ -152,6 +187,7 @@ class ChatTaskEventBuffer:
             if stream is None:
                 stream = _ChatTaskEventStream(task_id=task_id)
                 self._streams[task_id] = stream
+            self._raise_if_cursor_expired(stream, after_sequence=after_sequence)
             events = [
                 event for event in stream.events if event.sequence > after_sequence
             ]
@@ -160,6 +196,24 @@ class ChatTaskEventBuffer:
                 and stream.terminal_sequence <= after_sequence
             )
             return events, terminal_seen, stream.changed
+
+    @staticmethod
+    def _raise_if_cursor_expired(
+        stream: _ChatTaskEventStream,
+        *,
+        after_sequence: int,
+    ) -> None:
+        if not stream.events:
+            return
+        oldest_available_sequence = stream.events[0].sequence
+        if after_sequence >= oldest_available_sequence - 1:
+            return
+        raise ChatTaskEventCursorExpired(
+            task_id=stream.task_id,
+            after_sequence=after_sequence,
+            oldest_available_sequence=oldest_available_sequence,
+            latest_sequence=stream.events[-1].sequence,
+        )
 
     def _trim_stream_events(self, stream: _ChatTaskEventStream) -> None:
         while len(stream.events) > self._max_events_per_task:

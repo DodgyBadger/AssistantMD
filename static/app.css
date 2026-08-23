@@ -2124,13 +2124,21 @@ details summary::-webkit-details-marker {
 .tool-status.tool-status-complete {
     color: rgb(var(--text-primary));
 }
+.tool-status.tool-status-interrupted {
+    color: rgb(var(--text-secondary));
+}
+.tool-status.tool-status-failed {
+    color: rgb(var(--state-error));
+}
 .tool-status:hover,
 .tool-status:focus-visible {
     background: rgb(var(--accent-primary) / 0.1);
     outline: none;
 }
 .tool-status-summary {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
     width: auto;
     min-width: 0;
     max-width: 100%;
@@ -2139,6 +2147,41 @@ details summary::-webkit-details-marker {
     color: rgb(var(--text-primary));
     overflow: hidden;
     box-sizing: border-box;
+}
+.tool-status-state-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 1.5px solid rgb(var(--text-secondary) / 0.55);
+    border-radius: 9999px;
+    color: rgb(var(--accent-primary));
+    font-size: 0.65rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.tool-status-running .tool-status-state-icon {
+    border-color: rgb(var(--accent-primary) / 0.3);
+    border-top-color: rgb(var(--accent-primary));
+    animation: tool-status-spin 0.8s linear infinite;
+}
+.tool-status-complete .tool-status-state-icon {
+    border-color: rgb(var(--accent-primary) / 0.65);
+}
+.tool-status-failed .tool-status-state-icon {
+    border-color: rgb(var(--state-error) / 0.75);
+    color: rgb(var(--state-error));
+}
+.tool-status-interrupted .tool-status-state-icon {
+    border-color: rgb(var(--text-secondary) / 0.7);
+    color: rgb(var(--text-secondary));
+}
+@keyframes tool-status-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 .tool-status-summary::-webkit-details-marker,
 .tool-status-summary::marker {
@@ -2163,7 +2206,7 @@ details summary::-webkit-details-marker {
 }
 .tool-status-line {
     display: block;
-    width: 100%;
+    flex: 1 1 auto;
     max-width: 100%;
     min-width: 0;
     overflow: hidden;
@@ -2173,6 +2216,12 @@ details summary::-webkit-details-marker {
     font-size: 0.74rem;
     font-weight: 500;
     color: rgb(var(--text-secondary));
+}
+@media (prefers-reduced-motion: reduce) {
+    .tool-status-running .tool-status-state-icon {
+        animation: none;
+        border-color: rgb(var(--accent-primary));
+    }
 }
 .tool-status-line span {
     display: inline;
@@ -2266,6 +2315,19 @@ details summary::-webkit-details-marker {
 .tool-status-block .copy-button:hover {
     background: rgb(var(--accent-primary) / 0.2);
     border-color: rgb(var(--accent-primary));
+}
+.tool-status-block .tool-detail-toggle {
+    position: sticky;
+    left: 0;
+    bottom: 0;
+    margin-top: 0.75rem;
+    margin-right: 0.45rem;
+    background: rgb(var(--bg-elevated));
+    color: rgb(var(--text-primary));
+    border: 1px solid rgb(var(--border-primary));
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 12px;
 }
 .tool-status-placeholder {
     font-size: 0.8rem;

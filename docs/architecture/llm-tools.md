@@ -45,6 +45,8 @@ AssistantMD-owned Pydantic AI capabilities live under `core/llm/capabilities/`.
 - `chat_tool_output_cache.py` persists tool call/result events and routes oversized chat tool output to cache through tool lifecycle hooks.
 - `assistant_tools.py` exposes settings-resolved AssistantMD tools through Pydantic AI `Toolset(FunctionToolset(...))` and applies shared tool-definition policy through `PrepareTools(...)`.
 - `factory.py` composes chat capabilities for normal and streaming chat execution.
+- `delegate_repeated_failure_guard.py` blocks repeated delegate child-tool calls
+  that return the same structured failure with identical arguments.
 
 These capabilities preserve the existing chat contracts while moving cross-cutting
 agent behavior toward Pydantic AI's composable capability model.
@@ -141,7 +143,25 @@ construction fails with actionable reconnect/switch-auth guidance.
 
 ## Delegate and Code Execution
 
-`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors. Bounded failures also include structured classification metadata such as failure kind, retryability, and suggested action.
+`delegate` creates a bounded child agent with an isolated prompt, optional model
+alias, optional tool list, and internal request, tool-call, repeated-failure,
+and timeout guardrails. Every child receives a compact system-owned flight card
+and its effective tool-call budget. Completed and bounded-failure returns include
+compact audit metadata summarizing child tool calls, return previews, and tool
+errors. Failures include structured classification, usage, and the latest
+bounded partial output, an audit that distinguishes settled from unsettled
+calls, and cache/artifact references available in process. Delegate progress is
+not persisted and child tools are never replayed
+to construct a failure handoff.
+
+Primary chat attaches a task-scoped Harness `StepPersistence` capability. Its
+bounded in-memory snapshots preserve settled model/tool boundaries during the
+live execution task. A transient disconnect can continue after completed tool
+calls without re-executing them. Unsettled replay-safe tools may run again;
+unsettled vault mutations require terminal task rollback before one replacement
+task starts; unknown or external effects fail closed for manual recovery.
+Recovery state does not survive a process or container restart. Delegate runs
+currently apply automatic retry only while no child tool effect has occurred.
 
 `code_execution` runs constrained Monty Python in the active chat session. It shares the authoring runtime and helper/tool surface used by workflow and context scripts, but is exposed as a normal chat tool.
 

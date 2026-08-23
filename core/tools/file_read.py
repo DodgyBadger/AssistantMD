@@ -17,13 +17,17 @@ from core.vault_state.file_operations import (
     search_vault_files_operation,
 )
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 
 logger = UnifiedLogger(tag="file-read-tool")
 
 
 class FileRead(BaseTool):
     """Read, list, and search vault files."""
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.REPLAY_SAFE
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -125,14 +129,6 @@ class FileRead(BaseTool):
             name="file_read",
             description="Read, list, search, and inspect frontmatter within the current vault.",
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Return usage instructions for read-only file operations."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/file_read.md`
-"""
 
 
 def _to_tool_return(result: VaultFileOperationResult) -> ToolReturn:

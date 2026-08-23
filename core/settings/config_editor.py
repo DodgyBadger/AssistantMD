@@ -51,6 +51,7 @@ def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
         raise SettingsError(f"Setting '{name}' does not exist.")
 
     coerced_value = _coerce_setting_value(raw_value, entry.value)
+    _validate_general_setting_value(name, coerced_value, settings_file)
     settings_file.settings[name] = SettingsEntry(
         value=coerced_value,
         description=entry.description,
@@ -60,6 +61,38 @@ def update_general_setting(name: str, raw_value: str) -> SettingsEntry:
 
     _persist_changes(settings_file)
     return settings_file.settings[name]
+
+
+def _validate_general_setting_value(
+    name: str, value: Any, settings_file: SettingsFile
+) -> None:
+    """Validate safety-sensitive general settings before persistence."""
+    if name == "model_stream_retries" and not 0 <= value <= 5:
+        raise SettingsError("Model stream retries must be between 0 and 5.")
+
+    delay_names = {
+        "model_stream_retry_base_delay_seconds",
+        "model_stream_retry_max_delay_seconds",
+    }
+    if name not in delay_names:
+        return
+    if not 0 <= value <= 300:
+        raise SettingsError(
+            "Model stream retry delays must be between 0 and 300 seconds."
+        )
+
+    settings = _merged_general_settings(settings_file)
+    other_name = next(iter(delay_names - {name}))
+    other_entry = settings.get(other_name)
+    other_value = getattr(other_entry, "value", None)
+    if not isinstance(other_value, int | float):
+        return
+    base_delay = value if name.endswith("base_delay_seconds") else other_value
+    max_delay = value if name.endswith("max_delay_seconds") else other_value
+    if base_delay > max_delay:
+        raise SettingsError(
+            "Model stream retry base delay must not exceed the maximum delay."
+        )
 
 
 def _template_general_settings() -> dict[str, SettingsEntry]:

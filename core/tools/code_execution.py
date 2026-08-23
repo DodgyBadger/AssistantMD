@@ -19,7 +19,7 @@ from core.authoring.runtime import (
 )
 from core.logger import UnifiedLogger
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 
 logger = UnifiedLogger(tag="code-execution-tool")
 
@@ -58,7 +58,10 @@ class CodeExecution(BaseTool):
                         "vault_name and session_id available."
                     )
                 if not code.strip():
-                    return cls.get_instructions().strip()
+                    return (
+                        "code is required. Consult "
+                        "__virtual_docs__/tools/code_execution.md for usage."
+                    )
 
                 workflow_id = f"{vault_name}/chat/{session_id}"
                 host = WorkflowAuthoringHost(
@@ -87,14 +90,6 @@ class CodeExecution(BaseTool):
             name="code_execution",
             description="Run constrained local Python against the current chat session and current AssistantMD runtime.",
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for constrained local code execution."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/code_execution.md`
-"""
 
     @staticmethod
     def _format_execution_result(value: Any, prints: tuple[str, ...]) -> str:
@@ -150,3 +145,7 @@ Full documentation:
                 "`__virtual_docs__/tools/code_execution.md`; this should now be available."
             )
         return None
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.UNKNOWN

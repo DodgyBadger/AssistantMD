@@ -5,6 +5,7 @@
         let mathTypesetQueue = Promise.resolve();
         let currentEmptyStateMessage = CHAT_EMPTY_STATE_MESSAGE;
         let workspaceEditorOpen = false;
+        let activeToolDetailEntry = null;
 
         function isChatPlaceholderNode(node) {
             if (!node || !(node instanceof HTMLElement)) return false;
@@ -427,8 +428,6 @@
                     });
                 }
 
-                entry.container.classList.remove('tool-status-running');
-                entry.container.classList.add('tool-status-complete');
                 entry.events.push(event);
 
                 if (event.args) {
@@ -449,10 +448,18 @@
                     }
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
                     entry.detailResult = entry.result;
+                    entry.resultMetadata = event.result_metadata || {};
                     entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
+                    setToolEntryState(entry, toolResultState(event));
                 }
 
                 updateToolDetail(entry);
+            });
+
+            context.toolStatusMap.forEach((entry) => {
+                if (entry.state === 'running') {
+                    setToolEntryState(entry, 'interrupted');
+                }
             });
 
             updateToolCallsSummary(context);
@@ -838,6 +845,7 @@
                 errorMessages: [],
                 toolSummary: null,
                 postProcessTimer: null,
+                toolElapsedTimer: null,
                 archivedToolEvents: false
             };
         }
@@ -909,6 +917,19 @@
                 context.thinkingExpanded = false;
             }
             renderAssistantMarkdown(context);
+        }
+
+        function resetAssistantStream(context) {
+            if (!context) {
+                return;
+            }
+            context.fullText = '';
+            context.thinkingText = '';
+            context.collapseThinking = false;
+            context.thinkingExpanded = false;
+            context.errorMessages = [];
+            renderAssistantMarkdown(context);
+            setAssistantStatus(context, 'Reconnecting to model', 'thinking');
         }
 
         function renderAssistantMarkdown(context, options = {}) {
@@ -1046,6 +1067,89 @@
             context.indicator.innerHTML = '';
         }
 
+        function formatToolElapsed(entry) {
+            const end = entry.finishedAt || Date.now();
+            const elapsedSeconds = Math.max(0, Math.floor((end - entry.startedAt) / 1000));
+            if (elapsedSeconds < 60) return `${elapsedSeconds}s`;
+            const minutes = Math.floor(elapsedSeconds / 60);
+            return `${minutes}m ${elapsedSeconds % 60}s`;
+        }
+
+        function setToolEntryState(entry, nextState) {
+            if (!entry) return;
+            entry.state = nextState;
+            if (nextState === 'running') {
+                entry.finishedAt = null;
+            } else if (!entry.finishedAt) {
+                entry.finishedAt = Date.now();
+            }
+            entry.container.classList.remove(
+                'tool-status-running',
+                'tool-status-complete',
+                'tool-status-failed',
+                'tool-status-interrupted'
+            );
+            const className = nextState === 'completed' ? 'tool-status-complete' : `tool-status-${nextState}`;
+            entry.container.classList.add(className);
+            const symbols = { running: '', completed: '✓', failed: '×', interrupted: '!' };
+            entry.stateIcon.textContent = symbols[nextState] || '';
+            updateToolElapsed(entry);
+            if (activeToolDetailEntry === entry) {
+                refreshToolCallDetails(entry);
+            }
+        }
+
+        function updateToolElapsed(entry) {
+            if (!entry) return;
+            entry.container.setAttribute('aria-label', `${entry.toolName}: ${toolStateLabel(entry)}`);
+            if (activeToolDetailEntry === entry) {
+                const elapsedBlock = document.querySelector(
+                    '#chat-tool-call-modal [data-tool-call-elapsed] .tool-status-block'
+                );
+                if (elapsedBlock) elapsedBlock.textContent = formatToolElapsed(entry);
+            }
+        }
+
+        function toolStateLabel(entry) {
+            const labels = {
+                running: 'Running',
+                completed: 'Complete',
+                failed: 'Failed',
+                interrupted: 'Interrupted'
+            };
+            return labels[entry.state] || entry.state;
+        }
+
+        function toolResultState(payload) {
+            const outcome = String(payload?.outcome || '').trim().toLowerCase();
+            if (outcome === 'interrupted' || payload?.terminal_state === 'interrupted') return 'interrupted';
+            const metadata = payload?.result_metadata || payload?.metadata || {};
+            const status = String(metadata.status || metadata.state || '').trim().toLowerCase();
+            if (['failed', 'denied'].includes(outcome) || ['error', 'failed', 'failure'].includes(status)) {
+                return 'failed';
+            }
+            return payload?.terminal_state === 'failed' ? 'failed' : 'completed';
+        }
+
+        function startToolElapsedTimer(context) {
+            if (context.toolElapsedTimer) return;
+            context.toolElapsedTimer = window.setInterval(() => {
+                let hasRunning = false;
+                context.toolStatusMap.forEach((entry) => {
+                    if (entry.state !== 'running') return;
+                    hasRunning = true;
+                    updateToolElapsed(entry);
+                });
+                if (!hasRunning) stopToolElapsedTimer(context);
+            }, 1000);
+        }
+
+        function stopToolElapsedTimer(context) {
+            if (!context.toolElapsedTimer) return;
+            window.clearInterval(context.toolElapsedTimer);
+            context.toolElapsedTimer = null;
+        }
+
         function handleToolEvent(context, payload) {
             const toolId = payload.tool_call_id || `tool-${context.toolStatusMap.size + 1}`;
             if (!toolId) return;
@@ -1061,8 +1165,6 @@
             }
 
             if (payload.event === 'tool_call_finished') {
-                entry.container.classList.remove('tool-status-running');
-                entry.container.classList.add('tool-status-complete');
                 if (payload.result !== undefined && payload.result !== null) {
                     entry.result = payload.result;
                     entry.detailResult = payload.result_detail !== undefined && payload.result_detail !== null
@@ -1070,12 +1172,18 @@
                         : payload.result;
                 }
                 entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
+                entry.resultMetadata = payload.result_metadata || {};
                 entry.events.push(payload);
+                setToolEntryState(entry, toolResultState(payload));
                 updateToolDetail(entry);
+                if (activeToolDetailEntry === entry) {
+                    void loadToolCallDetail(entry, { force: true });
+                }
 
                 const hasRunning = Array.from(context.toolStatusMap.values())
-                    .some(item => item.container.classList.contains('tool-status-running'));
+                    .some(item => item.state === 'running');
                 if (!hasRunning) {
+                    stopToolElapsedTimer(context);
                     setAssistantStatus(context, 'Continuing response', 'thinking');
                 }
             } else if (payload.event === 'tool_call_started') {
@@ -1086,7 +1194,9 @@
                         : payload.arguments;
                 }
                 entry.events.push(payload);
+                setToolEntryState(entry, 'running');
                 updateToolDetail(entry);
+                startToolElapsedTimer(context);
             }
             updateToolCallsSummary(context);
         }
@@ -1102,6 +1212,11 @@
             const line = document.createElement('span');
             line.className = 'tool-status-line';
 
+            const stateIcon = document.createElement('span');
+            stateIcon.className = 'tool-status-state-icon';
+            stateIcon.setAttribute('aria-hidden', 'true');
+
+            summary.appendChild(stateIcon);
             summary.appendChild(line);
 
             container.appendChild(summary);
@@ -1119,6 +1234,7 @@
                 artifactContainer,
                 summary,
                 line,
+                stateIcon,
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
                 args: payload.arguments || null,
@@ -1127,10 +1243,19 @@
                     : payload.arguments || null,
                 result: null,
                 detailResult: null,
+                resultMetadata: {},
                 artifactRef: payload.artifact_ref || '',
                 archived: Boolean(context.archivedToolEvents),
+                state: 'running',
+                startedAt: Date.now(),
+                finishedAt: null,
+                detailLoaded: Boolean(context.archivedToolEvents),
+                detailLoading: false,
+                detailError: '',
+                detailRequestId: 0,
                 events: []
             };
+            setToolEntryState(entry, 'running');
             updateToolDetail(entry);
             context.toolStatusMap.set(toolId, entry);
 
@@ -1138,6 +1263,13 @@
         }
 
         function finalizeAssistantMessage(context, metadata) {
+            stopToolElapsedTimer(context);
+            context.toolStatusMap.forEach((entry) => {
+                if (entry.state === 'running') {
+                    setToolEntryState(entry, 'interrupted');
+                }
+            });
+            updateToolCallsSummary(context);
             renderAssistantMarkdown(context, { finalize: true });
 
             const hasError = context.errorMessages.length > 0;
@@ -1381,31 +1513,7 @@
         function openToolCallDetails(entry) {
             if (!entry) return;
             closeToolCallDetails();
-
-            const sections = [];
-            sections.push({ label: 'Tool', value: entry.toolName || 'Tool call' });
-            sections.push({ label: 'Tool call ID', value: entry.toolId || '' });
-            sections.push({
-                label: 'Context',
-                value: entry.archived
-                    ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
-                    : 'Retained in active chat context.'
-            });
-            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
-                ? entry.detailArgs
-                : entry.args;
-            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
-                ? entry.detailResult
-                : entry.result;
-            if (!isEmptyToolValue(argsForDetail)) {
-                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
-            }
-            if (!isEmptyToolValue(resultForDetail)) {
-                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
-            }
-            if (entry.events.length > 0) {
-                sections.push({ label: 'Events', value: entry.events });
-            }
+            activeToolDetailEntry = entry;
 
             const overlay = document.createElement('div');
             overlay.id = 'chat-tool-call-modal';
@@ -1427,12 +1535,6 @@
                     <div class="p-4" data-tool-call-modal-body></div>
                 </section>
             `;
-            const body = overlay.querySelector('[data-tool-call-modal-body]');
-            if (body) {
-                sections.forEach(({ label, value, kind }) => {
-                    body.appendChild(createToolDetailSection(label, value, { kind }));
-                });
-            }
             overlay.addEventListener('click', (event) => {
                 const target = event.target;
                 if (!(target instanceof Element)) return;
@@ -1442,6 +1544,107 @@
             });
             document.addEventListener('keydown', handleToolCallModalKeydown);
             document.body.appendChild(overlay);
+            refreshToolCallDetails(entry);
+            void loadToolCallDetail(entry);
+        }
+
+        async function loadToolCallDetail(entry, options = {}) {
+            const vault = elements.vaultSelector?.value || '';
+            const sessionId = state.sessionId || '';
+            if (!entry || !vault || !sessionId || (entry.detailLoaded && !options.force)) return;
+
+            const requestId = entry.detailRequestId + 1;
+            entry.detailRequestId = requestId;
+            entry.detailLoading = true;
+            entry.detailError = '';
+            refreshToolCallDetails(entry);
+            try {
+                const response = await fetch(
+                    `api/chat/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(entry.toolId)}?vault_name=${encodeURIComponent(vault)}`
+                );
+                if (!response.ok) {
+                    if (response.status === 404 && entry.state === 'running') return;
+                    throw new Error(`Full tool detail is unavailable (HTTP ${response.status}).`);
+                }
+                const payload = await response.json();
+                if (entry.detailRequestId !== requestId) return;
+                if (payload.args !== undefined && payload.args !== null) {
+                    entry.detailArgs = payload.args;
+                }
+                if (payload.result_text !== undefined && payload.result_text !== null) {
+                    entry.detailResult = {
+                        text: payload.result_text,
+                        ...(payload.result_metadata && Object.keys(payload.result_metadata).length > 0
+                            ? { metadata: payload.result_metadata }
+                            : {}),
+                        ...(payload.artifact_ref ? { artifact_ref: payload.artifact_ref } : {})
+                    };
+                }
+                entry.resultMetadata = payload.result_metadata || {};
+                entry.artifactRef = payload.artifact_ref || entry.artifactRef || '';
+                if (entry.state !== 'running') {
+                    setToolEntryState(entry, toolResultState({ result_metadata: entry.resultMetadata }));
+                }
+                entry.detailLoaded = true;
+            } catch (error) {
+                if (entry.detailRequestId === requestId) {
+                    entry.detailError = error.message || 'Full tool detail is unavailable.';
+                }
+            } finally {
+                if (entry.detailRequestId === requestId) {
+                    entry.detailLoading = false;
+                    refreshToolCallDetails(entry);
+                }
+            }
+        }
+
+        function refreshToolCallDetails(entry) {
+            if (!entry || activeToolDetailEntry !== entry) return;
+            const body = document.querySelector('#chat-tool-call-modal [data-tool-call-modal-body]');
+            if (!body) return;
+
+            const sections = [
+                { label: 'Tool', value: entry.toolName || 'Tool call' },
+                { label: 'Tool call ID', value: entry.toolId || '' },
+                { label: 'Status', value: toolStateLabel(entry) },
+                { label: 'Elapsed', value: formatToolElapsed(entry), elapsed: true },
+                {
+                    label: 'Context',
+                    value: entry.archived
+                        ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
+                        : 'Retained in active chat context.'
+                }
+            ];
+            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
+                ? entry.detailArgs
+                : entry.args;
+            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
+                ? entry.detailResult
+                : entry.result;
+            if (!isEmptyToolValue(argsForDetail)) {
+                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
+            }
+            if (!isEmptyToolValue(resultForDetail)) {
+                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
+            }
+            if (entry.state === 'failed' && !isEmptyToolValue(entry.resultMetadata)) {
+                sections.push({ label: 'Failure', value: entry.resultMetadata });
+            }
+            if (entry.detailLoading) {
+                sections.push({ label: 'Full detail', value: 'Loading…' });
+            } else if (entry.detailError) {
+                sections.push({ label: 'Full detail', value: entry.detailError });
+            }
+            if (entry.events.length > 0) {
+                sections.push({ label: 'Events', value: entry.events });
+            }
+
+            body.replaceChildren();
+            sections.forEach(({ label, value, kind, elapsed }) => {
+                const section = createToolDetailSection(label, value, { kind });
+                if (elapsed) section.dataset.toolCallElapsed = 'true';
+                body.appendChild(section);
+            });
         }
 
         function closeToolCallDetails() {
@@ -1449,6 +1652,7 @@
             if (modal) {
                 modal.remove();
             }
+            activeToolDetailEntry = null;
             document.removeEventListener('keydown', handleToolCallModalKeydown);
         }
 
@@ -1549,9 +1753,32 @@
             block.className = options.kind === 'code'
                 ? 'tool-status-block tool-status-block-code'
                 : 'tool-status-block';
-            block.textContent = value;
-            const copyButton = createCopyButton(() => utils.getCopyableText(block), 'code-copy-button');
-            block.appendChild(copyButton);
+            const fullText = String(value ?? '');
+            const displayLimit = 4000;
+            let expanded = fullText.length <= displayLimit;
+
+            const renderBlock = (focusToggle = false) => {
+                block.textContent = expanded
+                    ? fullText
+                    : `${fullText.slice(0, displayLimit).trimEnd()}\n… [display collapsed]`;
+                if (fullText.length > displayLimit) {
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'copy-button tool-detail-toggle';
+                    toggle.textContent = expanded ? 'Show less' : 'Show all';
+                    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                    toggle.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        expanded = !expanded;
+                        renderBlock(true);
+                    });
+                    block.appendChild(toggle);
+                    if (focusToggle) toggle.focus();
+                }
+                const copyButton = createCopyButton(() => fullText, 'code-copy-button');
+                block.appendChild(copyButton);
+            };
+            renderBlock();
             return block;
         }
 
@@ -1653,6 +1880,7 @@
             createAssistantStreamingMessage,
             appendAssistantDelta,
             appendAssistantThinkingDelta,
+            resetAssistantStream,
             renderAssistantMarkdown,
             setAssistantStatus,
             handleToolEvent,

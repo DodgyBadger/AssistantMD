@@ -18,7 +18,7 @@ from core.settings.store import (
     get_enabled_tool_names,
     get_enabled_tools_config,
 )
-from core.tools.base import BaseTool
+from core.tools.base import BaseTool, ToolRecoveryPolicy, tool_recovery_metadata
 from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
@@ -33,6 +33,7 @@ class ToolSpec:
     params: dict[str, str]
     tool_class: type[BaseTool]
     tool_function: Tool
+    recovery_policy: ToolRecoveryPolicy
     week_start_day: int = 0
 
 
@@ -150,7 +151,7 @@ def resolve_tool_binding(
             wrapped_tool = _wrap_tool_function(
                 tool_function,
                 tool_name=tool_name,
-                tool_instructions=tool_class.get_instructions(),
+                recovery_policy=tool_class.get_recovery_policy(),
                 requires_approval=(
                     True if tool_name in (approval_tool_names or set()) else None
                 ),
@@ -162,6 +163,7 @@ def resolve_tool_binding(
                     params={},
                     tool_class=tool_class,
                     tool_function=wrapped_tool,
+                    recovery_policy=tool_class.get_recovery_policy(),
                     week_start_day=week_start_day,
                 )
             )
@@ -362,7 +364,7 @@ def _wrap_tool_function(
     tool: Tool,
     *,
     tool_name: str,
-    tool_instructions: str | None = None,
+    recovery_policy: ToolRecoveryPolicy = ToolRecoveryPolicy.UNKNOWN,
     requires_approval: bool | None = None,
 ) -> Tool:
     original_func = cast(Callable[..., Any], tool.function)
@@ -372,8 +374,7 @@ def _wrap_tool_function(
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions
-                or f"No usage instructions available for tool '{tool_name}'.",
+                f"Tool '{tool_name}' requires named parameters.",
             )
         binding_error = _tool_argument_binding_error(
             original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
@@ -381,7 +382,7 @@ def _wrap_tool_function(
         if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, binding_error, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error),
                 status="error",
                 error_type="invalid_parameters",
             )
@@ -395,8 +396,7 @@ def _wrap_tool_function(
         if not _has_meaningful_tool_args(kwargs):
             return _to_tool_return(
                 tool_name,
-                tool_instructions
-                or f"No usage instructions available for tool '{tool_name}'.",
+                f"Tool '{tool_name}' requires named parameters.",
             )
         binding_error = _tool_argument_binding_error(
             original_func, original_takes_ctx=original_takes_ctx, ctx=ctx, kwargs=kwargs
@@ -404,7 +404,7 @@ def _wrap_tool_function(
         if binding_error is not None:
             return _to_tool_return(
                 tool_name,
-                _format_tool_type_error(tool_name, binding_error, tool_instructions),
+                _format_tool_type_error(tool_name, binding_error),
                 status="error",
                 error_type="invalid_parameters",
             )
@@ -447,6 +447,13 @@ def _wrap_tool_function(
             if requires_approval is not None
             else getattr(tool, "requires_approval", False)
         ),
+        metadata={
+            **dict(getattr(tool, "metadata", None) or {}),
+            "assistantmd": {
+                **dict((getattr(tool, "metadata", None) or {}).get("assistantmd", {})),
+                **tool_recovery_metadata(recovery_policy),
+            },
+        },
     )
 
 
@@ -486,15 +493,10 @@ def _has_meaningful_tool_args(kwargs: dict[str, Any]) -> bool:
     return False
 
 
-def _format_tool_type_error(
-    tool_name: str, exc: Exception, instructions: str | None
-) -> str:
-    prefix = (
+def _format_tool_type_error(tool_name: str, exc: Exception) -> str:
+    return (
         f"Invalid parameters for tool '{tool_name}': {exc}. Use named parameters only."
     )
-    if instructions:
-        return f"{prefix}\n\n{instructions}"
-    return prefix
 
 
 def _to_tool_return(

@@ -12,11 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from core.chat.executor import PreparedChatExecution
 from core.utils.messages import extract_role_and_text
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FailingStreamAgent:
     """Fake agent that fails after streaming starts."""
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         raise RuntimeError("forced streaming chat failure for logging validation")
         yield None

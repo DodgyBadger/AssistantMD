@@ -1,12 +1,12 @@
 import json
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
 
 from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessage, UserContent
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.constants import DEFAULT_TOOL_RETRIES
 from core.llm.model_factory import build_model_instance
@@ -26,6 +26,15 @@ class CollectedAgentRun:
 
     output: Any
     messages: list[ModelMessage]
+
+
+@dataclass
+class AgentRunProgress:
+    """Latest process-local settled state observed while collecting one run."""
+
+    messages: list[ModelMessage] = field(default_factory=list)
+    output: Any = None
+    usage: RunUsage = field(default_factory=RunUsage)
 
 
 async def create_agent(
@@ -154,6 +163,8 @@ async def collect_response(
     message_history: Sequence[ModelMessage] | None = None,
     deps: Any = None,
     usage_limits: UsageLimits | None = None,
+    usage: RunUsage | None = None,
+    progress: AgentRunProgress | None = None,
 ) -> CollectedAgentRun:
     """Run an agent through the streaming transport and return one final result.
 
@@ -167,11 +178,27 @@ async def collect_response(
         kwargs["message_history"] = message_history
     if usage_limits is not None:
         kwargs["usage_limits"] = usage_limits
+    effective_usage = usage
+    if progress is not None:
+        if effective_usage is None:
+            effective_usage = progress.usage
+        else:
+            progress.usage = effective_usage
+    if effective_usage is not None:
+        kwargs["usage"] = effective_usage
 
     async with agent.run_stream(prompt, **kwargs) as result:
-        async for _ in result.stream_output(debounce_by=None):
-            pass
-        return CollectedAgentRun(
-            output=await result.get_output(),
-            messages=list(result.all_messages()),
-        )
+        try:
+            async for streamed_output in result.stream_output(debounce_by=None):
+                if progress is not None:
+                    progress.output = streamed_output
+                    progress.messages = list(result.all_messages())
+            output = await result.get_output()
+            messages = list(result.all_messages())
+            if progress is not None:
+                progress.output = output
+                progress.messages = messages
+            return CollectedAgentRun(output=output, messages=messages)
+        finally:
+            if progress is not None:
+                progress.messages = list(result.all_messages())

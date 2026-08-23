@@ -6,7 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
-from pydantic_ai.capabilities import HistoryProcessor
+from pydantic_ai.capabilities import ProcessHistory
 
 from core.authoring.context_manager import (
     ContextTemplateExecutionError,
@@ -29,7 +29,7 @@ def build_chat_context_capability(
     history_processor_factory: Callable[
         ..., Any
     ] = build_context_manager_history_processor,
-) -> HistoryProcessor[Any] | None:
+) -> ProcessHistory[Any] | None:
     """Build a context-template history processor capability when available."""
     template_candidates = build_context_template_candidates(context_template)
     if not template_candidates:
@@ -45,7 +45,7 @@ def build_chat_context_capability(
                 template_name=candidate,
                 workspace_path=workspace_path,
             )
-            return HistoryProcessor(_normalize_history_processor(processor))
+            return ProcessHistory(_normalize_history_processor(processor))
         except ContextTemplateExecutionError as exc:
             logger.warning(
                 "Context template failed, trying next in fallback chain",

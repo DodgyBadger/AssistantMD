@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,7 +23,8 @@ from pydantic_ai import (
     ThinkingPartDelta,
 )
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ModelMessage, TextPart, ToolReturnPart
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from core.authoring.context_manager import ContextTemplateExecutionError
 from core.chat import executor as chat_executor
@@ -35,13 +36,16 @@ from core.chat.deferred_reviews import (
     capture_deferred_review_context,
     create_deferred_review,
     has_pending_deferred_review,
+    log_deferred_review_created,
     mark_deferred_review_terminal,
     summarize_deferred_review,
 )
-from core.chat.task_events import ChatTaskEventBuffer
+from core.chat.run_recovery import ChatRecoveryStrategy
+from core.chat.task_events import ChatTaskEventBuffer, ChatTaskEventCursorExpired
 from core.identity import ExecutionAuthority
 from core.llm.capabilities.chat_context import build_context_template_error_details
 from core.llm.capabilities.chat_tool_output_cache import tool_result_as_text
+from core.llm.stream_retry import ModelStreamRetryPolicy
 from core.runtime.buffers import get_session_buffer_store
 from core.runtime.execution_tasks import (
     ExecutionTaskKind,
@@ -56,8 +60,9 @@ from core.runtime.task_runner import (
     ExecutionTaskHooks,
     ExecutionTaskSpec,
 )
-from core.tools.failures import classify_exception
+from core.tools.failures import classify_exception, classify_tool_result_state
 from core.tools.utils import estimate_token_count
+from core.vault_state.rollback import rollback_task_file_mutations
 
 _CHAT_STORE = ChatStore()
 
@@ -68,6 +73,16 @@ class ChatStreamTaskStart:
 
     task: ExecutionTaskSnapshot
     session_id: str
+
+
+class ChatRollbackRestartRequired(RuntimeError):
+    """Signal that a failed chat must roll back before whole-turn replay."""
+
+    def __init__(self, *, cause: Exception, attempt: int, max_attempts: int) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.attempt = attempt
+        self.max_attempts = max_attempts
 
 
 CHAT_TASK_EVENT_BUFFER = ChatTaskEventBuffer()
@@ -120,9 +135,138 @@ async def start_prepared_chat_stream_task(
         ),
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+            on_failed=lambda task_id, exc: _handle_failed_chat_task(
+                task_id=task_id,
+                exc=exc,
+                prepared=prepared,
+                vault_name=vault_name,
+                vault_path=vault_path,
+                session_id=session_id,
+                event_buffer=buffer,
+            ),
         ),
     )
     return ChatStreamTaskStart(task=task, session_id=session_id)
+
+
+async def _handle_failed_chat_task(
+    *,
+    task_id: str,
+    exc: BaseException,
+    prepared: chat_executor.PreparedChatExecution,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    event_buffer: ChatTaskEventBuffer,
+) -> None:
+    """Start whole-turn replay only after task-terminal rollback succeeds."""
+    if not isinstance(exc, ChatRollbackRestartRequired):
+        return
+    chat_executor.logger.info(
+        "Chat rollback-restart recovery hook invoked",
+        data={
+            "event": "chat_failed_task_recovery_hook",
+            "status": "started",
+            "task_id": task_id,
+            "session_id": session_id,
+            "vault_name": vault_name,
+            "error_type": type(exc).__name__,
+        },
+    )
+    try:
+        rollback = rollback_task_file_mutations(
+            task_id=task_id,
+            terminal_status="failed",
+            reason="chat_recovery_restart",
+        )
+        rollback_succeeded = rollback.rollback_status == "completed" or (
+            rollback.skipped
+            and rollback.reason in {"already_rolled_back", "no_mutations"}
+        )
+        if not rollback_succeeded:
+            raise RuntimeError(rollback.reason or "rollback_incomplete")
+
+        replacement_prepared = replace(
+            prepared,
+            automatic_restart_count=prepared.automatic_restart_count + 1,
+        )
+        replacement = await start_prepared_chat_stream_task(
+            prepared=replacement_prepared,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=event_buffer,
+            persist_user_request=False,
+        )
+    except Exception as rollback_exc:
+        chat_executor.logger.error(
+            "Primary chat rollback recovery abandoned",
+            data={
+                "event": "chat_recovery_abandoned",
+                "status": "failed",
+                "task_id": task_id,
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "reason": "rollback_or_restart_unavailable",
+                "error_type": type(rollback_exc).__name__,
+                "error": str(rollback_exc),
+            },
+        )
+        if not await event_buffer.is_terminal(task_id):
+            await event_buffer.append(
+                task_id,
+                "error",
+                _error_event_data(
+                    "\n\nError: Automatic recovery could not safely restart after "
+                    "rolling back vault changes.",
+                    {
+                        "strategy": "manual_required",
+                        "reason": "rollback_or_restart_unavailable",
+                    },
+                ),
+            )
+        return
+
+    redirect_data = {
+        "event": "chat_retry_redirect",
+        "source_task_id": task_id,
+        "replacement_task_id": replacement.task.task_id,
+        "session_id": session_id,
+        "strategy": "terminal_rollback_restart",
+        "rollback_status": rollback.rollback_status or rollback.reason,
+        "attempt": exc.attempt,
+        "max_attempts": exc.max_attempts,
+        "reset_response": True,
+    }
+    try:
+        await event_buffer.append(
+            task_id,
+            "chat_retry_redirect",
+            redirect_data,
+        )
+        chat_executor.logger.info(
+            "Primary chat redirected to rollback-restart replacement",
+            data={
+                **redirect_data,
+                "event": "chat_recovery_redirected",
+                "status": "completed",
+                "vault_name": vault_name,
+            },
+        )
+    except RuntimeError as redirect_exc:
+        chat_executor.logger.error(
+            "Primary chat replacement started but redirect publication failed",
+            data={
+                "event": "chat_recovery_redirect_failed",
+                "status": "failed",
+                "task_id": task_id,
+                "replacement_task_id": replacement.task.task_id,
+                "session_id": session_id,
+                "vault_name": vault_name,
+                "error_type": type(redirect_exc).__name__,
+                "error": str(redirect_exc),
+            },
+        )
 
 
 async def start_chat_turn_retry_task(
@@ -424,9 +568,11 @@ async def start_queued_chat_stream_task(
     """Start a streaming chat task that waits behind earlier tasks in its session."""
     runtime = get_runtime_context()
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
+    prepared_for_failure: chat_executor.PreparedChatExecution | None = None
 
     async def _run(tracked_task: ExecutionTaskSnapshot) -> None:
         async def _run_in_session_gate() -> None:
+            nonlocal prepared_for_failure
             try:
                 if has_pending_deferred_review(
                     vault_name=vault_name, session_id=session_id
@@ -451,6 +597,7 @@ async def start_queued_chat_stream_task(
                     chat_mode=chat_mode,
                     display_prompt=display_prompt,
                 )
+                prepared_for_failure = prepared
             except asyncio.CancelledError:
                 raise
             except (
@@ -494,6 +641,19 @@ async def start_queued_chat_stream_task(
             _run_in_session_gate,
         )
 
+    async def _on_failed(task_id: str, exc: BaseException) -> None:
+        if prepared_for_failure is None:
+            return
+        await _handle_failed_chat_task(
+            task_id=task_id,
+            exc=exc,
+            prepared=prepared_for_failure,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=buffer,
+        )
+
     task = await runtime.task_runner.start_background(
         ExecutionTaskSpec(
             kind=ExecutionTaskKind.CHAT,
@@ -513,6 +673,7 @@ async def start_queued_chat_stream_task(
         _run,
         hooks=ExecutionTaskHooks(
             on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+            on_failed=_on_failed,
         ),
         start_immediately=False,
     )
@@ -658,6 +819,7 @@ async def _run_prepared_chat_stream_task(
     should_mark_started = task is None
     full_response = ""
     final_result = None
+    messages_for_canonical_commit: list[ModelMessage] | None = None
     deferred_review = None
     tool_activity: dict[str, dict[str, Any]] = {}
     session_buffer_store = get_session_buffer_store(session_id)
@@ -707,69 +869,186 @@ async def _run_prepared_chat_stream_task(
         )
 
         try:
-            async for event in prepared.agent.run_stream_events(
-                prepared.user_prompt,
-                message_history=prepared.message_history,
-                deferred_tool_results=prepared.deferred_tool_results,
-                deps=run_deps,
-                usage_limits=chat_executor._chat_usage_limits(),
-            ):
-                if isinstance(event, PartStartEvent):
-                    if isinstance(event.part, TextPart) and event.part.content:
-                        delta_text = event.part.content
-                        full_response += delta_text
-                        await event_buffer.append(
-                            task.task_id,
-                            "delta",
-                            _delta_event_data(delta_text),
+            usage = RunUsage()
+            usage_limits = chat_executor._chat_usage_limits()
+            retry_policy = ModelStreamRetryPolicy.from_settings()
+            attempt_prompt = prepared.user_prompt
+            attempt_history = prepared.message_history
+            for attempt in range(1, retry_policy.max_attempts + 1):
+                try:
+                    final_result, full_response = await _collect_chat_stream_attempt(
+                        prepared=prepared,
+                        user_prompt=attempt_prompt,
+                        message_history=attempt_history,
+                        run_deps=run_deps,
+                        usage=usage,
+                        usage_limits=usage_limits,
+                        task_id=task.task_id,
+                        event_buffer=event_buffer,
+                        tool_activity=tool_activity,
+                        vault_name=vault_name,
+                        session_id=session_id,
+                    )
+                    if (
+                        attempt_history is not None
+                        and attempt_history is not prepared.message_history
+                    ):
+                        history_prefix_length = len(prepared.message_history or [])
+                        messages_for_canonical_commit = [
+                            *attempt_history[history_prefix_length:],
+                            *final_result.new_messages(),
+                        ]
+                    break
+                except Exception as exc:
+                    classification = classify_exception(exc, phase="agent_stream")
+                    checkpoint = None
+                    recovery_decision = None
+                    if classification.retryable and prepared.recovery is not None:
+                        recovery_decision = await prepared.recovery.decide(
+                            conversation_id=session_id
                         )
-                    elif isinstance(event.part, ThinkingPart) and event.part.content:
-                        await event_buffer.append(
-                            task.task_id,
-                            "thinking_delta",
-                            _thinking_delta_event_data(event.part.content),
-                        )
-
-                elif isinstance(event, PartDeltaEvent):
-                    if isinstance(event.delta, TextPartDelta):
-                        delta_text = event.delta.content_delta
-                        full_response += delta_text
-                        await event_buffer.append(
-                            task.task_id,
-                            "delta",
-                            _delta_event_data(delta_text),
-                        )
-                    elif isinstance(event.delta, ThinkingPartDelta):
-                        thinking_delta = event.delta.content_delta
-                        if thinking_delta:
+                        checkpoint = recovery_decision.checkpoint
+                    replay_scope = "no_chat_tools"
+                    if checkpoint is not None:
+                        assert recovery_decision is not None
+                        attempt_prompt = None
+                        attempt_history = checkpoint.messages
+                        replay_scope = str(recovery_decision.strategy)
+                    recovery_supported = recovery_decision is not None and (
+                        recovery_decision.strategy
+                        in {
+                            ChatRecoveryStrategy.RESUME_SNAPSHOT,
+                            ChatRecoveryStrategy.REPLAY_NO_EFFECT,
+                        }
+                    )
+                    rollback_restart = recovery_decision is not None and (
+                        recovery_decision.strategy
+                        is ChatRecoveryStrategy.TERMINAL_ROLLBACK_RESTART
+                    )
+                    if (
+                        classification.retryable
+                        and rollback_restart
+                        and retry_policy.can_retry_after(attempt)
+                        and prepared.automatic_restart_count < retry_policy.retries
+                    ):
+                        raise ChatRollbackRestartRequired(
+                            cause=exc,
+                            attempt=attempt,
+                            max_attempts=retry_policy.max_attempts,
+                        ) from exc
+                    can_retry = (
+                        classification.retryable
+                        and retry_policy.can_retry_after(attempt)
+                        and (not prepared.tools or recovery_supported)
+                    )
+                    if not can_retry:
+                        if prepared.tools and recovery_decision is not None:
+                            rejection_reason = (
+                                "retry_budget_exhausted"
+                                if not retry_policy.can_retry_after(attempt)
+                                else recovery_decision.reason
+                            )
+                            rejected_data = {
+                                "event": "chat_recovery_rejected",
+                                "status": "rejected",
+                                "task_id": task.task_id,
+                                "session_id": session_id,
+                                "vault_name": vault_name,
+                                "strategy": str(recovery_decision.strategy),
+                                "reason": rejection_reason,
+                                "completed_tool_count": (
+                                    recovery_decision.completed_tool_count
+                                ),
+                                "unresolved_tool_count": (
+                                    recovery_decision.unresolved_tool_count
+                                ),
+                            }
+                            chat_executor.logger.warning(
+                                "Primary chat automatic recovery rejected",
+                                data=rejected_data,
+                            )
                             await event_buffer.append(
                                 task.task_id,
-                                "thinking_delta",
-                                _thinking_delta_event_data(thinking_delta),
+                                "chat_recovery_rejected",
+                                rejected_data,
                             )
-
-                elif isinstance(event, FunctionToolCallEvent):
-                    await _publish_tool_call_started(
-                        task_id=task.task_id,
-                        event=event,
-                        event_buffer=event_buffer,
-                        tool_activity=tool_activity,
-                        vault_name=vault_name,
-                        session_id=session_id,
+                        raise
+                    delay_seconds = retry_policy.delay_after(attempt)
+                    retry_data = {
+                        "event": "chat_retry_scheduled",
+                        "task_id": task.task_id,
+                        "session_id": session_id,
+                        "model": prepared.model,
+                        "attempt": attempt,
+                        "next_attempt": attempt + 1,
+                        "max_attempts": retry_policy.max_attempts,
+                        "delay_seconds": delay_seconds,
+                        "failure_kind": classification.failure_kind,
+                        "error_type": classification.error_type,
+                        "replay_scope": replay_scope,
+                        "strategy": replay_scope,
+                        "reset_response": True,
+                    }
+                    if recovery_decision is not None:
+                        retry_data.update(
+                            {
+                                "completed_tool_count": (
+                                    recovery_decision.completed_tool_count
+                                ),
+                                "unresolved_tool_count": (
+                                    recovery_decision.unresolved_tool_count
+                                ),
+                            }
+                        )
+                    if checkpoint is not None:
+                        assert recovery_decision is not None
+                        retry_data.update(
+                            {
+                                "recovery_run_id": checkpoint.run_id,
+                                "recovery_step_index": checkpoint.step_index,
+                                "trimmed_failed_response": (
+                                    checkpoint.trimmed_failed_response
+                                ),
+                            }
+                        )
+                        checkpoint_data = {
+                            "event": "chat_recovery_checkpoint_selected",
+                            "status": "selected",
+                            "task_id": task.task_id,
+                            "session_id": session_id,
+                            "vault_name": vault_name,
+                            "run_id": checkpoint.run_id,
+                            "step_index": checkpoint.step_index,
+                            "message_count": len(checkpoint.messages),
+                            "trimmed_failed_response": (
+                                checkpoint.trimmed_failed_response
+                            ),
+                            "interrupted": checkpoint.interrupted,
+                            "completed_tool_count": (
+                                recovery_decision.completed_tool_count
+                            ),
+                            "unresolved_tool_count": (
+                                recovery_decision.unresolved_tool_count
+                            ),
+                        }
+                        chat_executor.logger.info(
+                            "Primary chat recovery checkpoint selected",
+                            data=checkpoint_data,
+                        )
+                        await event_buffer.append(
+                            task.task_id,
+                            "chat_recovery_checkpoint_selected",
+                            checkpoint_data,
+                        )
+                    chat_executor.logger.warning(
+                        "Primary chat retry scheduled", data=retry_data
                     )
-
-                elif isinstance(event, FunctionToolResultEvent):
-                    await _publish_tool_call_finished(
-                        task_id=task.task_id,
-                        event=event,
-                        event_buffer=event_buffer,
-                        tool_activity=tool_activity,
-                        vault_name=vault_name,
-                        session_id=session_id,
+                    await event_buffer.append(
+                        task.task_id,
+                        "chat_retry_scheduled",
+                        retry_data,
                     )
-
-                elif isinstance(event, AgentRunResultEvent):
-                    final_result = event.result
+                    await asyncio.sleep(delay_seconds)
 
             if final_result:
                 deferred_requests = getattr(final_result, "output", None)
@@ -777,30 +1056,38 @@ async def _run_prepared_chat_stream_task(
                     session_id=session_id,
                     vault_name=vault_name,
                 ):
-                    _CHAT_STORE.add_messages(
-                        session_id,
-                        vault_name,
-                        chat_executor._messages_after_accepted_user_request(
-                            final_result.new_messages()
-                        ),
-                    )
-                    chat_executor._clear_latest_turn_failure(
-                        session_id=session_id,
-                        vault_name=vault_name,
-                    )
-                    if isinstance(deferred_requests, DeferredToolRequests):
-                        deferred_review = create_deferred_review(
-                            vault_name=vault_name,
-                            session_id=session_id,
-                            originating_task_id=task.task_id,
-                            requests=deferred_requests,
-                            resume_messages=list(final_result.all_messages()),
-                            resume_config=prepared.resume_config(),
-                            review_context=capture_deferred_review_context(
-                                vault_path=vault_path,
-                                requests=deferred_requests,
+                    with _CHAT_STORE.transaction() as connection:
+                        _CHAT_STORE.add_messages(
+                            session_id,
+                            vault_name,
+                            chat_executor._messages_after_accepted_user_request(
+                                messages_for_canonical_commit
+                                or final_result.new_messages()
                             ),
+                            connection=connection,
                         )
+                        chat_executor._clear_latest_turn_failure(
+                            session_id=session_id,
+                            vault_name=vault_name,
+                            connection=connection,
+                        )
+                        if isinstance(deferred_requests, DeferredToolRequests):
+                            deferred_review = create_deferred_review(
+                                vault_name=vault_name,
+                                session_id=session_id,
+                                originating_task_id=task.task_id,
+                                requests=deferred_requests,
+                                resume_messages=list(final_result.all_messages()),
+                                resume_config=prepared.resume_config(),
+                                review_context=capture_deferred_review_context(
+                                    vault_path=vault_path,
+                                    requests=deferred_requests,
+                                ),
+                                connection=connection,
+                                log_created=False,
+                            )
+                if deferred_review is not None:
+                    log_deferred_review_created(deferred_review)
                 chat_executor._log_chat_lifecycle(
                     (
                         "Streaming chat execution paused for inline review"
@@ -888,6 +1175,49 @@ async def _run_prepared_chat_stream_task(
                             "finish_reason": "cancelled",
                         }
                     ],
+                },
+            )
+            raise
+        except ChatRollbackRestartRequired as exc:
+            classification = classify_exception(exc.cause, phase="agent_stream")
+            chat_executor._log_chat_failure(
+                "Streaming chat requires rollback before automatic restart",
+                vault_name=vault_name,
+                session_id=session_id,
+                model=prepared.model,
+                tools=prepared.tools,
+                streaming=True,
+                phase="agent_stream",
+                prompt_length=len(prepared.prompt_for_history),
+                attached_image_count=prepared.attached_image_count,
+                context_template=prepared.context_template,
+                workspace_path=prepared.workspace_path,
+                extra={
+                    **chat_executor._summarize_tool_activity(tool_activity),
+                    "task_id": task.task_id,
+                    "strategy": "terminal_rollback_restart",
+                },
+                exc=exc.cause,
+            )
+            chat_executor._record_latest_turn_failure(
+                session_id=session_id,
+                vault_name=vault_name,
+                exc=exc.cause,
+                phase="agent_stream",
+                streaming=True,
+                model=prepared.model,
+                tools=prepared.tools,
+                chat_mode=prepared.chat_mode,
+            )
+            chat_executor.logger.info(
+                "Primary chat awaiting task rollback",
+                data={
+                    "event": "chat_recovery_awaiting_rollback",
+                    "status": "waiting",
+                    "task_id": task.task_id,
+                    "session_id": session_id,
+                    "vault_name": vault_name,
+                    "failure_kind": classification.failure_kind,
                 },
             )
             raise
@@ -1049,6 +1379,84 @@ async def _run_prepared_chat_stream_task(
         )
 
 
+async def _collect_chat_stream_attempt(
+    *,
+    prepared: chat_executor.PreparedChatExecution,
+    user_prompt: chat_executor.PromptInput,
+    message_history: list[ModelMessage] | None,
+    run_deps: chat_executor.ChatRunDeps,
+    usage: RunUsage,
+    usage_limits: UsageLimits | None,
+    task_id: str,
+    event_buffer: ChatTaskEventBuffer,
+    tool_activity: dict[str, dict[str, Any]],
+    vault_name: str,
+    session_id: str,
+) -> tuple[Any, str]:
+    """Collect one Pydantic chat stream attempt and publish provisional events."""
+    final_result = None
+    full_response = ""
+    async with prepared.agent.run_stream_events(
+        user_prompt,
+        message_history=message_history,
+        deferred_tool_results=prepared.deferred_tool_results,
+        deps=run_deps,
+        usage_limits=usage_limits,
+        usage=usage,
+        conversation_id=session_id,
+    ) as stream_events:
+        async for event in stream_events:
+            if isinstance(event, PartStartEvent):
+                if isinstance(event.part, TextPart) and event.part.content:
+                    delta_text = event.part.content
+                    full_response += delta_text
+                    await event_buffer.append(
+                        task_id, "delta", _delta_event_data(delta_text)
+                    )
+                elif isinstance(event.part, ThinkingPart) and event.part.content:
+                    await event_buffer.append(
+                        task_id,
+                        "thinking_delta",
+                        _thinking_delta_event_data(event.part.content),
+                    )
+            elif isinstance(event, PartDeltaEvent):
+                if isinstance(event.delta, TextPartDelta):
+                    delta_text = event.delta.content_delta
+                    full_response += delta_text
+                    await event_buffer.append(
+                        task_id, "delta", _delta_event_data(delta_text)
+                    )
+                elif isinstance(event.delta, ThinkingPartDelta):
+                    thinking_delta = event.delta.content_delta
+                    if thinking_delta:
+                        await event_buffer.append(
+                            task_id,
+                            "thinking_delta",
+                            _thinking_delta_event_data(thinking_delta),
+                        )
+            elif isinstance(event, FunctionToolCallEvent):
+                await _publish_tool_call_started(
+                    task_id=task_id,
+                    event=event,
+                    event_buffer=event_buffer,
+                    tool_activity=tool_activity,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+            elif isinstance(event, FunctionToolResultEvent):
+                await _publish_tool_call_finished(
+                    task_id=task_id,
+                    event=event,
+                    event_buffer=event_buffer,
+                    tool_activity=tool_activity,
+                    vault_name=vault_name,
+                    session_id=session_id,
+                )
+            elif isinstance(event, AgentRunResultEvent):
+                final_result = event.result
+    return final_result, full_response
+
+
 async def stream_chat_task_sse(
     *,
     task_id: str,
@@ -1072,6 +1480,16 @@ async def stream_chat_task_sse(
             except TimeoutError:
                 yield ": keepalive\n\n"
                 continue
+            except ChatTaskEventCursorExpired as exc:
+                pending_event = None
+                yield f"data: {json.dumps({
+                    'event': 'chat_event_cursor_expired',
+                    'task_id': task_id,
+                    'after_sequence': exc.after_sequence,
+                    'oldest_available_sequence': exc.oldest_available_sequence,
+                    'latest_sequence': exc.latest_sequence,
+                })}\n\n"
+                return
             except StopAsyncIteration:
                 pending_event = None
                 return
@@ -1204,28 +1622,40 @@ async def _publish_tool_call_finished(
     session_id: str,
 ) -> None:
     tool_id = event.tool_call_id
-    result_part = getattr(event, "result", None)
+    result_part = event.part
     tool_name = getattr(result_part, "tool_name", "tool")
     result_content = None
-    if result_part is not None:
-        try:
+    try:
+        if isinstance(result_part, ToolReturnPart):
             result_content = result_part.model_response_str()
-        except Exception as exc:  # noqa: BLE001 - defensive fallback
-            chat_executor.logger.debug(
-                "model_response_str failed; using raw content",
-                data={"error": str(exc)},
-            )
-            result_content = getattr(result_part, "content", None)
+        else:
+            result_content = result_part.model_response()
+    except Exception as exc:  # noqa: BLE001 - defensive fallback
+        chat_executor.logger.debug(
+            "Tool result rendering failed; using raw content",
+            data={"error": str(exc)},
+        )
+        result_content = getattr(result_part, "content", None)
+    result_metadata = _tool_result_event_metadata(result_part)
+    outcome = str(getattr(result_part, "outcome", "success") or "success")
+    terminal_state = classify_tool_result_state(
+        outcome=outcome,
+        metadata=result_metadata,
+    )
     tool_activity[tool_id] = {
         "tool_name": tool_name,
-        "status": "completed",
+        "status": terminal_state,
     }
     payload = {
         "event": "tool_call_finished",
         "tool_call_id": tool_id,
         "tool_name": tool_name,
         "result": chat_executor._normalize_tool_result(result_content),
+        "outcome": outcome,
+        "terminal_state": terminal_state,
     }
+    if result_metadata:
+        payload["result_metadata"] = result_metadata
     artifact_ref = _artifact_ref_from_tool_result(result_content)
     if artifact_ref:
         payload["artifact_ref"] = artifact_ref
@@ -1240,6 +1670,8 @@ async def _publish_tool_call_finished(
             "session_id": session_id,
             "tool_call_id": tool_id,
             "tool_name": tool_name,
+            "terminal_state": terminal_state,
+            "failure_kind": result_metadata.get("failure_kind"),
             "result_length": len(result_text),
             "result_token_estimate": (
                 estimate_token_count(result_text) if result_text else 0
@@ -1248,6 +1680,34 @@ async def _publish_tool_call_finished(
         },
     )
     await event_buffer.append(task_id, "tool_call_finished", payload)
+
+
+_TOOL_RESULT_EVENT_METADATA_KEYS = (
+    "status",
+    "state",
+    "error_type",
+    "failure_kind",
+    "retryable",
+    "phase",
+    "suggested_action",
+    "http_status",
+    "retry_after",
+    "limit_kind",
+    "limit_setting",
+    "limit",
+)
+
+
+def _tool_result_event_metadata(result_part: Any) -> dict[str, Any]:
+    """Return the bounded result-state envelope safe for task events."""
+    metadata = getattr(result_part, "metadata", None)
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: chat_executor._normalize_tool_detail(metadata[key])
+        for key in _TOOL_RESULT_EVENT_METADATA_KEYS
+        if key in metadata
+    }
 
 
 def _artifact_ref_from_tool_result(result_content: Any) -> str | None:

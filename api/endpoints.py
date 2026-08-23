@@ -22,6 +22,7 @@ from api.import_models import (
     ImportUrlResponse,
 )
 from core.chat.executor import UploadedImageAttachment
+from core.chat.task_events import ChatTaskEventCursorExpired
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
     start_chat_turn_retry_task,
@@ -70,6 +71,7 @@ from .models import (
     ChatSessionWorkspaceRequest,
     ChatTaskRequest,
     ChatTaskStartResponse,
+    ChatToolCallDetailResponse,
     ChatWorkspaceInfo,
     DeferredReviewResponse,
     DeferredReviewSubmitRequest,
@@ -159,6 +161,7 @@ from .services import (
     get_chat_history_compaction_status,
     get_chat_session_detail,
     get_chat_session_summary,
+    get_chat_tool_call_detail,
     get_configurable_models,
     get_configurable_providers,
     get_enabled_chat_tool_names,
@@ -695,6 +698,23 @@ async def chat_task_events(
                 message=f"Chat task events are no longer retained: {task_id}",
                 details={"task_id": task_id},
             )
+        try:
+            await CHAT_TASK_EVENT_BUFFER.ensure_cursor_available(
+                task_id,
+                after_sequence=after_sequence,
+            )
+        except ChatTaskEventCursorExpired as exc:
+            raise APIException(
+                status_code=410,
+                error_type="ChatTaskEventCursorExpired",
+                message="Chat task events are no longer retained from the requested cursor.",
+                details={
+                    "task_id": task_id,
+                    "after_sequence": exc.after_sequence,
+                    "oldest_available_sequence": exc.oldest_available_sequence,
+                    "latest_sequence": exc.latest_sequence,
+                },
+            ) from exc
         return StreamingResponse(
             stream_chat_task_sse(
                 task_id=task_id,
@@ -1814,6 +1834,22 @@ async def chat_session_detail(
     """
     try:
         return get_chat_session_detail(vault_name, session_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/chat/sessions/{session_id}/tools/{tool_call_id}",
+    response_model=ChatToolCallDetailResponse,
+)
+async def chat_tool_call_detail(
+    session_id: str,
+    tool_call_id: str,
+    vault_name: str,
+) -> ChatToolCallDetailResponse | JSONResponse:
+    """Load complete persisted detail for one session-owned tool call."""
+    try:
+        return get_chat_tool_call_detail(vault_name, session_id, tool_call_id)
     except Exception as e:
         return create_error_response(e)
 

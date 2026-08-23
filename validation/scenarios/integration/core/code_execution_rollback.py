@@ -13,6 +13,7 @@ from core.chat.executor import PreparedChatExecution
 from core.runtime.execution_tasks import chat_session_scope
 from core.tools.code_execution import CodeExecution
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _CodeExecutionFailingAgent:
@@ -46,6 +47,7 @@ class _CodeExecutionFailingAgent:
             )
         raise RuntimeError("forced parent chat failure after code_execution mutation")
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         await self.run(*args, **kwargs)
         if False:

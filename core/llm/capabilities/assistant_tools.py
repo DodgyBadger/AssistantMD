@@ -37,7 +37,7 @@ def build_assistant_tools_capabilities(
 async def _prepare_assistantmd_tool_definitions(
     ctx: RunContext[Any],
     tool_defs: list[ToolDefinition],
-) -> list[ToolDefinition] | None:
+) -> list[ToolDefinition]:
     """Apply common AssistantMD metadata to prepared tool definitions."""
     del ctx
     prepared: list[ToolDefinition] = []

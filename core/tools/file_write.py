@@ -20,13 +20,17 @@ from core.vault_state.file_operations import (
     write_vault_file_operation,
 )
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 
 logger = UnifiedLogger(tag="file-write-tool")
 
 
 class FileWrite(BaseTool):
     """Create, edit, move, and delete vault files."""
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.VAULT_TRANSACTIONAL
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -114,14 +118,6 @@ class FileWrite(BaseTool):
                 "call write with overwrite=true."
             ),
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Return usage instructions for mutating file operations."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/file_write.md`
-"""
 
 
 def _execute_write_operation(

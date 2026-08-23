@@ -125,7 +125,7 @@ async def _map_probe_history(
             ),
         ],
         settings,
-        ModelRequestParameters(function_tools=[], builtin_tools=[], output_tools=[]),
+        ModelRequestParameters(function_tools=[], native_tools=[], output_tools=[]),
     )
     return [dict(item) for item in mapped]
 

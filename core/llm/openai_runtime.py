@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -79,7 +79,10 @@ class DefaultOpenAIOAuthRuntimeAdapter:
             api_key=bearer_token,
             base_url=OPENAI_CHATGPT_CODEX_BASE_URL,
             default_headers=headers or None,
-            http_client=http_client,
+            # OpenAI 3.x annotates this as its httpx2 client while Pydantic AI's
+            # provider retry transport still supplies a runtime-compatible
+            # httpx client. Keep the cast at this upstream typing boundary.
+            http_client=cast(Any, http_client),
         )
         return OpenAIProvider(openai_client=client)
 

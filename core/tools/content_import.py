@@ -10,7 +10,7 @@ from pydantic_ai.tools import Tool
 
 from core.ingestion.import_service import ContentImportResult, ContentImportService
 from core.logger import UnifiedLogger
-from core.tools.base import BaseTool
+from core.tools.base import BaseTool, ToolRecoveryPolicy
 from core.tools.failures import FailureClassification, tool_failure_return
 
 logger = UnifiedLogger(tag="content-import-tool")
@@ -18,6 +18,10 @@ logger = UnifiedLogger(tag="content-import-tool")
 
 class ContentImport(BaseTool):
     """Submit and inspect durable ingestion jobs in the current vault."""
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.MANUAL_REQUIRED
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -102,13 +106,6 @@ class ContentImport(BaseTool):
                 "and inspect the resulting ingestion jobs."
             ),
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        return """
-Full documentation:
-- `__virtual_docs__/tools/content_import.md`
-"""
 
 
 def _success_result(

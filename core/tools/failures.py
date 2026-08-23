@@ -3,12 +3,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import openai
-from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+    UsageLimitExceeded,
+)
 from pydantic_ai.messages import ToolReturn
+
+ToolTerminalState = Literal["completed", "failed", "interrupted"]
+
+
+def classify_tool_result_state(
+    *, outcome: Any = None, metadata: Any = None
+) -> ToolTerminalState:
+    """Classify a completed tool transport by its structured domain outcome."""
+    normalized_outcome = str(outcome or "success").strip().lower()
+    if normalized_outcome == "interrupted":
+        return "interrupted"
+    result_metadata = metadata if isinstance(metadata, dict) else {}
+    status = (
+        str(result_metadata.get("status") or result_metadata.get("state") or "")
+        .strip()
+        .lower()
+    )
+    if normalized_outcome in {"failed", "denied"} or status in {
+        "error",
+        "failed",
+        "failure",
+    }:
+        return "failed"
+    return "completed"
 
 
 @dataclass(frozen=True)
@@ -182,6 +211,42 @@ def classify_exception(
             http_status=status_code,
             suggested_action="Change the model request or selected model before retrying.",
             metadata={"model_name": exc.model_name},
+        )
+    if isinstance(exc, ModelAPIError):
+        lowered = str(exc).lower()
+        if any(
+            token in lowered
+            for token in (
+                "connection error",
+                "connection closed",
+                "connection reset",
+                "disconnected",
+                "network error",
+            )
+        ):
+            return FailureClassification(
+                error_type=type(exc).__name__,
+                failure_kind="transient_network",
+                retryable=True,
+                phase=phase,
+                message=str(exc),
+                suggested_action=(
+                    "Retry with backoff; check network connectivity if failures continue."
+                ),
+                metadata={"model_name": exc.model_name},
+            )
+    if isinstance(exc, UnexpectedModelBehavior) and (
+        "streamed response ended without content or tool calls" in str(exc).lower()
+    ):
+        return FailureClassification(
+            error_type=type(exc).__name__,
+            failure_kind="transient_provider",
+            retryable=True,
+            phase=phase,
+            message=str(exc),
+            suggested_action=(
+                "Retry with backoff; use another model/provider if the stream remains incomplete."
+            ),
         )
     if isinstance(exc, httpx.TimeoutException):
         return FailureClassification(

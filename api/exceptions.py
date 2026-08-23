@@ -56,6 +56,18 @@ class InvalidVaultNameError(APIException):
         )
 
 
+class InvalidSystemSettingError(APIException):
+    """Raised when a user provides an invalid system setting value."""
+
+    def __init__(self, setting_name: str, message: str):
+        super().__init__(
+            status_code=400,
+            error_type="InvalidSystemSetting",
+            message=message,
+            details={"setting_name": setting_name},
+        )
+
+
 class SystemConfigurationError(APIException):
     """Raised when there are system configuration issues."""
 

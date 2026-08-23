@@ -365,14 +365,6 @@ class WorkflowRun(BaseTool):
             description="List managed automations and run, start, check, cancel, enable, or disable them; run/start can also execute an explicit vault-relative workflow path.",
         )
 
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for workflow execution."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/workflow_run.md`
-"""
-
     @staticmethod
     def _resolve_vault_name(vault_path: str | None, data_root: Path) -> str:
         if not vault_path:

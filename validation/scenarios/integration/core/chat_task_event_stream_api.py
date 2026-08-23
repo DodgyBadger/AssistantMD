@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
 
 from core.chat.chat_store import ChatStore
 from core.chat.executor import PreparedChatExecution
+from core.chat.task_events import ChatTaskEventBuffer
 from core.chat.task_execution import (
     CHAT_TASK_EVENT_BUFFER,
     start_prepared_chat_stream_task,
@@ -28,6 +29,7 @@ from core.chat.task_execution import (
 )
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FakeStreamResult:
@@ -43,6 +45,7 @@ class _FakeStreamResult:
 
 
 class _CompletingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=ThinkingPart("thinking start "))
         yield PartDeltaEvent(
@@ -59,6 +62,7 @@ class _CompletingStreamAgent:
 
 
 class _DeltaThenHangingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("still running"))
         await asyncio.Event().wait()
@@ -135,6 +139,66 @@ class ChatTaskEventStreamApiScenario(BaseScenario):
             and '"event": "done"' in replay_after_delta.text,
             "Cursor replay should skip events at or before after_sequence",
         )
+
+        original_event_limit = (
+            CHAT_TASK_EVENT_BUFFER._max_events_per_task
+        )  # noqa: SLF001
+        CHAT_TASK_EVENT_BUFFER._max_events_per_task = 2  # noqa: SLF001
+        try:
+            overflowed = await start_prepared_chat_stream_task(
+                prepared=PreparedChatExecution(
+                    agent=_CompletingStreamAgent(),
+                    message_history=None,
+                    prompt_for_history="Expire the initial event cursor.",
+                    user_prompt="Expire the initial event cursor.",
+                    attached_image_count=0,
+                    model="test",
+                    tools=[],
+                ),
+                vault_name=vault.name,
+                vault_path=str(vault),
+                session_id="chat_task_event_stream_api_session",
+            )
+            overflowed_task = await self._wait_for_task_terminal(
+                overflowed.task.task_id
+            )
+            self.soft_assert_equal(
+                overflowed_task.status if overflowed_task else None,
+                "completed",
+                "Overflow probe should complete before cursor expiry is queried",
+            )
+            expired_cursor = self.call_api(
+                f"/api/chat/tasks/{overflowed.task.task_id}/events",
+                params={"after_sequence": 0},
+            )
+            self.soft_assert_equal(
+                expired_cursor.status_code,
+                410,
+                "A cursor before the retained event window should be rejected",
+            )
+            self.soft_assert(
+                "ChatTaskEventCursorExpired" in expired_cursor.text
+                and "oldest_available_sequence" in expired_cursor.text,
+                "Cursor expiry should return a stable recovery envelope",
+            )
+            race_buffer = ChatTaskEventBuffer(max_events_per_task=2)
+            await race_buffer.append("cursor-race", "delta", {"index": 1})
+            await race_buffer.append("cursor-race", "delta", {"index": 2})
+            await race_buffer.append("cursor-race", "delta", {"index": 3})
+            race_stream = stream_chat_task_sse(
+                task_id="cursor-race",
+                event_buffer=race_buffer,
+                after_sequence=0,
+            )
+            race_payload = await race_stream.__anext__()
+            self.soft_assert(
+                "chat_event_cursor_expired" in race_payload,
+                "A cursor gap discovered after API preflight should close the SSE stream explicitly",
+            )
+        finally:
+            CHAT_TASK_EVENT_BUFFER._max_events_per_task = (  # noqa: SLF001
+                original_event_limit
+            )
 
         original_terminal_limit = (
             CHAT_TASK_EVENT_BUFFER._max_terminal_tasks

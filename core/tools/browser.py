@@ -38,7 +38,7 @@ from core.web.security import (
     sanitize_urls_in_text_for_log,
 )
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 from .failures import classify_exception, tool_failure_return
 
 logger = UnifiedLogger(tag="browser-tool")
@@ -265,14 +265,6 @@ class BrowserTool(BaseTool):
             f"{available // (1024 * 1024)} MiB available, "
             f"{required // (1024 * 1024)} MiB required."
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Get usage instructions for the browser tool."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/browser.md`
-"""
 
     @classmethod
     async def _browse(
@@ -958,3 +950,7 @@ Full documentation:
         if first_line.startswith("result_type:"):
             return first_line.split(":", 1)[1].strip() or "error"
         return "error"
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.REPLAY_SAFE

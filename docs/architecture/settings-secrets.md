@@ -58,6 +58,13 @@ Runtime-relevant general settings include:
 - `chat_tool_calls_limit`: maximum tool calls allowed in one chat response; `0` disables the limit.
 - `chat_model_requests_limit`: maximum model requests allowed in one chat
   response; `0` disables the circuit breaker.
+- `model_stream_retries`: retries after a retryable model-stream disconnect in
+  primary chat and delegate runs; `0` disables automatic retries. Primary chat
+  uses effect-aware checkpoints, while a delegate retries only before any child
+  tool effect. Both paths must prove that retry will not duplicate tool effects.
+- `model_stream_retry_base_delay_seconds` and
+  `model_stream_retry_max_delay_seconds`: initial and maximum delays for bounded
+  exponential stream-retry backoff.
 - `file_list_max_results`: maximum structured results returned by
   `file_read(list)`; `0` disables the cap.
 - `file_search_timeout_seconds`: timeout for `file_read(search)`.
@@ -66,6 +73,13 @@ Runtime-relevant general settings include:
   stored with provider-native messages, which can increase replay tokens and
   reduce portability across providers.
 - `delegate_tool_calls_limit`: maximum tool calls allowed inside one `delegate` child-agent run; `0` disables the limit.
+- `delegate_model_requests_limit`: maximum model requests allowed inside one
+  delegate child-agent run; `0` disables the limit. Keep at least one of the
+  delegate model-request, tool-call, or timeout limits enabled to retain runaway
+  protection.
+- `delegate_repeated_failure_limit`: maximum consecutive structured failures
+  allowed for one delegate child tool with identical arguments before later
+  unchanged attempts are blocked; `0` disables the guard.
 - `delegate_timeout_seconds`: maximum seconds allowed for one `delegate` child-agent run; `0` disables the timeout.
 - `workflow_task_timeout_seconds`: maximum runtime seconds for a workflow execution task; `0` disables the workflow task timeout.
 - `max_concurrent_workflows`: maximum workflows allowed to run at once across all vaults; `0` disables the global concurrency limit.

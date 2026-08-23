@@ -210,6 +210,12 @@ eligible for automatic or explicit file-state rollback.
 
 Rollback failures are logged as `task_rollback_failed`; they do not replace the original task terminal status.
 
+Effect-aware chat recovery uses this terminal boundary for interrupted
+vault-transactional tool calls. It starts a replacement chat task only after
+automatic rollback completes or reports the safe idempotent outcomes
+`no_mutations` or `already_rolled_back`; a rollback conflict or failure leaves
+the source task failed and requires manual recovery.
+
 ## Observability
 
 The Dashboard tab shows recent attributed vault activity through:

@@ -20,6 +20,8 @@ const RESTART_STORAGE_KEY = 'assistantmd_restart_required';
 const CHAT_COMPOSE_HEIGHT_STORAGE_KEY = 'assistantmd_chat_compose_height';
 const CHAT_COMPOSE_DEFAULT_HEIGHT = 288;
 const CHAT_COMPOSE_MIN_HEIGHT = 128;
+const CHAT_STREAM_MAX_RECONNECTS = 3;
+const CHAT_STREAM_RECONNECT_BASE_DELAY_MS = 500;
 
 const state = {
     sessionId: null,
@@ -661,6 +663,30 @@ function applyChatStreamPayload(payload, assistantMessage) {
         return { finished: false, messageCount: 0 };
     }
 
+    if (eventType === 'chat_retry_scheduled') {
+        if (payload.reset_response) {
+            chatRendering.resetAssistantStream(assistantMessage);
+        }
+        return { finished: false, messageCount: 0 };
+    }
+
+    if (eventType === 'chat_retry_redirect') {
+        if (payload.reset_response) {
+            chatRendering.resetAssistantStream(assistantMessage);
+        }
+        return {
+            finished: false,
+            messageCount: 0,
+            nextTaskId: payload.replacement_task_id || '',
+        };
+    }
+
+    if (eventType === 'chat_event_cursor_expired') {
+        chatRendering.resetAssistantStream(assistantMessage);
+        setAssistantStatus(assistantMessage, 'Finishing in background…', 'thinking');
+        return { finished: false, messageCount: 0, eventGap: true };
+    }
+
     if (eventType === 'tool_call_started' || eventType === 'tool_call_finished') {
         handleToolEvent(assistantMessage, payload);
         return { finished: false, messageCount: 0 };
@@ -701,21 +727,73 @@ function applyChatStreamPayload(payload, assistantMessage) {
     return { finished: false, messageCount: 0 };
 }
 
+function applyConsumedChatStreamEvent(
+    payload,
+    assistantMessage,
+    { currentTaskId, lastSequence, messageCount, finishReason }
+) {
+    const nextSequence = Number.isInteger(payload.sequence)
+        ? Math.max(lastSequence, payload.sequence)
+        : lastSequence;
+    const result = applyChatStreamPayload(payload, assistantMessage);
+    return {
+        currentTaskId: result.nextTaskId || currentTaskId,
+        lastSequence: result.nextTaskId ? 0 : nextSequence,
+        messageCount: Math.max(messageCount, result.messageCount),
+        finishReason: result.finishReason || finishReason,
+        finished: Boolean(result.finished),
+        eventGap: Boolean(result.eventGap),
+        redirected: Boolean(result.nextTaskId),
+        receivedSequence: Number.isInteger(payload.sequence),
+    };
+}
+
 async function consumeChatTaskEvents(taskId, assistantMessage, abortController) {
+    let currentTaskId = taskId;
     let lastSequence = 0;
     let messageCount = 0;
     let finished = false;
     let finishReason = '';
+    let reconnectAttempts = 0;
+    let eventGap = false;
 
     while (!finished) {
-        const streamUrl = `api/chat/tasks/${encodeURIComponent(taskId)}/events?after_sequence=${lastSequence}`;
-        const response = await fetch(streamUrl, {
-            method: 'GET',
-            signal: abortController.signal,
-            headers: { Accept: 'text/event-stream' }
-        });
+        let redirected = false;
+        const streamUrl = `api/chat/tasks/${encodeURIComponent(currentTaskId)}/events?after_sequence=${lastSequence}`;
+        let response;
+        try {
+            response = await fetch(streamUrl, {
+                method: 'GET',
+                signal: abortController.signal,
+                headers: { Accept: 'text/event-stream' }
+            });
+        } catch (error) {
+            if (abortController.signal.aborted || reconnectAttempts >= CHAT_STREAM_MAX_RECONNECTS) {
+                throw error;
+            }
+            reconnectAttempts += 1;
+            setAssistantStatus(assistantMessage, 'Reconnecting…', 'thinking');
+            await waitForChatStreamReconnect(reconnectAttempts, abortController.signal);
+            continue;
+        }
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
+            if (response.status === 410) {
+                eventGap = true;
+                chatRendering.resetAssistantStream(assistantMessage);
+                setAssistantStatus(assistantMessage, 'Finishing in background…', 'thinking');
+                await waitForChatTaskTerminal(currentTaskId, abortController.signal);
+                break;
+            }
+            if (
+                (response.status === 408 || response.status === 429 || response.status >= 500)
+                && reconnectAttempts < CHAT_STREAM_MAX_RECONNECTS
+            ) {
+                reconnectAttempts += 1;
+                setAssistantStatus(assistantMessage, 'Reconnecting…', 'thinking');
+                await waitForChatStreamReconnect(reconnectAttempts, abortController.signal);
+                continue;
+            }
             throw new Error(errorData.message || `HTTP ${response.status}`);
         }
         if (!response.body || !response.body.getReader) {
@@ -726,46 +804,92 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
         const decoder = new TextDecoder();
         let buffer = '';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const events = buffer.split(/\r?\n\r?\n/);
-            buffer = events.pop() || '';
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split(/\r?\n\r?\n/);
+                buffer = events.pop() || '';
 
-            for (const rawEvent of events) {
-                const payload = parseSseEvent(rawEvent);
-                if (!payload) continue;
-                if (Number.isInteger(payload.sequence)) {
-                    lastSequence = Math.max(lastSequence, payload.sequence);
+                for (const rawEvent of events) {
+                    const payload = parseSseEvent(rawEvent);
+                    if (!payload) continue;
+                    const transition = applyConsumedChatStreamEvent(
+                        payload,
+                        assistantMessage,
+                        { currentTaskId, lastSequence, messageCount, finishReason }
+                    );
+                    currentTaskId = transition.currentTaskId;
+                    lastSequence = transition.lastSequence;
+                    messageCount = transition.messageCount;
+                    finishReason = transition.finishReason;
+                    finished = transition.finished;
+                    eventGap = transition.eventGap;
+                    redirected = transition.redirected;
+                    if (transition.receivedSequence) {
+                        reconnectAttempts = 0;
+                    }
+                    if (redirected) {
+                        state.activeChatTaskId = currentTaskId;
+                        reconnectAttempts = 0;
+                    }
+                    if (finished || eventGap || redirected) break;
                 }
-                const result = applyChatStreamPayload(payload, assistantMessage);
-                messageCount = Math.max(messageCount, result.messageCount);
-                finishReason = result.finishReason || finishReason;
-                if (result.finished) {
-                    finished = true;
+                if (redirected) {
+                    await reader.cancel();
                     break;
                 }
+                if (finished || eventGap) break;
             }
-            if (finished) break;
+        } catch (error) {
+            if (abortController.signal.aborted || reconnectAttempts >= CHAT_STREAM_MAX_RECONNECTS) {
+                throw error;
+            }
+            reconnectAttempts += 1;
+            setAssistantStatus(assistantMessage, 'Reconnecting…', 'thinking');
+            await waitForChatStreamReconnect(reconnectAttempts, abortController.signal);
+            continue;
+        }
+
+        if (redirected) continue;
+
+        if (eventGap) {
+            await waitForChatTaskTerminal(currentTaskId, abortController.signal);
+            break;
         }
 
         if (!finished && buffer.trim()) {
             const payload = parseSseEvent(buffer);
             if (payload) {
-                if (Number.isInteger(payload.sequence)) {
-                    lastSequence = Math.max(lastSequence, payload.sequence);
+                const transition = applyConsumedChatStreamEvent(
+                    payload,
+                    assistantMessage,
+                    { currentTaskId, lastSequence, messageCount, finishReason }
+                );
+                currentTaskId = transition.currentTaskId;
+                lastSequence = transition.lastSequence;
+                messageCount = transition.messageCount;
+                finishReason = transition.finishReason;
+                finished = transition.finished;
+                eventGap = transition.eventGap;
+                redirected = transition.redirected;
+                if (redirected) {
+                    state.activeChatTaskId = currentTaskId;
                 }
-                const result = applyChatStreamPayload(payload, assistantMessage);
-                messageCount = Math.max(messageCount, result.messageCount);
-                finishReason = result.finishReason || finishReason;
-                finished = result.finished;
             }
         }
 
+        if (redirected) continue;
+
+        if (eventGap) {
+            await waitForChatTaskTerminal(currentTaskId, abortController.signal);
+            break;
+        }
+
         if (!finished) {
-            const taskResponse = await fetch(`api/tasks/${encodeURIComponent(taskId)}`, {
+            const taskResponse = await fetch(`api/tasks/${encodeURIComponent(currentTaskId)}`, {
                 cache: 'no-store',
                 signal: abortController.signal
             });
@@ -776,7 +900,61 @@ async function consumeChatTaskEvents(taskId, assistantMessage, abortController) 
         }
     }
 
-    return { finished, messageCount, finishReason };
+    return { finished, messageCount, finishReason, eventGap };
+}
+
+function waitForChatStreamReconnect(attempt, signal) {
+    const delayMs = CHAT_STREAM_RECONNECT_BASE_DELAY_MS * (2 ** (attempt - 1));
+    return new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+        }, delayMs);
+        const onAbort = () => {
+            window.clearTimeout(timeoutId);
+            reject(new DOMException('Chat stream reconnect cancelled.', 'AbortError'));
+        };
+        if (signal.aborted) {
+            onAbort();
+            return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+function releaseActiveChatStream(abortController) {
+    if (state.activeChatAbortController !== abortController) return false;
+    state.isLoading = false;
+    state.isCancellingChat = false;
+    state.activeChatSessionId = null;
+    state.activeChatTaskId = null;
+    state.activeChatAbortController = null;
+    return true;
+}
+
+async function waitForChatTaskTerminal(taskId, signal) {
+    let pollFailures = 0;
+    while (!signal.aborted) {
+        try {
+            const response = await fetch(`api/tasks/${encodeURIComponent(taskId)}`, {
+                cache: 'no-store',
+                signal,
+            });
+            if (!response.ok) {
+                throw new Error(`Could not read background chat task: HTTP ${response.status}`);
+            }
+            const task = await response.json();
+            pollFailures = 0;
+            if (!['queued', 'running'].includes(task.status)) return;
+        } catch (error) {
+            if (signal.aborted) throw error;
+            pollFailures += 1;
+            if (pollFailures >= CHAT_STREAM_MAX_RECONNECTS) {
+                throw new Error('Could not confirm that the background chat task finished.');
+            }
+        }
+        await waitForChatStreamReconnect(2, signal);
+    }
 }
 
 function syncChatControlLocks() {
@@ -871,6 +1049,7 @@ async function loadSession(sessionId) {
     if (!vault || !sessionId) {
         return;
     }
+    let loadedSessionId = '';
     try {
         state.pendingDeferredReview = null;
         state.sessionId = sessionId;
@@ -886,6 +1065,7 @@ async function loadSession(sessionId) {
         }
         const payload = await response.json();
         state.sessionId = payload.session_id || sessionId;
+        loadedSessionId = state.sessionId;
         if (chatElements.chatModeSelector) {
             chatElements.chatModeSelector.value = payload.chat_mode === 'inline_edit'
                 ? 'inline_edit'
@@ -914,6 +1094,55 @@ async function loadSession(sessionId) {
     } finally {
         state.isLoading = false;
         syncChatControlLocks();
+    }
+    if (loadedSessionId && !state.activeChatTaskId && state.sessionId === loadedSessionId) {
+        await reattachActiveChatTask(loadedSessionId, vault);
+    }
+}
+
+async function reattachActiveChatTask(sessionId, vault) {
+    let response;
+    try {
+        response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}/active-task`,
+            { cache: 'no-store' }
+        );
+    } catch (error) {
+        console.warn('Could not check for an active chat task:', error);
+        return;
+    }
+    if (response.status === 404) return;
+    if (!response.ok) {
+        console.warn(`Could not check for an active chat task: HTTP ${response.status}`);
+        return;
+    }
+
+    const task = await response.json();
+    if (!task?.task_id || !['queued', 'running'].includes(task.status)) return;
+    if (state.activeChatTaskId || state.sessionId !== sessionId) return;
+
+    const abortController = new AbortController();
+    state.isLoading = true;
+    state.isCancellingChat = false;
+    state.activeChatSessionId = sessionId;
+    state.activeChatTaskId = task.task_id;
+    state.activeChatAbortController = abortController;
+    syncChatControlLocks();
+    try {
+        await streamStartedChatTask(
+            { session_id: sessionId, task },
+            vault,
+            abortController
+        );
+    } catch (error) {
+        console.error('Error reattaching to active chat task:', error);
+        if (!state.isCancellingChat && error.name !== 'AbortError') {
+            addChatErrorMessage(error.message);
+        }
+    } finally {
+        if (releaseActiveChatStream(abortController)) {
+            syncChatControlLocks();
+        }
     }
 }
 
@@ -1591,15 +1820,12 @@ async function streamDeferredReviewTask(started) {
         }
         return false;
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        chatElements.sendBtn.disabled = false;
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
+        if (releaseActiveChatStream(abortController)) {
+            chatElements.sendBtn.disabled = false;
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
+        }
     }
 }
 
@@ -1642,18 +1868,15 @@ async function retryLatestFailure(button = null) {
             addChatErrorMessage(error.message);
         }
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        if (button) {
-            button.disabled = false;
-            window.AssistantMDIcons.setIconButtonLabel(button, 'Retry interrupted turn');
+        if (releaseActiveChatStream(abortController)) {
+            if (button) {
+                button.disabled = false;
+                window.AssistantMDIcons.setIconButtonLabel(button, 'Retry interrupted turn');
+            }
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
         }
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
     }
 }
 
@@ -1772,15 +1995,12 @@ async function sendMessage(promptOverride = null) {
         }
         return false;
     } finally {
-        state.isLoading = false;
-        state.isCancellingChat = false;
-        state.activeChatSessionId = null;
-        state.activeChatTaskId = null;
-        state.activeChatAbortController = null;
-        chatElements.sendBtn.disabled = false;
-        syncChatControlLocks();
-        chatElements.chatInput.focus();
-        sessionControls.refreshCompactionProgress();
+        if (releaseActiveChatStream(abortController)) {
+            chatElements.sendBtn.disabled = false;
+            syncChatControlLocks();
+            chatElements.chatInput.focus();
+            sessionControls.refreshCompactionProgress();
+        }
     }
 }
 

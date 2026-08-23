@@ -14,6 +14,7 @@ from core.chat.executor import (
     _failure_recovery_message,
 )
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _RequestLimitAgent:
@@ -24,6 +25,7 @@ class _RequestLimitAgent:
             "The next request would exceed the request_limit of 150"
         )
 
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         raise UsageLimitExceeded(
             "The next request would exceed the request_limit of 150"

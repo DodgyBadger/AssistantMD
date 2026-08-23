@@ -16,13 +16,17 @@ from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import get_current_execution_task
 from core.tools.failures import FailureClassification, tool_failure_return
 
-from .base import BaseTool
+from .base import BaseTool, ToolRecoveryPolicy
 
 logger = UnifiedLogger(tag="goal-ops-tool")
 
 
 class GoalOps(BaseTool):
     """Create, inspect, and update durable goal_ops records."""
+
+    @classmethod
+    def get_recovery_policy(cls) -> ToolRecoveryPolicy:
+        return ToolRecoveryPolicy.MANUAL_REQUIRED
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -119,14 +123,6 @@ class GoalOps(BaseTool):
             name="goal_ops",
             description="Track durable goals and compact recovery checkpoints.",
         )
-
-    @classmethod
-    def get_instructions(cls) -> str:
-        """Get minimal compatibility instructions for goal_ops."""
-        return """
-Full documentation:
-- `__virtual_docs__/tools/goal_ops.md`
-"""
 
     @classmethod
     def _dispatch(

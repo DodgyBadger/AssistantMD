@@ -17,6 +17,7 @@ from core.chat.task_events import ChatTaskEventBuffer
 from core.chat.task_execution import start_prepared_chat_stream_task
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
+from validation.core.streaming import stream_events_context
 
 
 class _FakeStreamResult:
@@ -28,12 +29,14 @@ class _FakeStreamResult:
 
 
 class _CompletingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         yield PartStartEvent(index=0, part=TextPart("background "))
         yield AgentRunResultEvent(result=_FakeStreamResult())
 
 
 class _HangingStreamAgent:
+    @stream_events_context
     async def run_stream_events(self, *args, **kwargs):
         await asyncio.Event().wait()
         if False:

@@ -69,7 +69,7 @@ from core.settings.store import (
 )
 from core.settings.upgrades import upgrade_settings_mapping
 
-from ..exceptions import SystemConfigurationError
+from ..exceptions import InvalidSystemSettingError, SystemConfigurationError
 from ..models import (
     IngestionCapabilityInfo,
     MetadataResponse,
@@ -330,7 +330,7 @@ def update_general_setting_value(
     try:
         updated = update_general_setting(setting_name, payload.value)
     except SettingsError as exc:
-        raise SystemConfigurationError(str(exc)) from exc
+        raise InvalidSystemSettingError(setting_name, str(exc)) from exc
 
     reload_result = reload_configuration(restart_required=updated.restart_required)
     setting_info = _build_setting_info(setting_name, updated)
