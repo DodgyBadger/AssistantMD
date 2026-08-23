@@ -9,7 +9,7 @@ from .bootstrap import (
     reset_secrets_bootstrap_status,
 )
 from .crypto import SecretIntegrityError, SecretKeyring
-from .service import EncryptedSecretsService, SecretMetadata
+from .service import EncryptedSecretsService, SecretMetadata, SecretWrite
 
 __all__ = [
     "EncryptedSecretsService",
@@ -18,6 +18,7 @@ __all__ = [
     "SecretIntegrityError",
     "SecretKeyring",
     "SecretMetadata",
+    "SecretWrite",
     "get_secrets_bootstrap_status",
     "initialize_secrets_bootstrap",
     "require_secrets_ready",

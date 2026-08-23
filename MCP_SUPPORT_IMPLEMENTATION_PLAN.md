@@ -440,7 +440,10 @@ inventory below supplies the requirements assigned to these slices.
    and cover fresh, successful-upgrade, failed-upgrade, locked-secrets, and
    restart paths. Missing or unusable keys keep the API/UI available but disable
    model/provider execution and secret mutation; they never select plaintext
-   storage or mutate/migrate existing secret state.
+   storage or mutate/migrate existing secret state. Implement and validate the
+   importer in this slice, but activate YAML retirement only with slice 4's
+   final consumer cutover so no runnable milestone deletes the file while live
+   code still depends on it.
 
 4. **Existing secret-consumer migration**
    Move model/provider configuration, OAuth state, configuration health, tool

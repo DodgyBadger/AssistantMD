@@ -53,6 +53,9 @@ from core.memory.schema import (
     ensure_session_summary_schema,
 )
 from core.runtime.paths import get_system_root
+from core.secrets.schema import DB_NAME as SECRETS_DB_NAME
+from core.secrets.schema import MIGRATION_NAMESPACE as SECRETS_MIGRATION_NAMESPACE
+from core.secrets.schema import SECRETS_MIGRATIONS, ensure_secrets_schema
 from core.vault_state.schema import (
     DB_NAME as VAULT_STATE_DB_NAME,
 )
@@ -163,6 +166,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
         namespace=INGESTION_JOBS_MIGRATION_NAMESPACE,
         migrations=INGESTION_JOB_MIGRATIONS,
         ensure_schema=lambda system_root: ensure_ingestion_jobs_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
+    SystemMigrationTarget(
+        db_name=SECRETS_DB_NAME,
+        namespace=SECRETS_MIGRATION_NAMESPACE,
+        migrations=SECRETS_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_secrets_schema(
             system_root,
             apply_migrations=True,
         ),

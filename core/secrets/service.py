@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import cast
 
 from core.identity import ExecutionAuthority, require_current_execution_authority
 
@@ -18,6 +19,16 @@ class SecretMetadata:
     namespace: str
     name: str
     has_value: bool = True
+
+
+@dataclass(frozen=True)
+class SecretWrite:
+    """One trusted principal-owned value for an atomic batch write."""
+
+    authority: ExecutionAuthority
+    namespace: str
+    name: str
+    value: str
 
 
 class EncryptedSecretsService:
@@ -225,6 +236,58 @@ class EncryptedSecretsService:
             conn.close()
         return rotated
 
+    def set_many_for_authorities(self, writes: list[SecretWrite]) -> int:
+        """Encrypt, write, and authenticate a trusted batch in one transaction."""
+        prepared: list[tuple[SecretWrite, str, str, EncryptedValue]] = []
+        identities: set[tuple[str, str, str]] = set()
+        for write in writes:
+            namespace, name = _normalize_identity(write.namespace, write.name)
+            if not isinstance(write.value, str) or not write.value.strip():
+                raise ValueError("Secret value must be a non-empty string.")
+            identity = (write.authority.principal_id, namespace, name)
+            if identity in identities:
+                raise ValueError("A secret batch cannot contain duplicate identities.")
+            identities.add(identity)
+            encrypted = self._keyring.encrypt(
+                write.value,
+                owner_principal_id=write.authority.principal_id,
+                namespace=namespace,
+                name=name,
+            )
+            prepared.append((write, namespace, name, encrypted))
+
+        conn = connect_secrets(self._system_root)
+        try:
+            with conn:
+                for write, namespace, name, encrypted in prepared:
+                    self._upsert_encrypted(
+                        conn,
+                        owner_principal_id=write.authority.principal_id,
+                        namespace=namespace,
+                        name=name,
+                        encrypted=encrypted,
+                    )
+                for write, namespace, name, _encrypted in prepared:
+                    row = self._select_row(
+                        conn,
+                        owner_principal_id=write.authority.principal_id,
+                        namespace=namespace,
+                        name=name,
+                    )
+                    if row is None:
+                        raise RuntimeError("Imported secret verification failed.")
+                    value = self._decrypt_row(
+                        row,
+                        owner_principal_id=write.authority.principal_id,
+                        namespace=namespace,
+                        name=name,
+                    )
+                    if value != write.value:
+                        raise RuntimeError("Imported secret verification failed.")
+        finally:
+            conn.close()
+        return len(prepared)
+
     def verify_all(self) -> None:
         """Authenticate every stored record without returning secret values."""
         conn = connect_secrets(self._system_root)
@@ -247,6 +310,57 @@ class EncryptedSecretsService:
                 namespace=str(row["namespace"]),
                 name=str(row["name"]),
             )
+
+    @staticmethod
+    def _select_row(
+        conn: sqlite3.Connection,
+        *,
+        owner_principal_id: str,
+        namespace: str,
+        name: str,
+    ) -> sqlite3.Row | None:
+        row = conn.execute(
+            """
+            SELECT envelope_version, key_version, nonce, ciphertext
+            FROM encrypted_secrets
+            WHERE owner_principal_id = ? AND namespace = ? AND name = ?
+            """,
+            (owner_principal_id, namespace, name),
+        ).fetchone()
+        return cast(sqlite3.Row | None, row)
+
+    @staticmethod
+    def _upsert_encrypted(
+        conn: sqlite3.Connection,
+        *,
+        owner_principal_id: str,
+        namespace: str,
+        name: str,
+        encrypted: EncryptedValue,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO encrypted_secrets (
+                owner_principal_id, namespace, name, envelope_version,
+                key_version, nonce, ciphertext
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_principal_id, namespace, name) DO UPDATE SET
+                envelope_version = excluded.envelope_version,
+                key_version = excluded.key_version,
+                nonce = excluded.nonce,
+                ciphertext = excluded.ciphertext,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                owner_principal_id,
+                namespace,
+                name,
+                encrypted.envelope_version,
+                encrypted.key_version,
+                encrypted.nonce,
+                encrypted.ciphertext,
+            ),
+        )
 
     def _decrypt_row(
         self,
