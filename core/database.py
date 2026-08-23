@@ -77,6 +77,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.workflow_runs",
         description="Durable workflow attempts, outcomes, and failure history.",
     ),
+    "secrets": SystemDatabaseDefinition(
+        name="secrets",
+        owner="core.secrets",
+        description="Principal-owned authenticated encrypted secret values.",
+    ),
 }
 
 

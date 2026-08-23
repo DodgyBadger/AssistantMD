@@ -1554,6 +1554,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "anyio" },
     { name = "apscheduler" },
+    { name = "cryptography" },
     { name = "ddgs" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -1603,6 +1604,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=3.7.0" },
     { name = "apscheduler", specifier = ">=3.10.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "cryptography", specifier = ">=45.0.0" },
     { name = "ddgs", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.27.0" },
