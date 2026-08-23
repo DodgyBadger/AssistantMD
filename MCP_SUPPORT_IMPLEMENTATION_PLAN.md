@@ -411,9 +411,80 @@ Later multi-user work should change request-principal resolution and add an
 authentication/user-management surface without changing the secret or MCP
 ownership schema.
 
-## Delivery Increments
+## Delivery Slices
 
-1. **Contract probe and decisions**
+Each slice is an independently testable milestone and a candidate commit
+boundary. Complete its targeted checks before beginning the next slice;
+maintainers retain ownership of the full validation suite. The detailed work
+inventory below supplies the requirements assigned to these slices.
+
+1. **Contract probes and ADRs**
+   Lock down the Pydantic AI composition, accepted failure behavior, immutable
+   naming contract, encrypted-store design, HTTP/SSE behavior, and feasibility
+   of the encrypted FastMCP OAuth adapter and headless completion flow.
+
+2. **Encrypted secrets store foundation**
+   Implement the principal-aware schema and service, AES-256-GCM envelope,
+   key-version and rotation primitives, atomic CRUD/presence operations, tamper
+   detection, redaction, and principal/system isolation. This slice does not
+   migrate existing consumers.
+
+3. **Bootstrap and one-time YAML migration**
+   Generate the installation key, initialize the database before secret
+   consumers run, implement the transactional/idempotent YAML import and ledger,
+   update validation isolation, and cover fresh, successful-upgrade,
+   failed-upgrade, and restart paths.
+
+4. **Existing secret-consumer migration**
+   Move model/provider configuration, OAuth state, configuration health, tool
+   binding, web, ingestion, vectors, and logging onto authority-aware encrypted
+   lookups. Remove runtime YAML compatibility after every consumer is covered.
+
+5. **Workflow ownership foundation**
+   Persist and propagate immutable workflow ownership, seed existing workflows
+   as `local-user`, remove implicit scheduler system authority, and prove API-,
+   tool-, and schedule-triggered ownership. This establishes the prerequisite
+   but does not yet expose MCP tools to workflows.
+
+6. **MCP connection domain and management API**
+   Add principal-owned connection persistence, immutable slugs, allowlists,
+   encrypted static credentials, authorization-aware services/endpoints,
+   credential-presence reporting, enable/disable/delete semantics, sanitized
+   test contracts, and synthetic-principal isolation checks.
+
+7. **MCP transport and connection manager**
+   Implement Streamable HTTP/SSE clients and the lazy principal-scoped manager,
+   including readiness barriers, shared initialization, frozen catalogs, leases,
+   invalidation, idle/shutdown cleanup, and unavailable-server isolation. Build
+   HTTPS, loopback-development, DNS-rebinding/SSRF, timeout, response-size,
+   concurrency, and redaction controls into this slice rather than postponing
+   them to final hardening.
+
+8. **Chat tool-search vertical slice**
+   Compose filtered, prefixed, individually deferred MCP tools with `ToolSearch`;
+   preserve provenance and integrate initial/continued chats, budgets, events,
+   output handling, cancellation, caching, recovery, and history replay. Finish
+   with a credential-free or static-credential local HTTP MCP chat smoke test.
+
+9. **MCP OAuth and single-user management UI**
+   Deliver encrypted token storage, PKCE/state and pending-flow handling,
+   callback plus headless manual completion, refresh/disconnect/status, and the
+   configuration UI for unauthenticated, static, and OAuth connections. Finish
+   with user-level smoke contracts for a remote OAuth service such as Gmail and
+   an independently running local URL service such as Marimo.
+
+10. **End-to-end hardening and documentation**
+    Verify cross-principal isolation, malformed servers, cancellation/shutdown,
+    redaction, list changes, collisions, oversized results, security controls,
+    dependencies, and container packaging. Document the current contract and
+    request the maintainer-owned full validation run before review preparation.
+
+## Detailed Work Inventory
+
+The following requirements are allocated across the delivery slices above. They
+are a completeness inventory, not additional sequential milestones.
+
+- **Contract probes and decisions**
    - Add an experimental scenario proving Pydantic AI 2.19 behavior for multiple
      toolset-level deferred MCP toolsets, stable prefixing, allowlist wrapper
      order, local/native search request shapes, history replay, cancellation,
@@ -422,8 +493,8 @@ ownership schema.
    - Specify the encrypted SQLite secrets schema, authenticated-encryption
      envelope, master-key source, key versioning/rotation, and principal/system
      ownership rules in an ADR.
-   - Decide the stable model-facing tool naming rule and record the replay
-     implications.
+   - Verify the accepted immutable connection-slug naming rule and record its
+     replay implications.
    - Confirm URL transport behavior and Pydantic AI/FastMCP compatibility for
      Streamable HTTP, legacy SSE, HTTPS enforcement, and loopback development
      HTTP. Stdio is explicitly outside the first release.
@@ -434,7 +505,7 @@ ownership schema.
      redirect parsing, redaction, and sanitized status without coupling MCP to
      OpenAI's provider-specific token or device-code protocol.
 
-2. **Encrypted secrets platform migration**
+- **Encrypted secrets platform migration**
    - Add the encrypted SQLite secrets store and principal-aware service contract,
      including explicit system/global ownership for existing infrastructure
      secrets.
@@ -466,7 +537,7 @@ ownership schema.
      configuration health or logging lookup, and replace validation's
      `SECRETS_PATH` isolation with per-run database/key isolation.
 
-3. **Workflow ownership foundation**
+- **Workflow ownership foundation**
    - Add immutable `owner_principal_id` to loaded workflow/schedule identity,
      serialized scheduler job arguments, workflow execution tasks, and durable
      workflow-run history.
@@ -476,7 +547,7 @@ ownership schema.
    - Prove API-, tool-, and schedule-triggered workflow work retains owner
      authority through nested/background execution and secret lookup.
 
-4. **Principal-owned MCP persistence and runtime service**
+- **Principal-owned MCP persistence and runtime service**
    - Add connection models, subsystem database/migrations, authorization-aware
      repository/service APIs, encrypted-secret integration, and runtime lifecycle
      wiring.
@@ -485,10 +556,9 @@ ownership schema.
    - Keep production request resolution fixed to `local-user`; synthetic
      principals exist only to prove the backend boundary and future transition.
    - Define connection auth modes explicitly (none, encrypted bearer/header,
-     and MCP OAuth only if included by the prior decision); never persist raw
-     headers or tokens in connection rows.
+     and MCP OAuth); never persist raw headers or tokens in connection rows.
 
-5. **Chat tool-search vertical slice**
+- **Chat tool-search vertical slice**
    - Declare the MCP/FastMCP and encryption dependencies directly.
    - Build filtered, prefixed, individually deferred MCP toolsets for current
      task authority and compose `ToolSearch` without changing built-in exposure.
@@ -506,7 +576,7 @@ ownership schema.
    - Keep workflows, authored scripts, code execution, and delegate children
      disabled for MCP until their authority and effect boundaries are tested.
 
-6. **Management surface**
+- **Management surface**
    - Add principal-scoped API models/endpoints and the configuration UI.
    - Support sanitized connection tests and credential-presence reporting.
    - Ensure removal/disable closes active resources and affects subsequent runs
@@ -514,16 +584,16 @@ ownership schema.
    - Do not add principal IDs, owner selectors, user creation, or user switching
      to the frontend/API contract in this branch.
 
-7. **Additional execution surfaces**
+- **Explicit follow-up execution surfaces**
    - Evaluate delegate children, workflows, contexts, and authored direct-tool
      execution individually. Require explicit authority propagation and bounded
      tool budgets before enabling MCP on each surface.
    - Add stdio only after command allowlisting, environment filtering, working
      directory, process teardown, and deployment policy are specified.
 
-8. **Hardening and documentation**
-   - Add SSRF/egress policy for remote endpoints, TLS rules, timeouts, response
-     size limits, concurrency limits, and redaction tests.
+- **Hardening and documentation**
+   - Verify the transport slice's SSRF/egress policy, TLS rules, timeouts,
+     response-size limits, concurrency limits, and redaction behavior end to end.
    - Document the current user-facing connection/tool-search contract and update
      architecture/ADR material without migration narrative.
    - Review dependency licenses/notices and container packaging.
