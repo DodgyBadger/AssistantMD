@@ -22,6 +22,7 @@ from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
+from core.mcp import MCPConnectionService
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.secrets import get_encrypted_secrets_service, initialize_secrets_bootstrap
@@ -76,6 +77,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
         secrets_status = initialize_secrets_bootstrap(config.system_root)
+        mcp_connections: MCPConnectionService | None = None
         if not secrets_status.ready:
             logger.warning(
                 "Encrypted secrets are locked",
@@ -85,9 +87,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 },
             )
         else:
+            secrets_service = get_encrypted_secrets_service()
             migration_result = migrate_legacy_secrets_yaml(
                 system_root=config.system_root,
-                service=get_encrypted_secrets_service(),
+                service=secrets_service,
             )
             logger.info(
                 "Legacy secrets migration checked",
@@ -98,6 +101,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                     "skipped_oauth_count": migration_result.skipped_oauth_count,
                     "source_retired": migration_result.source_retired,
                 },
+            )
+            mcp_connections = MCPConnectionService(
+                system_root=str(config.system_root),
+                secrets=secrets_service,
             )
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             refresh_settings_cache()
@@ -261,6 +268,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             task_runner=task_runner,
             workflow_governor=workflow_governor,
             workflow_run_store=workflow_run_store,
+            mcp_connections=mcp_connections,
             background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,

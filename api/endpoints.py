@@ -84,6 +84,11 @@ from .models import (
     ExecutionTaskListResponse,
     GoalCleanupRequest,
     GoalCleanupResponse,
+    MCPConnectionCreateRequest,
+    MCPConnectionInfo,
+    MCPConnectionTestResponse,
+    MCPConnectionUpdateRequest,
+    MCPCredentialUpdateRequest,
     MetadataResponse,
     ModelConfigRequest,
     ModelInfo,
@@ -220,6 +225,15 @@ from .services import (
     upload_vault_file,
     upsert_configurable_model,
     upsert_configurable_provider,
+)
+from .services.mcp import (
+    clear_mcp_credential,
+    create_mcp_connection,
+    delete_mcp_connection,
+    list_mcp_connections,
+    set_mcp_credential,
+    test_mcp_connection,
+    update_mcp_connection,
 )
 from .utils import create_error_response, serialize_exception
 
@@ -1165,6 +1179,92 @@ async def delete_secret_endpoint(secret_name: str) -> OperationResult | JSONResp
     """Delete a stored secret entry entirely."""
     try:
         return delete_secret_entry(secret_name)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get("/system/mcp/connections", response_model=list[MCPConnectionInfo])
+async def list_mcp_connections_endpoint() -> list[MCPConnectionInfo] | JSONResponse:
+    """List current-user MCP connections without credential values."""
+    try:
+        return list_mcp_connections()
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post("/system/mcp/connections", response_model=MCPConnectionInfo)
+async def create_mcp_connection_endpoint(
+    request: MCPConnectionCreateRequest,
+) -> MCPConnectionInfo | JSONResponse:
+    """Create a current-user MCP connection."""
+    try:
+        return create_mcp_connection(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put("/system/mcp/connections/{connection_id}", response_model=MCPConnectionInfo)
+async def update_mcp_connection_endpoint(
+    connection_id: str, request: MCPConnectionUpdateRequest
+) -> MCPConnectionInfo | JSONResponse:
+    """Update mutable current-user MCP connection settings."""
+    try:
+        return update_mcp_connection(connection_id, request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put(
+    "/system/mcp/connections/{connection_id}/credential",
+    response_model=MCPConnectionInfo,
+)
+async def set_mcp_credential_endpoint(
+    connection_id: str, request: MCPCredentialUpdateRequest
+) -> MCPConnectionInfo | JSONResponse:
+    """Set a write-only static credential for a current-user connection."""
+    try:
+        return set_mcp_credential(connection_id, request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete(
+    "/system/mcp/connections/{connection_id}/credential",
+    response_model=MCPConnectionInfo,
+)
+async def clear_mcp_credential_endpoint(
+    connection_id: str,
+) -> MCPConnectionInfo | JSONResponse:
+    """Clear a static credential for a current-user connection."""
+    try:
+        return clear_mcp_credential(connection_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/mcp/connections/{connection_id}/test",
+    response_model=MCPConnectionTestResponse,
+)
+async def test_mcp_connection_endpoint(
+    connection_id: str,
+) -> MCPConnectionTestResponse | JSONResponse:
+    """Return sanitized connection readiness; transport arrives in slice 7."""
+    try:
+        return test_mcp_connection(connection_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete(
+    "/system/mcp/connections/{connection_id}", response_model=OperationResult
+)
+async def delete_mcp_connection_endpoint(
+    connection_id: str,
+) -> OperationResult | JSONResponse:
+    """Delete a current-user MCP connection and static credential."""
+    try:
+        return delete_mcp_connection(connection_id)
     except Exception as e:
         return create_error_response(e)
 

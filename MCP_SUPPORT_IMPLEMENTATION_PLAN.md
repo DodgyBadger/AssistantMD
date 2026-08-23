@@ -19,6 +19,17 @@ only interactive principal. The UI does not expose principal creation,
 selection, assignment, or administration. The future target is multi-user
 within one AssistantMD installation, not multi-tenant infrastructure.
 
+## Implementation Progress
+
+- Slices 1–5 are complete: Pydantic AI contract probes, encrypted
+  principal-owned secrets, locked bootstrap and verified YAML retirement,
+  workflow ownership, and existing secret-consumer cutover.
+- Slice 6 is complete: principal-owned MCP connection persistence, immutable
+  slugs, encrypted static credentials, sanitized management APIs, the basic
+  single-user System UI, and synthetic-principal isolation coverage.
+- Slice 7 is next: managed HTTP/SSE transports, connection readiness/testing,
+  network policy, catalog leases, invalidation, and shutdown lifecycle.
+
 ## Invariants
 
 - Every MCP server configuration, connection, credential lookup, tool listing,
@@ -45,14 +56,14 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   reporting, output handling, and recovery framework as built-in tools. Their
   secondary status is limited to discovery and initial context exposure.
 
-## Current Architecture and Integration Seams
+## Implemented Architecture and Integration Seams
 
 - `ExecutionAuthority` is installed for interactive requests and captured by
   background chat tasks. Session ownership supplies authority when chat work is
   resumed outside the originating request.
-- `RuntimeContext` is the process-wide composition root and owns lifecycle
-  services. It is the correct owner for an MCP configuration/connection
-  service, while current-principal state must remain context-local.
+- `RuntimeContext` is the process-wide composition root and now owns the MCP
+  connection service when encrypted secrets are ready. Current-principal state
+  remains context-local.
 - Built-in tools are resolved by `core/authoring/shared/tool_binding.py` and
   exposed by `core/llm/capabilities/assistant_tools.py` as a Pydantic AI
   `FunctionToolset`.
@@ -64,15 +75,15 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   provider-adaptive `ToolSearch` capability. `mcp` and `fastmcp` are present in
   the current lock/environment transitively, but MCP support is not declared as
   an intentional project dependency and should be made explicit.
-- The global `system/secrets.yaml` store cannot provide principal ownership or
-  encryption at rest. Replacing it with an encrypted SQLite secrets service is
-  a prerequisite for storing MCP credentials.
+- Principal-owned credentials are stored in encrypted `system/secrets.db`;
+  sanitized MCP definitions and immutable slugs are stored in `system/mcp.db`.
+  Normal runtime code has no plaintext YAML fallback.
 
 Relevant decisions: ADR 0001 (runtime composition root), ADR 0007
 (settings/tool binding), ADR 0008 (context-efficient disclosure), and ADR 0028
 (explicit execution principals).
 
-## Deep Inspection Findings
+## Planning-Time Deep Inspection Findings
 
 ### AssistantMD execution paths
 

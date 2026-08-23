@@ -541,6 +541,62 @@
                     </div>
                 </details>
 
+                <details id="config-mcp-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">MCP Connections</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <p class="text-sm text-txt-secondary">
+                            Enabled servers make their allowed tools available for discovery in every chat. Only connect servers you trust: AssistantMD does not infer whether an MCP tool is read-only or mutating.
+                        </p>
+                        <form id="mcp-create-form" class="rounded-lg border border-border-primary bg-app-card p-4 space-y-3">
+                            <div class="grid gap-3 md:grid-cols-2">
+                                <label class="text-xs text-txt-secondary">Display name
+                                    <input name="display_name" required maxlength="120" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Gmail" />
+                                </label>
+                                <label class="text-xs text-txt-secondary">Server URL
+                                    <input name="url" required maxlength="2048" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="https://example.com/mcp" />
+                                </label>
+                                <label class="text-xs text-txt-secondary">Transport
+                                    <select name="transport" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary">
+                                        <option value="streamable_http">Streamable HTTP</option>
+                                        <option value="sse">SSE</option>
+                                    </select>
+                                </label>
+                                <label class="text-xs text-txt-secondary">Authentication
+                                    <select name="auth_mode" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary">
+                                        <option value="none">None</option>
+                                        <option value="bearer">Bearer token</option>
+                                        <option value="header">Custom header</option>
+                                    </select>
+                                </label>
+                                <label class="text-xs text-txt-secondary">Header name (custom header only)
+                                    <input name="header_name" maxlength="128" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" />
+                                </label>
+                                <label class="text-xs text-txt-secondary">Credential (write-only)
+                                    <input name="credential" type="password" maxlength="16384" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" />
+                                </label>
+                                <label class="text-xs text-txt-secondary md:col-span-2">Allowed tools (comma-separated; blank trusts all server tools)
+                                    <input name="allowed_tools" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="search_messages, read_message" />
+                                </label>
+                            </div>
+                            <div class="flex items-center justify-between gap-3">
+                                <label class="text-sm text-txt-primary"><input name="enabled" type="checkbox" checked class="mr-2" />Enabled</label>
+                                <button type="submit" class="ui-button is-primary">Add Connection</button>
+                            </div>
+                        </form>
+                        <div id="mcp-feedback" class="text-sm text-txt-secondary"></div>
+                        <div id="mcp-connections-list" class="flex flex-col gap-3">
+                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">Loading MCP connections…</div>
+                        </div>
+                    </div>
+                </details>
+
                 <details id="config-activity-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
                     <summary class="collapsible-summary">
                         <div class="summary-text">

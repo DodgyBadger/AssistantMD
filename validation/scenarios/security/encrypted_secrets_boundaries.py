@@ -39,6 +39,7 @@ from core.secrets.crypto import (  # noqa: E402
     ACTIVE_KEY_VERSION_ENV,
     KEYRING_ENV,
 )
+from core.system_migrations import run_system_migrations  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -70,6 +71,11 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
         self.soft_assert(
             execution_blocked,
             "Secrets-locked bootstrap must block model/secret execution",
+        )
+        run_system_migrations(locked_root, backup=False)
+        self.soft_assert(
+            not (locked_root / "secrets.db").exists(),
+            "General system migrations must not touch locked encrypted storage",
         )
         reset_secrets_bootstrap_status()
 

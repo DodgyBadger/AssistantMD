@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 #######################################################################
 ## Request Models
@@ -1583,6 +1583,70 @@ class SecretUpdateRequest(BaseModel):
     value: str | None = Field(
         None, description="New value for the secret (empty to clear)"
     )
+
+
+class MCPConnectionCreateRequest(BaseModel):
+    """Create one current-principal MCP connection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(..., min_length=1, max_length=120)
+    url: str = Field(..., min_length=1, max_length=2048)
+    transport: Literal["streamable_http", "sse"] = "streamable_http"
+    auth_mode: Literal["none", "bearer", "header", "oauth"] = "none"
+    header_name: str | None = Field(None, max_length=128)
+    enabled: bool = True
+    allowed_tools: list[str] | None = None
+    credential: SecretStr | None = Field(None, max_length=16384)
+
+
+class MCPConnectionUpdateRequest(BaseModel):
+    """Replace mutable current-principal MCP connection settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(..., min_length=1, max_length=120)
+    url: str = Field(..., min_length=1, max_length=2048)
+    transport: Literal["streamable_http", "sse"]
+    auth_mode: Literal["none", "bearer", "header", "oauth"]
+    header_name: str | None = Field(None, max_length=128)
+    enabled: bool
+    allowed_tools: list[str] | None = None
+
+
+class MCPCredentialUpdateRequest(BaseModel):
+    """Write-only static credential update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential: SecretStr = Field(..., min_length=1, max_length=16384)
+
+
+class MCPConnectionInfo(BaseModel):
+    """Sanitized MCP connection metadata returned to the current user."""
+
+    connection_id: str
+    slug: str
+    display_name: str
+    url: str
+    transport: Literal["streamable_http", "sse"]
+    auth_mode: Literal["none", "bearer", "header", "oauth"]
+    header_name: str | None
+    enabled: bool
+    allowed_tools: list[str] | None
+    credential_present: bool
+    config_version: int
+    created_at: str
+    updated_at: str
+
+
+class MCPConnectionTestResponse(BaseModel):
+    """Sanitized MCP connection readiness result."""
+
+    status: str
+    ready: bool
+    tool_count: int | None
+    message: str
 
 
 class SystemActivityEntryInfo(BaseModel):

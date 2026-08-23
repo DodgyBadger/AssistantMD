@@ -22,6 +22,8 @@
         isSavingProvider: false,
         isLoadingSecrets: false,
         isSavingSecret: false,
+        isLoadingMcp: false,
+        isSavingMcp: false,
         isPurgingCache: false,
         isCleaningGoals: false,
         isCleaningVaultState: false,
@@ -40,6 +42,7 @@
         models: [],
         providers: [],
         secrets: [],
+        mcpConnections: [],
         importVaults: [],
         importResults: null,
         importUrlResult: null,
@@ -139,6 +142,10 @@
         secretsList: null,
         secretFeedback: null,
         secretAddBtn: null,
+
+        mcpCreateForm: null,
+        mcpConnectionsList: null,
+        mcpFeedback: null,
 
         miscFeedback: null,
         refreshSystemAuthoringBtn: null,
@@ -258,6 +265,10 @@
         elements.secretFeedback = document.getElementById('secret-feedback');
         elements.secretAddBtn = document.getElementById('secret-add-row');
 
+        elements.mcpCreateForm = document.getElementById('mcp-create-form');
+        elements.mcpConnectionsList = document.getElementById('mcp-connections-list');
+        elements.mcpFeedback = document.getElementById('mcp-feedback');
+
         elements.miscFeedback = document.getElementById('misc-feedback');
         elements.refreshSystemAuthoringBtn = document.getElementById('refresh-system-authoring');
         elements.refreshSystemAuthoringFeedback = document.getElementById('refresh-system-authoring-feedback');
@@ -339,6 +350,8 @@
         elements.secretAddBtn?.addEventListener('click', startNewSecret);
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretsList?.addEventListener('input', handleSecretInputChange);
+        elements.mcpCreateForm?.addEventListener('submit', handleMcpCreate);
+        elements.mcpConnectionsList?.addEventListener('click', handleMcpConnectionAction);
         elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
@@ -2186,6 +2199,128 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    async function loadMcpConnections() {
+        if (!elements.mcpConnectionsList || state.isLoadingMcp) return;
+        state.isLoadingMcp = true;
+        try {
+            const response = await fetch('api/system/mcp/connections', { cache: 'no-store' });
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            state.mcpConnections = Array.isArray(payload) ? payload : [];
+            renderMcpConnections();
+        } catch (error) {
+            elements.mcpConnectionsList.innerHTML = `<div class="rounded-lg border state-surface-error px-4 py-3 text-sm text-center shadow-sm">Failed to load MCP connections: ${escapeHtml(error.message)}</div>`;
+        } finally {
+            state.isLoadingMcp = false;
+        }
+    }
+
+    function renderMcpConnections() {
+        if (!elements.mcpConnectionsList) return;
+        if (!state.mcpConnections.length) {
+            elements.mcpConnectionsList.innerHTML = '<div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">No MCP connections configured.</div>';
+            return;
+        }
+        elements.mcpConnectionsList.innerHTML = state.mcpConnections.map((connection) => {
+            const allowedTools = Array.isArray(connection.allowed_tools) ? connection.allowed_tools.join(', ') : '';
+            const staticAuth = connection.auth_mode === 'bearer' || connection.auth_mode === 'header';
+            return `
+                <div class="rounded-lg border border-border-primary bg-app-card p-4 shadow-sm space-y-3" data-mcp-id="${escapeHtml(connection.connection_id)}">
+                    <div class="flex items-center justify-between gap-3">
+                        <div><div class="font-medium text-txt-primary">${escapeHtml(connection.display_name)}</div><div class="font-mono text-xs text-txt-secondary">${escapeHtml(connection.slug)}</div></div>
+                        <span class="text-xs ${connection.enabled ? 'state-success' : 'text-txt-secondary'}">${connection.enabled ? 'Enabled' : 'Disabled'}</span>
+                    </div>
+                    <div class="grid gap-3 md:grid-cols-2">
+                        <label class="text-xs text-txt-secondary">Display name<input data-mcp-field="display_name" value="${escapeHtml(connection.display_name)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                        <label class="text-xs text-txt-secondary">Server URL<input data-mcp-field="url" value="${escapeHtml(connection.url)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                        <label class="text-xs text-txt-secondary">Transport<select data-mcp-field="transport" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary"><option value="streamable_http" ${connection.transport === 'streamable_http' ? 'selected' : ''}>Streamable HTTP</option><option value="sse" ${connection.transport === 'sse' ? 'selected' : ''}>SSE</option></select></label>
+                        <label class="text-xs text-txt-secondary">Authentication<select data-mcp-field="auth_mode" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary"><option value="none" ${connection.auth_mode === 'none' ? 'selected' : ''}>None</option><option value="bearer" ${connection.auth_mode === 'bearer' ? 'selected' : ''}>Bearer token</option><option value="header" ${connection.auth_mode === 'header' ? 'selected' : ''}>Custom header</option><option value="oauth" ${connection.auth_mode === 'oauth' ? 'selected' : ''}>OAuth (management arrives in slice 9)</option></select></label>
+                        <label class="text-xs text-txt-secondary">Header name<input data-mcp-field="header_name" value="${escapeHtml(connection.header_name || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" /></label>
+                        <label class="text-xs text-txt-secondary">Allowed tools<input data-mcp-field="allowed_tools" value="${escapeHtml(allowedTools)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank trusts all tools" /></label>
+                    </div>
+                    <label class="text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
+                    <div class="rounded-md border border-border-primary p-3 space-y-2">
+                        <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
+                        <div class="flex gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" class="ui-button" ${staticAuth ? '' : 'disabled'}>Save Credential</button><button type="button" data-mcp-action="clear-credential" class="ui-button" ${connection.credential_present ? '' : 'disabled'}>Clear</button></div>
+                    </div>
+                    <div class="flex justify-end gap-2"><button type="button" data-mcp-action="delete" class="ui-button is-danger">Delete</button><button type="button" data-mcp-action="save" class="ui-button is-primary">Save Connection</button></div>
+                </div>`;
+        }).join('');
+    }
+
+    function parseMcpAllowedTools(value) {
+        const tools = String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+        return tools.length ? [...new Set(tools)] : null;
+    }
+
+    async function handleMcpCreate(event) {
+        event.preventDefault();
+        if (state.isSavingMcp || !(elements.mcpCreateForm instanceof HTMLFormElement)) return;
+        const form = new FormData(elements.mcpCreateForm);
+        const payload = {
+            display_name: String(form.get('display_name') || ''),
+            url: String(form.get('url') || ''),
+            transport: String(form.get('transport') || 'streamable_http'),
+            auth_mode: String(form.get('auth_mode') || 'none'),
+            header_name: String(form.get('auth_mode') || 'none') === 'header' ? (String(form.get('header_name') || '').trim() || null) : null,
+            enabled: form.get('enabled') === 'on',
+            allowed_tools: parseMcpAllowedTools(form.get('allowed_tools')),
+            credential: String(form.get('credential') || '').trim() || null,
+        };
+        const saved = await mutateMcp('api/system/mcp/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection added.');
+        if (saved) elements.mcpCreateForm.reset();
+    }
+
+    async function handleMcpConnectionAction(event) {
+        const button = event.target instanceof Element ? event.target.closest('[data-mcp-action]') : null;
+        const card = button?.closest('[data-mcp-id]');
+        if (!(button instanceof HTMLButtonElement) || !(card instanceof HTMLElement) || state.isSavingMcp) return;
+        const id = card.dataset.mcpId;
+        if (!id) return;
+        const action = button.dataset.mcpAction;
+        const endpoint = `api/system/mcp/connections/${encodeURIComponent(id)}`;
+        if (action === 'delete') {
+            if (!window.confirm('Delete this MCP connection and its stored credential?')) return;
+            await mutateMcp(endpoint, { method: 'DELETE' }, 'MCP connection deleted.');
+            return;
+        }
+        if (action === 'clear-credential') {
+            await mutateMcp(`${endpoint}/credential`, { method: 'DELETE' }, 'MCP credential cleared.');
+            return;
+        }
+        if (action === 'credential') {
+            const credential = card.querySelector('[data-mcp-field="credential"]')?.value || '';
+            await mutateMcp(`${endpoint}/credential`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) }, 'MCP credential saved.');
+            return;
+        }
+        if (action === 'save') {
+            const value = (name) => card.querySelector(`[data-mcp-field="${name}"]`)?.value || '';
+            const enabled = card.querySelector('[data-mcp-field="enabled"]')?.checked === true;
+            const authMode = value('auth_mode');
+            const payload = { display_name: value('display_name'), url: value('url'), transport: value('transport'), auth_mode: authMode, header_name: authMode === 'header' ? (value('header_name').trim() || null) : null, enabled, allowed_tools: parseMcpAllowedTools(value('allowed_tools')) };
+            await mutateMcp(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection saved.');
+        }
+    }
+
+    async function mutateMcp(url, options, successMessage) {
+        state.isSavingMcp = true;
+        setStatus(elements.mcpFeedback, 'Saving…');
+        try {
+            const response = await fetch(url, options);
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            setStatus(elements.mcpFeedback, successMessage, 'success');
+            await loadMcpConnections();
+            await notifyConfigChanged();
+            return true;
+        } catch (error) {
+            setStatus(elements.mcpFeedback, error.message, 'error');
+            return false;
+        } finally {
+            state.isSavingMcp = false;
+        }
+    }
+
     function renderSecretsTable() {
         if (!elements.secretsList) return;
 
@@ -2534,6 +2669,7 @@ async function saveModelRow(rowKey) {
 
         const result = await response.json();
         await loadSecrets();
+        await loadMcpConnections();
         await loadProviders();
         await notifyConfigChanged();
         return result;
@@ -2551,6 +2687,7 @@ async function saveModelRow(rowKey) {
 
         const result = await response.json();
         await loadSecrets();
+        await loadMcpConnections();
         await loadProviders();
         await notifyConfigChanged();
         return result;

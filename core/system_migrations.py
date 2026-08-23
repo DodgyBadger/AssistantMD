@@ -42,6 +42,9 @@ from core.ingestion.schema import (
     MIGRATION_NAMESPACE as INGESTION_JOBS_MIGRATION_NAMESPACE,
 )
 from core.logger import UnifiedLogger
+from core.mcp.schema import DB_NAME as MCP_DB_NAME
+from core.mcp.schema import MCP_MIGRATIONS, ensure_mcp_schema
+from core.mcp.schema import MIGRATION_NAMESPACE as MCP_MIGRATION_NAMESPACE
 from core.memory.schema import (
     DB_NAME as SESSION_SUMMARIES_DB_NAME,
 )
@@ -53,6 +56,7 @@ from core.memory.schema import (
     ensure_session_summary_schema,
 )
 from core.runtime.paths import get_system_root
+from core.secrets.bootstrap import get_secrets_bootstrap_status
 from core.secrets.schema import DB_NAME as SECRETS_DB_NAME
 from core.secrets.schema import MIGRATION_NAMESPACE as SECRETS_MIGRATION_NAMESPACE
 from core.secrets.schema import SECRETS_MIGRATIONS, ensure_secrets_schema
@@ -179,6 +183,15 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
             apply_migrations=True,
         ),
     ),
+    SystemMigrationTarget(
+        db_name=MCP_DB_NAME,
+        namespace=MCP_MIGRATION_NAMESPACE,
+        migrations=MCP_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_mcp_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
 )
 
 
@@ -199,9 +212,21 @@ def run_system_migrations(
     """Apply all registered system database migrations and return final status."""
     root = _resolve_system_root(system_root)
     before = get_system_migration_status(root)
-    backup_paths = _backup_pending_databases(before) if backup else {}
+    secrets_status = get_secrets_bootstrap_status()
+    excluded_db_names = (
+        frozenset({SECRETS_DB_NAME})
+        if secrets_status is not None and not secrets_status.ready
+        else frozenset()
+    )
+    backup_paths = (
+        _backup_pending_databases(before, excluded_db_names=excluded_db_names)
+        if backup
+        else {}
+    )
 
     for target in MIGRATION_TARGETS:
+        if target.db_name in excluded_db_names:
+            continue
         target.ensure_schema(str(root))
 
     after = get_system_migration_status(root)
@@ -226,6 +251,7 @@ def run_system_migrations(
             "pending_before": before.pending_count,
             "pending_after": result.pending_count,
             "backups_created": len(backup_paths),
+            "excluded_locked_databases": sorted(excluded_db_names),
         },
     )
     return result
@@ -297,11 +323,17 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
-def _backup_pending_databases(status: SystemMigrationStatus) -> dict[str, str]:
+def _backup_pending_databases(
+    status: SystemMigrationStatus, *, excluded_db_names: frozenset[str]
+) -> dict[str, str]:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     backups: dict[str, str] = {}
     for target in status.targets:
-        if not target.exists or not target.pending_versions:
+        if (
+            target.db_name in excluded_db_names
+            or not target.exists
+            or not target.pending_versions
+        ):
             continue
         source = Path(target.db_path)
         backup_path = source.with_name(f"{source.name}.backup-{timestamp}")

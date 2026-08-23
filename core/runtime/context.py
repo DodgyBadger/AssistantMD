@@ -19,6 +19,7 @@ from core.identity import AuthorizationService
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
+from core.mcp import MCPConnectionService
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
@@ -73,6 +74,7 @@ class RuntimeContext:
     task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
     workflow_run_store: WorkflowRunStore
+    mcp_connections: MCPConnectionService | None
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime

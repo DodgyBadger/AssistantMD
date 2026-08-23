@@ -508,6 +508,90 @@ class ApiEndpointsScenario(BaseScenario):
             for entry in cleared_secrets.json()
         ), "Secret list no longer reports a stored value"
 
+        # MCP connection management exposes metadata and credential presence only.
+        rejected_owner = self.call_api(
+            "/api/system/mcp/connections",
+            method="POST",
+            data={
+                "display_name": "Injected owner",
+                "url": "https://example.com/mcp",
+                "owner_principal_id": "foreign-user",
+            },
+        )
+        assert rejected_owner.status_code == 422, "MCP owner injection is rejected"
+
+        mcp_create = self.call_api(
+            "/api/system/mcp/connections",
+            method="POST",
+            data={
+                "display_name": "Validation MCP",
+                "url": "https://example.com/mcp",
+                "transport": "streamable_http",
+                "auth_mode": "bearer",
+                "enabled": True,
+                "allowed_tools": ["search"],
+                "credential": "validation-mcp-token",
+            },
+        )
+        assert mcp_create.status_code == 200, "MCP connection creation succeeds"
+        mcp_payload = mcp_create.json()
+        mcp_id = mcp_payload["connection_id"]
+        assert mcp_payload["slug"] == "validation-mcp", "MCP slug is deterministic"
+        assert (
+            mcp_payload["credential_present"] is True
+        ), "Credential presence is reported"
+        assert "credential" not in mcp_payload, "Credential value is write-only"
+
+        mcp_list = self.call_api("/api/system/mcp/connections")
+        assert mcp_list.status_code == 200, "MCP connection listing succeeds"
+        assert [entry["connection_id"] for entry in mcp_list.json()] == [
+            mcp_id
+        ], "MCP list contains only the created current-user connection"
+
+        mcp_test = self.call_api(
+            f"/api/system/mcp/connections/{mcp_id}/test",
+            method="POST",
+        )
+        assert mcp_test.status_code == 200, "MCP test contract is available"
+        assert (
+            mcp_test.json()["status"] == "transport_unavailable"
+            and mcp_test.json()["ready"] is False
+        ), "Slice 6 reports sanitized pre-transport readiness"
+
+        mcp_update = self.call_api(
+            f"/api/system/mcp/connections/{mcp_id}",
+            method="PUT",
+            data={
+                "display_name": "Renamed Validation MCP",
+                "url": "https://example.com/mcp",
+                "transport": "sse",
+                "auth_mode": "bearer",
+                "header_name": None,
+                "enabled": False,
+                "allowed_tools": None,
+            },
+        )
+        assert mcp_update.status_code == 200, "MCP connection update succeeds"
+        assert mcp_update.json()["slug"] == "validation-mcp", "MCP slug stays immutable"
+
+        mcp_clear = self.call_api(
+            f"/api/system/mcp/connections/{mcp_id}/credential",
+            method="DELETE",
+        )
+        assert mcp_clear.status_code == 200, "MCP credential clear succeeds"
+        assert mcp_clear.json()["credential_present"] is False
+
+        mcp_delete = self.call_api(
+            f"/api/system/mcp/connections/{mcp_id}",
+            method="DELETE",
+        )
+        assert mcp_delete.status_code == 200, "MCP connection deletion succeeds"
+        mcp_missing = self.call_api(
+            f"/api/system/mcp/connections/{mcp_id}/test",
+            method="POST",
+        )
+        assert mcp_missing.status_code == 404, "Deleted MCP connections look absent"
+
         # Vault rescan should keep workflow counts stable
         rescan_response = self.call_api("/api/vaults/rescan", method="POST")
         assert rescan_response.status_code == 200, "Vault rescan succeeds"
