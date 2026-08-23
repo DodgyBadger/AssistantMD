@@ -370,6 +370,102 @@ The design must retain AssistantMD's portable canonical chat history. Exact,
 provider-bound state needed for recovery is staged separately and is committed
 to canonical history only when the logical turn completes.
 
+## Delegate Reliability Hardening
+
+### Scope and invariants
+
+- Preserve the latest settled in-memory child messages, partial output, usage,
+  tool audit, and cache/artifact references when a delegate ends at a usage
+  limit, timeout, or classified runtime failure. Return this as a bounded
+  handoff to the parent; do not add durable delegate checkpoints or replay
+  child tools.
+- Once `delegate_started` is emitted, every exit must produce exactly one
+  delegate terminal lifecycle event: `delegate_completed`, `delegate_failed`,
+  or `delegate_cancelled`. Cancellation must be logged and immediately
+  re-raised so the owning chat/workflow task retains authority over its
+  terminal state.
+- Model resolution, tool binding, agent construction, and child execution use
+  the same structured failure boundary. Invalid configuration must not leave a
+  start-only delegate lifecycle.
+- One shared structured tool-result classifier owns failed/interrupted/success
+  interpretation for chat events, delegate audits, and the repeated-failure
+  guard. Text inspection remains an audit-only fallback for legacy unstructured
+  tool output.
+- The repeated-failure guard protects result-informed consecutive retries. It
+  must not serialize parallel child tool calls already admitted, and successful
+  repeated calls remain legal.
+- Delegate timeouts must cancel and await the child run. Validation must prove
+  that a cancellation-aware child tool stops and does not mutate state after
+  the delegate returns. Blocking or cancellation-suppressing third-party code
+  cannot be made into a hard wall by `asyncio`; timeout documentation and event
+  semantics must not claim otherwise.
+
+### Affected areas
+
+- `core/llm/agents.py`: optional process-local run-progress snapshots while
+  consuming streamed output.
+- `core/tools/delegate.py`: unified lifecycle boundary, partial handoff
+  assembly, usage/audit/reference metadata, and cancellation event.
+- `core/tools/tool_results.py` (new shared helper): authoritative structured
+  terminal-state classification.
+- `core/chat/task_execution.py` and
+  `core/llm/capabilities/delegate_repeated_failure_guard.py`: consume the shared
+  classification contract.
+- `validation/scenarios/integration/core/delegate_tool.py`: deterministic
+  assertions for partial salvage, initialization failure, cancellation,
+  timeout cleanup, result classification, successful repeats, and concurrent
+  guard admission.
+
+### Stable validation events
+
+- `delegate_completed`: existing success event.
+- `delegate_failed`: existing failure event; add partial message/tool/usage and
+  handoff/reference counts without logging full child content.
+- `delegate_cancelled`: new event with workflow id, model, configured limits,
+  partial message/tool/usage counts, and no raw prompt or tool result content.
+- `delegate_repeated_tool_failure_blocked`: existing guard decision event.
+
+### Validation target and implementation order
+
+1. Extend `integration/core/delegate_tool` with deterministic failing
+   assertions for the shared classifier and lifecycle terminal events.
+2. Add streamed progress snapshots and return bounded partial failure handoffs.
+3. Move all post-start initialization under the classified lifecycle boundary
+   and add cancellation logging/re-raise behavior.
+4. Centralize result classification and make chat status, delegate auditing,
+   and the repeated-failure guard consume it.
+5. Add cancellation-aware timeout and concurrent/repeated-success guard probes,
+   then run the individual delegate scenario and the production static gate.
+
+The next phase is Feature Development, followed by targeted Testing and
+Validation and a final Refactor and Hardening review.
+
+### Implemented delegate reliability contract
+
+- Stream collection now snapshots the latest in-process messages, output, and
+  shared usage counter. Classified failures return a bounded partial handoff,
+  compact audit, usage counts, and discovered cache/artifact references.
+- Audits distinguish settled from unsettled child tool calls. Failure handoffs
+  warn the parent to inspect durable state before replaying a possible mutation
+  whose return was not settled.
+- Model resolution, child tool binding, agent construction, and execution now
+  share one classified failure boundary. Unknown internal failures become
+  explicit non-retryable `delegate_internal` tool results.
+- Parent cancellation emits `delegate_cancelled` with bounded counts and then
+  re-raises `CancelledError`. Timeout cancellation is awaited before returning
+  `delegate_timeout`.
+- `classify_tool_result_state` is the shared structured result classifier for
+  chat task events, delegate audits, and repeated-failure protection. The
+  audit-only legacy text fallback uses specific failure markers and does not
+  classify benign text such as “completed without error.”
+- Delegate terminal failures use non-deduplicated error lifecycle logging;
+  global warning deduplication can no longer suppress later `delegate_failed`
+  events in the same process.
+- Deterministic validation covers partial salvage, structured initialization
+  failure, cooperative timeout cleanup, parent cancellation, benign result
+  classification, unresolved-call accounting, successful repeated calls, and
+  concurrent identical call admission. The focused delegate scenario passes.
+
 ## Current Contracts
 
 ### Canonical chat history

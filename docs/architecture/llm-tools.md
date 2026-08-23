@@ -141,7 +141,15 @@ construction fails with actionable reconnect/switch-auth guidance.
 
 ## Delegate and Code Execution
 
-`delegate` creates a bounded child agent with an isolated prompt, optional model alias, optional tool list, and internal tool-call/timeout guardrails. Completed and bounded-failure returns include compact audit metadata summarizing child tool calls, return previews, and tool errors. Bounded failures also include structured classification metadata such as failure kind, retryability, and suggested action.
+`delegate` creates a bounded child agent with an isolated prompt, optional model
+alias, optional tool list, and internal request, tool-call, repeated-failure,
+and timeout guardrails. Every child receives a compact system-owned flight card
+and its effective tool-call budget. Completed and bounded-failure returns include
+compact audit metadata summarizing child tool calls, return previews, and tool
+errors. Failures include structured classification, usage, and the latest
+bounded partial output, settled audit, and cache/artifact references available
+in process. Delegate progress is not persisted and child tools are never replayed
+to construct a failure handoff.
 
 Primary chat attaches a task-scoped Harness `StepPersistence` capability. Its
 bounded in-memory snapshots preserve settled model/tool boundaries during the

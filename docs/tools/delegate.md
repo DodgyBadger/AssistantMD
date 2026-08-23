@@ -41,6 +41,10 @@ automatically.
 
 Delegate child runs are also bounded by the `delegate_tool_calls_limit` general
 setting. The default is `32` child tool calls; `0` disables this limit.
+`delegate_model_requests_limit` bounds child model requests, and
+`delegate_repeated_failure_limit` blocks later unchanged calls after the same
+child tool and arguments return consecutive structured failures. Keep at least
+one of the request, tool-call, or timeout limits enabled.
 `delegate_timeout_seconds` controls the child-run timeout. The default is `120`
 seconds; `0` disables this timeout.
 
@@ -97,7 +101,7 @@ Returns the child agent's final text response.
 In scripted Monty flows, direct calls return an object with `return_value`, `metadata`, `content`, and `items`:
 
 - `return_value`: child agent final text response
-- `metadata`: run metadata including `model`, `tool_names`, `thinking`, `output_chars`, and `audit`
+- `metadata`: run metadata including `model`, `tool_names`, `thinking`, `output_chars`, `audit`, and configured limits; failures also include usage, partial output, and handoff references
 - `content`: `None`
 - `items`: empty; `delegate` does not project source artifacts
 
@@ -108,15 +112,16 @@ model_used = result.metadata["model"]
 tool_calls = result.metadata["audit"]["tool_calls"]
 ```
 
-The `audit` metadata is a compact child-run summary for debugging and validation. It includes message counts, child tool-call counts, child tool-error counts, and truncated child tool-call entries with tool name, arguments, outcome, and return preview. It does not include raw multimodal payloads.
+The `audit` metadata is a compact child-run summary for debugging and validation. It includes message counts, child tool-call counts, child tool-error counts, and truncated child tool-call entries with tool name, arguments, outcome, and return preview. It does not include raw multimodal payloads. A bounded failure preserves the latest settled in-process audit and partial output so the parent can continue from completed work; this state does not survive a process restart.
 
 ## Notes
 
 - `delegate` and `code_execution` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
-- the child does not inherit the parent system instructions or tool-reading flight card; provide the required tool policy explicitly
+- the child does not inherit the parent system instructions; it receives a compact delegate flight card and effective tool-call budget, while caller-supplied `instructions` remain available for task-specific policy
 - `delegate` blocks the parent chat turn or workflow step until the child run finishes; use asynchronous workflows for long-running delegated work that should be visible, cancellable, or able to save intermediate artifacts
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
+- parent cancellation is propagated to the active child; timeout cancellation is awaited before the failed result returns, although blocking or cancellation-suppressing third-party code can delay cooperative asyncio cancellation
 - `delegate_tool_calls_limit` controls the child tool-call guardrail globally; use scoped prompts and multiple delegate calls rather than one broad child run when the limit is reached
 - `delegate_timeout_seconds` controls the child timeout globally; raise it for slower models or larger delegated tasks, or split broad work into smaller child runs
 - to work with files, include the file path in the prompt and add `file_read` or `file_write` to `tools` according to the required capability

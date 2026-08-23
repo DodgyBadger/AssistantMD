@@ -30,7 +30,7 @@ from core.constants import (
     DELEGATE_AUDIT_MAX_TOOL_CALLS,
     DELEGATE_FLIGHT_CARD,
 )
-from core.llm.agents import collect_response, create_agent
+from core.llm.agents import AgentRunProgress, collect_response, create_agent
 from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
 from core.llm.capabilities.delegate_repeated_failure_guard import (
     build_delegate_repeated_failure_capability,
@@ -48,12 +48,18 @@ from core.settings import (
     get_delegate_tool_calls_limit,
 )
 from core.tools.base import BaseTool
-from core.tools.failures import FailureClassification, classify_exception
+from core.tools.failures import (
+    FailureClassification,
+    classify_exception,
+    classify_tool_result_state,
+)
 
 logger = UnifiedLogger(tag="delegate-tool")
 
 _FORBIDDEN_CHILD_TOOLS = frozenset({"delegate", "code_execution"})
 _SUPPORTED_OPTION_KEYS = frozenset({"thinking"})
+_DELEGATE_PARTIAL_OUTPUT_MAX_CHARS = 4_000
+_DELEGATE_MAX_HANDOFF_REFERENCES = 20
 
 
 class DelegateTool(BaseTool):
@@ -117,47 +123,49 @@ class DelegateTool(BaseTool):
                 },
             )
 
-            resolved_model = None
-            if model_value:
-                resolved_model = build_model_instance(
-                    model_value, thinking=resolved_thinking
-                )
-                if (
-                    isinstance(resolved_model, ModelExecutionSpec)
-                    and resolved_model.mode == "skip"
-                ):
-                    raise ValueError("delegate does not support skip model mode")
-
-            tool_capabilities: list[Any] = []
-            if safe_tool_names:
-                week_start_day = getattr(ctx.deps, "week_start_day", 0)
-                binding = resolve_tool_binding(
-                    list(safe_tool_names),
-                    vault_path=_vault_path,
-                    week_start_day=week_start_day,
-                )
-                tool_capabilities = build_assistant_tools_capabilities(
-                    tools=binding.tool_functions,
-                    instructions="",
-                )
-                repeated_failure_capability = (
-                    build_delegate_repeated_failure_capability(
-                        limit=repeated_failure_limit,
-                        session_id=session_id,
-                    )
-                )
-                if repeated_failure_capability is not None:
-                    tool_capabilities.append(repeated_failure_capability)
-                logger.set_sinks(["validation"]).info(
-                    "delegate_tool_binding_resolved",
-                    data={
-                        "workflow_id": session_id,
-                        "requested": list(safe_tool_names),
-                        "bound": binding.tool_names(),
-                    },
-                )
+            progress = AgentRunProgress()
 
             try:
+                resolved_model = None
+                if model_value:
+                    resolved_model = build_model_instance(
+                        model_value, thinking=resolved_thinking
+                    )
+                    if (
+                        isinstance(resolved_model, ModelExecutionSpec)
+                        and resolved_model.mode == "skip"
+                    ):
+                        raise ValueError("delegate does not support skip model mode")
+
+                tool_capabilities: list[Any] = []
+                if safe_tool_names:
+                    week_start_day = getattr(ctx.deps, "week_start_day", 0)
+                    binding = resolve_tool_binding(
+                        list(safe_tool_names),
+                        vault_path=_vault_path,
+                        week_start_day=week_start_day,
+                    )
+                    tool_capabilities = build_assistant_tools_capabilities(
+                        tools=binding.tool_functions,
+                        instructions="",
+                    )
+                    repeated_failure_capability = (
+                        build_delegate_repeated_failure_capability(
+                            limit=repeated_failure_limit,
+                            session_id=session_id,
+                        )
+                    )
+                    if repeated_failure_capability is not None:
+                        tool_capabilities.append(repeated_failure_capability)
+                    logger.set_sinks(["validation"]).info(
+                        "delegate_tool_binding_resolved",
+                        data={
+                            "workflow_id": session_id,
+                            "requested": list(safe_tool_names),
+                            "bound": binding.tool_names(),
+                        },
+                    )
+
                 agent = await create_agent(
                     model=resolved_model,
                     capabilities=tool_capabilities,
@@ -184,12 +192,24 @@ class DelegateTool(BaseTool):
                         allow_retry=not safe_tool_names,
                         session_id=session_id,
                         model=model_value or "default",
+                        progress=progress,
                     ),
                     timeout=_delegate_wait_timeout(timeout_seconds),
                 )
                 output = result.output
                 text = coerce_output_data(output)
                 audit = _build_child_run_audit(result.messages)
+            except asyncio.CancelledError:
+                _log_delegate_cancelled(
+                    session_id=session_id,
+                    model=model_value or "default",
+                    tool_names=safe_tool_names,
+                    max_tool_calls=max_tool_calls,
+                    repeated_failure_limit=repeated_failure_limit,
+                    timeout_seconds=timeout_seconds,
+                    progress=progress,
+                )
+                raise
             except UsageLimitExceeded as exc:
                 limit_context = _delegate_usage_limit_context(
                     exc, max_tool_calls=max_tool_calls
@@ -219,6 +239,8 @@ class DelegateTool(BaseTool):
                     thinking=thinking_value_to_label(resolved_thinking),
                     max_tool_calls=max_tool_calls,
                     timeout_seconds=timeout_seconds,
+                    repeated_failure_limit=repeated_failure_limit,
+                    progress=progress,
                     classification=classification,
                     message=limit_context["message"],
                 )
@@ -242,6 +264,8 @@ class DelegateTool(BaseTool):
                     thinking=thinking_value_to_label(resolved_thinking),
                     max_tool_calls=max_tool_calls,
                     timeout_seconds=timeout_seconds,
+                    repeated_failure_limit=repeated_failure_limit,
+                    progress=progress,
                     classification=classification,
                     message=(
                         f"Delegate stopped because the child agent exceeded its timeout of "
@@ -252,31 +276,34 @@ class DelegateTool(BaseTool):
                 )
             except Exception as exc:
                 classification = classify_exception(exc, phase="delegate_child_run")
-                if classification.failure_kind != "unknown":
-                    return _failed_delegate_return(
-                        session_id=session_id,
-                        model=model_value or "default",
-                        tool_names=safe_tool_names,
-                        stripped_tools=stripped,
-                        thinking=thinking_value_to_label(resolved_thinking),
-                        max_tool_calls=max_tool_calls,
-                        timeout_seconds=timeout_seconds,
-                        classification=classification,
-                        message=(
-                            f"Delegate stopped because the child agent hit a "
-                            f"{classification.failure_kind} failure. {classification.suggested_action}"
+                if classification.failure_kind == "unknown":
+                    classification = FailureClassification(
+                        error_type=type(exc).__name__,
+                        failure_kind="delegate_internal",
+                        retryable=False,
+                        phase="delegate_child_run",
+                        message=str(exc),
+                        suggested_action=(
+                            "Inspect the delegate failure log and correct the model, tool binding, "
+                            "or child-run configuration before retrying."
                         ),
                     )
-                logger.add_sink("validation").error(
-                    "delegate_failed",
-                    data={
-                        "workflow_id": session_id,
-                        "model": model_value or "default",
-                        "error_type": type(exc).__name__,
-                        "error_message": str(exc),
-                    },
+                return _failed_delegate_return(
+                    session_id=session_id,
+                    model=model_value or "default",
+                    tool_names=safe_tool_names,
+                    stripped_tools=stripped,
+                    thinking=thinking_value_to_label(resolved_thinking),
+                    max_tool_calls=max_tool_calls,
+                    timeout_seconds=timeout_seconds,
+                    repeated_failure_limit=repeated_failure_limit,
+                    progress=progress,
+                    classification=classification,
+                    message=(
+                        f"Delegate stopped because the child agent hit a "
+                        f"{classification.failure_kind} failure. {classification.suggested_action}"
+                    ),
                 )
-                raise
 
             metadata: dict[str, Any] = {
                 "status": "completed",
@@ -288,6 +315,7 @@ class DelegateTool(BaseTool):
                 "repeated_failure_limit": repeated_failure_limit,
                 "timeout_seconds": timeout_seconds,
                 "audit": audit,
+                "usage": _delegate_usage_metadata(progress.usage),
             }
             if stripped:
                 metadata["stripped_tools"] = list(stripped)
@@ -303,6 +331,7 @@ class DelegateTool(BaseTool):
                     "child_tool_error_count": audit["tool_error_count"],
                     "max_tool_calls": max_tool_calls,
                     "timeout_seconds": timeout_seconds,
+                    **_delegate_usage_metadata(progress.usage),
                 },
             )
 
@@ -324,9 +353,9 @@ async def _collect_delegate_response(
     allow_retry: bool,
     session_id: str,
     model: str,
+    progress: AgentRunProgress,
 ) -> Any:
     """Collect a child run, retrying only when replay cannot duplicate tools."""
-    usage = RunUsage()
     retry_policy = ModelStreamRetryPolicy.from_settings()
     for attempt in range(1, retry_policy.max_attempts + 1):
         try:
@@ -334,7 +363,8 @@ async def _collect_delegate_response(
                 agent,
                 prompt,
                 usage_limits=usage_limits,
-                usage=usage,
+                usage=progress.usage,
+                progress=progress,
             )
         except Exception as exc:
             classification = classify_exception(exc, phase="delegate_child_run")
@@ -374,18 +404,33 @@ def _failed_delegate_return(
     thinking: str,
     max_tool_calls: int,
     timeout_seconds: float,
+    repeated_failure_limit: int,
+    progress: AgentRunProgress,
     classification: FailureClassification,
     message: str,
 ) -> ToolReturn:
+    audit = _build_child_run_audit(progress.messages)
+    references = _child_run_references(progress.messages)
+    partial_output = _partial_delegate_output(progress.output)
+    handoff_message = _delegate_failure_handoff_message(
+        message,
+        partial_output,
+        unsettled_tool_call_count=audit["unsettled_tool_call_count"],
+    )
+    usage = _delegate_usage_metadata(progress.usage)
     metadata: dict[str, Any] = {
         "status": "failed",
         "model": model,
         "tool_names": list(tool_names),
         "thinking": thinking,
-        "output_chars": len(message),
+        "output_chars": len(handoff_message),
         "max_tool_calls": max_tool_calls,
+        "repeated_failure_limit": repeated_failure_limit,
         "timeout_seconds": timeout_seconds,
-        "audit": _empty_child_run_audit(),
+        "audit": audit,
+        "usage": usage,
+        "partial_output": partial_output,
+        "handoff_references": references,
     }
     metadata.update(classification.to_metadata())
     if stripped_tools:
@@ -400,18 +445,55 @@ def _failed_delegate_return(
         "retryable": classification.retryable,
         "error_message": message,
         "max_tool_calls": max_tool_calls,
+        "repeated_failure_limit": repeated_failure_limit,
         "timeout_seconds": timeout_seconds,
         "suggested_action": classification.suggested_action,
+        "partial_message_count": audit["message_count"],
+        "partial_tool_call_count": audit["tool_call_count"],
+        "unsettled_tool_call_count": audit["unsettled_tool_call_count"],
+        "partial_output_chars": len(partial_output),
+        "handoff_reference_count": len(references),
+        **usage,
     }
     for key in ("limit_kind", "limit_setting", "limit"):
         if key in metadata:
             log_data[key] = metadata[key]
 
-    logger.add_sink("validation").warning(
+    logger.add_sink("validation").error(
         "delegate_failed",
         data=log_data,
     )
-    return ToolReturn(return_value=message, content=None, metadata=metadata)
+    return ToolReturn(return_value=handoff_message, content=None, metadata=metadata)
+
+
+def _log_delegate_cancelled(
+    *,
+    session_id: str,
+    model: str,
+    tool_names: tuple[str, ...],
+    max_tool_calls: int,
+    repeated_failure_limit: int,
+    timeout_seconds: float,
+    progress: AgentRunProgress,
+) -> None:
+    audit = _build_child_run_audit(progress.messages)
+    usage = _delegate_usage_metadata(progress.usage)
+    logger.add_sink("validation").info(
+        "delegate_cancelled",
+        data={
+            "workflow_id": session_id,
+            "model": model,
+            "tool_names": list(tool_names),
+            "max_tool_calls": max_tool_calls,
+            "repeated_failure_limit": repeated_failure_limit,
+            "timeout_seconds": timeout_seconds,
+            "partial_message_count": audit["message_count"],
+            "partial_tool_call_count": audit["tool_call_count"],
+            "unsettled_tool_call_count": audit["unsettled_tool_call_count"],
+            "partial_output_chars": len(_partial_delegate_output(progress.output)),
+            **usage,
+        },
+    )
 
 
 def _delegate_usage_limit_context(
@@ -461,6 +543,8 @@ def _delegate_usage_limit_context(
 
 def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
     tool_calls_by_id: dict[str, dict[str, Any]] = {}
+    all_tool_call_ids: set[str] = set()
+    settled_tool_call_ids: set[str] = set()
     total_tool_call_count = 0
     tool_calls: list[dict[str, Any]] = []
     response_count = 0
@@ -475,9 +559,11 @@ def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
         for part in getattr(message, "parts", ()) or ():
             if isinstance(part, ToolCallPart):
                 total_tool_call_count += 1
+                all_tool_call_ids.add(part.tool_call_id)
                 call: dict[str, Any] = {
                     "tool": part.tool_name,
                     "call_id": part.tool_call_id,
+                    "settled": False,
                     "arguments": _compact_value(
                         part.args,
                         max_chars=DELEGATE_AUDIT_MAX_ARGUMENT_CHARS,
@@ -487,43 +573,48 @@ def _build_child_run_audit(messages: Sequence[ModelMessage]) -> dict[str, Any]:
                     tool_calls.append(call)
                     tool_calls_by_id[part.tool_call_id] = call
             elif isinstance(part, ToolReturnPart):
+                if part.tool_call_id in all_tool_call_ids:
+                    settled_tool_call_ids.add(part.tool_call_id)
                 returned_call = tool_calls_by_id.get(part.tool_call_id)
                 if returned_call is None:
                     continue
                 returned_call["outcome"] = part.outcome
+                returned_call["settled"] = True
+                returned_call["terminal_state"] = classify_tool_result_state(
+                    outcome=part.outcome,
+                    metadata=part.metadata,
+                )
                 returned_call["result"] = _compact_value(
                     part.content,
                     max_chars=DELEGATE_AUDIT_MAX_RESULT_CHARS,
                 )
                 if isinstance(part.metadata, dict):
                     returned_call["metadata"] = _compact_mapping(part.metadata)
+                    returned_call["structured_state"] = bool(
+                        part.metadata.get("status") or part.metadata.get("state")
+                    )
 
     tool_error_count = sum(
         1
         for call in tool_calls
-        if call.get("outcome") in {"failed", "denied"}
-        or _looks_like_tool_error(str(call.get("result") or ""))
+        if call.get("terminal_state") == "failed"
+        or (
+            not call.get("structured_state")
+            and call.get("outcome") in {None, "success"}
+            and _looks_like_tool_error(str(call.get("result") or ""))
+        )
     )
+    settled_tool_call_count = len(settled_tool_call_ids)
     return {
         "message_count": len(messages),
         "request_count": request_count,
         "response_count": response_count,
         "tool_call_count": total_tool_call_count,
+        "settled_tool_call_count": settled_tool_call_count,
+        "unsettled_tool_call_count": total_tool_call_count - settled_tool_call_count,
         "tool_error_count": tool_error_count,
         "tool_calls_truncated": total_tool_call_count > len(tool_calls),
         "tool_calls": tool_calls,
-    }
-
-
-def _empty_child_run_audit() -> dict[str, Any]:
-    return {
-        "message_count": 0,
-        "request_count": 0,
-        "response_count": 0,
-        "tool_call_count": 0,
-        "tool_error_count": 0,
-        "tool_calls_truncated": False,
-        "tool_calls": [],
     }
 
 
@@ -537,10 +628,86 @@ def _compact_mapping(value: dict[str, Any]) -> dict[str, Any]:
         "media_mode",
         "size_bytes",
         "error_type",
+        "failure_kind",
+        "artifact_ref",
+        "cache_ref",
+        "ref",
     ):
         if key in value:
             compact[key] = _compact_value(value[key], max_chars=200)
     return compact
+
+
+def _partial_delegate_output(output: Any) -> str:
+    if output is None:
+        return ""
+    return _compact_value(
+        coerce_output_data(output),
+        max_chars=_DELEGATE_PARTIAL_OUTPUT_MAX_CHARS,
+    )
+
+
+def _delegate_failure_handoff_message(
+    message: str,
+    partial_output: str,
+    *,
+    unsettled_tool_call_count: int,
+) -> str:
+    sections = [message]
+    if unsettled_tool_call_count:
+        sections.append(
+            f"Caution: {unsettled_tool_call_count} child tool call(s) had no settled return. "
+            "Do not replay a possible mutation blindly; inspect durable state first."
+        )
+    if partial_output:
+        sections.append(f"Partial child handoff:\n{partial_output}")
+    return "\n\n".join(sections)
+
+
+def _delegate_usage_metadata(usage: RunUsage) -> dict[str, int]:
+    return {
+        "request_count": usage.requests,
+        "tool_call_count": usage.tool_calls,
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+    }
+
+
+def _child_run_references(messages: Sequence[ModelMessage]) -> list[str]:
+    references: list[str] = []
+    for message in messages:
+        for part in getattr(message, "parts", ()) or ():
+            if not isinstance(part, ToolReturnPart):
+                continue
+            _collect_handoff_references(part.metadata, references)
+            _collect_handoff_references(part.content, references)
+            if len(references) >= _DELEGATE_MAX_HANDOFF_REFERENCES:
+                return references
+    return references
+
+
+def _collect_handoff_references(value: Any, references: list[str]) -> None:
+    if len(references) >= _DELEGATE_MAX_HANDOFF_REFERENCES:
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in {"artifact_ref", "cache_ref", "ref"} and isinstance(
+                item, str
+            ):
+                if item and item not in references:
+                    references.append(item)
+            else:
+                _collect_handoff_references(item, references)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            _collect_handoff_references(item, references)
+    elif isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return
+        _collect_handoff_references(parsed, references)
 
 
 def _compact_value(value: Any, *, max_chars: int) -> str:
@@ -557,11 +724,13 @@ def _compact_value(value: Any, *, max_chars: int) -> str:
 
 
 def _looks_like_tool_error(text: str) -> bool:
-    lowered = text.lower()
+    lowered = text.strip().lower()
+    if lowered.startswith(("error:", "error ", "failed:", "failure:")):
+        return True
     return any(
         marker in lowered
         for marker in (
-            "error",
+            '"error":',
             "cannot ",
             "not found",
             "unsupported",

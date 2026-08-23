@@ -11,7 +11,11 @@ from pydantic_ai.capabilities import Hooks
 from pydantic_ai.messages import ToolReturn
 
 from core.logger import UnifiedLogger
-from core.tools.failures import FailureClassification, tool_failure_return
+from core.tools.failures import (
+    FailureClassification,
+    classify_tool_result_state,
+    tool_failure_return,
+)
 
 logger = UnifiedLogger(tag="delegate-tool")
 
@@ -138,9 +142,4 @@ def _tool_call_fingerprint(tool_name: str, args: Any) -> str:
 def _is_structured_failure(result: Any) -> bool:
     if not isinstance(result, ToolReturn) or not isinstance(result.metadata, dict):
         return False
-    status = (
-        str(result.metadata.get("status") or result.metadata.get("state") or "")
-        .strip()
-        .lower()
-    )
-    return status in {"error", "failed", "failure"}
+    return classify_tool_result_state(metadata=result.metadata) == "failed"

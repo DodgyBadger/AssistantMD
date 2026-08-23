@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import openai
@@ -14,6 +14,30 @@ from pydantic_ai.exceptions import (
     UsageLimitExceeded,
 )
 from pydantic_ai.messages import ToolReturn
+
+ToolTerminalState = Literal["completed", "failed", "interrupted"]
+
+
+def classify_tool_result_state(
+    *, outcome: Any = None, metadata: Any = None
+) -> ToolTerminalState:
+    """Classify a completed tool transport by its structured domain outcome."""
+    normalized_outcome = str(outcome or "success").strip().lower()
+    if normalized_outcome == "interrupted":
+        return "interrupted"
+    result_metadata = metadata if isinstance(metadata, dict) else {}
+    status = (
+        str(result_metadata.get("status") or result_metadata.get("state") or "")
+        .strip()
+        .lower()
+    )
+    if normalized_outcome in {"failed", "denied"} or status in {
+        "error",
+        "failed",
+        "failure",
+    }:
+        return "failed"
+    return "completed"
 
 
 @dataclass(frozen=True)

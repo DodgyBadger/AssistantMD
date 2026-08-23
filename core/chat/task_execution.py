@@ -60,7 +60,7 @@ from core.runtime.task_runner import (
     ExecutionTaskHooks,
     ExecutionTaskSpec,
 )
-from core.tools.failures import classify_exception
+from core.tools.failures import classify_exception, classify_tool_result_state
 from core.tools.utils import estimate_token_count
 from core.vault_state.rollback import rollback_task_file_mutations
 
@@ -1638,7 +1638,7 @@ async def _publish_tool_call_finished(
         result_content = getattr(result_part, "content", None)
     result_metadata = _tool_result_event_metadata(result_part)
     outcome = str(getattr(result_part, "outcome", "success") or "success")
-    terminal_state = _tool_result_terminal_state(
+    terminal_state = classify_tool_result_state(
         outcome=outcome,
         metadata=result_metadata,
     )
@@ -1708,21 +1708,6 @@ def _tool_result_event_metadata(result_part: Any) -> dict[str, Any]:
         for key in _TOOL_RESULT_EVENT_METADATA_KEYS
         if key in metadata
     }
-
-
-def _tool_result_terminal_state(*, outcome: str, metadata: dict[str, Any]) -> str:
-    """Classify transport-complete tool output by its structured domain result."""
-    normalized_outcome = outcome.strip().lower()
-    if normalized_outcome == "interrupted":
-        return "interrupted"
-    status = str(metadata.get("status") or metadata.get("state") or "").strip().lower()
-    if normalized_outcome in {"failed", "denied"} or status in {
-        "error",
-        "failed",
-        "failure",
-    }:
-        return "failed"
-    return "completed"
 
 
 def _artifact_ref_from_tool_result(result_content: Any) -> str | None:

@@ -64,6 +64,7 @@ WHERE start_timestamp >= TIMESTAMP '2026-04-26T20:00:00Z'
     'delegate_started',
     'delegate_completed',
     'delegate_failed',
+    'delegate_cancelled',
     'delegate_tool_binding_resolved'
   )
 ORDER BY start_timestamp ASC
