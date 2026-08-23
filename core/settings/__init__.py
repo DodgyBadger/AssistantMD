@@ -215,7 +215,11 @@ def validate_settings(
                 severity="warning",
             )
             continue
-        missing_secrets = [key for key in required_secrets if not secret_has_value(key)]
+        missing_secrets = (
+            list(required_secrets)
+            if secrets_locked
+            else [key for key in required_secrets if not secret_has_value(key)]
+        )
         status.tool_availability[tool_name] = not missing_secrets
         if missing_secrets:
             strategy_context = (

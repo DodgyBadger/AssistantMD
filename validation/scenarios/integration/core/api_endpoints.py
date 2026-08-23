@@ -5,7 +5,6 @@ validation harness' shared FastAPI TestClient.
 
 import base64
 import json
-import os
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -37,18 +36,12 @@ class ApiEndpointsScenario(BaseScenario):
     """Validate core REST endpoints end-to-end using real runtime context."""
 
     async def test_scenario(self):
-        original_secrets_path = os.environ.get("SECRETS_PATH")
-        os.environ["SECRETS_PATH"] = str(self.run_path / "system" / "secrets.yaml")
         try:
             await self._run_api_endpoint_checks()
         finally:
             set_openai_oauth_token_adapter(None)
             if self._system_controller and self._system_controller.is_running:
                 await self.stop_system()
-            if original_secrets_path is None:
-                os.environ.pop("SECRETS_PATH", None)
-            else:
-                os.environ["SECRETS_PATH"] = original_secrets_path
 
     async def _run_api_endpoint_checks(self):
         vault = self.create_vault("IntegrationApiVault")

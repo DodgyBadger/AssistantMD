@@ -3,7 +3,7 @@
 AssistantMD separates infrastructure/runtime config from confidential values:
 
 - Settings: `system/settings.yaml` (typed, template-seeded)
-- Secrets: `system/secrets.yaml` (or `SECRETS_PATH` override)
+- Secrets: principal-owned encrypted records in `system/secrets.db`
 
 This page documents how each store works and how reload/validation interacts with them.
 
@@ -99,20 +99,22 @@ Runtime-relevant general settings include:
 
 Primary implementation: `core/settings/secrets_store.py`
 
-Resolution:
-
-1. `SECRETS_PATH` env var (authoritative if set)
-2. otherwise `get_system_root() / "secrets.yaml"`
-
 Key behavior:
 
-- File is auto-created from `core/settings/secrets.template.yaml` if missing.
-- Reads/writes are YAML-based and atomic.
-- Empty values are normalized consistently.
-- Helper APIs support list/get/set/remove/delete plus value-presence checks.
+- AES-256-GCM encrypts every value with identity-bound authenticated metadata.
+- `ASSISTANTMD_SECRETS_KEYS` supplies the versioned installation keyring and
+  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` selects the key used for writes.
+- Generic provider and tool credentials belong to the active execution
+  principal. System infrastructure credentials such as `LOGFIRE_TOKEN` belong
+  to the system principal.
+- Missing, malformed, or non-matching key material puts secrets into a locked
+  state. The application remains available for diagnostics, while provider and
+  model use remains unavailable until the installation key is restored.
+- Helper APIs support list/get/set/remove/delete plus value-presence checks
+  without exposing records owned by another principal.
 
 OpenAI OAuth token state, pending PKCE state, and pending device-code state are
-persisted as internal secret entries in this store so they survive restarts.
+persisted as internal, principal-owned secret entries so they survive restarts.
 Those internal entries are not returned by the generic Secrets UI/API list and
 should only be accessed through `core/llm/openai_oauth.py`. Pending auth state
 has a short TTL and is lazily cleared when status or completion paths observe

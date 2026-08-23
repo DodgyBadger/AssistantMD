@@ -94,4 +94,6 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 - For browser usage, start with a single extraction pass before attempting narrower selectors or follow-up actions
 - Test prompt-injection-sensitive workflows before trusting them with write/delete capabilities
 - Keep backups of important vault data
-- API keys and OpenAI OAuth token state are kept in the built-in secrets store (`system/secrets.yaml`). The file is ignored by git - keep it that way.
+- API keys and OpenAI OAuth token state are encrypted at rest in
+  `system/secrets.db`. Protect and back up the installation key in `.env`
+  separately; losing it requires re-entering stored credentials.

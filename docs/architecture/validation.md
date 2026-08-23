@@ -56,19 +56,17 @@ fixtures and default runtime paths. Set `VALIDATION_ROOT` when scenario
 discovery and run evidence live somewhere other than
 `<application-root>/validation`.
 
-Explicit `CONTAINER_DATA_ROOT`, `CONTAINER_SYSTEM_ROOT`, and `SECRETS_PATH`
-values remain authoritative.
+Explicit `CONTAINER_DATA_ROOT` and `CONTAINER_SYSTEM_ROOT` values remain
+authoritative.
 
 
 ## Working with secrets during validation
 
-- By default, validation runs use the configured secrets file (`SECRETS_PATH` if set, otherwise
-  `system/secrets.yaml`). API calls that update secrets write to that same file.
-- To isolate secrets for a specific run, set `SECRETS_PATH` before starting the system and point it
-  at a run-local file (for example, `validation/runs/<timestamp>_<scenario>/system/secrets.yaml`).
-  This keeps scenario updates scoped to the run folder.
-  You can set this inside the scenario file itself (before calling `start_system()`), for example
-  by assigning `os.environ["SECRETS_PATH"]` at the top of `test_scenario`.
+- Each validation system controller uses a run-local system root and an
+  ephemeral installation keyring. Secret API mutations therefore remain scoped
+  to that scenario's encrypted `secrets.db`.
+- Scenarios that instantiate secret services directly must supply their own
+  isolated system root and keyring.
 
 ## Validation events
 

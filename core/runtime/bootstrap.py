@@ -7,21 +7,25 @@ with proper configuration, error handling, and lifecycle management.
 
 import asyncio
 from datetime import UTC, datetime
-from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from core.authoring.template_discovery import WorkflowLoader, seed_system_templates
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
-from core.identity import AuthorizationService
+from core.identity import (
+    LOCAL_USER_AUTHORITY,
+    AuthorizationService,
+    use_execution_authority,
+)
 from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
-from core.secrets import initialize_secrets_bootstrap
+from core.secrets import get_encrypted_secrets_service, initialize_secrets_bootstrap
+from core.secrets.legacy_migration import migrate_legacy_secrets_yaml
 from core.settings import validate_settings
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
@@ -80,13 +84,30 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                     "reason": secrets_status.reason,
                 },
             )
-        refresh_settings_cache()
+        else:
+            migration_result = migrate_legacy_secrets_yaml(
+                system_root=config.system_root,
+                service=get_encrypted_secrets_service(),
+            )
+            logger.info(
+                "Legacy secrets migration checked",
+                data={
+                    "event": "legacy_secrets_migration_checked",
+                    "phase": migration_result.phase,
+                    "imported_count": migration_result.imported_count,
+                    "skipped_oauth_count": migration_result.skipped_oauth_count,
+                    "source_retired": migration_result.source_retired,
+                },
+            )
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            refresh_settings_cache()
 
         # Ensure packaged system templates exist without overwriting runtime edits.
         seed_system_templates(config.system_root)
 
         # Validate configuration before continuing bootstrap
-        config_status = validate_settings()
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            config_status = validate_settings()
         if not config_status.is_healthy:
             error_messages = [
                 f"{issue.name}: {issue.message}" for issue in config_status.errors
@@ -102,10 +123,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
         os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
-        os.environ.setdefault(
-            "SECRETS_PATH", str(Path(config.system_root) / "secrets.yaml")
-        )
-
         migration_status = run_system_migrations(config.system_root, backup=True)
         logger.info(
             "Startup system database migration check completed",

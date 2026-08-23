@@ -9,11 +9,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.schema import Table
 
-from core.logger import UnifiedLogger
 from core.runtime.paths import get_system_root
 from core.runtime.state import get_runtime_context, has_runtime_context
-
-logger = UnifiedLogger(tag="database")
 
 
 class Base(DeclarativeBase):

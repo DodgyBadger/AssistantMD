@@ -2275,7 +2275,7 @@ async function saveModelRow(rowKey) {
                         <div>
                             <label class="block text-xs font-medium text-txt-primary mb-1.5">Secret Value</label>
                             <input data-secret-field="value" type="password" class="w-full px-3 py-2 border border-border-secondary rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent bg-app-card text-txt-primary text-sm transition-colors" placeholder="Enter the credential" value="${escapeHtml(draft.value || '')}" />
-                            <p class="text-xs text-txt-secondary mt-1">Values are stored as plain text inside <code>system/secrets.yaml</code>.</p>
+                            <p class="text-xs text-txt-secondary mt-1">Values are encrypted at rest and owned by the current principal.</p>
                         </div>
                     </div>
                     <div class="flex justify-end gap-2">

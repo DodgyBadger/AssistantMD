@@ -5,7 +5,9 @@ Manages AssistantMD system startup, shutdown, and configuration.
 """
 
 import asyncio
+import base64
 import datetime as dt_module
+import json
 import os
 import subprocess
 from datetime import datetime
@@ -26,9 +28,9 @@ from core.runtime.bootstrap import bootstrap_runtime
 from core.runtime.config import RuntimeConfig
 from core.runtime.paths import set_bootstrap_roots
 from core.runtime.state import clear_runtime_context
+from core.secrets import reset_secrets_bootstrap_status
+from core.secrets.crypto import ACTIVE_KEY_VERSION_ENV, KEYRING_ENV
 from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
-
-from .paths import resolve_validation_system_root
 
 
 class SchedulerJobInfo:
@@ -64,19 +66,14 @@ class SystemController:
         set_bootstrap_roots(Path(self.test_data_root), self._system_root)
         self._seed_validation_settings()
 
-        # Use the real secrets file by default; allow override via env.
-        target_secrets = (
-            Path(os.environ["SECRETS_PATH"])
-            if os.environ.get("SECRETS_PATH")
-            else resolve_validation_system_root() / "secrets.yaml"
+        self._original_secret_keyring = os.environ.get(KEYRING_ENV)
+        self._original_active_key_version = os.environ.get(ACTIVE_KEY_VERSION_ENV)
+        validation_key = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+        self._validation_secret_keyring = json.dumps(
+            {"1": validation_key}, separators=(",", ":")
         )
-        target_secrets.parent.mkdir(parents=True, exist_ok=True)
-        if not target_secrets.exists():
-            target_secrets.touch(exist_ok=True)
-        self._secrets_file = target_secrets
-
-        self._original_secrets_path: str | None = os.environ.get("SECRETS_PATH")
-        os.environ["SECRETS_PATH"] = str(self._secrets_file)
+        os.environ[KEYRING_ENV] = self._validation_secret_keyring
+        os.environ[ACTIVE_KEY_VERSION_ENV] = "1"
 
         # Store current date for restoration
         self._current_test_date = None
@@ -139,11 +136,11 @@ class SystemController:
         if self.is_running:
             return
 
-        # Ensure secrets path points to the configured base for every start.
-        os.environ["SECRETS_PATH"] = str(self._secrets_file)
-
+        os.environ[KEYRING_ENV] = self._validation_secret_keyring
+        os.environ[ACTIVE_KEY_VERSION_ENV] = "1"
         # Clear any existing runtime context for test isolation
         clear_runtime_context()
+        reset_secrets_bootstrap_status()
 
         try:
             # Create runtime configuration for validation
@@ -208,6 +205,7 @@ class SystemController:
 
         # Clear runtime context for test isolation
         clear_runtime_context()
+        reset_secrets_bootstrap_status()
         self._api_app.state.runtime = None
 
         if self._process:
@@ -217,11 +215,14 @@ class SystemController:
 
         self.is_running = False
 
-        if self._original_secrets_path is None:
-            os.environ.pop("SECRETS_PATH", None)
+        if self._original_secret_keyring is None:
+            os.environ.pop(KEYRING_ENV, None)
         else:
-            os.environ["SECRETS_PATH"] = self._original_secrets_path
-        self._original_secrets_path = None
+            os.environ[KEYRING_ENV] = self._original_secret_keyring
+        if self._original_active_key_version is None:
+            os.environ.pop(ACTIVE_KEY_VERSION_ENV, None)
+        else:
+            os.environ[ACTIVE_KEY_VERSION_ENV] = self._original_active_key_version
 
     def set_context_manager_now(self, value: datetime | None) -> None:
         """Override cache clock used by context manager in validation runs."""
