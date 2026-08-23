@@ -1636,16 +1636,26 @@ async def _publish_tool_call_finished(
             data={"error": str(exc)},
         )
         result_content = getattr(result_part, "content", None)
+    result_metadata = _tool_result_event_metadata(result_part)
+    outcome = str(getattr(result_part, "outcome", "success") or "success")
+    terminal_state = _tool_result_terminal_state(
+        outcome=outcome,
+        metadata=result_metadata,
+    )
     tool_activity[tool_id] = {
         "tool_name": tool_name,
-        "status": "completed",
+        "status": terminal_state,
     }
     payload = {
         "event": "tool_call_finished",
         "tool_call_id": tool_id,
         "tool_name": tool_name,
         "result": chat_executor._normalize_tool_result(result_content),
+        "outcome": outcome,
+        "terminal_state": terminal_state,
     }
+    if result_metadata:
+        payload["result_metadata"] = result_metadata
     artifact_ref = _artifact_ref_from_tool_result(result_content)
     if artifact_ref:
         payload["artifact_ref"] = artifact_ref
@@ -1660,6 +1670,8 @@ async def _publish_tool_call_finished(
             "session_id": session_id,
             "tool_call_id": tool_id,
             "tool_name": tool_name,
+            "terminal_state": terminal_state,
+            "failure_kind": result_metadata.get("failure_kind"),
             "result_length": len(result_text),
             "result_token_estimate": (
                 estimate_token_count(result_text) if result_text else 0
@@ -1668,6 +1680,49 @@ async def _publish_tool_call_finished(
         },
     )
     await event_buffer.append(task_id, "tool_call_finished", payload)
+
+
+_TOOL_RESULT_EVENT_METADATA_KEYS = (
+    "status",
+    "state",
+    "error_type",
+    "failure_kind",
+    "retryable",
+    "phase",
+    "suggested_action",
+    "http_status",
+    "retry_after",
+    "limit_kind",
+    "limit_setting",
+    "limit",
+)
+
+
+def _tool_result_event_metadata(result_part: Any) -> dict[str, Any]:
+    """Return the bounded result-state envelope safe for task events."""
+    metadata = getattr(result_part, "metadata", None)
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: chat_executor._normalize_tool_detail(metadata[key])
+        for key in _TOOL_RESULT_EVENT_METADATA_KEYS
+        if key in metadata
+    }
+
+
+def _tool_result_terminal_state(*, outcome: str, metadata: dict[str, Any]) -> str:
+    """Classify transport-complete tool output by its structured domain result."""
+    normalized_outcome = outcome.strip().lower()
+    if normalized_outcome == "interrupted":
+        return "interrupted"
+    status = str(metadata.get("status") or metadata.get("state") or "").strip().lower()
+    if normalized_outcome in {"failed", "denied"} or status in {
+        "error",
+        "failed",
+        "failure",
+    }:
+        return "failed"
+    return "completed"
 
 
 def _artifact_ref_from_tool_result(result_content: Any) -> str | None:

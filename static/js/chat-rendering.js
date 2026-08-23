@@ -448,8 +448,9 @@
                     }
                     entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
                     entry.detailResult = entry.result;
+                    entry.resultMetadata = event.result_metadata || {};
                     entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
-                    setToolEntryState(entry, 'completed');
+                    setToolEntryState(entry, toolResultState(event));
                 }
 
                 updateToolDetail(entry);
@@ -890,17 +891,7 @@
 
             const total = context.toolStatusMap.size;
             const label = context.archivedToolEvents ? 'Archived tool calls' : 'Tool calls';
-            const counts = { running: 0, completed: 0, interrupted: 0 };
-            context.toolStatusMap.forEach((entry) => {
-                if (Object.hasOwn(counts, entry.state)) {
-                    counts[entry.state] += 1;
-                }
-            });
-            const details = [];
-            if (counts.running) details.push(`${counts.running} running`);
-            if (counts.completed) details.push(`${counts.completed} complete`);
-            if (counts.interrupted) details.push(`${counts.interrupted} interrupted`);
-            context.toolCallsSummaryTitle.textContent = `${label} (${total})${details.length ? ` · ${details.join(' · ')}` : ''}`;
+            context.toolCallsSummaryTitle.textContent = `${label} (${total})`;
         }
 
         function appendAssistantDelta(context, delta) {
@@ -1095,18 +1086,13 @@
             entry.container.classList.remove(
                 'tool-status-running',
                 'tool-status-complete',
+                'tool-status-failed',
                 'tool-status-interrupted'
             );
             const className = nextState === 'completed' ? 'tool-status-complete' : `tool-status-${nextState}`;
             entry.container.classList.add(className);
-            const labels = {
-                running: 'Running',
-                completed: 'Complete',
-                interrupted: 'Interrupted'
-            };
-            const symbols = { running: '', completed: '✓', interrupted: '!' };
+            const symbols = { running: '', completed: '✓', failed: '×', interrupted: '!' };
             entry.stateIcon.textContent = symbols[nextState] || '';
-            entry.stateLabel.textContent = labels[nextState] || nextState;
             updateToolElapsed(entry);
             if (activeToolDetailEntry === entry) {
                 refreshToolCallDetails(entry);
@@ -1115,17 +1101,34 @@
 
         function updateToolElapsed(entry) {
             if (!entry) return;
-            entry.elapsed.textContent = formatToolElapsed(entry);
-            entry.container.setAttribute(
-                'aria-label',
-                `${entry.toolName}: ${entry.stateLabel.textContent}, ${entry.elapsed.textContent}`
-            );
+            entry.container.setAttribute('aria-label', `${entry.toolName}: ${toolStateLabel(entry)}`);
             if (activeToolDetailEntry === entry) {
                 const elapsedBlock = document.querySelector(
                     '#chat-tool-call-modal [data-tool-call-elapsed] .tool-status-block'
                 );
                 if (elapsedBlock) elapsedBlock.textContent = formatToolElapsed(entry);
             }
+        }
+
+        function toolStateLabel(entry) {
+            const labels = {
+                running: 'Running',
+                completed: 'Complete',
+                failed: 'Failed',
+                interrupted: 'Interrupted'
+            };
+            return labels[entry.state] || entry.state;
+        }
+
+        function toolResultState(payload) {
+            const outcome = String(payload?.outcome || '').trim().toLowerCase();
+            if (outcome === 'interrupted' || payload?.terminal_state === 'interrupted') return 'interrupted';
+            const metadata = payload?.result_metadata || payload?.metadata || {};
+            const status = String(metadata.status || metadata.state || '').trim().toLowerCase();
+            if (['failed', 'denied'].includes(outcome) || ['error', 'failed', 'failure'].includes(status)) {
+                return 'failed';
+            }
+            return payload?.terminal_state === 'failed' ? 'failed' : 'completed';
         }
 
         function startToolElapsedTimer(context) {
@@ -1169,8 +1172,9 @@
                         : payload.result;
                 }
                 entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
+                entry.resultMetadata = payload.result_metadata || {};
                 entry.events.push(payload);
-                setToolEntryState(entry, 'completed');
+                setToolEntryState(entry, toolResultState(payload));
                 updateToolDetail(entry);
                 if (activeToolDetailEntry === entry) {
                     void loadToolCallDetail(entry, { force: true });
@@ -1212,20 +1216,8 @@
             stateIcon.className = 'tool-status-state-icon';
             stateIcon.setAttribute('aria-hidden', 'true');
 
-            const stateMeta = document.createElement('span');
-            stateMeta.className = 'tool-status-state-meta';
-
-            const stateLabel = document.createElement('span');
-            stateLabel.className = 'tool-status-state-label';
-
-            const elapsed = document.createElement('span');
-            elapsed.className = 'tool-status-elapsed';
-
-            stateMeta.appendChild(stateLabel);
-            stateMeta.appendChild(elapsed);
             summary.appendChild(stateIcon);
             summary.appendChild(line);
-            summary.appendChild(stateMeta);
 
             container.appendChild(summary);
             container.addEventListener('click', () => {
@@ -1243,8 +1235,6 @@
                 summary,
                 line,
                 stateIcon,
-                stateLabel,
-                elapsed,
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
                 args: payload.arguments || null,
@@ -1253,6 +1243,7 @@
                     : payload.arguments || null,
                 result: null,
                 detailResult: null,
+                resultMetadata: {},
                 artifactRef: payload.artifact_ref || '',
                 archived: Boolean(context.archivedToolEvents),
                 state: 'running',
@@ -1589,7 +1580,11 @@
                         ...(payload.artifact_ref ? { artifact_ref: payload.artifact_ref } : {})
                     };
                 }
+                entry.resultMetadata = payload.result_metadata || {};
                 entry.artifactRef = payload.artifact_ref || entry.artifactRef || '';
+                if (entry.state !== 'running') {
+                    setToolEntryState(entry, toolResultState({ result_metadata: entry.resultMetadata }));
+                }
                 entry.detailLoaded = true;
             } catch (error) {
                 if (entry.detailRequestId === requestId) {
@@ -1611,7 +1606,7 @@
             const sections = [
                 { label: 'Tool', value: entry.toolName || 'Tool call' },
                 { label: 'Tool call ID', value: entry.toolId || '' },
-                { label: 'Status', value: entry.stateLabel.textContent },
+                { label: 'Status', value: toolStateLabel(entry) },
                 { label: 'Elapsed', value: formatToolElapsed(entry), elapsed: true },
                 {
                     label: 'Context',
@@ -1631,6 +1626,9 @@
             }
             if (!isEmptyToolValue(resultForDetail)) {
                 sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
+            }
+            if (entry.state === 'failed' && !isEmptyToolValue(entry.resultMetadata)) {
+                sections.push({ label: 'Failure', value: entry.resultMetadata });
             }
             if (entry.detailLoading) {
                 sections.push({ label: 'Full detail', value: 'Loading…' });

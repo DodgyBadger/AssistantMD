@@ -28,9 +28,13 @@ from core.constants import (
     DELEGATE_AUDIT_MAX_ARGUMENT_CHARS,
     DELEGATE_AUDIT_MAX_RESULT_CHARS,
     DELEGATE_AUDIT_MAX_TOOL_CALLS,
+    DELEGATE_FLIGHT_CARD,
 )
 from core.llm.agents import collect_response, create_agent
 from core.llm.capabilities.assistant_tools import build_assistant_tools_capabilities
+from core.llm.capabilities.delegate_repeated_failure_guard import (
+    build_delegate_repeated_failure_capability,
+)
 from core.llm.model_factory import build_model_instance
 from core.llm.model_selection import ModelExecutionSpec
 from core.llm.stream_retry import ModelStreamRetryPolicy
@@ -39,6 +43,7 @@ from core.logger import UnifiedLogger
 from core.settings import (
     get_default_model_thinking,
     get_delegate_model_requests_limit,
+    get_delegate_repeated_failure_limit,
     get_delegate_timeout_seconds,
     get_delegate_tool_calls_limit,
 )
@@ -85,6 +90,7 @@ class DelegateTool(BaseTool):
             requested_thinking, max_tool_calls, timeout_seconds = _parse_options(
                 options or {}
             )
+            repeated_failure_limit = get_delegate_repeated_failure_limit()
 
             safe_tool_names = tuple(
                 n for n in tool_names if n not in _FORBIDDEN_CHILD_TOOLS
@@ -106,6 +112,7 @@ class DelegateTool(BaseTool):
                     "resolved_thinking": thinking_value_to_label(resolved_thinking),
                     "thinking_source": thinking_source,
                     "max_tool_calls": max_tool_calls,
+                    "repeated_failure_limit": repeated_failure_limit,
                     "timeout_seconds": timeout_seconds,
                 },
             )
@@ -121,7 +128,7 @@ class DelegateTool(BaseTool):
                 ):
                     raise ValueError("delegate does not support skip model mode")
 
-            tool_capabilities = None
+            tool_capabilities: list[Any] = []
             if safe_tool_names:
                 week_start_day = getattr(ctx.deps, "week_start_day", 0)
                 binding = resolve_tool_binding(
@@ -133,6 +140,14 @@ class DelegateTool(BaseTool):
                     tools=binding.tool_functions,
                     instructions="",
                 )
+                repeated_failure_capability = (
+                    build_delegate_repeated_failure_capability(
+                        limit=repeated_failure_limit,
+                        session_id=session_id,
+                    )
+                )
+                if repeated_failure_capability is not None:
+                    tool_capabilities.append(repeated_failure_capability)
                 logger.set_sinks(["validation"]).info(
                     "delegate_tool_binding_resolved",
                     data={
@@ -154,6 +169,11 @@ class DelegateTool(BaseTool):
                         return instructions
 
                     agent.instructions(delegate_instructions)
+
+                def delegate_flight_card() -> str:
+                    return _delegate_flight_card(max_tool_calls)
+
+                agent.instructions(delegate_flight_card)
 
                 usage_limits = _delegate_usage_limits(max_tool_calls)
                 result = await asyncio.wait_for(
@@ -265,6 +285,7 @@ class DelegateTool(BaseTool):
                 "thinking": thinking_value_to_label(resolved_thinking),
                 "output_chars": len(text),
                 "max_tool_calls": max_tool_calls,
+                "repeated_failure_limit": repeated_failure_limit,
                 "timeout_seconds": timeout_seconds,
                 "audit": audit,
             }
@@ -591,6 +612,20 @@ def _delegate_usage_limits(max_tool_calls: int) -> UsageLimits | None:
         request_limit=model_requests_limit if model_requests_limit > 0 else None,
         tool_calls_limit=max_tool_calls if max_tool_calls > 0 else None,
     )
+
+
+def _delegate_flight_card(max_tool_calls: int) -> str:
+    if max_tool_calls > 0:
+        budget_instruction = (
+            f"This run has a maximum of {max_tool_calls} total tool calls. "
+            "Finish tool use early enough to synthesize the compact handoff."
+        )
+    else:
+        budget_instruction = (
+            "The configured tool-call limit is disabled for this run. "
+            "Keep tool use bounded to the smallest set needed for the deliverable."
+        )
+    return f"{DELEGATE_FLIGHT_CARD.strip()}\n- {budget_instruction}"
 
 
 def _delegate_wait_timeout(timeout_seconds: float) -> float | None:

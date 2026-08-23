@@ -2127,6 +2127,9 @@ details summary::-webkit-details-marker {
 .tool-status.tool-status-interrupted {
     color: rgb(var(--text-secondary));
 }
+.tool-status.tool-status-failed {
+    color: rgb(var(--state-error));
+}
 .tool-status:hover,
 .tool-status:focus-visible {
     background: rgb(var(--accent-primary) / 0.1);
@@ -2167,6 +2170,10 @@ details summary::-webkit-details-marker {
 .tool-status-complete .tool-status-state-icon {
     border-color: rgb(var(--accent-primary) / 0.65);
 }
+.tool-status-failed .tool-status-state-icon {
+    border-color: rgb(var(--state-error) / 0.75);
+    color: rgb(var(--state-error));
+}
 .tool-status-interrupted .tool-status-state-icon {
     border-color: rgb(var(--text-secondary) / 0.7);
     color: rgb(var(--text-secondary));
@@ -2175,24 +2182,6 @@ details summary::-webkit-details-marker {
     to {
         transform: rotate(360deg);
     }
-}
-.tool-status-state-meta {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 0.35rem;
-    color: rgb(var(--text-secondary));
-    font-size: 0.68rem;
-    font-weight: 500;
-    white-space: nowrap;
-}
-.tool-status-state-label {
-    color: inherit;
-}
-.tool-status-elapsed {
-    min-width: 2rem;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
 }
 .tool-status-summary::-webkit-details-marker,
 .tool-status-summary::marker {

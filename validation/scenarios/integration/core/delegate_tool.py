@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.messages import ToolReturn
 
 from validation.core.base_scenario import BaseScenario
 
@@ -32,6 +33,7 @@ class DelegateToolScenario(BaseScenario):
         await self.start_system()
 
         configured_delegate_limit = 12
+        configured_repeated_failure_limit = 2
         configured_delegate_timeout = 90
         configured_stream_retries = 1
         configured_retry_base_delay = 0.0
@@ -44,6 +46,16 @@ class DelegateToolScenario(BaseScenario):
         assert (
             delegate_limit_update.status_code == 200
         ), "Delegate tool-call limit setting updates"
+        repeated_failure_limit_update = self.call_api(
+            "/api/system/settings/general/delegate_repeated_failure_limit",
+            method="PUT",
+            data={"value": str(configured_repeated_failure_limit)},
+        )
+        assert (
+            repeated_failure_limit_update.status_code == 200
+        ), "Delegate repeated-failure limit setting updates"
+        await _assert_repeated_failure_guard()
+        _assert_delegate_flight_card(configured_delegate_limit)
         delegate_timeout_update = self.call_api(
             "/api/system/settings/general/delegate_timeout_seconds",
             method="PUT",
@@ -386,6 +398,28 @@ class DelegateToolScenario(BaseScenario):
                     "limit_setting": "delegate_tool_calls_limit",
                 },
             )
+            limit_result_event = next(
+                (
+                    event
+                    for event in limit_failure["events"]
+                    if event.get("event") == "tool_call_finished"
+                    and event.get("tool_name") == "delegate"
+                ),
+                None,
+            )
+            assert (
+                limit_result_event is not None
+            ), "Delegate failure should finish its tool lifecycle"
+            self.soft_assert_equal(
+                limit_result_event.get("terminal_state"),
+                "failed",
+                "Delegate failure result should expose a failed terminal state",
+            )
+            self.soft_assert_equal(
+                limit_result_event.get("result_metadata", {}).get("failure_kind"),
+                "execution_limit",
+                "Delegate failure result should preserve its structured failure kind",
+            )
             self.soft_assert(
                 "tool-call limit" in limit_failure["text"],
                 "Delegate limit failure should return actionable text to the parent agent",
@@ -692,6 +726,60 @@ class DelegateToolScenario(BaseScenario):
         await self.stop_system()
         self.teardown_scenario()
         self.assert_no_failures()
+
+
+async def _assert_repeated_failure_guard() -> None:
+    from core.llm.capabilities.delegate_repeated_failure_guard import (
+        DelegateRepeatedFailureGuard,
+    )
+
+    executed: list[str] = []
+
+    async def fail(args):
+        executed.append(str(args))
+        return ToolReturn(return_value="failed", metadata={"status": "failed"})
+
+    async def succeed(args):
+        executed.append(str(args))
+        return ToolReturn(return_value="ok", metadata={"status": "completed"})
+
+    guard = DelegateRepeatedFailureGuard(limit=2, session_id="guard-contract")
+    await guard.execute(tool_name="probe", args={"a": 1, "b": 2}, handler=fail)
+    await guard.execute(tool_name="probe", args={"b": 2, "a": 1}, handler=fail)
+    blocked = await guard.execute(
+        tool_name="probe",
+        args={"a": 1, "b": 2},
+        handler=fail,
+    )
+    assert len(executed) == 2, "Third identical failed execution should be blocked"
+    assert blocked.metadata["failure_kind"] == "repeated_tool_failure"
+
+    await guard.execute(tool_name="other", args={}, handler=succeed)
+    await guard.execute(tool_name="probe", args={"a": 1, "b": 2}, handler=fail)
+    assert (
+        len(executed) == 4
+    ), "A successful different call should reset the failure streak"
+
+    disabled = DelegateRepeatedFailureGuard(limit=0, session_id="guard-disabled")
+    for _ in range(3):
+        await disabled.execute(tool_name="probe", args={}, handler=fail)
+    assert len(executed) == 7, "Zero should disable the repeated-failure guard"
+
+
+def _assert_delegate_flight_card(tool_call_limit: int) -> None:
+    from core.tools.delegate import _delegate_flight_card
+
+    bounded = _delegate_flight_card(tool_call_limit)
+    assert "FLIGHT CARD" in bounded
+    assert str(tool_call_limit) in bounded
+    assert "model-request" not in bounded
+    assert "timeout" not in bounded
+    assert "compact handoff" in bounded
+
+    disabled = _delegate_flight_card(0)
+    assert "disabled" in disabled
+    assert "model-request" not in disabled
+    assert "timeout" not in disabled
 
 
 DELEGATE_WITH_TOOLS_WORKFLOW = """---

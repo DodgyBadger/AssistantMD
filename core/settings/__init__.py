@@ -713,6 +713,19 @@ def get_delegate_model_requests_limit() -> int:
     return parsed if parsed > 0 else 0
 
 
+def get_delegate_repeated_failure_limit() -> int:
+    """Return allowed identical structured failures before delegate calls are blocked."""
+    entry = get_general_settings().get("delegate_repeated_failure_limit")
+    value = getattr(entry, "value", None) if entry is not None else None
+    if value is None:
+        return _get_template_setting_positive_int("delegate_repeated_failure_limit", 2)
+    try:
+        parsed = _setting_int(value)
+    except (TypeError, ValueError):
+        return _get_template_setting_positive_int("delegate_repeated_failure_limit", 2)
+    return parsed if parsed > 0 else 0
+
+
 def get_delegate_timeout_seconds() -> float:
     """Return delegate child-run timeout seconds; 0 disables the timeout."""
     entry = get_general_settings().get("delegate_timeout_seconds")

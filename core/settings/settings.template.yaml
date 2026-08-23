@@ -66,7 +66,12 @@ settings:
     restart_required: false
   delegate_model_requests_limit:
     value: 75
-    description: "Maximum model requests allowed inside one delegate child-agent run. 0 disables the limit. Keep child runs bounded and split broad work into smaller delegates."
+    description: "Maximum model requests allowed inside one delegate child-agent run. 0 disables the limit. Keep at least one of the model-request, tool-call, or timeout delegate limits enabled to retain runaway protection."
+    category: "Delegation"
+    restart_required: false
+  delegate_repeated_failure_limit:
+    value: 2
+    description: "Maximum consecutive executions of one delegate child tool with identical arguments that may return structured failures before later unchanged attempts are blocked. 0 disables this guard."
     category: "Delegation"
     restart_required: false
   delegate_timeout_seconds:
