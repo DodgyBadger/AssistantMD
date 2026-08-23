@@ -1085,7 +1085,10 @@ async def _assert_repeated_failure_guard() -> None:
 
 
 def _assert_delegate_flight_card(tool_call_limit: int) -> None:
-    from core.tools.delegate import _delegate_flight_card
+    from core.tools.delegate import (
+        _apply_delegate_instruction_layers,
+        _delegate_flight_card,
+    )
 
     bounded = _delegate_flight_card(tool_call_limit)
     assert "FLIGHT CARD" in bounded
@@ -1098,6 +1101,24 @@ def _assert_delegate_flight_card(tool_call_limit: int) -> None:
     assert "disabled" in disabled
     assert "model-request" not in disabled
     assert "timeout" not in disabled
+
+    class _InstructionRecorder:
+        def __init__(self):
+            self.layers = []
+
+        def instructions(self, instruction):
+            self.layers.append(instruction)
+
+    recorder = _InstructionRecorder()
+    task_instructions = "TASK-SPECIFIC-DELEGATE-INSTRUCTIONS"
+    _apply_delegate_instruction_layers(
+        recorder,
+        max_tool_calls=tool_call_limit,
+        caller_instructions=task_instructions,
+    )
+    assert len(recorder.layers) == 2
+    assert "DELEGATE FLIGHT CARD" in recorder.layers[0]
+    assert recorder.layers[1] == task_instructions
 
 
 def _assert_shared_tool_result_classification() -> None:

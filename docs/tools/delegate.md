@@ -118,7 +118,7 @@ The `audit` metadata is a compact child-run summary for debugging and validation
 
 - `delegate` and `code_execution` are always removed from the child tool list — recursive delegation is not permitted
 - the child agent runs in isolation; its messages do not appear in the parent chat transcript
-- the child does not inherit the parent system instructions; it receives a compact delegate flight card and effective tool-call budget, while caller-supplied `instructions` remain available for task-specific policy
+- the child does not inherit the parent system instructions; its instruction layers follow the parent ordering of date, stable flight card, then caller-supplied task-specific `instructions`
 - `delegate` blocks the parent chat turn or workflow step until the child run finishes; use asynchronous workflows for long-running delegated work that should be visible, cancellable, or able to save intermediate artifacts
 - child runs are bounded; if the child exceeds its tool-call or timeout guardrail, `delegate` returns a failed tool result with guidance instead of crashing the parent run
 - parent cancellation is propagated to the active child; timeout cancellation is awaited before the failed result returns, although blocking or cancellation-suppressing third-party code can delay cooperative asyncio cancellation

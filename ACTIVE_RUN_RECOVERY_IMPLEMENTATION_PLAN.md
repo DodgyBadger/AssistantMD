@@ -355,9 +355,10 @@ child-actionable rules:
 Do not copy parent-only rules about UI formatting, inline review, math through
 `code_execution`, `goal_ops`, or virtual documentation. Delegate and
 `code_execution` are forbidden child tools, and other capabilities vary per
-call. Compose the internal flight card after caller-supplied child instructions
-so task-specific guidance remains supported without hiding the system-owned
-safety contract in arbitrary prompt assembly.
+call. Register the internal flight card before caller-supplied child
+instructions, matching the parent chat layering of date, stable base policy,
+then task/tool-specific guidance. This keeps the system-owned safety contract
+visibly foundational while preserving task-specific delegate instructions.
 
 ## Objective
 

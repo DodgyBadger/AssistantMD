@@ -172,17 +172,11 @@ class DelegateTool(BaseTool):
                     capabilities=tool_capabilities,
                     thinking=resolved_thinking,
                 )
-                if instructions:
-
-                    def delegate_instructions() -> str:
-                        return instructions
-
-                    agent.instructions(delegate_instructions)
-
-                def delegate_flight_card() -> str:
-                    return _delegate_flight_card(max_tool_calls)
-
-                agent.instructions(delegate_flight_card)
+                _apply_delegate_instruction_layers(
+                    agent,
+                    max_tool_calls=max_tool_calls,
+                    caller_instructions=instructions,
+                )
 
                 usage_limits = _delegate_usage_limits(max_tool_calls)
                 result = await asyncio.wait_for(
@@ -809,6 +803,18 @@ def _delegate_flight_card(max_tool_calls: int) -> str:
             "Keep tool use bounded to the smallest set needed for the deliverable."
         )
     return f"{DELEGATE_FLIGHT_CARD.strip()}\n- {budget_instruction}"
+
+
+def _apply_delegate_instruction_layers(
+    agent: Any,
+    *,
+    max_tool_calls: int,
+    caller_instructions: str | None,
+) -> None:
+    """Register delegate layers in the same base-before-specific order as chat."""
+    agent.instructions(_delegate_flight_card(max_tool_calls))
+    if caller_instructions:
+        agent.instructions(caller_instructions)
 
 
 def _delegate_wait_timeout(timeout_seconds: float) -> float | None:
