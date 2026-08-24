@@ -2242,10 +2242,10 @@ async function saveModelRow(rowKey) {
                     <label class="text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
                     <div class="rounded-md border border-border-primary p-3 space-y-2">
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
-                        <div class="flex gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" class="ui-button" ${staticAuth ? '' : 'disabled'}>Save Credential</button><button type="button" data-mcp-action="clear-credential" class="ui-button" ${connection.credential_present ? '' : 'disabled'}>Clear</button></div>
+                        <div class="flex items-center gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" ${iconButton('save', 'Save MCP credential', 'is-primary', staticAuth ? '' : 'disabled')}>${iconSvg('save')}</button><button type="button" data-mcp-action="clear-credential" ${iconButton('x', 'Clear MCP credential', 'is-danger', connection.credential_present ? '' : 'disabled')}>${iconSvg('x')}</button></div>
                     </div>
                     <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
-                    <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" class="ui-button">Test Connection</button><button type="button" data-mcp-action="delete" class="ui-button is-danger">Delete</button><button type="button" data-mcp-action="save" class="ui-button is-primary">Save Connection</button></div>
+                    <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" ${iconButton('play', 'Test MCP connection')}>${iconSvg('play')}</button><button type="button" data-mcp-action="delete" ${iconButton('trash', 'Delete MCP connection', 'is-danger')}>${iconSvg('trash')}</button><button type="button" data-mcp-action="save" ${iconButton('save', 'Save MCP connection', 'is-primary')}>${iconSvg('save')}</button></div>
                 </div>`;
         }).join('');
     }
@@ -3261,6 +3261,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadMcpConnections();
         await loadSystemJobs();
         await loadSystemMigrations();
         await loadImportVaults();
