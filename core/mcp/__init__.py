@@ -14,8 +14,18 @@ __all__ = [
     "MCPAuthMode",
     "MCPConnection",
     "MCPConnectionCreate",
+    "MCPConnectionLease",
+    "MCPConnectionManager",
     "MCPConnectionService",
     "MCPConnectionTestResult",
     "MCPConnectionUpdate",
+    "MCPReadinessSnapshot",
     "MCPTransport",
+    "MCPUnavailableConnection",
 ]
+from .manager import (
+    MCPConnectionLease,
+    MCPConnectionManager,
+    MCPReadinessSnapshot,
+    MCPUnavailableConnection,
+)

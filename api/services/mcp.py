@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 
+from core.identity import require_current_execution_authority
 from core.logger import UnifiedLogger
 from core.mcp import (
     MCPAuthMode,
@@ -15,7 +16,6 @@ from core.mcp import (
     MCPConnectionUpdate,
     MCPTransport,
 )
-from core.mcp.testing import test_mcp_connection_runtime
 from core.runtime.state import get_runtime_context
 
 from ..exceptions import APIException
@@ -127,10 +127,22 @@ def delete_mcp_connection(connection_id: str) -> OperationResult:
 
 
 async def test_mcp_connection(connection_id: str) -> MCPConnectionTestResponse:
-    """Test initialization and tool discovery without retaining a client."""
+    """Test managed initialization and return sanitized tool discovery."""
     with _domain_errors():
-        connection, credential = _service().get_connection_test_material(connection_id)
-        result = await test_mcp_connection_runtime(connection, credential)
+        connection = _service().get_connection(connection_id)
+        if connection is None:
+            raise LookupError("MCP connection not found.")
+        runtime = get_runtime_context()
+        if runtime.mcp_manager is None:
+            raise APIException(
+                status_code=503,
+                error_type="MCPRuntimeUnavailable",
+                message="MCP runtime connections are unavailable.",
+            )
+        result = await runtime.mcp_manager.test_connection(
+            require_current_execution_authority(),
+            connection,
+        )
     return MCPConnectionTestResponse(**asdict(result))
 
 

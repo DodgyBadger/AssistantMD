@@ -27,9 +27,13 @@ within one AssistantMD installation, not multi-tenant infrastructure.
 - Slice 6 is complete: principal-owned MCP connection persistence, immutable
   slugs, encrypted static credentials, sanitized management APIs, the basic
   single-user System UI, and synthetic-principal isolation coverage.
-- Slice 7 is in progress: bounded connection readiness/testing is complete;
-  retained managed transports, network policy, catalog leases, invalidation,
-  and shutdown lifecycle remain.
+- Slice 7 is complete: bounded connection readiness/testing now runs through
+  lazy retained transports with principal/version keys, settled catalog leases,
+  shared cold initialization, transient reconnect, invalidation, idle/runtime
+  cleanup, explicit local-HTTP policy, and proxy-independent clients.
+- Slice 8 is next: compose the frozen managed catalogs behind Pydantic AI tool
+  search and wire them through chat execution, activity, budgets, cancellation,
+  output handling, and recovery.
 
 ## Invariants
 

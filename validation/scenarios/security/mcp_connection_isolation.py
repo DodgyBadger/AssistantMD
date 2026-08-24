@@ -28,11 +28,14 @@ if __name__ == "__main__":
 from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E402
 from core.mcp import (  # noqa: E402
     MCPAuthMode,
+    MCPConnection,
     MCPConnectionCreate,
+    MCPConnectionManager,
     MCPConnectionService,
     MCPConnectionUpdate,
     MCPTransport,
 )
+from core.mcp.network import MCPNetworkPolicyError, validate_mcp_endpoint  # noqa: E402
 from core.mcp.testing import test_mcp_connection_runtime  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -176,8 +179,147 @@ class MCPConnectionIsolationScenario(BaseScenario):
             "A retired slug must never be reassigned to another connection",
         )
 
+        await self._assert_managed_connection_lifecycle(
+            service=service,
+            owner=owner,
+            other=other,
+            owner_connection=replacement,
+            other_connection=other_connection,
+        )
+        await self._assert_network_policy()
+
         self.assert_no_failures()
         self.teardown_scenario()
+
+    async def _assert_managed_connection_lifecycle(
+        self,
+        *,
+        service: MCPConnectionService,
+        owner: ExecutionAuthority,
+        other: ExecutionAuthority,
+        owner_connection: MCPConnection,
+        other_connection: MCPConnection,
+    ) -> None:
+        clients: list[_ManagedTestClient] = []
+
+        def client_factory(*_args: object, **_kwargs: object) -> _ManagedTestClient:
+            client = _ManagedTestClient()
+            clients.append(client)
+            return client
+
+        manager = MCPConnectionManager(
+            connections=service,
+            allow_insecure_http=True,
+            idle_timeout_seconds=0,
+        )
+        with (
+            patch("core.mcp.manager.Client", side_effect=client_factory),
+            patch("core.mcp.manager.validate_mcp_endpoint", new=_allow_endpoint),
+        ):
+            owner_leases = await asyncio.gather(
+                manager.acquire(owner, owner_connection),
+                manager.acquire(owner, owner_connection),
+            )
+            self.soft_assert_equal(
+                len(clients),
+                1,
+                "Concurrent cold callers should share one initialization",
+            )
+            other_lease = await manager.acquire(other, other_connection)
+            self.soft_assert_equal(
+                len(clients),
+                2,
+                "The same manager must retain separate clients per principal",
+            )
+
+            await owner_leases[0].close()
+            self.soft_assert_equal(
+                await manager.evict_idle(),
+                0,
+                "An active lease must prevent idle eviction",
+            )
+            await owner_leases[1].close()
+            self.soft_assert_equal(
+                await manager.evict_idle(),
+                1,
+                "An idle unleased client should be evicted",
+            )
+            replacement_lease = await manager.acquire(owner, owner_connection)
+            self.soft_assert_equal(
+                len(clients),
+                3,
+                "An evicted connection should initialize again on demand",
+            )
+            manager.invalidate(owner.principal_id, owner_connection.connection_id)
+            await asyncio.sleep(0)
+            await replacement_lease.close()
+            await asyncio.sleep(0)
+            invalidated_lease = await manager.acquire(owner, owner_connection)
+            self.soft_assert_equal(
+                len(clients),
+                4,
+                "Invalidation should force the next lease onto a fresh client",
+            )
+            await invalidated_lease.close()
+            await other_lease.close()
+            await manager.shutdown()
+
+        self.soft_assert(
+            all(client.exit_count == 1 for client in clients),
+            "Eviction, invalidation, and shutdown should close every client once "
+            f"(close counts: {[client.exit_count for client in clients]})",
+        )
+
+    async def _assert_network_policy(self) -> None:
+        with patch(
+            "core.mcp.network._resolve_addresses",
+            return_value=("172.18.0.9",),
+        ):
+            try:
+                await validate_mcp_endpoint(
+                    "http://marimo:8080/mcp/server",
+                    allow_insecure_http=False,
+                )
+                rejected_local_http = False
+            except MCPNetworkPolicyError:
+                rejected_local_http = True
+            self.soft_assert(
+                rejected_local_http,
+                "Local HTTP MCP should require the explicit development allowance",
+            )
+            allowed = await validate_mcp_endpoint(
+                "http://marimo:8080/mcp/server",
+                allow_insecure_http=True,
+            )
+            self.soft_assert_equal(
+                allowed.addresses,
+                ("172.18.0.9",),
+                "Explicit development allowance should admit local HTTP MCP",
+            )
+        with patch(
+            "core.mcp.network._resolve_addresses",
+            return_value=("8.8.8.8",),
+        ):
+            try:
+                await validate_mcp_endpoint(
+                    "http://public.example/mcp",
+                    allow_insecure_http=True,
+                )
+                rejected_public_http = False
+            except MCPNetworkPolicyError:
+                rejected_public_http = True
+            self.soft_assert(
+                rejected_public_http,
+                "The development allowance must not permit public HTTP MCP",
+            )
+            secure = await validate_mcp_endpoint(
+                "https://public.example/mcp",
+                allow_insecure_http=False,
+            )
+            self.soft_assert(
+                secure.secure,
+                "Public MCP connections should require and accept HTTPS",
+            )
 
 
 @dataclass(frozen=True)
@@ -209,6 +351,25 @@ class _RejectedTestClient:
 
     async def __aexit__(self, *_args: object) -> None:
         return None
+
+
+class _ManagedTestClient:
+    def __init__(self) -> None:
+        self.exit_count = 0
+
+    async def __aenter__(self) -> _ManagedTestClient:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        self.exit_count += 1
+
+    async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
+        assert max_pages > 0
+        return [_TestTool("search_messages")]
+
+
+async def _allow_endpoint(*_args: object, **_kwargs: object) -> None:
+    return None
 
 
 if __name__ == "__main__":

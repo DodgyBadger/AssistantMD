@@ -22,7 +22,8 @@ from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
-from core.mcp import MCPConnectionService
+from core.mcp import MCPConnectionManager, MCPConnectionService
+from core.mcp.network import insecure_http_allowed_from_environment
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.secrets import get_encrypted_secrets_service, initialize_secrets_bootstrap
@@ -78,6 +79,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         set_bootstrap_roots(config.data_root, config.system_root)
         secrets_status = initialize_secrets_bootstrap(config.system_root)
         mcp_connections: MCPConnectionService | None = None
+        mcp_manager: MCPConnectionManager | None = None
         if not secrets_status.ready:
             logger.warning(
                 "Encrypted secrets are locked",
@@ -102,10 +104,25 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                     "source_retired": migration_result.source_retired,
                 },
             )
+            manager_holder: list[MCPConnectionManager] = []
+
+            def invalidate_mcp_connection(
+                principal_id: str, connection_id: str
+            ) -> None:
+                if manager_holder:
+                    manager_holder[0].invalidate(principal_id, connection_id)
+
             mcp_connections = MCPConnectionService(
                 system_root=str(config.system_root),
                 secrets=secrets_service,
+                on_change=invalidate_mcp_connection,
             )
+            mcp_manager = MCPConnectionManager(
+                connections=mcp_connections,
+                allow_insecure_http=insecure_http_allowed_from_environment(),
+            )
+            manager_holder.append(mcp_manager)
+            mcp_manager.start()
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             refresh_settings_cache()
 
@@ -269,6 +286,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             workflow_governor=workflow_governor,
             workflow_run_store=workflow_run_store,
             mcp_connections=mcp_connections,
+            mcp_manager=mcp_manager,
             background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,
@@ -321,6 +339,11 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 scheduler.shutdown(wait=False)
         except Exception as cleanup_error:
             logger.error(f"Error during bootstrap cleanup: {cleanup_error}")
+        try:
+            if "mcp_manager" in locals() and mcp_manager is not None:
+                await mcp_manager.shutdown()
+        except Exception as cleanup_error:
+            logger.error(f"Error during MCP manager cleanup: {cleanup_error}")
 
         raise RuntimeStartupError(f"Failed to bootstrap runtime: {e}") from e
 
