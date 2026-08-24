@@ -16,7 +16,6 @@ from .models import (
     MCPAuthMode,
     MCPConnection,
     MCPConnectionCreate,
-    MCPConnectionTestResult,
     MCPConnectionUpdate,
     MCPTransport,
 )
@@ -135,17 +134,18 @@ class MCPConnectionService:
         self._delete_connection_row(authority, clean_id)
         self._notify(authority, clean_id)
 
-    def test_connection(self, connection_id: str) -> MCPConnectionTestResult:
-        """Return the stable pre-transport test contract for slice 6."""
-        self._require_for_authority(
-            require_current_execution_authority(), connection_id
+    def get_connection_test_material(
+        self, connection_id: str
+    ) -> tuple[MCPConnection, str | None]:
+        """Resolve one connection and credential under current authority."""
+        authority = require_current_execution_authority()
+        connection = self._require_for_authority(authority, connection_id)
+        credential = self._secrets.get_for_authority(
+            authority,
+            _credential_namespace(connection_id),
+            MCP_CREDENTIAL_NAME,
         )
-        return MCPConnectionTestResult(
-            status="transport_unavailable",
-            ready=False,
-            tool_count=None,
-            message="Connection testing is unavailable until MCP transport is initialized.",
-        )
+        return connection, credential
 
     def list_connections_for_authority(
         self, authority: ExecutionAuthority

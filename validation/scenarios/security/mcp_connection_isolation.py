@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
+
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -29,6 +33,7 @@ from core.mcp import (  # noqa: E402
     MCPConnectionUpdate,
     MCPTransport,
 )
+from core.mcp.testing import test_mcp_connection_runtime  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -125,6 +130,38 @@ class MCPConnectionIsolationScenario(BaseScenario):
             "Neither MCP metadata nor encrypted storage may contain credential plaintext",
         )
 
+        with patch("core.mcp.testing.Client", return_value=_SuccessfulTestClient()):
+            ready_result = await test_mcp_connection_runtime(
+                updated,
+                "owner-token",
+            )
+        self.soft_assert_equal(
+            (
+                ready_result.status,
+                ready_result.ready,
+                ready_result.tool_count,
+                ready_result.tool_names,
+            ),
+            ("ready", True, 1, ("search_messages",)),
+            "Connection testing should report effective allowlisted tools",
+        )
+
+        with patch("core.mcp.testing.Client", return_value=_RejectedTestClient()):
+            rejected_result = await test_mcp_connection_runtime(
+                updated,
+                "owner-token",
+            )
+        self.soft_assert_equal(
+            rejected_result.status,
+            "authentication_failed",
+            "HTTP authentication rejection should have a stable sanitized status",
+        )
+        self.soft_assert(
+            "owner-token" not in rejected_result.message
+            and updated.url not in rejected_result.message,
+            "Connection-test failures must not expose credentials or raw URLs",
+        )
+
         with use_execution_authority(owner):
             service.delete_connection(owner_connection.connection_id)
             replacement = service.create_connection(
@@ -141,6 +178,37 @@ class MCPConnectionIsolationScenario(BaseScenario):
 
         self.assert_no_failures()
         self.teardown_scenario()
+
+
+@dataclass(frozen=True)
+class _TestTool:
+    name: str
+
+
+class _SuccessfulTestClient:
+    async def __aenter__(self) -> _SuccessfulTestClient:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
+        assert max_pages > 0
+        return [_TestTool("search_messages"), _TestTool("archive_message")]
+
+
+class _RejectedTestClient:
+    async def __aenter__(self) -> _RejectedTestClient:
+        request = httpx.Request("POST", "https://private.example/mcp")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError(
+            "credential-bearing raw transport failure",
+            request=request,
+            response=response,
+        )
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
 
 
 if __name__ == "__main__":

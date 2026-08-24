@@ -1646,6 +1646,7 @@ class MCPConnectionTestResponse(BaseModel):
     status: str
     ready: bool
     tool_count: int | None
+    tool_names: list[str] = Field(default_factory=list)
     message: str
 
 

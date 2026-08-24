@@ -1251,7 +1251,7 @@ async def test_mcp_connection_endpoint(
 ) -> MCPConnectionTestResponse | JSONResponse:
     """Return sanitized connection readiness; transport arrives in slice 7."""
     try:
-        return test_mcp_connection(connection_id)
+        return await test_mcp_connection(connection_id)
     except Exception as e:
         return create_error_response(e)
 

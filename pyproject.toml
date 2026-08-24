@@ -35,6 +35,8 @@ dependencies = [
     "pymupdf>=1.24.10",
     "pydantic-monty==0.0.21",
     "cryptography>=45.0.0",
+    "fastmcp-slim[client]==3.4.0",
+    "mcp==1.26.0",
 ]
 
 [project.optional-dependencies]

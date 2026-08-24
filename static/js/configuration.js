@@ -24,6 +24,7 @@
         isSavingSecret: false,
         isLoadingMcp: false,
         isSavingMcp: false,
+        isTestingMcp: false,
         isPurgingCache: false,
         isCleaningGoals: false,
         isCleaningVaultState: false,
@@ -2243,7 +2244,8 @@ async function saveModelRow(rowKey) {
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
                         <div class="flex gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" class="ui-button" ${staticAuth ? '' : 'disabled'}>Save Credential</button><button type="button" data-mcp-action="clear-credential" class="ui-button" ${connection.credential_present ? '' : 'disabled'}>Clear</button></div>
                     </div>
-                    <div class="flex justify-end gap-2"><button type="button" data-mcp-action="delete" class="ui-button is-danger">Delete</button><button type="button" data-mcp-action="save" class="ui-button is-primary">Save Connection</button></div>
+                    <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
+                    <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" class="ui-button">Test Connection</button><button type="button" data-mcp-action="delete" class="ui-button is-danger">Delete</button><button type="button" data-mcp-action="save" class="ui-button is-primary">Save Connection</button></div>
                 </div>`;
         }).join('');
     }
@@ -2279,6 +2281,10 @@ async function saveModelRow(rowKey) {
         if (!id) return;
         const action = button.dataset.mcpAction;
         const endpoint = `api/system/mcp/connections/${encodeURIComponent(id)}`;
+        if (action === 'test') {
+            await testMcpConnection(card, endpoint, button);
+            return;
+        }
         if (action === 'delete') {
             if (!window.confirm('Delete this MCP connection and its stored credential?')) return;
             await mutateMcp(endpoint, { method: 'DELETE' }, 'MCP connection deleted.');
@@ -2318,6 +2324,38 @@ async function saveModelRow(rowKey) {
             return false;
         } finally {
             state.isSavingMcp = false;
+        }
+    }
+
+    async function testMcpConnection(card, endpoint, button) {
+        if (state.isTestingMcp) return;
+        const resultElement = card.querySelector('[data-mcp-test-result]');
+        state.isTestingMcp = true;
+        button.disabled = true;
+        if (resultElement) {
+            resultElement.className = 'text-sm text-txt-secondary';
+            resultElement.textContent = 'Testing connection and discovering tools…';
+        }
+        try {
+            const response = await fetch(`${endpoint}/test`, { method: 'POST' });
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            const names = Array.isArray(payload?.tool_names) ? payload.tool_names : [];
+            const namesMarkup = names.length
+                ? `<div class="mt-1 font-mono text-xs break-words">${names.map((name) => escapeHtml(name)).join(', ')}</div>`
+                : '';
+            if (resultElement) {
+                resultElement.className = `text-sm ${payload.ready ? 'state-success' : 'state-warning'}`;
+                resultElement.innerHTML = `${escapeHtml(payload.message || 'Connection test finished.')}${namesMarkup}`;
+            }
+        } catch (error) {
+            if (resultElement) {
+                resultElement.className = 'text-sm state-error';
+                resultElement.textContent = error.message;
+            }
+        } finally {
+            state.isTestingMcp = false;
+            button.disabled = false;
         }
     }
 

@@ -9,6 +9,7 @@ import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import yaml
@@ -27,6 +28,7 @@ from core.llm.openai_oauth import (
     StaticOpenAIOAuthTokenAdapter,
     set_openai_oauth_token_adapter,
 )
+from core.mcp import MCPConnectionTestResult
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
 from validation.core.base_scenario import BaseScenario
@@ -548,15 +550,28 @@ class ApiEndpointsScenario(BaseScenario):
             mcp_id
         ], "MCP list contains only the created current-user connection"
 
-        mcp_test = self.call_api(
-            f"/api/system/mcp/connections/{mcp_id}/test",
-            method="POST",
-        )
+        with patch(
+            "api.services.mcp.test_mcp_connection_runtime",
+            new=AsyncMock(
+                return_value=MCPConnectionTestResult(
+                    status="ready",
+                    ready=True,
+                    tool_count=2,
+                    tool_names=("search", "read"),
+                    message="Connected successfully and discovered 2 available MCP tool(s).",
+                )
+            ),
+        ):
+            mcp_test = self.call_api(
+                f"/api/system/mcp/connections/{mcp_id}/test",
+                method="POST",
+            )
         assert mcp_test.status_code == 200, "MCP test contract is available"
         assert (
-            mcp_test.json()["status"] == "transport_unavailable"
-            and mcp_test.json()["ready"] is False
-        ), "Slice 6 reports sanitized pre-transport readiness"
+            mcp_test.json()["status"] == "ready"
+            and mcp_test.json()["ready"] is True
+            and mcp_test.json()["tool_names"] == ["search", "read"]
+        ), "MCP test reports sanitized readiness and discovered tool names"
 
         mcp_update = self.call_api(
             f"/api/system/mcp/connections/{mcp_id}",

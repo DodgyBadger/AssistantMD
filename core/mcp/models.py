@@ -75,4 +75,5 @@ class MCPConnectionTestResult:
     status: str
     ready: bool
     tool_count: int | None
+    tool_names: tuple[str, ...]
     message: str

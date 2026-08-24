@@ -27,8 +27,9 @@ within one AssistantMD installation, not multi-tenant infrastructure.
 - Slice 6 is complete: principal-owned MCP connection persistence, immutable
   slugs, encrypted static credentials, sanitized management APIs, the basic
   single-user System UI, and synthetic-principal isolation coverage.
-- Slice 7 is next: managed HTTP/SSE transports, connection readiness/testing,
-  network policy, catalog leases, invalidation, and shutdown lifecycle.
+- Slice 7 is in progress: bounded connection readiness/testing is complete;
+  retained managed transports, network policy, catalog leases, invalidation,
+  and shutdown lifecycle remain.
 
 ## Invariants
 

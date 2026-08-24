@@ -15,6 +15,7 @@ from core.mcp import (
     MCPConnectionUpdate,
     MCPTransport,
 )
+from core.mcp.testing import test_mcp_connection_runtime
 from core.runtime.state import get_runtime_context
 
 from ..exceptions import APIException
@@ -125,10 +126,11 @@ def delete_mcp_connection(connection_id: str) -> OperationResult:
     )
 
 
-def test_mcp_connection(connection_id: str) -> MCPConnectionTestResponse:
-    """Return the stable sanitized pre-transport test contract."""
+async def test_mcp_connection(connection_id: str) -> MCPConnectionTestResponse:
+    """Test initialization and tool discovery without retaining a client."""
     with _domain_errors():
-        result = _service().test_connection(connection_id)
+        connection, credential = _service().get_connection_test_material(connection_id)
+        result = await test_mcp_connection_runtime(connection, credential)
     return MCPConnectionTestResponse(**asdict(result))
 
 

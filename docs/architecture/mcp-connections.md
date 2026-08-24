@@ -35,7 +35,9 @@ Streamable HTTP or SSE; set an allowlist; and set or clear bearer/custom-header
 credentials. Enabling a connection trusts the tools allowed by its policy:
 AssistantMD does not infer whether remote tools are read-only or mutating.
 
-Live connection tests, managed transports, chat tool search, and MCP OAuth are
-not active in this contract yet. The test endpoint returns a sanitized
-`transport_unavailable` result until the runtime connection manager owns that
-operation.
+The UI can run a bounded connection test that initializes the configured
+transport and lists the effective allowed tools. Results distinguish readiness,
+authentication failure, timeout, unreachable servers, HTTP rejection, and MCP
+initialization failure without returning credentials or raw transport errors.
+The test closes its client immediately; retained managed transports, chat tool
+search, and MCP OAuth are not active in this contract yet.
