@@ -573,13 +573,14 @@
                                         <option value="none">None</option>
                                         <option value="bearer">Bearer token</option>
                                         <option value="header">Custom header</option>
+                                        <option value="oauth">OAuth</option>
                                     </select>
                                 </label>
                                 <label class="text-xs text-txt-secondary">Header name (custom header only)
-                                    <input name="header_name" maxlength="128" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" />
+                                    <input name="header_name" maxlength="128" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" />
                                 </label>
                                 <label class="text-xs text-txt-secondary">Credential (write-only)
-                                    <input name="credential" type="password" maxlength="16384" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" />
+                                    <input name="credential" type="password" maxlength="16384" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" />
                                 </label>
                                 <label class="text-xs text-txt-secondary md:col-span-2">Allowed tools (comma-separated; blank trusts all server tools)
                                     <input name="allowed_tools" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="search_messages, read_message" />

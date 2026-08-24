@@ -354,6 +354,7 @@
         elements.secretsList?.addEventListener('input', handleSecretInputChange);
         elements.mcpCreateForm?.addEventListener('submit', handleMcpCreate);
         elements.mcpConnectionsList?.addEventListener('click', handleMcpConnectionAction);
+        elements.mcpCreateForm?.addEventListener('change', updateMcpCreateAuthFields);
         elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
         elements.purgeExpiredCacheBtn?.addEventListener('click', handlePurgeExpiredCache);
         elements.cleanupVaultStateBtn?.addEventListener('click', handleCleanupVaultState);
@@ -2263,6 +2264,21 @@ async function saveModelRow(rowKey) {
         return tools.length ? [...new Set(tools)] : null;
     }
 
+    function updateMcpCreateAuthFields() {
+        if (!(elements.mcpCreateForm instanceof HTMLFormElement)) return;
+        const authMode = elements.mcpCreateForm.elements.namedItem('auth_mode')?.value || 'none';
+        const headerInput = elements.mcpCreateForm.elements.namedItem('header_name');
+        const credentialInput = elements.mcpCreateForm.elements.namedItem('credential');
+        if (headerInput instanceof HTMLInputElement) {
+            headerInput.disabled = authMode !== 'header';
+            if (headerInput.disabled) headerInput.value = '';
+        }
+        if (credentialInput instanceof HTMLInputElement) {
+            credentialInput.disabled = authMode !== 'bearer' && authMode !== 'header';
+            if (credentialInput.disabled) credentialInput.value = '';
+        }
+    }
+
     async function loadMcpOAuthStatuses() {
         const oauthConnections = state.mcpConnections.filter((connection) => connection.auth_mode === 'oauth');
         await Promise.all(oauthConnections.map(async (connection) => {
@@ -2292,10 +2308,13 @@ async function saveModelRow(rowKey) {
             header_name: String(form.get('auth_mode') || 'none') === 'header' ? (String(form.get('header_name') || '').trim() || null) : null,
             enabled: form.get('enabled') === 'on',
             allowed_tools: parseMcpAllowedTools(form.get('allowed_tools')),
-            credential: String(form.get('credential') || '').trim() || null,
+            credential: ['bearer', 'header'].includes(String(form.get('auth_mode') || 'none')) ? (String(form.get('credential') || '').trim() || null) : null,
         };
         const saved = await mutateMcp('api/system/mcp/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection added.');
-        if (saved) elements.mcpCreateForm.reset();
+        if (saved) {
+            elements.mcpCreateForm.reset();
+            updateMcpCreateAuthFields();
+        }
     }
 
     async function handleMcpConnectionAction(event) {
