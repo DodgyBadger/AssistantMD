@@ -6,7 +6,12 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 from pydantic_ai import BinaryContent
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -255,6 +260,21 @@ logger = UnifiedLogger(tag="api-endpoints")
 _CHAT_TASK_EVENT_KEEPALIVE_SECONDS = 15.0
 _CHAT_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
 _VAULT_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+def _mcp_oauth_callback_page(*, success: bool) -> str:
+    title = "MCP OAuth connected" if success else "MCP OAuth failed"
+    message = (
+        "Authorization completed. You can close this tab and return to AssistantMD."
+        if success
+        else "Authorization could not be completed. Close this tab and retry from AssistantMD."
+    )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title></head><body>"
+        f"<main><h1>{title}</h1><p>{message}</p></main>"
+        "</body></html>"
+    )
 
 
 def _looks_like_workflow_path(value: str) -> bool:
@@ -1288,21 +1308,25 @@ async def start_mcp_oauth_endpoint(
 
 @router.get(
     "/system/mcp/connections/{connection_id}/oauth/callback",
-    response_model=MCPOAuthStatusResponse,
 )
 async def complete_mcp_oauth_callback_endpoint(
     connection_id: str,
     code: str,
     state: str,
-) -> MCPOAuthStatusResponse | JSONResponse:
+) -> HTMLResponse:
     """Complete MCP OAuth from a browser callback."""
     try:
-        return await complete_mcp_oauth(
+        await complete_mcp_oauth(
             connection_id,
             MCPOAuthCompleteRequest(redirect_url=None, code=code, state=state),
         )
+        return HTMLResponse(_mcp_oauth_callback_page(success=True))
     except Exception as e:
-        return create_error_response(e)
+        error_response = create_error_response(e)
+        return HTMLResponse(
+            _mcp_oauth_callback_page(success=False),
+            status_code=error_response.status_code,
+        )
 
 
 @router.post(

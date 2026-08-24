@@ -128,6 +128,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             mcp_oauth = MCPOAuthCoordinator(
                 connections=mcp_connections,
                 manager=mcp_manager,
+                allow_insecure_http=insecure_http_allowed_from_environment(),
             )
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             refresh_settings_cache()

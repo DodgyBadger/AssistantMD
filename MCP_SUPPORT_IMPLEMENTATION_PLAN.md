@@ -45,9 +45,9 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   stored tokens without ever launching an interactive browser flow; missing or
   exhausted authorization fails with an actionable reconnect requirement. The
   authorization coordinator and UI/API actions are now implemented with
-  browser-callback and pasted-redirect completion. Restart-resumable pending
-  authorization and a real-provider interoperability pass remain before the
-  slice is complete.
+  browser-callback and pasted-redirect completion, and encrypted PKCE state can
+  complete after an application restart. A real-provider interoperability pass
+  remains before the slice is complete.
 
 ## Invariants
 

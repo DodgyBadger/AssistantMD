@@ -7,23 +7,33 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
+import httpx
 from fastmcp import Client
 from fastmcp.client.auth import OAuth
+from fastmcp.client.auth.oauth import TokenStorageAdapter
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from mcp.client.auth.exceptions import OAuthFlowError
+from mcp.client.auth.oauth2 import PKCEParameters
+from mcp.shared.auth import OAuthToken
 from pydantic import AnyHttpUrl
 
 from core.identity import ExecutionAuthority
 
 from .manager import MCPConnectionManager
 from .models import MCPAuthMode, MCPConnection, MCPTransport
-from .oauth_storage import EncryptedMCPOAuthStorage, _oauth_http_client
+from .oauth_storage import (
+    EncryptedMCPOAuthStorage,
+    mcp_oauth_http_client_factory,
+)
 from .service import MCPConnectionService
 
 MCP_OAUTH_START_TIMEOUT_SECONDS = 15.0
 MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS = 10 * 60.0
 MCP_OAUTH_COMPLETE_TIMEOUT_SECONDS = 30.0
+_PENDING_COLLECTION = "assistantmd"
+_PENDING_KEY = "pending-authorization"
 
 
 class MCPOAuthError(ValueError):
@@ -65,14 +75,18 @@ class _HeadlessOAuth(OAuth):
         storage: EncryptedMCPOAuthStorage,
         authorization_url: asyncio.Future[str],
         callback: asyncio.Future[tuple[str, str | None]],
+        allow_insecure_http: bool,
     ) -> None:
         self._authorization_url = authorization_url
         self._callback = callback
+        self._storage = storage
         super().__init__(
             mcp_url=mcp_url,
             token_storage=storage,
             callback_timeout=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS,
-            httpx_client_factory=_oauth_http_client,
+            httpx_client_factory=mcp_oauth_http_client_factory(
+                allow_insecure_http=allow_insecure_http
+            ),
         )
         self.context.client_metadata.redirect_uris = [AnyHttpUrl(redirect_uri)]
 
@@ -84,6 +98,69 @@ class _HeadlessOAuth(OAuth):
         async with asyncio.timeout(MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS):
             return await self._callback
 
+    async def _perform_authorization_code_grant(self) -> tuple[str, str]:
+        """Persist enough PKCE state to finish after a process restart."""
+        if self.context.client_metadata.redirect_uris is None:
+            raise OAuthFlowError("No redirect URI is configured.")
+        if not self.context.client_info or not self.context.client_info.client_id:
+            raise OAuthFlowError("No OAuth client registration is available.")
+        if (
+            self.context.oauth_metadata
+            and self.context.oauth_metadata.authorization_endpoint
+        ):
+            auth_endpoint = str(self.context.oauth_metadata.authorization_endpoint)
+        else:
+            auth_endpoint = urljoin(
+                self.context.get_authorization_base_url(self.context.server_url),
+                "/authorize",
+            )
+        pkce = PKCEParameters.generate()
+        state = secrets.token_urlsafe(32)
+        redirect_uri = str(self.context.client_metadata.redirect_uris[0])
+        auth_params = {
+            "response_type": "code",
+            "client_id": self.context.client_info.client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "code_challenge": pkce.code_challenge,
+            "code_challenge_method": "S256",
+        }
+        resource: str | None = None
+        if self.context.should_include_resource_param(self.context.protocol_version):
+            resource = self.context.get_resource_url()
+            auth_params["resource"] = resource
+        if self.context.client_metadata.scope:
+            auth_params["scope"] = self.context.client_metadata.scope
+        authorization_url = f"{auth_endpoint}?{urlencode(auth_params)}"
+        await self._storage.put(
+            _PENDING_KEY,
+            {
+                "state": state,
+                "code_verifier": pkce.code_verifier,
+                "redirect_uri": redirect_uri,
+                "token_endpoint": self._get_token_endpoint(),
+                "client_id": self.context.client_info.client_id,
+                "client_secret": self.context.client_info.client_secret,
+                "token_endpoint_auth_method": (
+                    self.context.client_info.token_endpoint_auth_method or "none"
+                ),
+                "resource": resource,
+                "expires_at": (
+                    datetime.now(UTC)
+                    + timedelta(seconds=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS)
+                ).isoformat(),
+            },
+            collection=_PENDING_COLLECTION,
+            ttl=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS,
+        )
+        await self.redirect_handler(authorization_url)
+        auth_code, returned_state = await self.callback_handler()
+        if returned_state is None or not secrets.compare_digest(returned_state, state):
+            raise OAuthFlowError("OAuth state parameter mismatch.")
+        if not auth_code:
+            raise OAuthFlowError("No OAuth authorization code was received.")
+        return auth_code, pkce.code_verifier
+
 
 class MCPOAuthCoordinator:
     """Own process-local authorization attempts and encrypted durable tokens."""
@@ -93,9 +170,11 @@ class MCPOAuthCoordinator:
         *,
         connections: MCPConnectionService,
         manager: MCPConnectionManager,
+        allow_insecure_http: bool = False,
     ) -> None:
         self._connections = connections
         self._manager = manager
+        self._allow_insecure_http = allow_insecure_http
         self._attempts: dict[tuple[str, str], _Attempt] = {}
         self._lock = asyncio.Lock()
 
@@ -110,6 +189,7 @@ class MCPOAuthCoordinator:
         clean_redirect_uri = _validate_redirect_uri(redirect_uri)
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
+        await self._clear_pending(authority, connection)
         loop = asyncio.get_running_loop()
         attempt = _Attempt(
             authority=authority,
@@ -143,6 +223,7 @@ class MCPOAuthCoordinator:
                 raise TimeoutError
         except BaseException as exc:
             await self._cancel_attempt(key)
+            await self._clear_pending(authority, connection)
             if isinstance(exc, asyncio.CancelledError):
                 raise
             raise MCPOAuthError(
@@ -168,9 +249,18 @@ class MCPOAuthCoordinator:
         async with self._lock:
             attempt = self._attempts.get(key)
         if attempt is None or attempt.task is None:
-            raise MCPOAuthError("No active OAuth connection attempt was found.")
+            connection = self._require_oauth_connection(authority, connection_id)
+            await self._complete_persisted_attempt(
+                authority=authority,
+                connection=connection,
+                code=code,
+                state=state,
+            )
+            self._manager.invalidate(authority.principal_id, connection_id)
+            return MCPOAuthStatus(status="connected", connected=True)
         if datetime.now(UTC) >= attempt.expires_at:
             await self._cancel_attempt(key)
+            await self._clear_pending(authority, attempt.connection)
             raise MCPOAuthError("The MCP OAuth connection attempt has expired.")
         expected_state = _required_query_value(
             await asyncio.shield(attempt.authorization_url), "state"
@@ -188,12 +278,14 @@ class MCPOAuthCoordinator:
             if isinstance(exc, asyncio.CancelledError):
                 raise
             await self._cancel_attempt(key)
+            await self._clear_pending(authority, attempt.connection)
             raise MCPOAuthError(
                 "The MCP server did not complete OAuth authorization."
             ) from exc
         finally:
             async with self._lock:
                 self._attempts.pop(key, None)
+        await self._clear_pending(authority, attempt.connection)
         self._manager.invalidate(authority.principal_id, connection_id)
         return MCPOAuthStatus(status="connected", connected=True)
 
@@ -218,13 +310,19 @@ class MCPOAuthCoordinator:
             )
         if attempt is not None:
             await self._cancel_attempt(key)
-        from fastmcp.client.auth.oauth import TokenStorageAdapter
-
         adapter = TokenStorageAdapter(
             async_key_value=self._connections.oauth_storage(authority, connection_id),
             server_url=connection.url,
         )
         connected = await adapter.get_tokens() is not None
+        if not connected:
+            pending = await self._load_pending(authority, connection)
+            if pending is not None:
+                return MCPOAuthStatus(
+                    status="pending",
+                    connected=False,
+                    pending_expires_at=str(pending["expires_at"]),
+                )
         return MCPOAuthStatus(
             status="connected" if connected else "disconnected",
             connected=connected,
@@ -236,8 +334,7 @@ class MCPOAuthCoordinator:
         connection = self._require_oauth_connection(authority, connection_id)
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
-        from fastmcp.client.auth.oauth import TokenStorageAdapter
-
+        await self._clear_pending(authority, connection)
         adapter = TokenStorageAdapter(
             async_key_value=self._connections.oauth_storage(authority, connection_id),
             server_url=connection.url,
@@ -260,22 +357,127 @@ class MCPOAuthCoordinator:
             storage=storage,
             authorization_url=attempt.authorization_url,
             callback=attempt.callback,
+            allow_insecure_http=self._allow_insecure_http,
+        )
+        http_client_factory = mcp_oauth_http_client_factory(
+            allow_insecure_http=self._allow_insecure_http
         )
         transport = (
             StreamableHttpTransport(
                 attempt.connection.url,
                 auth=auth,
-                httpx_client_factory=_oauth_http_client,
+                httpx_client_factory=http_client_factory,
             )
             if attempt.connection.transport is MCPTransport.STREAMABLE_HTTP
             else SSETransport(
                 attempt.connection.url,
                 auth=auth,
-                httpx_client_factory=_oauth_http_client,
+                httpx_client_factory=http_client_factory,
             )
         )
         async with Client(transport, init_timeout=10.0, timeout=30.0):
             return
+
+    async def _complete_persisted_attempt(
+        self,
+        *,
+        authority: ExecutionAuthority,
+        connection: MCPConnection,
+        code: str,
+        state: str,
+    ) -> None:
+        pending = await self._load_pending(authority, connection)
+        if pending is None:
+            raise MCPOAuthError("No active OAuth connection attempt was found.")
+        expected_state = str(pending["state"])
+        if not secrets.compare_digest(state, expected_state):
+            raise MCPOAuthError("The MCP OAuth state did not match.")
+        token_data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": str(pending["redirect_uri"]),
+            "client_id": str(pending["client_id"]),
+            "code_verifier": str(pending["code_verifier"]),
+        }
+        resource = pending.get("resource")
+        if isinstance(resource, str) and resource:
+            token_data["resource"] = resource
+        auth: httpx.Auth | None = None
+        method = str(pending["token_endpoint_auth_method"])
+        client_secret = pending.get("client_secret")
+        if method == "client_secret_post":
+            if not isinstance(client_secret, str) or not client_secret:
+                raise MCPOAuthError("Stored MCP OAuth client state is incomplete.")
+            token_data["client_secret"] = client_secret
+        elif method == "client_secret_basic":
+            if not isinstance(client_secret, str) or not client_secret:
+                raise MCPOAuthError("Stored MCP OAuth client state is incomplete.")
+            auth = httpx.BasicAuth(str(pending["client_id"]), client_secret)
+        elif method != "none":
+            raise MCPOAuthError(
+                "This MCP OAuth client authentication method is not supported."
+            )
+        try:
+            http_client_factory = mcp_oauth_http_client_factory(
+                allow_insecure_http=self._allow_insecure_http
+            )
+            async with http_client_factory(auth=auth) as client:
+                response = await client.post(
+                    str(pending["token_endpoint"]),
+                    data=token_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+            response.raise_for_status()
+            tokens = OAuthToken.model_validate(response.json())
+            adapter = TokenStorageAdapter(
+                async_key_value=self._connections.oauth_storage(
+                    authority, connection.connection_id
+                ),
+                server_url=connection.url,
+            )
+            await adapter.set_tokens(tokens)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise MCPOAuthError(
+                "The MCP server rejected OAuth completion. Start a new connection attempt."
+            ) from exc
+        finally:
+            await self._clear_pending(authority, connection)
+
+    async def _load_pending(
+        self, authority: ExecutionAuthority, connection: MCPConnection
+    ) -> dict[str, Any] | None:
+        storage = self._connections.oauth_storage(authority, connection.connection_id)
+        pending = await storage.get(_PENDING_KEY, collection=_PENDING_COLLECTION)
+        if pending is None:
+            return None
+        required = {
+            "state",
+            "code_verifier",
+            "redirect_uri",
+            "token_endpoint",
+            "client_id",
+            "token_endpoint_auth_method",
+            "expires_at",
+        }
+        if not required.issubset(pending):
+            await self._clear_pending(authority, connection)
+            raise MCPOAuthError("Stored MCP OAuth pending state is invalid.")
+        try:
+            expires_at = datetime.fromisoformat(str(pending["expires_at"]))
+        except ValueError as exc:
+            await self._clear_pending(authority, connection)
+            raise MCPOAuthError("Stored MCP OAuth pending state is invalid.") from exc
+        if expires_at.tzinfo is None or datetime.now(UTC) >= expires_at:
+            await self._clear_pending(authority, connection)
+            return None
+        return pending
+
+    async def _clear_pending(
+        self, authority: ExecutionAuthority, connection: MCPConnection
+    ) -> None:
+        await self._connections.oauth_storage(
+            authority, connection.connection_id
+        ).delete(_PENDING_KEY, collection=_PENDING_COLLECTION)
 
     async def _cancel_attempt(self, key: tuple[str, str]) -> None:
         async with self._lock:

@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
+
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -31,7 +35,14 @@ from core.mcp import (  # noqa: E402
     MCPConnectionManager,
     MCPConnectionService,
 )
-from core.mcp.oauth import MCPOAuthCoordinator, MCPOAuthError, _Attempt  # noqa: E402
+from core.mcp.oauth import (  # noqa: E402
+    _PENDING_COLLECTION,
+    _PENDING_KEY,
+    MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS,
+    MCPOAuthCoordinator,
+    MCPOAuthError,
+    _Attempt,
+)
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -39,15 +50,34 @@ from validation.core.base_scenario import BaseScenario  # noqa: E402
 class _DeterministicCoordinator(MCPOAuthCoordinator):
     async def _run_attempt(self, attempt: _Attempt) -> None:
         state = "validation-state"
+        storage = self._connections.oauth_storage(  # noqa: SLF001
+            attempt.authority, attempt.connection.connection_id
+        )
+        await storage.put(
+            _PENDING_KEY,
+            {
+                "state": state,
+                "code_verifier": "validation-code-verifier",
+                "redirect_uri": attempt.redirect_uri,
+                "token_endpoint": "https://identity.example/token",
+                "client_id": "validation-client",
+                "client_secret": None,
+                "token_endpoint_auth_method": "none",
+                "resource": None,
+                "expires_at": (
+                    datetime.now(UTC)
+                    + timedelta(seconds=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS)
+                ).isoformat(),
+            },
+            collection=_PENDING_COLLECTION,
+            ttl=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS,
+        )
         attempt.authorization_url.set_result(
             f"https://identity.example/authorize?state={state}"
         )
         code, returned_state = await attempt.callback
         if code != "validation-code" or returned_state != state:
             raise ValueError("Unexpected deterministic callback values")
-        storage = self._connections.oauth_storage(  # noqa: SLF001
-            attempt.authority, attempt.connection.connection_id
-        )
         await TokenStorageAdapter(
             async_key_value=storage,
             server_url=attempt.connection.url,
@@ -117,12 +147,28 @@ class MCPOAuthCoordinatorScenario(BaseScenario):
         else:
             self.soft_assert(False, "Another principal must not see OAuth status")
 
-        completed = await coordinator.complete(
-            authority=owner,
-            connection_id=connection.connection_id,
-            code="validation-code",
-            state="validation-state",
+        await coordinator.shutdown()
+        coordinator = MCPOAuthCoordinator(connections=service, manager=manager)
+        self.soft_assert_equal(
+            (
+                await coordinator.status(
+                    authority=owner,
+                    connection_id=connection.connection_id,
+                )
+            ).status,
+            "pending",
+            "Encrypted pending state should survive coordinator restart",
         )
+        with patch(
+            "core.mcp.oauth.mcp_oauth_http_client_factory",
+            return_value=_oauth_http_client,
+        ):
+            completed = await coordinator.complete(
+                authority=owner,
+                connection_id=connection.connection_id,
+                code="validation-code",
+                state="validation-state",
+            )
         self.soft_assert(
             completed.connected,
             "Callback completion should persist a usable OAuth token",
@@ -170,6 +216,30 @@ class MCPOAuthCoordinatorScenario(BaseScenario):
         await manager.shutdown()
         self.assert_no_failures()
         self.teardown_scenario()
+
+
+def _oauth_http_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    del headers, timeout, auth
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://identity.example/token"
+        assert b"code=validation-code" in request.content
+        assert b"code_verifier=validation-code-verifier" in request.content
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "validation-access-token",
+                "refresh_token": "validation-refresh-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            },
+        )
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond))
 
 
 if __name__ == "__main__":

@@ -2380,11 +2380,33 @@ async function saveModelRow(rowKey) {
             const statusElement = card.querySelector('[data-mcp-oauth-status]');
             if (statusElement) statusElement.textContent = 'OAuth: pending';
             setStatus(elements.mcpFeedback, popup ? 'Complete authorization in the new tab. For a headless callback, paste the redirected URL here.' : 'Open the authorization URL from this browser, then paste the redirected URL here.', 'success');
+            void pollMcpOAuthStatus(card, endpoint, Date.now() + 10 * 60 * 1000);
         } catch (error) {
             setStatus(elements.mcpFeedback, error.message, 'error');
         } finally {
             state.isSavingMcp = false;
         }
+    }
+
+    async function pollMcpOAuthStatus(card, endpoint, deadline) {
+        if (!card.isConnected || Date.now() >= deadline) return;
+        try {
+            const response = await fetch(`${endpoint}/oauth/status`, { cache: 'no-store' });
+            const payload = await safeJson(response);
+            if (response.ok && payload?.connected) {
+                setStatus(elements.mcpFeedback, 'MCP OAuth connected.', 'success');
+                await loadMcpConnections();
+                return;
+            }
+            if (response.ok && payload?.status === 'failed') {
+                setStatus(elements.mcpFeedback, 'MCP OAuth authorization failed. Start a new connection attempt.', 'error');
+                await loadMcpConnections();
+                return;
+            }
+        } catch (_error) {
+            // A transient status failure should not cancel the browser flow.
+        }
+        window.setTimeout(() => void pollMcpOAuthStatus(card, endpoint, deadline), 2000);
     }
 
     async function testMcpConnection(card, endpoint, button) {

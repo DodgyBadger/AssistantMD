@@ -12,9 +12,12 @@ from typing import Any, SupportsFloat
 import httpx
 from fastmcp.client.auth import OAuth
 from fastmcp.client.auth.oauth import TokenStorageAdapter
+from mcp.shared._httpx_utils import McpHttpClientFactory
 
 from core.identity import ExecutionAuthority
 from core.secrets import EncryptedSecretsService
+
+from .network import validate_mcp_endpoint
 
 _OAUTH_NAMESPACE_SUFFIX = ".oauth"
 
@@ -149,11 +152,14 @@ class ConnectedMCPOAuth(OAuth):
         *,
         mcp_url: str,
         token_storage: EncryptedMCPOAuthStorage,
+        allow_insecure_http: bool,
     ) -> None:
         super().__init__(
             mcp_url=mcp_url,
             token_storage=token_storage,
-            httpx_client_factory=_oauth_http_client,
+            httpx_client_factory=mcp_oauth_http_client_factory(
+                allow_insecure_http=allow_insecure_http
+            ),
         )
 
     async def redirect_handler(self, authorization_url: str) -> None:
@@ -195,3 +201,29 @@ def _oauth_http_client(
         follow_redirects=False,
         trust_env=False,
     )
+
+
+def mcp_oauth_http_client_factory(*, allow_insecure_http: bool) -> McpHttpClientFactory:
+    """Create clients that validate every MCP/OAuth request immediately before use."""
+
+    async def validate_request(request: httpx.Request) -> None:
+        await validate_mcp_endpoint(
+            str(request.url),
+            allow_insecure_http=allow_insecure_http,
+        )
+
+    def create_client(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            follow_redirects=False,
+            trust_env=False,
+            event_hooks={"request": [validate_request]},
+        )
+
+    return create_client

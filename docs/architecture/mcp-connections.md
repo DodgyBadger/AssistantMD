@@ -84,4 +84,6 @@ OAuth tokens and dynamic client-registration state use the encrypted,
 principal-and-connection-scoped secrets store. Chat and connection tests may use
 and refresh an existing token, but they cannot initiate interactive
 authorization. Disconnecting, deleting, or changing a connection away from
-OAuth clears its stored OAuth state.
+OAuth clears its stored OAuth state. Short-lived PKCE completion state is also
+encrypted, allowing a callback or pasted redirect to complete after an
+AssistantMD restart until the attempt expires.

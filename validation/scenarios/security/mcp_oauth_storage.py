@@ -132,6 +132,7 @@ class MCPOAuthStorageScenario(BaseScenario):
         connected_auth = ConnectedMCPOAuth(
             mcp_url="https://mail.example/mcp",
             token_storage=other_store,
+            allow_insecure_http=False,
         )
         try:
             await connected_auth.redirect_handler("https://identity.example/authorize")

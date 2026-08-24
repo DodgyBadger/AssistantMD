@@ -331,6 +331,7 @@ class MCPConnectionManager:
             connection,
             credential,
             oauth_storage=oauth_storage,
+            allow_insecure_http=self._allow_insecure_http,
         )
         transport = (
             StreamableHttpTransport(
@@ -464,6 +465,7 @@ def _build_auth(
     credential: str | None,
     *,
     oauth_storage: EncryptedMCPOAuthStorage | None = None,
+    allow_insecure_http: bool = False,
 ) -> tuple[dict[str, str] | None, str | httpx.Auth | None]:
     if connection.auth_mode is MCPAuthMode.BEARER:
         if credential is None:
@@ -479,6 +481,7 @@ def _build_auth(
         return None, ConnectedMCPOAuth(
             mcp_url=connection.url,
             token_storage=oauth_storage,
+            allow_insecure_http=allow_insecure_http,
         )
     return None, None
 
