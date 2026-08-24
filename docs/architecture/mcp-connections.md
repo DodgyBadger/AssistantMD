@@ -53,4 +53,22 @@ sets that development allowance automatically. MCP clients ignore ambient HTTP
 proxy configuration and do not follow redirects, preventing credentials from
 being forwarded outside the explicitly configured endpoint.
 
-Chat tool search and MCP OAuth are not active in this contract yet.
+## Chat tool contract
+
+Each primary chat run waits for a settled snapshot of the current principal's
+enabled MCP connections before its first model request. An unavailable server
+does not block built-in tools or healthy MCP servers; the run receives a
+sanitized availability note and emits a task warning event.
+
+MCP tools use immutable connection-slug prefixes and are absent from the initial
+tool schemas. Pydantic AI's tool search discovers matching tools on demand. Once
+discovered, MCP calls use the normal chat tool-call budget, activity events,
+oversized-output handling, failure reporting, cancellation, and conservative
+recovery behavior. Server instructions are not added to the chat prompt.
+
+Catalog definitions remain frozen for the run. Connection changes invalidate
+the retained client for subsequent runs without changing a run already in
+progress. Runtime leases are released when preflight fails, task startup fails,
+or the chat finishes or is cancelled.
+
+MCP OAuth is not active in this contract yet.

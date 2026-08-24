@@ -31,9 +31,14 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   lazy retained transports with principal/version keys, settled catalog leases,
   shared cold initialization, transient reconnect, invalidation, idle/runtime
   cleanup, explicit local-HTTP policy, and proxy-independent clients.
-- Slice 8 is next: compose the frozen managed catalogs behind Pydantic AI tool
-  search and wire them through chat execution, activity, budgets, cancellation,
-  output handling, and recovery.
+- Slice 8 is complete: frozen managed catalogs are filtered, stably prefixed,
+  individually deferred behind Pydantic AI tool search, and wired into initial
+  and resumed chat execution with shared activity/output hooks, tool budgets,
+  conservative recovery, unavailable-server isolation, and bounded lease
+  cleanup.
+- Slice 9 is next: add principal-owned MCP OAuth using the existing headless-safe
+  browser/manual-completion strategy, then expose connect, status, reconnect,
+  and disconnect actions in the System UI.
 
 ## Invariants
 

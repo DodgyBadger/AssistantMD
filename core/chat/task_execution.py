@@ -108,44 +108,48 @@ async def start_prepared_chat_stream_task(
     """Start a prepared streaming chat run in a background execution task."""
     runtime = get_runtime_context()
     buffer = event_buffer or CHAT_TASK_EVENT_BUFFER
-    task = await runtime.task_runner.start_background(
-        ExecutionTaskSpec(
-            kind=ExecutionTaskKind.CHAT,
-            scope=chat_session_scope(session_id),
-            source=ExecutionTaskSource.API,
-            label=chat_task_label(session_id),
-            authority=_session_authority(session_id, vault_name),
-            metadata={
-                "vault": vault_name,
-                "session_id": session_id,
-                "streaming": True,
-                "model": prepared.model,
-                "tools": list(prepared.tools),
-                "retry": not persist_user_request,
-            },
-        ),
-        lambda task: _run_prepared_chat_stream_task(
-            task=task,
-            prepared=prepared,
-            vault_name=vault_name,
-            vault_path=vault_path,
-            session_id=session_id,
-            event_buffer=buffer,
-            persist_user_request=persist_user_request,
-        ),
-        hooks=ExecutionTaskHooks(
-            on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
-            on_failed=lambda task_id, exc: _handle_failed_chat_task(
-                task_id=task_id,
-                exc=exc,
+    try:
+        task = await runtime.task_runner.start_background(
+            ExecutionTaskSpec(
+                kind=ExecutionTaskKind.CHAT,
+                scope=chat_session_scope(session_id),
+                source=ExecutionTaskSource.API,
+                label=chat_task_label(session_id),
+                authority=_session_authority(session_id, vault_name),
+                metadata={
+                    "vault": vault_name,
+                    "session_id": session_id,
+                    "streaming": True,
+                    "model": prepared.model,
+                    "tools": list(prepared.tools),
+                    "retry": not persist_user_request,
+                },
+            ),
+            lambda task: _run_prepared_chat_stream_task(
+                task=task,
                 prepared=prepared,
                 vault_name=vault_name,
                 vault_path=vault_path,
                 session_id=session_id,
                 event_buffer=buffer,
+                persist_user_request=persist_user_request,
             ),
-        ),
-    )
+            hooks=ExecutionTaskHooks(
+                on_cancelled=lambda task_id: _append_cancelled_if_open(buffer, task_id),
+                on_failed=lambda task_id, exc: _handle_failed_chat_task(
+                    task_id=task_id,
+                    exc=exc,
+                    prepared=prepared,
+                    vault_name=vault_name,
+                    vault_path=vault_path,
+                    session_id=session_id,
+                    event_buffer=buffer,
+                ),
+            ),
+        )
+    except BaseException:
+        await prepared.close()
+        raise
     return ChatStreamTaskStart(task=task, session_id=session_id)
 
 
@@ -807,6 +811,33 @@ async def _run_prepared_chat_stream_task(
     event_buffer: ChatTaskEventBuffer,
     persist_user_request: bool = True,
 ) -> None:
+    """Run one prepared chat and always release its external tool leases."""
+    try:
+        await _run_prepared_chat_stream_task_inner(
+            task_id=task_id,
+            task=task,
+            prepared=prepared,
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            event_buffer=event_buffer,
+            persist_user_request=persist_user_request,
+        )
+    finally:
+        await prepared.close()
+
+
+async def _run_prepared_chat_stream_task_inner(
+    *,
+    task_id: str | None = None,
+    task: ExecutionTaskSnapshot | None = None,
+    prepared: chat_executor.PreparedChatExecution,
+    vault_name: str,
+    vault_path: str,
+    session_id: str,
+    event_buffer: ChatTaskEventBuffer,
+    persist_user_request: bool = True,
+) -> None:
     """Run a prepared streaming chat task and publish buffered task events."""
     runtime = get_runtime_context()
     if task is None and task_id is None:
@@ -836,6 +867,18 @@ async def _run_prepared_chat_stream_task(
         )
         if should_mark_started:
             await runtime.task_coordinator.mark_started(task.task_id)
+        for unavailable in prepared.mcp_unavailable:
+            await event_buffer.append(
+                task.task_id,
+                "mcp_connection_unavailable",
+                {
+                    "event": "mcp_connection_unavailable",
+                    "task_id": task.task_id,
+                    "connection_name": unavailable.display_name,
+                    "status": unavailable.status,
+                    "message": unavailable.message,
+                },
+            )
         if persist_user_request:
             async with chat_session_history_lock(
                 session_id=session_id, vault_name=vault_name
@@ -939,7 +982,7 @@ async def _run_prepared_chat_stream_task(
                     can_retry = (
                         classification.retryable
                         and retry_policy.can_retry_after(attempt)
-                        and (not prepared.tools or recovery_supported)
+                        and (not prepared.has_effective_tools or recovery_supported)
                     )
                     if not can_retry:
                         if prepared.tools and recovery_decision is not None:
