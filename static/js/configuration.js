@@ -2246,14 +2246,26 @@ async function saveModelRow(rowKey) {
                         <label class="text-xs text-txt-secondary">Allowed tools<input data-mcp-field="allowed_tools" value="${escapeHtml(allowedTools)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank trusts all tools" /></label>
                     </div>
                     <label class="text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
-                    <div class="rounded-md border border-border-primary p-3 space-y-2">
+                    ${staticAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
                         <div class="flex items-center gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" ${iconButton('save', 'Save MCP credential', 'is-primary', staticAuth ? '' : 'disabled')}>${iconSvg('save')}</button><button type="button" data-mcp-action="clear-credential" ${iconButton('x', 'Clear MCP credential', 'is-danger', connection.credential_present ? '' : 'disabled')}>${iconSvg('x')}</button></div>
-                    </div>
-                    ${oauthAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
-                        <div data-mcp-oauth-status class="text-xs text-txt-secondary">OAuth: loading status…</div>
-                        <div class="flex items-center gap-2"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste redirected URL for headless completion" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Complete OAuth</button></div>
-                        <div class="flex justify-end gap-2"><button type="button" data-mcp-action="oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium state-error hover:border-border-secondary">Disconnect</button><button type="button" data-mcp-action="oauth-connect" class="px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Connect OAuth</button></div>
+                    </div>` : ''}
+                    ${oauthAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div data-mcp-oauth-status class="text-sm text-txt-secondary">OAuth status: loading…</div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" data-mcp-action="oauth-connect" class="px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Authorize</button>
+                                <button type="button" data-mcp-action="oauth-disconnect" disabled class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium state-error hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed">Disconnect</button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. AssistantMD detects the callback automatically when this address is reachable from your browser.</p>
+                        <details class="rounded-md border border-border-primary px-3 py-2">
+                            <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
+                            <div class="pt-2 space-y-2">
+                                <p class="text-xs text-txt-secondary">Only use this if the browser cannot reach AssistantMD's callback. Copy the full redirected URL from the browser address bar.</p>
+                                <div class="flex flex-col gap-2 sm:flex-row"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish from redirected URL</button></div>
+                            </div>
+                        </details>
                     </div>` : ''}
                     <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
                     <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" ${iconButton('play', 'Test MCP connection')}>${iconSvg('play')}</button><button type="button" data-mcp-action="delete" ${iconButton('trash', 'Delete MCP connection', 'is-danger')}>${iconSvg('trash')}</button><button type="button" data-mcp-action="save" ${iconButton('save', 'Save MCP connection', 'is-primary')}>${iconSvg('save')}</button></div>
@@ -2291,7 +2303,11 @@ async function saveModelRow(rowKey) {
                 const payload = await safeJson(response);
                 if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
                 state.mcpOAuthStatuses[connection.connection_id] = payload;
-                if (statusElement) statusElement.textContent = `OAuth: ${payload.status}`;
+                if (statusElement) statusElement.textContent = `OAuth status: ${payload.status}`;
+                const authorizeButton = card?.querySelector('[data-mcp-action="oauth-connect"]');
+                const disconnectButton = card?.querySelector('[data-mcp-action="oauth-disconnect"]');
+                if (authorizeButton instanceof HTMLButtonElement) authorizeButton.textContent = payload.connected ? 'Reauthorize' : (payload.status === 'pending' ? 'Restart authorization' : 'Authorize');
+                if (disconnectButton instanceof HTMLButtonElement) disconnectButton.disabled = !payload.connected && payload.status !== 'pending';
             } catch (error) {
                 if (statusElement) statusElement.textContent = `OAuth status unavailable: ${error.message}`;
             }
@@ -2333,6 +2349,10 @@ async function saveModelRow(rowKey) {
         }
         if (action === 'oauth-complete') {
             const redirectUrl = card.querySelector('[data-mcp-field="oauth_redirect"]')?.value || '';
+            if (!redirectUrl.trim()) {
+                setStatus(elements.mcpFeedback, 'Paste the full redirected URL before using the headless fallback.', 'error');
+                return;
+            }
             await mutateMcp(`${endpoint}/oauth/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirectUrl, code: null, state: null }) }, 'MCP OAuth connected.');
             return;
         }
@@ -2399,8 +2419,8 @@ async function saveModelRow(rowKey) {
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
             const popup = window.open(payload.auth_url, '_blank', 'noopener,noreferrer');
             const statusElement = card.querySelector('[data-mcp-oauth-status]');
-            if (statusElement) statusElement.textContent = 'OAuth: pending';
-            setStatus(elements.mcpFeedback, popup ? 'Complete authorization in the new tab. For a headless callback, paste the redirected URL here.' : 'Open the authorization URL from this browser, then paste the redirected URL here.', 'success');
+            if (statusElement) statusElement.textContent = 'OAuth status: pending';
+            setStatus(elements.mcpFeedback, popup ? 'Finish authorization in the new tab. AssistantMD will detect the callback automatically.' : 'The browser blocked the authorization tab. Allow pop-ups and choose Authorize again.', popup ? 'success' : 'error');
             void pollMcpOAuthStatus(card, endpoint, Date.now() + 10 * 60 * 1000);
         } catch (error) {
             setStatus(elements.mcpFeedback, error.message, 'error');
