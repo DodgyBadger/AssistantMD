@@ -41,8 +41,10 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   and disconnect actions in the System UI.
 - Slice 9 groundwork is in progress: FastMCP's token-storage contract now has an
   encrypted, principal-and-connection-scoped adapter with durable expiry and
-  client-registration state; the authorization coordinator and UI/API actions
-  remain to be implemented.
+  client-registration state. Retained chat connections can use and refresh
+  stored tokens without ever launching an interactive browser flow; missing or
+  exhausted authorization fails with an actionable reconnect requirement. The
+  authorization coordinator and UI/API actions remain to be implemented.
 
 ## Invariants
 

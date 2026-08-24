@@ -25,7 +25,8 @@ from fastmcp.client.auth.oauth import TokenStorageAdapter  # noqa: E402
 from mcp.shared.auth import OAuthToken  # noqa: E402
 
 from core.identity import ExecutionAuthority  # noqa: E402
-from core.mcp import EncryptedMCPOAuthStorage  # noqa: E402
+from core.mcp import ConnectedMCPOAuth, EncryptedMCPOAuthStorage  # noqa: E402
+from core.mcp.oauth_storage import has_mcp_oauth_tokens  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -88,6 +89,13 @@ class MCPOAuthStorageScenario(BaseScenario):
             (await owner_adapter.get_token_expiry()) is not None,
             "FastMCP token expiry metadata should persist with the token",
         )
+        self.soft_assert(
+            await has_mcp_oauth_tokens(
+                storage=owner_store,
+                mcp_url="https://mail.example/mcp",
+            ),
+            "Runtime connection preflight should recognize persisted OAuth tokens",
+        )
         database_bytes = (system_root / "secrets.db").read_bytes()
         self.soft_assert(
             b"owner-access-token" not in database_bytes
@@ -102,6 +110,13 @@ class MCPOAuthStorageScenario(BaseScenario):
             None,
             "Clearing one principal's OAuth state should remove its tokens",
         )
+        self.soft_assert(
+            not await has_mcp_oauth_tokens(
+                storage=owner_store,
+                mcp_url="https://mail.example/mcp",
+            ),
+            "Disconnected OAuth state should fail runtime preflight without a browser",
+        )
         self.soft_assert_equal(
             (await other_adapter.get_tokens()).access_token,
             "other-access-token",
@@ -114,6 +129,19 @@ class MCPOAuthStorageScenario(BaseScenario):
             None,
             "Expired OAuth state should be deleted on read",
         )
+        connected_auth = ConnectedMCPOAuth(
+            mcp_url="https://mail.example/mcp",
+            token_storage=other_store,
+        )
+        try:
+            await connected_auth.redirect_handler("https://identity.example/authorize")
+        except ValueError as exc:
+            self.soft_assert(
+                "Connect this server in System" in str(exc),
+                "Runtime OAuth must report an actionable reconnect requirement",
+            )
+        else:
+            self.soft_assert(False, "Runtime OAuth must never launch a browser flow")
 
         self.assert_no_failures()
         self.teardown_scenario()

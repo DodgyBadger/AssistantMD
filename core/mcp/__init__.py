@@ -8,10 +8,11 @@ from .models import (
     MCPConnectionUpdate,
     MCPTransport,
 )
-from .oauth_storage import EncryptedMCPOAuthStorage
+from .oauth_storage import ConnectedMCPOAuth, EncryptedMCPOAuthStorage
 from .service import MCPConnectionService
 
 __all__ = [
+    "ConnectedMCPOAuth",
     "MCPAuthMode",
     "MCPConnection",
     "MCPConnectionCreate",

@@ -19,6 +19,7 @@ from .models import (
     MCPConnectionUpdate,
     MCPTransport,
 )
+from .oauth_storage import EncryptedMCPOAuthStorage
 from .schema import connect_mcp, ensure_mcp_schema
 
 MCP_SECRET_NAMESPACE_PREFIX = "mcp.connection."
@@ -96,6 +97,8 @@ class MCPConnectionService:
             conn.close()
         if normalized.auth_mode not in {MCPAuthMode.BEARER, MCPAuthMode.HEADER}:
             self._delete_credential(authority, connection_id)
+        if normalized.auth_mode is not MCPAuthMode.OAUTH:
+            self._delete_oauth_state(authority, connection_id)
         self._notify(authority, connection_id)
         return self._require_for_authority(authority, connection_id)
 
@@ -131,6 +134,7 @@ class MCPConnectionService:
         clean_id = _required_id(connection_id)
         self._require_for_authority(authority, clean_id)
         self._delete_credential(authority, clean_id)
+        self._delete_oauth_state(authority, clean_id)
         self._delete_connection_row(authority, clean_id)
         self._notify(authority, clean_id)
 
@@ -248,6 +252,17 @@ class MCPConnectionService:
             MCP_CREDENTIAL_NAME,
         )
 
+    def oauth_storage(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> EncryptedMCPOAuthStorage:
+        """Return encrypted OAuth storage after proving connection ownership."""
+        self._require_for_authority(authority, connection_id)
+        return EncryptedMCPOAuthStorage(
+            secrets=self._secrets,
+            authority=authority,
+            connection_id=connection_id,
+        )
+
     def _connection_from_row(
         self, authority: ExecutionAuthority, row: sqlite3.Row
     ) -> MCPConnection:
@@ -292,6 +307,13 @@ class MCPConnectionService:
             _credential_namespace(connection_id),
             MCP_CREDENTIAL_NAME,
         )
+
+    def _delete_oauth_state(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> None:
+        namespace = f"{_credential_namespace(connection_id)}.oauth"
+        for item in self._secrets.list_metadata_for_authority(authority, namespace):
+            self._secrets.delete_for_authority(authority, namespace, item.name)
 
     def _delete_connection_row(
         self, authority: ExecutionAuthority, connection_id: str

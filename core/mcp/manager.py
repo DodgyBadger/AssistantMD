@@ -24,6 +24,11 @@ from .models import (
     MCPTransport,
 )
 from .network import MCPNetworkPolicyError, validate_mcp_endpoint
+from .oauth_storage import (
+    ConnectedMCPOAuth,
+    EncryptedMCPOAuthStorage,
+    has_mcp_oauth_tokens,
+)
 from .service import MCPConnectionService
 
 MCP_CONNECT_TIMEOUT_SECONDS = 10.0
@@ -310,7 +315,23 @@ class MCPConnectionManager:
             authority,
             connection.connection_id,
         )
-        headers, auth = _build_auth(connection, credential)
+        oauth_storage = (
+            self._connections.oauth_storage(authority, connection.connection_id)
+            if connection.auth_mode is MCPAuthMode.OAUTH
+            else None
+        )
+        if oauth_storage is not None and not await has_mcp_oauth_tokens(
+            storage=oauth_storage,
+            mcp_url=connection.url,
+        ):
+            raise ValueError(
+                "MCP OAuth authorization is required. Connect this server in System."
+            )
+        headers, auth = _build_auth(
+            connection,
+            credential,
+            oauth_storage=oauth_storage,
+        )
         transport = (
             StreamableHttpTransport(
                 connection.url,
@@ -441,7 +462,9 @@ def _key(
 def _build_auth(
     connection: MCPConnection,
     credential: str | None,
-) -> tuple[dict[str, str] | None, str | None]:
+    *,
+    oauth_storage: EncryptedMCPOAuthStorage | None = None,
+) -> tuple[dict[str, str] | None, str | httpx.Auth | None]:
     if connection.auth_mode is MCPAuthMode.BEARER:
         if credential is None:
             raise ValueError("MCP bearer credential is missing.")
@@ -451,7 +474,12 @@ def _build_auth(
             raise ValueError("MCP header credential is missing.")
         return {connection.header_name: credential}, None
     if connection.auth_mode is MCPAuthMode.OAUTH:
-        raise ValueError("MCP OAuth is not connected.")
+        if oauth_storage is None:
+            raise ValueError("MCP OAuth storage is unavailable.")
+        return None, ConnectedMCPOAuth(
+            mcp_url=connection.url,
+            token_storage=oauth_storage,
+        )
     return None, None
 
 
