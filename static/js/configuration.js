@@ -44,6 +44,7 @@
         providers: [],
         secrets: [],
         mcpConnections: [],
+        mcpOAuthStatuses: {},
         importVaults: [],
         importResults: null,
         importUrlResult: null,
@@ -2209,6 +2210,7 @@ async function saveModelRow(rowKey) {
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
             state.mcpConnections = Array.isArray(payload) ? payload : [];
             renderMcpConnections();
+            void loadMcpOAuthStatuses();
         } catch (error) {
             elements.mcpConnectionsList.innerHTML = `<div class="rounded-lg border state-surface-error px-4 py-3 text-sm text-center shadow-sm">Failed to load MCP connections: ${escapeHtml(error.message)}</div>`;
         } finally {
@@ -2225,6 +2227,7 @@ async function saveModelRow(rowKey) {
         elements.mcpConnectionsList.innerHTML = state.mcpConnections.map((connection) => {
             const allowedTools = Array.isArray(connection.allowed_tools) ? connection.allowed_tools.join(', ') : '';
             const staticAuth = connection.auth_mode === 'bearer' || connection.auth_mode === 'header';
+            const oauthAuth = connection.auth_mode === 'oauth';
             return `
                 <div class="rounded-lg border border-border-primary bg-app-card p-4 shadow-sm space-y-3" data-mcp-id="${escapeHtml(connection.connection_id)}">
                     <div class="flex items-center justify-between gap-3">
@@ -2235,7 +2238,7 @@ async function saveModelRow(rowKey) {
                         <label class="text-xs text-txt-secondary">Display name<input data-mcp-field="display_name" value="${escapeHtml(connection.display_name)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                         <label class="text-xs text-txt-secondary">Server URL<input data-mcp-field="url" value="${escapeHtml(connection.url)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                         <label class="text-xs text-txt-secondary">Transport<select data-mcp-field="transport" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary"><option value="streamable_http" ${connection.transport === 'streamable_http' ? 'selected' : ''}>Streamable HTTP</option><option value="sse" ${connection.transport === 'sse' ? 'selected' : ''}>SSE</option></select></label>
-                        <label class="text-xs text-txt-secondary">Authentication<select data-mcp-field="auth_mode" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary"><option value="none" ${connection.auth_mode === 'none' ? 'selected' : ''}>None</option><option value="bearer" ${connection.auth_mode === 'bearer' ? 'selected' : ''}>Bearer token</option><option value="header" ${connection.auth_mode === 'header' ? 'selected' : ''}>Custom header</option><option value="oauth" ${connection.auth_mode === 'oauth' ? 'selected' : ''}>OAuth (management arrives in slice 9)</option></select></label>
+                        <label class="text-xs text-txt-secondary">Authentication<select data-mcp-field="auth_mode" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary"><option value="none" ${connection.auth_mode === 'none' ? 'selected' : ''}>None</option><option value="bearer" ${connection.auth_mode === 'bearer' ? 'selected' : ''}>Bearer token</option><option value="header" ${connection.auth_mode === 'header' ? 'selected' : ''}>Custom header</option><option value="oauth" ${connection.auth_mode === 'oauth' ? 'selected' : ''}>OAuth</option></select></label>
                         <label class="text-xs text-txt-secondary">Header name<input data-mcp-field="header_name" value="${escapeHtml(connection.header_name || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" /></label>
                         <label class="text-xs text-txt-secondary">Allowed tools<input data-mcp-field="allowed_tools" value="${escapeHtml(allowedTools)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank trusts all tools" /></label>
                     </div>
@@ -2244,6 +2247,11 @@ async function saveModelRow(rowKey) {
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
                         <div class="flex items-center gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" ${iconButton('save', 'Save MCP credential', 'is-primary', staticAuth ? '' : 'disabled')}>${iconSvg('save')}</button><button type="button" data-mcp-action="clear-credential" ${iconButton('x', 'Clear MCP credential', 'is-danger', connection.credential_present ? '' : 'disabled')}>${iconSvg('x')}</button></div>
                     </div>
+                    ${oauthAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
+                        <div data-mcp-oauth-status class="text-xs text-txt-secondary">OAuth: loading status…</div>
+                        <div class="flex items-center gap-2"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste redirected URL for headless completion" /><button type="button" data-mcp-action="oauth-complete" ${iconButton('check', 'Complete MCP OAuth', 'is-primary')}>${iconSvg('check')}</button></div>
+                        <div class="flex justify-end gap-2"><button type="button" data-mcp-action="oauth-disconnect" ${iconButton('x', 'Disconnect MCP OAuth', 'is-danger')}>${iconSvg('x')}</button><button type="button" data-mcp-action="oauth-connect" ${iconButton('link', 'Connect MCP OAuth', 'is-primary')}>${iconSvg('link')}</button></div>
+                    </div>` : ''}
                     <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
                     <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" ${iconButton('play', 'Test MCP connection')}>${iconSvg('play')}</button><button type="button" data-mcp-action="delete" ${iconButton('trash', 'Delete MCP connection', 'is-danger')}>${iconSvg('trash')}</button><button type="button" data-mcp-action="save" ${iconButton('save', 'Save MCP connection', 'is-primary')}>${iconSvg('save')}</button></div>
                 </div>`;
@@ -2253,6 +2261,23 @@ async function saveModelRow(rowKey) {
     function parseMcpAllowedTools(value) {
         const tools = String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
         return tools.length ? [...new Set(tools)] : null;
+    }
+
+    async function loadMcpOAuthStatuses() {
+        const oauthConnections = state.mcpConnections.filter((connection) => connection.auth_mode === 'oauth');
+        await Promise.all(oauthConnections.map(async (connection) => {
+            const card = elements.mcpConnectionsList?.querySelector(`[data-mcp-id="${CSS.escape(connection.connection_id)}"]`);
+            const statusElement = card?.querySelector('[data-mcp-oauth-status]');
+            try {
+                const response = await fetch(`api/system/mcp/connections/${encodeURIComponent(connection.connection_id)}/oauth/status`, { cache: 'no-store' });
+                const payload = await safeJson(response);
+                if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+                state.mcpOAuthStatuses[connection.connection_id] = payload;
+                if (statusElement) statusElement.textContent = `OAuth: ${payload.status}`;
+            } catch (error) {
+                if (statusElement) statusElement.textContent = `OAuth status unavailable: ${error.message}`;
+            }
+        }));
     }
 
     async function handleMcpCreate(event) {
@@ -2281,6 +2306,19 @@ async function saveModelRow(rowKey) {
         if (!id) return;
         const action = button.dataset.mcpAction;
         const endpoint = `api/system/mcp/connections/${encodeURIComponent(id)}`;
+        if (action === 'oauth-connect') {
+            await startMcpOAuth(card, endpoint);
+            return;
+        }
+        if (action === 'oauth-complete') {
+            const redirectUrl = card.querySelector('[data-mcp-field="oauth_redirect"]')?.value || '';
+            await mutateMcp(`${endpoint}/oauth/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirectUrl, code: null, state: null }) }, 'MCP OAuth connected.');
+            return;
+        }
+        if (action === 'oauth-disconnect') {
+            await mutateMcp(`${endpoint}/oauth`, { method: 'DELETE' }, 'MCP OAuth disconnected.');
+            return;
+        }
         if (action === 'test') {
             await testMcpConnection(card, endpoint, button);
             return;
@@ -2322,6 +2360,28 @@ async function saveModelRow(rowKey) {
         } catch (error) {
             setStatus(elements.mcpFeedback, error.message, 'error');
             return false;
+        } finally {
+            state.isSavingMcp = false;
+        }
+    }
+
+    async function startMcpOAuth(card, endpoint) {
+        state.isSavingMcp = true;
+        setStatus(elements.mcpFeedback, 'Starting OAuth…');
+        try {
+            const response = await fetch(`${endpoint}/oauth/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ redirect_uri: null }),
+            });
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            const popup = window.open(payload.auth_url, '_blank', 'noopener,noreferrer');
+            const statusElement = card.querySelector('[data-mcp-oauth-status]');
+            if (statusElement) statusElement.textContent = 'OAuth: pending';
+            setStatus(elements.mcpFeedback, popup ? 'Complete authorization in the new tab. For a headless callback, paste the redirected URL here.' : 'Open the authorization URL from this browser, then paste the redirected URL here.', 'success');
+        } catch (error) {
+            setStatus(elements.mcpFeedback, error.message, 'error');
         } finally {
             state.isSavingMcp = false;
         }

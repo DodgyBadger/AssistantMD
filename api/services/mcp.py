@@ -16,6 +16,7 @@ from core.mcp import (
     MCPConnectionUpdate,
     MCPTransport,
 )
+from core.mcp.oauth import MCPOAuthCoordinator, parse_oauth_completion
 from core.runtime.state import get_runtime_context
 
 from ..exceptions import APIException
@@ -25,6 +26,9 @@ from ..models import (
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
     MCPCredentialUpdateRequest,
+    MCPOAuthCompleteRequest,
+    MCPOAuthStartResponse,
+    MCPOAuthStatusResponse,
     OperationResult,
 )
 
@@ -146,6 +150,75 @@ async def test_mcp_connection(connection_id: str) -> MCPConnectionTestResponse:
     return MCPConnectionTestResponse(**asdict(result))
 
 
+async def start_mcp_oauth(
+    connection_id: str, *, redirect_uri: str
+) -> MCPOAuthStartResponse:
+    """Start interactive OAuth without launching a browser on the backend."""
+    coordinator = _oauth_coordinator()
+    with _domain_errors():
+        result = await coordinator.start(
+            authority=require_current_execution_authority(),
+            connection_id=connection_id,
+            redirect_uri=redirect_uri,
+        )
+    logger.info(
+        "MCP OAuth authorization started",
+        data={"event": "mcp_oauth_started", "connection_id": connection_id},
+    )
+    return MCPOAuthStartResponse(**asdict(result))
+
+
+async def complete_mcp_oauth(
+    connection_id: str, request: MCPOAuthCompleteRequest
+) -> MCPOAuthStatusResponse:
+    """Complete one callback or pasted-redirect OAuth attempt."""
+    with _domain_errors():
+        code, state = parse_oauth_completion(
+            redirect_url=request.redirect_url,
+            code=request.code,
+            state=request.state,
+        )
+        result = await _oauth_coordinator().complete(
+            authority=require_current_execution_authority(),
+            connection_id=connection_id,
+            code=code,
+            state=state,
+        )
+    logger.info(
+        "MCP OAuth authorization completed",
+        data={"event": "mcp_oauth_completed", "connection_id": connection_id},
+    )
+    return MCPOAuthStatusResponse(**asdict(result))
+
+
+async def get_mcp_oauth_status(connection_id: str) -> MCPOAuthStatusResponse:
+    """Return sanitized OAuth connection state."""
+    with _domain_errors():
+        result = await _oauth_coordinator().status(
+            authority=require_current_execution_authority(),
+            connection_id=connection_id,
+        )
+    return MCPOAuthStatusResponse(**asdict(result))
+
+
+async def disconnect_mcp_oauth(connection_id: str) -> OperationResult:
+    """Clear pending and durable OAuth state for one connection."""
+    with _domain_errors():
+        await _oauth_coordinator().disconnect(
+            authority=require_current_execution_authority(),
+            connection_id=connection_id,
+        )
+    logger.info(
+        "MCP OAuth disconnected",
+        data={"event": "mcp_oauth_disconnected", "connection_id": connection_id},
+    )
+    return OperationResult(
+        success=True,
+        message="MCP OAuth connection cleared.",
+        restart_required=False,
+    )
+
+
 def _service() -> MCPConnectionService:
     service = get_runtime_context().mcp_connections
     if service is None:
@@ -155,6 +228,17 @@ def _service() -> MCPConnectionService:
             message="MCP configuration is unavailable while encrypted secrets are locked.",
         )
     return service
+
+
+def _oauth_coordinator() -> MCPOAuthCoordinator:
+    coordinator = get_runtime_context().mcp_oauth
+    if coordinator is None:
+        raise APIException(
+            status_code=503,
+            error_type="MCPRuntimeUnavailable",
+            message="MCP OAuth is unavailable while encrypted secrets are locked.",
+        )
+    return coordinator
 
 
 def _to_info(connection: MCPConnection) -> MCPConnectionInfo:

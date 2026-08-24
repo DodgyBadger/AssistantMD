@@ -71,4 +71,17 @@ the retained client for subsequent runs without changing a run already in
 progress. Runtime leases are released when preflight fails, task startup fails,
 or the chat finishes or is cancelled.
 
-MCP OAuth is not active in this contract yet.
+## OAuth connection flow
+
+OAuth connections are initiated explicitly from the System tab. AssistantMD
+returns the authorization URL to the frontend and never launches a browser from
+the backend, so the same flow works when the application is hosted headlessly.
+The normal callback can complete automatically when the AssistantMD URL is
+reachable; otherwise the user can paste the redirected URL into the connection
+card.
+
+OAuth tokens and dynamic client-registration state use the encrypted,
+principal-and-connection-scoped secrets store. Chat and connection tests may use
+and refresh an existing token, but they cannot initiate interactive
+authorization. Disconnecting, deleting, or changing a connection away from
+OAuth clears its stored OAuth state.

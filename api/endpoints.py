@@ -89,6 +89,10 @@ from .models import (
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
     MCPCredentialUpdateRequest,
+    MCPOAuthCompleteRequest,
+    MCPOAuthStartRequest,
+    MCPOAuthStartResponse,
+    MCPOAuthStatusResponse,
     MetadataResponse,
     ModelConfigRequest,
     ModelInfo,
@@ -228,10 +232,14 @@ from .services import (
 )
 from .services.mcp import (
     clear_mcp_credential,
+    complete_mcp_oauth,
     create_mcp_connection,
     delete_mcp_connection,
+    disconnect_mcp_oauth,
+    get_mcp_oauth_status,
     list_mcp_connections,
     set_mcp_credential,
+    start_mcp_oauth,
     test_mcp_connection,
     update_mcp_connection,
 )
@@ -1252,6 +1260,90 @@ async def test_mcp_connection_endpoint(
     """Return sanitized connection readiness; transport arrives in slice 7."""
     try:
         return await test_mcp_connection(connection_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/mcp/connections/{connection_id}/oauth/start",
+    response_model=MCPOAuthStartResponse,
+)
+async def start_mcp_oauth_endpoint(
+    connection_id: str,
+    payload: MCPOAuthStartRequest,
+    request: Request,
+) -> MCPOAuthStartResponse | JSONResponse:
+    """Start a headless-safe OAuth attempt for one MCP connection."""
+    try:
+        redirect_uri = payload.redirect_uri or str(
+            request.url_for(
+                "complete_mcp_oauth_callback_endpoint",
+                connection_id=connection_id,
+            )
+        )
+        return await start_mcp_oauth(connection_id, redirect_uri=redirect_uri)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/system/mcp/connections/{connection_id}/oauth/callback",
+    response_model=MCPOAuthStatusResponse,
+)
+async def complete_mcp_oauth_callback_endpoint(
+    connection_id: str,
+    code: str,
+    state: str,
+) -> MCPOAuthStatusResponse | JSONResponse:
+    """Complete MCP OAuth from a browser callback."""
+    try:
+        return await complete_mcp_oauth(
+            connection_id,
+            MCPOAuthCompleteRequest(redirect_url=None, code=code, state=state),
+        )
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/mcp/connections/{connection_id}/oauth/complete",
+    response_model=MCPOAuthStatusResponse,
+)
+async def complete_mcp_oauth_manual_endpoint(
+    connection_id: str,
+    payload: MCPOAuthCompleteRequest,
+) -> MCPOAuthStatusResponse | JSONResponse:
+    """Complete MCP OAuth from a pasted redirect URL."""
+    try:
+        return await complete_mcp_oauth(connection_id, payload)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.get(
+    "/system/mcp/connections/{connection_id}/oauth/status",
+    response_model=MCPOAuthStatusResponse,
+)
+async def get_mcp_oauth_status_endpoint(
+    connection_id: str,
+) -> MCPOAuthStatusResponse | JSONResponse:
+    """Return sanitized OAuth status for one MCP connection."""
+    try:
+        return await get_mcp_oauth_status(connection_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.delete(
+    "/system/mcp/connections/{connection_id}/oauth",
+    response_model=OperationResult,
+)
+async def disconnect_mcp_oauth_endpoint(
+    connection_id: str,
+) -> OperationResult | JSONResponse:
+    """Disconnect OAuth for one MCP connection."""
+    try:
+        return await disconnect_mcp_oauth(connection_id)
     except Exception as e:
         return create_error_response(e)
 

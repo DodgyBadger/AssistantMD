@@ -1650,6 +1650,41 @@ class MCPConnectionTestResponse(BaseModel):
     message: str
 
 
+class MCPOAuthStartRequest(BaseModel):
+    """Start a headless-safe MCP OAuth connection attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    redirect_uri: str | None = Field(None, max_length=2048)
+
+
+class MCPOAuthStartResponse(BaseModel):
+    """Authorization URL and expiry for an MCP OAuth attempt."""
+
+    auth_url: str
+    state: str
+    redirect_uri: str
+    expires_at: str
+
+
+class MCPOAuthCompleteRequest(BaseModel):
+    """Complete MCP OAuth from a pasted redirect or explicit values."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    redirect_url: str | None = Field(None, max_length=4096)
+    code: str | None = Field(None, max_length=4096)
+    state: str | None = Field(None, max_length=4096)
+
+
+class MCPOAuthStatusResponse(BaseModel):
+    """Sanitized current OAuth state for one MCP connection."""
+
+    status: str
+    connected: bool
+    pending_expires_at: str | None = None
+
+
 class SystemActivityEntryInfo(BaseModel):
     """One parsed retained System Activity entry."""
 

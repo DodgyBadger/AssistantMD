@@ -20,6 +20,7 @@ from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
+from core.mcp.oauth import MCPOAuthCoordinator
 from core.runtime.background import RuntimeBackgroundSpawner
 from core.runtime.buffers import BufferStore
 from core.runtime.execution_tasks import TaskCoordinator
@@ -76,6 +77,7 @@ class RuntimeContext:
     workflow_run_store: WorkflowRunStore
     mcp_connections: MCPConnectionService | None
     mcp_manager: MCPConnectionManager | None
+    mcp_oauth: MCPOAuthCoordinator | None
     background_spawner: RuntimeBackgroundSpawner
     boot_id: int
     started_at: datetime
@@ -97,6 +99,9 @@ class RuntimeContext:
         self.logger.info("Shutting down runtime context")
 
         await self.task_coordinator.shutdown(reason="runtime_shutdown")
+
+        if self.mcp_oauth is not None:
+            await self.mcp_oauth.shutdown()
 
         if self.mcp_manager is not None:
             await self.mcp_manager.shutdown()

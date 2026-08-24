@@ -24,6 +24,7 @@ from core.ingestion.worker import IngestionWorker
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
 from core.mcp.network import insecure_http_allowed_from_environment
+from core.mcp.oauth import MCPOAuthCoordinator
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.secrets import get_encrypted_secrets_service, initialize_secrets_bootstrap
@@ -80,6 +81,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         secrets_status = initialize_secrets_bootstrap(config.system_root)
         mcp_connections: MCPConnectionService | None = None
         mcp_manager: MCPConnectionManager | None = None
+        mcp_oauth: MCPOAuthCoordinator | None = None
         if not secrets_status.ready:
             logger.warning(
                 "Encrypted secrets are locked",
@@ -123,6 +125,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             )
             manager_holder.append(mcp_manager)
             mcp_manager.start()
+            mcp_oauth = MCPOAuthCoordinator(
+                connections=mcp_connections,
+                manager=mcp_manager,
+            )
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             refresh_settings_cache()
 
@@ -287,6 +293,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             workflow_run_store=workflow_run_store,
             mcp_connections=mcp_connections,
             mcp_manager=mcp_manager,
+            mcp_oauth=mcp_oauth,
             background_spawner=background_spawner,
             boot_id=boot_id,
             started_at=started_at,
