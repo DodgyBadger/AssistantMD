@@ -225,6 +225,8 @@
             trash: icon.TRASH_ICON_SVG,
             x: icon.X_ICON_SVG,
             circleX: icon.CIRCLE_X_ICON_SVG,
+            check: icon.CHECK_ICON_SVG,
+            link: icon.LINK_ICON_SVG,
         };
         return svgByName[iconName] || icon.SETTINGS_ICON_SVG;
     }
@@ -2250,8 +2252,8 @@ async function saveModelRow(rowKey) {
                     </div>
                     ${oauthAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
                         <div data-mcp-oauth-status class="text-xs text-txt-secondary">OAuth: loading status…</div>
-                        <div class="flex items-center gap-2"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste redirected URL for headless completion" /><button type="button" data-mcp-action="oauth-complete" ${iconButton('check', 'Complete MCP OAuth', 'is-primary')}>${iconSvg('check')}</button></div>
-                        <div class="flex justify-end gap-2"><button type="button" data-mcp-action="oauth-disconnect" ${iconButton('x', 'Disconnect MCP OAuth', 'is-danger')}>${iconSvg('x')}</button><button type="button" data-mcp-action="oauth-connect" ${iconButton('link', 'Connect MCP OAuth', 'is-primary')}>${iconSvg('link')}</button></div>
+                        <div class="flex items-center gap-2"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste redirected URL for headless completion" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Complete OAuth</button></div>
+                        <div class="flex justify-end gap-2"><button type="button" data-mcp-action="oauth-disconnect" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium state-error hover:border-border-secondary">Disconnect</button><button type="button" data-mcp-action="oauth-connect" class="px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Connect OAuth</button></div>
                     </div>` : ''}
                     <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
                     <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" ${iconButton('play', 'Test MCP connection')}>${iconSvg('play')}</button><button type="button" data-mcp-action="delete" ${iconButton('trash', 'Delete MCP connection', 'is-danger')}>${iconSvg('trash')}</button><button type="button" data-mcp-action="save" ${iconButton('save', 'Save MCP connection', 'is-primary')}>${iconSvg('save')}</button></div>
