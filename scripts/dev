@@ -64,6 +64,56 @@ ensure_runtime_roots() {
   mkdir -p "${DATA_ROOT}" "${SYSTEM_ROOT}"
 }
 
+has_configured_secrets_key() {
+  [ -x "${VENV_PYTHON}" ] || return 1
+  REPO_ROOT="${REPO_ROOT}" "${VENV_PYTHON}" - <<'PY' >/dev/null 2>&1
+import os
+from pathlib import Path
+
+from dotenv import dotenv_values
+
+from core.secrets.crypto import SecretKeyring
+
+env_path = Path(os.environ["REPO_ROOT"]) / ".env"
+if env_path.exists():
+    for name, value in dotenv_values(env_path).items():
+        if value is not None:
+            os.environ.setdefault(name, value)
+
+try:
+    SecretKeyring.from_environment()
+except (RuntimeError, ValueError):
+    raise SystemExit(1)
+PY
+}
+
+print_secrets_key_guidance() {
+  if has_configured_secrets_key; then
+    echo "OK: encrypted secrets key configuration found."
+    echo "Existing system/secrets.yaml values, if any, will migrate on the next application startup."
+    return
+  fi
+
+  cat <<'EOF'
+
+ACTION REQUIRED: configure the encrypted secrets key before starting AssistantMD.
+Without it, the UI remains available for diagnostics, but providers, models,
+MCP configuration, and secret mutation stay locked.
+
+Generate a key into a new .env file with:
+
+  umask 077
+  key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+  printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
+  unset key
+
+If .env already contains other settings, add these entries without overwriting
+that file. Back up .env separately if you need to retain access to encrypted
+credentials. Existing system/secrets.yaml values migrate on application startup
+after a valid key is available.
+EOF
+}
+
 require_environment() {
   if [ ! -x "${VENV_PYTHON}" ]; then
     die "The checkout environment is missing or broken. Run scripts/dev setup."
@@ -121,6 +171,7 @@ setup_environment() {
   echo "Python: $("${VENV_PYTHON}" -V 2>&1)"
   echo "Runtime data: ${DATA_ROOT}"
   echo "Runtime system: ${SYSTEM_ROOT}"
+  print_secrets_key_guidance
   echo "Start AssistantMD with: scripts/dev run"
 }
 
@@ -267,8 +318,16 @@ PY
   echo "Runtime data: ${DATA_ROOT}"
   echo "Runtime system: ${SYSTEM_ROOT}"
 
+  if has_configured_secrets_key; then
+    echo "OK: encrypted secrets key configuration found"
+  else
+    echo "MISSING: encrypted secrets key configuration; providers, models, MCP configuration, and secret mutation will be locked"
+    failures=$((failures + 1))
+    print_secrets_key_guidance
+  fi
+
   if [ "${failures}" -ne 0 ]; then
-    echo "Doctor found ${failures} blocking issue(s). Run scripts/dev setup after installing missing host tools." >&2
+    echo "Doctor found ${failures} blocking issue(s). Resolve the missing items reported above; scripts/dev setup repairs the development environment but does not generate encryption keys." >&2
     return 1
   fi
   echo "Development environment checks passed."

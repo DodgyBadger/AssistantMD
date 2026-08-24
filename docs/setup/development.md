@@ -61,6 +61,11 @@ printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIV
 unset key
 ```
 
+`scripts/dev setup` checks for this configuration and prints the command when
+it is missing, but does not generate or overwrite `.env`. The encrypted secrets
+store initializes—and any legacy `system/secrets.yaml` values migrate—when the
+application next starts with `scripts/dev run`.
+
 `.env.example` documents the required names but contains no usable key.
 `scripts/dev run` loads `.env` when it exists. A missing or unusable key leaves
 the application in secrets-locked mode: the UI remains available for diagnosis,
