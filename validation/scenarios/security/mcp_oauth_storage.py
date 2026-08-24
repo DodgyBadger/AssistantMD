@@ -26,7 +26,10 @@ from mcp.shared.auth import OAuthToken  # noqa: E402
 
 from core.identity import ExecutionAuthority  # noqa: E402
 from core.mcp import ConnectedMCPOAuth, EncryptedMCPOAuthStorage  # noqa: E402
-from core.mcp.oauth_storage import has_mcp_oauth_tokens  # noqa: E402
+from core.mcp.oauth_storage import (  # noqa: E402
+    has_mcp_oauth_tokens,
+    mcp_oauth_http_client_factory,
+)
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -143,6 +146,12 @@ class MCPOAuthStorageScenario(BaseScenario):
             )
         else:
             self.soft_assert(False, "Runtime OAuth must never launch a browser flow")
+        factory = mcp_oauth_http_client_factory(allow_insecure_http=False)
+        async with factory(follow_redirects=True) as client:  # type: ignore[call-arg]
+            self.soft_assert(
+                not client.follow_redirects and not client.trust_env,
+                "FastMCP runtime kwargs must not weaken OAuth client policy",
+            )
 
         self.assert_no_failures()
         self.teardown_scenario()

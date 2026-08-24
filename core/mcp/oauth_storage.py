@@ -216,6 +216,7 @@ def mcp_oauth_http_client_factory(*, allow_insecure_http: bool) -> McpHttpClient
         headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
+        **_kwargs: Any,
     ) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             headers=headers,
