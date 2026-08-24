@@ -39,6 +39,10 @@ within one AssistantMD installation, not multi-tenant infrastructure.
 - Slice 9 is next: add principal-owned MCP OAuth using the existing headless-safe
   browser/manual-completion strategy, then expose connect, status, reconnect,
   and disconnect actions in the System UI.
+- Slice 9 groundwork is in progress: FastMCP's token-storage contract now has an
+  encrypted, principal-and-connection-scoped adapter with durable expiry and
+  client-registration state; the authorization coordinator and UI/API actions
+  remain to be implemented.
 
 ## Invariants
 

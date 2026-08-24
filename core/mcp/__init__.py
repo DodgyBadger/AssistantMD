@@ -8,6 +8,7 @@ from .models import (
     MCPConnectionUpdate,
     MCPTransport,
 )
+from .oauth_storage import EncryptedMCPOAuthStorage
 from .service import MCPConnectionService
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "MCPReadinessSnapshot",
     "MCPTransport",
     "MCPUnavailableConnection",
+    "EncryptedMCPOAuthStorage",
 ]
 from .manager import (
     MCPConnectionLease,
