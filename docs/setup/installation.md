@@ -45,6 +45,20 @@ and models remain unavailable until the matching key is restored or encrypted
 credentials are reset and re-entered. AssistantMD does not provide key export or
 managed key backup.
 
+For an installation reached through a reverse proxy, also add the externally
+visible AssistantMD origin to `.env`:
+
+```bash
+printf '%s\n' 'ASSISTANTMD_PUBLIC_URL=https://assistant.example.com' >> .env
+```
+
+Use the exact origin shown in the browser: scheme, hostname, and optional port,
+with no application path or callback path. Do not use the container address,
+proxy upstream such as `http://127.0.0.1:8000`, or an apex domain when
+AssistantMD actually runs on a subdomain. Plain HTTP is accepted only for
+localhost and loopback development addresses. Existing local installations may
+leave this unset; browser callback origins are then inferred where supported.
+
 ### Open `docker-compose.yml` and update the following:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your
@@ -53,7 +67,7 @@ managed key backup.
 - **Do not** change the right hand side: `/app/data` or the `./system:/app/system` mount.
 - Set `TZ` to your local [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) so that scheduled workflows run when you expect them to.
 - Keep the `env_file: .env` entry so the container receives the installation
-  encryption key.
+  encryption key and optional canonical public URL.
 
 **Optional**
 - Change the host side (the left side) of `127.0.0.1:8000:8000` if you want to expose the UI on a different IP/port (e.g. `192.168.0.1:1234:8000`).

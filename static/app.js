@@ -102,6 +102,8 @@ const dashElements = {
 const configElements = {
     statusBanner: document.getElementById('config-status-banner'),
     statusMessages: document.getElementById('config-status-messages'),
+    publicUrl: document.getElementById('configured-public-url'),
+    publicUrlHelp: document.getElementById('configured-public-url-help'),
     configTab: document.getElementById('configuration-tab')
 };
 
@@ -1424,6 +1426,15 @@ async function fetchSystemStatus() {
         if (!response.ok) throw new Error('Failed to fetch status');
 
         state.systemStatus = await response.json();
+        const publicUrl = state.systemStatus?.system?.public_url || '';
+        if (configElements.publicUrl) {
+            configElements.publicUrl.value = publicUrl || 'Not configured';
+        }
+        if (configElements.publicUrlHelp) {
+            configElements.publicUrlHelp.textContent = publicUrl
+                ? 'Configured by ASSISTANTMD_PUBLIC_URL.'
+                : 'Browser callbacks use an inferred origin until ASSISTANTMD_PUBLIC_URL is configured.';
+        }
         const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
             ? state.systemStatus.configuration_status.default_model
             : null;

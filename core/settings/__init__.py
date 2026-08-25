@@ -186,6 +186,7 @@ def validate_settings(
         ConfigurationStatus describing any issues discovered.
     """
     status = ConfigurationStatus()
+    app_settings = settings or get_app_settings()
     from core.secrets import get_secrets_bootstrap_status
 
     secrets_status = get_secrets_bootstrap_status()
@@ -197,6 +198,16 @@ def validate_settings(
                 "Encrypted secrets are locked. Restore or configure the installation "
                 "key in .env, then restart AssistantMD. Providers and models are "
                 "unavailable; existing secret state has not been changed."
+            ),
+            severity="warning",
+        )
+    if app_settings.public_url is None:
+        status.add_issue(
+            name="PUBLIC_URL_UNSET",
+            message=(
+                "Canonical public URL is not configured. Local use remains "
+                "available, but reverse-proxy deployments should set "
+                "ASSISTANTMD_PUBLIC_URL in .env and restart AssistantMD."
             ),
             severity="warning",
         )

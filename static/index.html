@@ -435,6 +435,24 @@
             </div>
 
             <div class="space-y-4">
+                <details id="config-deployment-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm" open>
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Deployment</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-2">
+                        <p class="text-sm text-txt-secondary">Instance-level values are configured in <code>.env</code> and require an application restart.</p>
+                        <label class="block text-xs text-txt-secondary">Canonical public URL
+                            <input id="configured-public-url" readonly class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" value="Loading…" />
+                        </label>
+                        <div id="configured-public-url-help" class="text-xs text-txt-secondary"></div>
+                    </div>
+                </details>
+
                 <details id="config-models-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
                     <summary class="collapsible-summary">
                         <div class="summary-text">

@@ -315,6 +315,17 @@ def collect_system_health() -> SystemInfo:
             startup_time=startup_time,
             last_config_reload=last_reload,
             data_root=data_root,
+            public_url=(
+                runtime.config.public_origin.value
+                if runtime.config.public_origin is not None
+                else None
+            ),
+            public_url_source=(
+                "configured"
+                if runtime.config.public_origin is not None
+                else "unconfigured"
+            ),
+            public_url_recommended=runtime.config.public_origin is None,
         )
 
         return system_info
@@ -325,6 +336,9 @@ def collect_system_health() -> SystemInfo:
             startup_time=datetime.now(),
             last_config_reload=None,
             data_root="/app/data",
+            public_url=None,
+            public_url_source="unconfigured",
+            public_url_recommended=True,
         )
 
 

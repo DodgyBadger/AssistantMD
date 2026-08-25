@@ -13,6 +13,12 @@ AssistantMD is designed as a **single-user application** running on your local m
 - **Remote access**: If you expose the service beyond your local machine, you must layer security yourself (for example, reverse proxy with TLS and authentication, VPN, or SSH tunnel). Without those controls, every endpoint — including secrets and settings updates — is exposed.
 - **Data in transit**: Requests are plain HTTP by default. Use a reverse proxy or tunnelling solution to terminate TLS if you need encrypted traffic.
 
+For reverse-proxy deployments, configure `ASSISTANTMD_PUBLIC_URL` with the
+externally visible HTTPS origin. This lets AssistantMD construct exact OAuth
+callbacks without trusting request host or forwarded headers. It does not
+configure DNS, TLS, authentication, proxy routing, or access control; the proxy
+must still route the callback path and protect the application.
+
 Keep these constraints in mind before putting the application on a public interface.
 
 ## Vault File Uploads

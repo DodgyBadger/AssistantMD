@@ -87,6 +87,32 @@ except (RuntimeError, ValueError):
 PY
 }
 
+public_url_status() {
+  REPO_ROOT="${REPO_ROOT}" "${VENV_PYTHON}" - <<'PY'
+import os
+from pathlib import Path
+
+from dotenv import dotenv_values
+
+from core.runtime.public_url import PublicOrigin, PublicUrlError
+
+env_path = Path(os.environ["REPO_ROOT"]) / ".env"
+if env_path.exists():
+    for name, value in dotenv_values(env_path).items():
+        if value is not None:
+            os.environ.setdefault(name, value)
+
+raw = os.environ.get("ASSISTANTMD_PUBLIC_URL", "").strip()
+if not raw:
+    print("UNCONFIGURED")
+else:
+    try:
+        print(f"CONFIGURED:{PublicOrigin.parse(raw).value}")
+    except PublicUrlError:
+        print("INVALID")
+PY
+}
+
 print_secrets_key_guidance() {
   if has_configured_secrets_key; then
     echo "OK: encrypted secrets key configuration found."
@@ -256,6 +282,7 @@ run_scenarios() {
 
 doctor() {
   local browser_path
+  local public_url_result
   local failures=0
   cd "${REPO_ROOT}"
   echo "Repository: ${REPO_ROOT}"
@@ -326,6 +353,20 @@ PY
     failures=$((failures + 1))
     print_secrets_key_guidance
   fi
+
+  public_url_result="$(public_url_status)"
+  case "${public_url_result}" in
+    CONFIGURED:*)
+      echo "OK: canonical public URL -> ${public_url_result#CONFIGURED:}"
+      ;;
+    UNCONFIGURED)
+      echo "OPTIONAL: ASSISTANTMD_PUBLIC_URL is not configured; browser callback origins will be inferred"
+      ;;
+    *)
+      echo "BROKEN: ASSISTANTMD_PUBLIC_URL is invalid"
+      failures=$((failures + 1))
+      ;;
+  esac
 
   if [ "${failures}" -ne 0 ]; then
     echo "Doctor found ${failures} blocking issue(s). Resolve the missing items reported above; scripts/dev setup repairs the development environment but does not generate encryption keys." >&2

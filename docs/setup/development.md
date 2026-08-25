@@ -72,6 +72,15 @@ the application in secrets-locked mode: the UI remains available for diagnosis,
 but providers and models are unavailable and secret state is not migrated or
 mutated.
 
+When development is accessed through a TLS reverse proxy rather than directly
+on loopback, add its browser-visible origin to `.env`:
+
+```text
+ASSISTANTMD_PUBLIC_URL=https://assistant-dev.example.com
+```
+
+Direct `http://127.0.0.1:8000` development does not require this setting.
+
 `scripts/dev setup` is idempotent. It:
 
 - installs or locates UV-managed Python 3.13;
@@ -218,8 +227,8 @@ scripts/dev doctor
 ```
 
 The doctor checks required commands, Node.js 22, the venv interpreter, Python
-3.13, the Logfire import, and optional Chromium availability without changing
-the environment.
+3.13, the Logfire import, canonical public URL validity, and optional Chromium
+availability without changing the environment.
 
 If activation succeeds but `python` is missing, the venv probably references an
 interpreter removed with an earlier host or container. Repair it with:

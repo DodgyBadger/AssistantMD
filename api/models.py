@@ -444,6 +444,11 @@ class SystemInfo(BaseModel):
         None, description="Last time configuration was reloaded"
     )
     data_root: str = Field(..., description="Root directory for vault data")
+    public_url: str | None = Field(
+        None, description="Canonical externally reachable AssistantMD origin"
+    )
+    public_url_source: Literal["configured", "unconfigured"] = "unconfigured"
+    public_url_recommended: bool = True
 
 
 class ConfigurationIssueInfo(BaseModel):

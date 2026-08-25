@@ -15,6 +15,7 @@ services:
     env_file:
       - path: .env
         required: false
+    # .env also accepts ASSISTANTMD_PUBLIC_URL for reverse-proxy deployments.
     environment:
       - TZ=UTC
       - API_PORT=8000
