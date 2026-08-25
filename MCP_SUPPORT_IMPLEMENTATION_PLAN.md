@@ -519,6 +519,18 @@ inventory below supplies the requirements assigned to these slices.
    OAuth-specific additions to the existing connection UI: connect URL/status,
    callback/manual completion, refresh, reconnect, and disconnect. Finish with a
    user-level smoke contract for a remote OAuth service such as Gmail.
+   - Resolve OAuth capabilities before opening the MCP session by following the
+     protected-resource and authorization-server metadata defined by the MCP
+     authorization specification. Do not depend on a server returning 401 from
+     `initialize` or `tools/list`.
+   - Support both standards branches through one flow: dynamic client
+     registration when advertised, and principal-owned pre-registered client ID
+     plus encrypted client secret when registration is unavailable. Allow an
+     optional explicit scope list for servers whose metadata does not select the
+     least-privileged tool scopes.
+   - Keep provider-specific names and endpoint tables out of the implementation;
+     compatibility changes belong in metadata resolution and capability
+     selection, with deterministic coverage for each standards shape.
 
 10. **End-to-end hardening and documentation**
     Verify cross-principal isolation, malformed servers, cancellation/shutdown,

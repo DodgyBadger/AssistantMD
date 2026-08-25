@@ -2251,6 +2251,11 @@ async function saveModelRow(rowKey) {
                         <div class="flex items-center gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" ${iconButton('save', 'Save MCP credential', 'is-primary', staticAuth ? '' : 'disabled')}>${iconSvg('save')}</button><button type="button" data-mcp-action="clear-credential" ${iconButton('x', 'Clear MCP credential', 'is-danger', connection.credential_present ? '' : 'disabled')}>${iconSvg('x')}</button></div>
                     </div>` : ''}
                     ${oauthAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-3">
+                        <div class="grid gap-3 md:grid-cols-2">
+                            <label class="text-xs text-txt-secondary">OAuth client ID<input data-mcp-field="oauth_client_id" value="${escapeHtml(connection.oauth_client_id || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses dynamic registration" /></label>
+                            <label class="text-xs text-txt-secondary">OAuth client secret (${connection.oauth_client_secret_present ? 'stored' : 'not set'})<input data-mcp-field="oauth_client_secret" type="password" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Leave blank to preserve" autocomplete="new-password" /></label>
+                            <label class="text-xs text-txt-secondary md:col-span-2">OAuth scopes<input data-mcp-field="oauth_scopes" value="${escapeHtml(Array.isArray(connection.oauth_scopes) ? connection.oauth_scopes.join(', ') : '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses server metadata" /></label>
+                        </div>
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div data-mcp-oauth-status class="text-sm text-txt-secondary">OAuth status: loading…</div>
                             <div class="flex items-center gap-2">
@@ -2258,6 +2263,7 @@ async function saveModelRow(rowKey) {
                                 <button type="button" data-mcp-action="oauth-disconnect" disabled class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium state-error hover:border-border-secondary disabled:opacity-50 disabled:cursor-not-allowed">Disconnect</button>
                             </div>
                         </div>
+                        <p class="text-xs text-txt-secondary">Save any client ID, client secret, or scope changes before choosing Authorize. Servers that support dynamic registration can leave these fields blank.</p>
                         <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. AssistantMD detects the callback automatically when this address is reachable from your browser.</p>
                         <details class="rounded-md border border-border-primary px-3 py-2">
                             <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
@@ -2283,6 +2289,7 @@ async function saveModelRow(rowKey) {
         const authMode = elements.mcpCreateForm.elements.namedItem('auth_mode')?.value || 'none';
         const headerInput = elements.mcpCreateForm.elements.namedItem('header_name');
         const credentialInput = elements.mcpCreateForm.elements.namedItem('credential');
+        const oauthInputs = ['oauth_client_id', 'oauth_client_secret', 'oauth_scopes'].map((name) => elements.mcpCreateForm.elements.namedItem(name));
         if (headerInput instanceof HTMLInputElement) {
             headerInput.disabled = authMode !== 'header';
             if (headerInput.disabled) headerInput.value = '';
@@ -2291,6 +2298,12 @@ async function saveModelRow(rowKey) {
             credentialInput.disabled = authMode !== 'bearer' && authMode !== 'header';
             if (credentialInput.disabled) credentialInput.value = '';
         }
+        oauthInputs.forEach((input) => {
+            if (input instanceof HTMLInputElement) {
+                input.disabled = authMode !== 'oauth';
+                if (input.disabled) input.value = '';
+            }
+        });
     }
 
     async function loadMcpOAuthStatuses() {
@@ -2327,6 +2340,9 @@ async function saveModelRow(rowKey) {
             enabled: form.get('enabled') === 'on',
             allowed_tools: parseMcpAllowedTools(form.get('allowed_tools')),
             credential: ['bearer', 'header'].includes(String(form.get('auth_mode') || 'none')) ? (String(form.get('credential') || '').trim() || null) : null,
+            oauth_client_id: String(form.get('auth_mode') || 'none') === 'oauth' ? (String(form.get('oauth_client_id') || '').trim() || null) : null,
+            oauth_client_secret: String(form.get('auth_mode') || 'none') === 'oauth' ? (String(form.get('oauth_client_secret') || '').trim() || null) : null,
+            oauth_scopes: String(form.get('auth_mode') || 'none') === 'oauth' ? parseMcpAllowedTools(form.get('oauth_scopes')) : null,
         };
         const saved = await mutateMcp('api/system/mcp/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection added.');
         if (saved) {
@@ -2382,8 +2398,12 @@ async function saveModelRow(rowKey) {
             const value = (name) => card.querySelector(`[data-mcp-field="${name}"]`)?.value || '';
             const enabled = card.querySelector('[data-mcp-field="enabled"]')?.checked === true;
             const authMode = value('auth_mode');
-            const payload = { display_name: value('display_name'), url: value('url'), transport: value('transport'), auth_mode: authMode, header_name: authMode === 'header' ? (value('header_name').trim() || null) : null, enabled, allowed_tools: parseMcpAllowedTools(value('allowed_tools')) };
-            await mutateMcp(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection saved.');
+            const payload = { display_name: value('display_name'), url: value('url'), transport: value('transport'), auth_mode: authMode, header_name: authMode === 'header' ? (value('header_name').trim() || null) : null, enabled, allowed_tools: parseMcpAllowedTools(value('allowed_tools')), oauth_client_id: authMode === 'oauth' ? (value('oauth_client_id').trim() || null) : null, oauth_scopes: authMode === 'oauth' ? parseMcpAllowedTools(value('oauth_scopes')) : null };
+            const saved = await mutateMcp(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection saved.');
+            const clientSecret = value('oauth_client_secret').trim();
+            if (saved && authMode === 'oauth' && clientSecret) {
+                await mutateMcp(`${endpoint}/oauth/client-secret`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_secret: clientSecret }) }, 'MCP OAuth client settings saved.');
+            }
         }
     }
 

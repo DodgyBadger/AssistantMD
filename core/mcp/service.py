@@ -24,6 +24,7 @@ from .schema import connect_mcp, ensure_mcp_schema
 
 MCP_SECRET_NAMESPACE_PREFIX = "mcp.connection."
 MCP_CREDENTIAL_NAME = "credential"
+MCP_OAUTH_CLIENT_SECRET_NAME = "oauth_client_secret"
 _SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 _HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
@@ -66,6 +67,7 @@ class MCPConnectionService:
     ) -> MCPConnection:
         """Update mutable metadata while preserving immutable identity and slug."""
         authority = require_current_execution_authority()
+        previous = self._require_for_authority(authority, connection_id)
         normalized = _normalize_update(request)
         conn = connect_mcp(self._system_root)
         try:
@@ -75,6 +77,7 @@ class MCPConnectionService:
                     UPDATE mcp_connections SET
                         display_name = ?, url = ?, transport = ?, auth_mode = ?,
                         header_name = ?, enabled = ?, allowed_tools_json = ?,
+                        oauth_client_id = ?, oauth_scopes_json = ?,
                         config_version = config_version + 1,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE owner_principal_id = ? AND connection_id = ?
@@ -87,6 +90,8 @@ class MCPConnectionService:
                         normalized.header_name,
                         int(normalized.enabled),
                         _dump_allowed_tools(normalized.allowed_tools),
+                        normalized.oauth_client_id,
+                        _dump_allowed_tools(normalized.oauth_scopes),
                         authority.principal_id,
                         _required_id(connection_id),
                     ),
@@ -98,6 +103,13 @@ class MCPConnectionService:
         if normalized.auth_mode not in {MCPAuthMode.BEARER, MCPAuthMode.HEADER}:
             self._delete_credential(authority, connection_id)
         if normalized.auth_mode is not MCPAuthMode.OAUTH:
+            self._delete_oauth_state(authority, connection_id)
+            self._delete_oauth_client_secret(authority, connection_id)
+        elif previous.auth_mode is MCPAuthMode.OAUTH and (
+            previous.url != normalized.url
+            or previous.oauth_client_id != normalized.oauth_client_id
+            or previous.oauth_scopes != normalized.oauth_scopes
+        ):
             self._delete_oauth_state(authority, connection_id)
         self._notify(authority, connection_id)
         return self._require_for_authority(authority, connection_id)
@@ -128,12 +140,45 @@ class MCPConnectionService:
         self._bump_version(authority, connection_id)
         return self._require_for_authority(authority, connection_id)
 
+    def set_oauth_client_secret(
+        self, connection_id: str, client_secret: str
+    ) -> MCPConnection:
+        """Create or replace a write-only OAuth client secret."""
+        authority = require_current_execution_authority()
+        connection = self._require_for_authority(authority, connection_id)
+        if connection.auth_mode is not MCPAuthMode.OAUTH:
+            raise ValueError("This MCP connection does not use OAuth.")
+        value = str(client_secret or "").strip()
+        if not value:
+            raise ValueError("OAuth client secret cannot be empty.")
+        self._delete_oauth_state(authority, connection_id)
+        self._secrets.set_for_authority(
+            authority,
+            _credential_namespace(connection_id),
+            MCP_OAUTH_CLIENT_SECRET_NAME,
+            value,
+        )
+        self._bump_version(authority, connection_id)
+        return self._require_for_authority(authority, connection_id)
+
+    def resolve_oauth_client_secret(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> str | None:
+        """Resolve an OAuth client secret only after proving ownership."""
+        self._require_for_authority(authority, connection_id)
+        return self._secrets.get_for_authority(
+            authority,
+            _credential_namespace(connection_id),
+            MCP_OAUTH_CLIENT_SECRET_NAME,
+        )
+
     def delete_connection(self, connection_id: str) -> None:
         """Delete a current-principal connection and its encrypted credential."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
         self._require_for_authority(authority, clean_id)
         self._delete_credential(authority, clean_id)
+        self._delete_oauth_client_secret(authority, clean_id)
         self._delete_oauth_state(authority, clean_id)
         self._delete_connection_row(authority, clean_id)
         self._notify(authority, clean_id)
@@ -210,7 +255,8 @@ class MCPConnectionService:
                         connection_id, owner_principal_id, slug, display_name,
                         url, transport, auth_mode, header_name, enabled,
                         allowed_tools_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        , oauth_client_id, oauth_scopes_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         connection_id,
@@ -223,6 +269,8 @@ class MCPConnectionService:
                         normalized.header_name,
                         int(normalized.enabled),
                         _dump_allowed_tools(normalized.allowed_tools),
+                        normalized.oauth_client_id,
+                        _dump_allowed_tools(normalized.oauth_scopes),
                     ),
                 )
         finally:
@@ -236,6 +284,21 @@ class MCPConnectionService:
                     normalized.credential,
                 )
             except Exception:
+                self._delete_credential(authority, connection_id)
+                self._delete_oauth_client_secret(authority, connection_id)
+                self._rollback_connection_create(authority, connection_id)
+                raise
+        if normalized.oauth_client_secret is not None:
+            try:
+                self._secrets.set_for_authority(
+                    authority,
+                    _credential_namespace(connection_id),
+                    MCP_OAUTH_CLIENT_SECRET_NAME,
+                    normalized.oauth_client_secret,
+                )
+            except Exception:
+                self._delete_credential(authority, connection_id)
+                self._delete_oauth_client_secret(authority, connection_id)
                 self._rollback_connection_create(authority, connection_id)
                 raise
         self._notify(authority, connection_id)
@@ -275,6 +338,13 @@ class MCPConnectionService:
                 MCP_CREDENTIAL_NAME,
             )
         )
+        oauth_client_secret_present = bool(
+            self._secrets.get_for_authority(
+                authority,
+                _credential_namespace(connection_id),
+                MCP_OAUTH_CLIENT_SECRET_NAME,
+            )
+        )
         return MCPConnection(
             connection_id=connection_id,
             slug=str(values["slug"]),
@@ -286,6 +356,11 @@ class MCPConnectionService:
             enabled=bool(values["enabled"]),
             allowed_tools=_load_allowed_tools(values["allowed_tools_json"]),
             credential_present=credential_present,
+            oauth_client_id=(
+                str(values["oauth_client_id"]) if values["oauth_client_id"] else None
+            ),
+            oauth_client_secret_present=oauth_client_secret_present,
+            oauth_scopes=_load_allowed_tools(values["oauth_scopes_json"]),
             config_version=int(values["config_version"]),
             created_at=str(values["created_at"]),
             updated_at=str(values["updated_at"]),
@@ -306,6 +381,15 @@ class MCPConnectionService:
             authority,
             _credential_namespace(connection_id),
             MCP_CREDENTIAL_NAME,
+        )
+
+    def _delete_oauth_client_secret(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> None:
+        self._secrets.delete_for_authority(
+            authority,
+            _credential_namespace(connection_id),
+            MCP_OAUTH_CLIENT_SECRET_NAME,
         )
 
     def _delete_oauth_state(
@@ -386,14 +470,19 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
             header_name=request.header_name,
             enabled=request.enabled,
             allowed_tools=request.allowed_tools,
+            oauth_client_id=request.oauth_client_id,
+            oauth_scopes=request.oauth_scopes,
         )
     )
     credential = str(request.credential or "").strip() or None
+    oauth_client_secret = str(request.oauth_client_secret or "").strip() or None
     if credential is not None and update.auth_mode not in {
         MCPAuthMode.BEARER,
         MCPAuthMode.HEADER,
     }:
         raise ValueError("Credentials are supported only for bearer or header auth.")
+    if oauth_client_secret is not None and update.auth_mode is not MCPAuthMode.OAUTH:
+        raise ValueError("OAuth client secrets are supported only for OAuth auth.")
     return MCPConnectionCreate(
         display_name=update.display_name,
         url=update.url,
@@ -403,6 +492,9 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
         enabled=update.enabled,
         allowed_tools=update.allowed_tools,
         credential=credential,
+        oauth_client_id=update.oauth_client_id,
+        oauth_client_secret=oauth_client_secret,
+        oauth_scopes=update.oauth_scopes,
     )
 
 
@@ -419,6 +511,10 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
     elif header_name is not None:
         raise ValueError("Header name is valid only for header auth.")
     allowed_tools = _normalize_allowed_tools(request.allowed_tools)
+    oauth_client_id = str(request.oauth_client_id or "").strip() or None
+    oauth_scopes = _normalize_allowed_tools(request.oauth_scopes)
+    if auth_mode is not MCPAuthMode.OAUTH and (oauth_client_id or oauth_scopes):
+        raise ValueError("OAuth client settings are valid only for OAuth auth.")
     return MCPConnectionUpdate(
         display_name=display_name,
         url=url,
@@ -427,6 +523,8 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
         header_name=header_name,
         enabled=bool(request.enabled),
         allowed_tools=allowed_tools,
+        oauth_client_id=oauth_client_id,
+        oauth_scopes=oauth_scopes,
     )
 
 

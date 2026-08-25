@@ -76,6 +76,17 @@ class MCPConnectionIsolationScenario(BaseScenario):
                 credential="other-token",
             ),
         )
+        oauth_connection = service.create_connection_for_authority(
+            owner,
+            MCPConnectionCreate(
+                display_name="Workspace",
+                url="https://workspace.example/mcp",
+                auth_mode=MCPAuthMode.OAUTH,
+                oauth_client_id="owner-client-id",
+                oauth_client_secret="owner-client-secret",
+                oauth_scopes=("mail.read", "mail.compose"),
+            ),
+        )
 
         self.soft_assert_equal(
             owner_connection.slug,
@@ -96,6 +107,32 @@ class MCPConnectionIsolationScenario(BaseScenario):
             service.resolve_credential(other, other_connection.connection_id),
             "other-token",
             "Same-named credentials must remain independently owned",
+        )
+        self.soft_assert_equal(
+            (
+                oauth_connection.oauth_client_id,
+                oauth_connection.oauth_client_secret_present,
+                oauth_connection.oauth_scopes,
+            ),
+            ("owner-client-id", True, ("mail.read", "mail.compose")),
+            "OAuth client metadata should round-trip without exposing its secret",
+        )
+        self.soft_assert_equal(
+            service.resolve_oauth_client_secret(owner, oauth_connection.connection_id),
+            "owner-client-secret",
+            "OAuth client secrets should resolve only under matching authority",
+        )
+        try:
+            service.resolve_oauth_client_secret(other, oauth_connection.connection_id)
+        except LookupError:
+            pass
+        else:
+            self.soft_assert(
+                False, "A foreign principal must not resolve OAuth secrets"
+            )
+        self.soft_assert(
+            b"owner-client-secret" not in (system_root / "secrets.db").read_bytes(),
+            "OAuth client secrets must be encrypted at rest",
         )
 
         with use_execution_authority(owner):

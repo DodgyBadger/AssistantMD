@@ -1598,6 +1598,9 @@ class MCPConnectionCreateRequest(BaseModel):
     enabled: bool = True
     allowed_tools: list[str] | None = None
     credential: SecretStr | None = Field(None, max_length=16384)
+    oauth_client_id: str | None = Field(None, max_length=2048)
+    oauth_client_secret: SecretStr | None = Field(None, max_length=16384)
+    oauth_scopes: list[str] | None = None
 
 
 class MCPConnectionUpdateRequest(BaseModel):
@@ -1612,6 +1615,8 @@ class MCPConnectionUpdateRequest(BaseModel):
     header_name: str | None = Field(None, max_length=128)
     enabled: bool
     allowed_tools: list[str] | None = None
+    oauth_client_id: str | None = Field(None, max_length=2048)
+    oauth_scopes: list[str] | None = None
 
 
 class MCPCredentialUpdateRequest(BaseModel):
@@ -1620,6 +1625,14 @@ class MCPCredentialUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     credential: SecretStr = Field(..., min_length=1, max_length=16384)
+
+
+class MCPOAuthClientSecretUpdateRequest(BaseModel):
+    """Write-only pre-registered OAuth client secret update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_secret: SecretStr = Field(..., min_length=1, max_length=16384)
 
 
 class MCPConnectionInfo(BaseModel):
@@ -1635,6 +1648,9 @@ class MCPConnectionInfo(BaseModel):
     enabled: bool
     allowed_tools: list[str] | None
     credential_present: bool
+    oauth_client_id: str | None
+    oauth_client_secret_present: bool
+    oauth_scopes: list[str] | None
     config_version: int
     created_at: str
     updated_at: str

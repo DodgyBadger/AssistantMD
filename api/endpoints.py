@@ -94,6 +94,7 @@ from .models import (
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
     MCPCredentialUpdateRequest,
+    MCPOAuthClientSecretUpdateRequest,
     MCPOAuthCompleteRequest,
     MCPOAuthStartRequest,
     MCPOAuthStartResponse,
@@ -244,6 +245,7 @@ from .services.mcp import (
     get_mcp_oauth_status,
     list_mcp_connections,
     set_mcp_credential,
+    set_mcp_oauth_client_secret,
     start_mcp_oauth,
     test_mcp_connection,
     update_mcp_connection,
@@ -1266,6 +1268,20 @@ async def clear_mcp_credential_endpoint(
     """Clear a static credential for a current-user connection."""
     try:
         return clear_mcp_credential(connection_id)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.put(
+    "/system/mcp/connections/{connection_id}/oauth/client-secret",
+    response_model=MCPConnectionInfo,
+)
+async def set_mcp_oauth_client_secret_endpoint(
+    connection_id: str, request: MCPOAuthClientSecretUpdateRequest
+) -> MCPConnectionInfo | JSONResponse:
+    """Set a write-only OAuth client secret for a current-user connection."""
+    try:
+        return set_mcp_oauth_client_secret(connection_id, request)
     except Exception as e:
         return create_error_response(e)
 

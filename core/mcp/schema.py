@@ -15,6 +15,11 @@ MCP_MIGRATIONS = (
         name="principal_owned_connections",
         apply=lambda conn: _create_connection_tables(conn),
     ),
+    SQLiteMigration(
+        version=2,
+        name="oauth_client_configuration",
+        apply=lambda conn: _add_oauth_client_columns(conn),
+    ),
 )
 
 
@@ -32,6 +37,7 @@ def ensure_mcp_schema(
             )
         else:
             _create_connection_tables(conn)
+            _add_oauth_client_columns(conn)
         conn.commit()
     finally:
         conn.close()
@@ -103,3 +109,14 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
         FROM mcp_connections
         """
     )
+
+
+def _add_oauth_client_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(mcp_connections)").fetchall()
+    }
+    if "oauth_client_id" not in columns:
+        conn.execute("ALTER TABLE mcp_connections ADD COLUMN oauth_client_id TEXT")
+    if "oauth_scopes_json" not in columns:
+        conn.execute("ALTER TABLE mcp_connections ADD COLUMN oauth_scopes_json TEXT")

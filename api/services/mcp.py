@@ -26,6 +26,7 @@ from ..models import (
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
     MCPCredentialUpdateRequest,
+    MCPOAuthClientSecretUpdateRequest,
     MCPOAuthCompleteRequest,
     MCPOAuthStartResponse,
     MCPOAuthStatusResponse,
@@ -63,6 +64,17 @@ def create_mcp_connection(
                     if request.credential is not None
                     else None
                 ),
+                oauth_client_id=request.oauth_client_id,
+                oauth_client_secret=(
+                    request.oauth_client_secret.get_secret_value()
+                    if request.oauth_client_secret is not None
+                    else None
+                ),
+                oauth_scopes=(
+                    tuple(request.oauth_scopes)
+                    if request.oauth_scopes is not None
+                    else None
+                ),
             )
         )
     _log_change("mcp_connection_created", connection)
@@ -86,6 +98,12 @@ def update_mcp_connection(
                 allowed_tools=(
                     tuple(request.allowed_tools)
                     if request.allowed_tools is not None
+                    else None
+                ),
+                oauth_client_id=request.oauth_client_id,
+                oauth_scopes=(
+                    tuple(request.oauth_scopes)
+                    if request.oauth_scopes is not None
                     else None
                 ),
             ),
@@ -112,6 +130,19 @@ def clear_mcp_credential(connection_id: str) -> MCPConnectionInfo:
     with _domain_errors():
         connection = _service().clear_credential(connection_id)
     _log_change("mcp_credential_cleared", connection)
+    return _to_info(connection)
+
+
+def set_mcp_oauth_client_secret(
+    connection_id: str, request: MCPOAuthClientSecretUpdateRequest
+) -> MCPConnectionInfo:
+    """Set a pre-registered OAuth client secret without returning its value."""
+    with _domain_errors():
+        connection = _service().set_oauth_client_secret(
+            connection_id,
+            request.client_secret.get_secret_value(),
+        )
+    _log_change("mcp_oauth_client_secret_updated", connection)
     return _to_info(connection)
 
 
@@ -247,6 +278,8 @@ def _to_info(connection: MCPConnection) -> MCPConnectionInfo:
     payload["allowed_tools"] = (
         list(allowed_tools) if allowed_tools is not None else None
     )
+    oauth_scopes = payload.get("oauth_scopes")
+    payload["oauth_scopes"] = list(oauth_scopes) if oauth_scopes is not None else None
     return MCPConnectionInfo.model_validate(payload)
 
 

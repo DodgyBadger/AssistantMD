@@ -76,10 +76,14 @@ class _HeadlessOAuth(OAuth):
         authorization_url: asyncio.Future[str],
         callback: asyncio.Future[tuple[str, str | None]],
         allow_insecure_http: bool,
+        scopes: tuple[str, ...] | None,
+        client_id: str | None,
+        client_secret: str | None,
     ) -> None:
         self._authorization_url = authorization_url
         self._callback = callback
         self._storage = storage
+        self._requested_scopes = scopes
         super().__init__(
             mcp_url=mcp_url,
             token_storage=storage,
@@ -87,6 +91,9 @@ class _HeadlessOAuth(OAuth):
             httpx_client_factory=mcp_oauth_http_client_factory(
                 allow_insecure_http=allow_insecure_http
             ),
+            scopes=list(scopes) if scopes is not None else None,
+            client_id=client_id,
+            client_secret=client_secret,
         )
         self.context.client_metadata.redirect_uris = [AnyHttpUrl(redirect_uri)]
 
@@ -100,6 +107,8 @@ class _HeadlessOAuth(OAuth):
 
     async def _perform_authorization_code_grant(self) -> tuple[str, str]:
         """Persist enough PKCE state to finish after a process restart."""
+        if self._requested_scopes is not None:
+            self.context.client_metadata.scope = " ".join(self._requested_scopes)
         if self.context.client_metadata.redirect_uris is None:
             raise OAuthFlowError("No redirect URI is configured.")
         if not self.context.client_info or not self.context.client_info.client_id:
@@ -190,6 +199,11 @@ class MCPOAuthCoordinator:
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
         await self._clear_pending(authority, connection)
+        adapter = TokenStorageAdapter(
+            async_key_value=self._connections.oauth_storage(authority, connection_id),
+            server_url=connection.url,
+        )
+        await adapter.clear()
         loop = asyncio.get_running_loop()
         attempt = _Attempt(
             authority=authority,
@@ -225,6 +239,8 @@ class MCPOAuthCoordinator:
             await self._cancel_attempt(key)
             await self._clear_pending(authority, connection)
             if isinstance(exc, asyncio.CancelledError):
+                raise
+            if isinstance(exc, MCPOAuthError):
                 raise
             raise MCPOAuthError(
                 "The MCP server did not start an OAuth authorization flow."
@@ -358,7 +374,13 @@ class MCPOAuthCoordinator:
             authorization_url=attempt.authorization_url,
             callback=attempt.callback,
             allow_insecure_http=self._allow_insecure_http,
+            scopes=attempt.connection.oauth_scopes,
+            client_id=attempt.connection.oauth_client_id,
+            client_secret=self._connections.resolve_oauth_client_secret(
+                attempt.authority, attempt.connection.connection_id
+            ),
         )
+        await _prime_oauth_authorization(auth, attempt.connection.url)
         http_client_factory = mcp_oauth_http_client_factory(
             allow_insecure_http=self._allow_insecure_http
         )
@@ -535,3 +557,36 @@ def _required_query_value(url: str, key: str) -> str:
 def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
     values = query.get(key, [])
     return values[0] if len(values) == 1 and values[0] else None
+
+
+async def _prime_oauth_authorization(auth: _HeadlessOAuth, mcp_url: str) -> None:
+    """Start standards discovery even when MCP initialization is public."""
+    request = httpx.Request("GET", mcp_url)
+    flow = auth.async_auth_flow(request)
+    try:
+        await anext(flow)
+        response = httpx.Response(401, request=request)
+        async with auth.httpx_client_factory() as client:
+            while True:
+                next_request = await flow.asend(response)
+                if (
+                    auth.context.oauth_metadata is not None
+                    and auth.context.oauth_metadata.registration_endpoint is None
+                    and auth.context.client_info is None
+                ):
+                    raise MCPOAuthError(
+                        "This MCP server requires a pre-registered OAuth client ID "
+                        "and client secret. Save them in the connection before "
+                        "authorizing."
+                    )
+                if (
+                    auth._authorization_url.done()
+                    and next_request.url == request.url
+                    and "Authorization" in next_request.headers
+                ):
+                    return
+                response = await client.send(next_request)
+    except StopAsyncIteration:
+        return
+    finally:
+        await flow.aclose()

@@ -582,6 +582,15 @@
                                 <label class="text-xs text-txt-secondary">Credential (write-only)
                                     <input name="credential" type="password" maxlength="16384" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" />
                                 </label>
+                                <label class="text-xs text-txt-secondary">OAuth client ID (pre-registered clients)
+                                    <input name="oauth_client_id" maxlength="2048" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" />
+                                </label>
+                                <label class="text-xs text-txt-secondary">OAuth client secret (write-only)
+                                    <input name="oauth_client_secret" type="password" maxlength="16384" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" />
+                                </label>
+                                <label class="text-xs text-txt-secondary md:col-span-2">OAuth scopes (comma-separated; optional)
+                                    <input name="oauth_scopes" disabled class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="https://example.com/scope.read" />
+                                </label>
                                 <label class="text-xs text-txt-secondary md:col-span-2">Allowed tools (comma-separated; blank trusts all server tools)
                                     <input name="allowed_tools" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="search_messages, read_message" />
                                 </label>

@@ -39,6 +39,9 @@ class MCPConnection:
     config_version: int
     created_at: str
     updated_at: str
+    oauth_client_id: str | None = None
+    oauth_client_secret_present: bool = False
+    oauth_scopes: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,9 @@ class MCPConnectionCreate:
     enabled: bool = True
     allowed_tools: tuple[str, ...] | None = None
     credential: str | None = None
+    oauth_client_id: str | None = None
+    oauth_client_secret: str | None = None
+    oauth_scopes: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,8 @@ class MCPConnectionUpdate:
     header_name: str | None
     enabled: bool
     allowed_tools: tuple[str, ...] | None
+    oauth_client_id: str | None = None
+    oauth_scopes: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
