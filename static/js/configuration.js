@@ -3576,6 +3576,7 @@ async function saveModelRow(rowKey) {
         await loadGeneralSettings();
         await loadModels();
         await loadSecrets();
+        await loadGoogleConnection();
         await loadMcpConnections();
         await loadSystemJobs();
         await loadSystemMigrations();
