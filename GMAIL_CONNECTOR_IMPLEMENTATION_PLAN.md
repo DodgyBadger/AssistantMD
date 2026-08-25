@@ -15,7 +15,7 @@ Completed Slice 1:
 - runtime-owned built-in/Google connection services that fail closed while
   secrets are unavailable.
 
-Next: Slice 4 workflow hardening and operational polish after manual chat validation.
+Next: optional mailbox mutation slices require separate approval.
 
 ## Objective
 
@@ -551,6 +551,12 @@ Manual checkpoint: ask chat to find and summarize known messages in the test
 account, then run a one-off read-only workflow under `local-user`.
 
 ### Slice 4: Workflow hardening and operational polish
+
+Status: complete. Concurrent token refresh, retryable provider responses,
+timeouts, revoked authorization, empty results, partial pages, malformed MIME,
+bounded content, and scheduled-workflow authority now have deterministic
+coverage. Operational logs and current-contract security/runtime documentation
+avoid message content and credential material.
 
 - Exercise concurrent token refresh from chat and workflow paths.
 - Confirm revoked grants, insufficient scopes, rate limits, network timeouts,

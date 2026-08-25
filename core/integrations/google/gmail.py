@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -72,6 +73,7 @@ class GmailSearchResult:
     result_size_estimate: int
     next_page_token: str | None
     requested_max_results: int
+    partial: bool
 
 
 @dataclass(frozen=True)
@@ -121,13 +123,15 @@ class GmailAPIClient:
                 params={"format": "metadata"},
             )
             messages.append(_normalize_message(metadata, max_characters=0))
+        next_page_token = _optional_string(payload.get("nextPageToken"))
         return GmailSearchResult(
             query=clean_query,
             messages=tuple(messages),
             result_count=len(messages),
             result_size_estimate=_integer(payload.get("resultSizeEstimate")) or 0,
-            next_page_token=_optional_string(payload.get("nextPageToken")),
+            next_page_token=next_page_token,
             requested_max_results=max_results,
+            partial=next_page_token is not None,
         )
 
     async def get_message(
@@ -325,10 +329,15 @@ def _headers(value: object) -> dict[str, str]:
 def _decode_body(value: str) -> str:
     try:
         padding = "=" * (-len(value) % 4)
-        return base64.urlsafe_b64decode(value + padding).decode(
-            "utf-8", errors="replace"
+        return base64.b64decode(
+            value + padding,
+            altchars=b"-_",
+            validate=True,
+        ).decode(
+            "utf-8",
+            errors="replace",
         )
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, binascii.Error):
         return ""
 
 

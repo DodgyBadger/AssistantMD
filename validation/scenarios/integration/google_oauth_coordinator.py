@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -35,6 +36,7 @@ from core.integrations.google import (  # noqa: E402
     GoogleConnectionService,
     GoogleOAuthCoordinator,
     GoogleOAuthError,
+    GoogleOAuthTokenState,
 )
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -103,6 +105,33 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             (refreshed.access_token, refreshed.refresh_token),
             ("refreshed-access-token", "initial-refresh-token"),
             "Refresh should preserve Google's omitted refresh token",
+        )
+        google.save_token_state(
+            owner,
+            GoogleOAuthTokenState(
+                access_token="expired-access-token",
+                refresh_token="initial-refresh-token",
+                expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+                scopes=completed.scopes,
+                account_id=completed.account_id,
+                account_email=completed.account_email,
+            ),
+        )
+        refresh_count_before = sum(
+            b"grant_type=refresh_token" in request.content for request in requests
+        )
+        concurrent_tokens = await asyncio.gather(
+            coordinator.access_token(owner),
+            coordinator.access_token(owner),
+            coordinator.access_token(owner),
+        )
+        refresh_count_after = sum(
+            b"grant_type=refresh_token" in request.content for request in requests
+        )
+        self.soft_assert_equal(
+            (concurrent_tokens, refresh_count_after - refresh_count_before),
+            (["refreshed-access-token"] * 3, 1),
+            "Concurrent callers should share one serialized token refresh",
         )
         self.soft_assert(
             any(

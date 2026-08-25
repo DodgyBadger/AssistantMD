@@ -156,6 +156,11 @@ ordering lets an effect-unsafe interrupted chat fail, complete vault rollback,
 and only then start its replacement task.
 
 Execution tasks also carry a principal authority distinct from their source.
+Connection-backed tools resolve credentials from that authority. Scheduled
+workflows currently inherit `local-user`, so Gmail calls from chat and workflows
+share that principal's Google grant without copying credentials into scheduler
+jobs. Authentication failure is terminal tool failure, while a successful empty
+Gmail search remains a normal result.
 Interactive work currently uses `local-user`; scheduler and system maintenance
 use `system`. The coordinator installs this authority through a context-local
 binding so tools and nested runtime work can use the originating identity

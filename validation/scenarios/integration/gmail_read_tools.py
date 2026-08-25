@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -23,7 +25,7 @@ if __name__ == "__main__":
     system_root.mkdir()
     set_bootstrap_roots(data_root=data_root, system_root=system_root)
 
-from core.integrations.google.gmail import GmailAPIClient  # noqa: E402
+from core.integrations.google.gmail import GmailAPIClient, GmailError  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -40,8 +42,12 @@ class GmailReadToolsScenario(BaseScenario):
 
         search = await client.search(query="from:sender@example.com", max_results=2)
         self.soft_assert_equal(
-            ([item.message_id for item in search.messages], search.result_count),
-            (["message-1", "message-2"], 2),
+            (
+                [item.message_id for item in search.messages],
+                search.result_count,
+                search.partial,
+            ),
+            (["message-1", "message-2"], 2, True),
             "Search should return stable message handles and a bounded count",
         )
 
@@ -79,6 +85,88 @@ class GmailReadToolsScenario(BaseScenario):
             "Read-only Gmail support must never download attachment bytes",
         )
 
+        retry_attempts = 0
+
+        def retry_then_empty(request: httpx.Request) -> httpx.Response:
+            nonlocal retry_attempts
+            retry_attempts += 1
+            if retry_attempts == 1:
+                return httpx.Response(429, headers={"Retry-After": "0"})
+            if retry_attempts == 2:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"messages": [], "resultSizeEstimate": 0})
+
+        retrying = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(retry_then_empty),
+            sleep=_no_sleep,
+        )
+        empty = await retrying.search(query="label:does-not-exist", max_results=1)
+        self.soft_assert_equal(
+            (retry_attempts, empty.result_count, empty.partial),
+            (3, 0, False),
+            "Rate limits and service failures should retry while an empty mailbox result remains successful",
+        )
+
+        authentication = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(401)
+            ),
+            sleep=_no_sleep,
+        )
+        try:
+            await authentication.search(query="newer_than:1d", max_results=1)
+        except GmailError as exc:
+            self.soft_assert_equal(
+                (exc.category, exc.retryable),
+                ("authentication", False),
+                "Revoked authorization should be distinguishable from an empty result",
+            )
+        else:
+            self.soft_assert(False, "Revoked authorization should fail explicitly")
+
+        timeout_attempts = 0
+
+        def always_timeout(request: httpx.Request) -> httpx.Response:
+            nonlocal timeout_attempts
+            timeout_attempts += 1
+            raise httpx.ConnectTimeout("timed out", request=request)
+
+        timing_out = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(always_timeout),
+            sleep=_no_sleep,
+        )
+        try:
+            await timing_out.search(query="newer_than:1d", max_results=1)
+        except GmailError as exc:
+            self.soft_assert_equal(
+                (timeout_attempts, exc.category, exc.retryable),
+                (3, "network", True),
+                "Network timeouts should exhaust the bounded connector retry policy",
+            )
+        else:
+            self.soft_assert(False, "Repeated Gmail timeouts should fail")
+
+        malformed = _message("message-bad", "thread-bad")
+        malformed["payload"]["parts"][0]["body"]["data"] = "!invalid!"
+        malformed_client = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(200, json=malformed)
+            ),
+            sleep=_no_sleep,
+        )
+        malformed_message = await malformed_client.get_message(
+            "message-bad", max_characters=10
+        )
+        self.soft_assert_equal(
+            malformed_message.text,
+            "",
+            "Malformed MIME body data should normalize safely without leaking encoded bytes",
+        )
+
         self.assert_no_failures()
         self.teardown_scenario()
 
@@ -104,6 +192,7 @@ def _gmail_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
                         {"id": "message-2", "threadId": "thread-2"},
                     ],
                     "resultSizeEstimate": 2,
+                    "nextPageToken": "next-page",
                 },
             )
         if path.endswith("/messages/message-1"):
@@ -127,7 +216,13 @@ def _gmail_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(respond))
 
 
-def _message(message_id: str, thread_id: str) -> dict[str, object]:
+def _response_client(
+    respond: Callable[[httpx.Request], httpx.Response],
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+
+def _message(message_id: str, thread_id: str) -> dict[str, Any]:
     return {
         "id": message_id,
         "threadId": thread_id,

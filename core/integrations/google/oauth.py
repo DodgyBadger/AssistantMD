@@ -211,56 +211,62 @@ class GoogleOAuthCoordinator:
         """Refresh one Google grant under a per-principal serialization lock."""
         lock = self._refresh_locks.setdefault(authority.principal_id, asyncio.Lock())
         async with lock:
-            existing = self._google.load_token_state(authority)
-            connection = self._connections.get_google_connection_for_authority(
-                authority
-            )
-            client_secret = self._google.resolve_client_secret(authority)
-            if (
-                existing is None
-                or not existing.refresh_token
-                or connection is None
-                or client_secret is None
-            ):
-                raise GoogleOAuthError("Google authorization must be reconnected.")
-            try:
-                token = await request_oauth_token(
-                    token_endpoint=GOOGLE_TOKEN_ENDPOINT,
-                    form={
-                        "grant_type": "refresh_token",
-                        "refresh_token": existing.refresh_token,
-                        "client_id": connection.client_id,
-                        "client_secret": client_secret,
-                    },
-                    http_client_factory=self._http_client_factory,
-                )
-            except OAuthTokenExchangeError as exc:
-                raise GoogleOAuthError("Google token refresh failed.") from exc
-            expires_at = (
-                datetime.now(UTC) + timedelta(seconds=token.expires_in)
-                if token.expires_in is not None
-                else None
-            )
-            refreshed = GoogleOAuthTokenState(
-                access_token=token.access_token,
-                refresh_token=token.refresh_token or existing.refresh_token,
-                expires_at=expires_at.isoformat() if expires_at is not None else None,
-                scopes=token.scopes or existing.scopes,
-                token_type=token.token_type,
-                account_id=existing.account_id,
-                account_email=existing.account_email,
-            )
-            self._google.save_token_state(authority, refreshed)
-            return refreshed
+            return await self._refresh_locked(authority)
 
     async def access_token(self, authority: ExecutionAuthority) -> str:
         """Resolve a usable access token, refreshing expired grants once."""
+        lock = self._refresh_locks.setdefault(authority.principal_id, asyncio.Lock())
+        async with lock:
+            existing = self._google.load_token_state(authority)
+            if existing is None:
+                raise GoogleOAuthError("Google authorization must be connected.")
+            if existing.expired:
+                existing = await self._refresh_locked(authority)
+            return existing.access_token
+
+    async def _refresh_locked(
+        self, authority: ExecutionAuthority
+    ) -> GoogleOAuthTokenState:
+        """Refresh while the caller holds the principal's serialization lock."""
         existing = self._google.load_token_state(authority)
-        if existing is None:
-            raise GoogleOAuthError("Google authorization must be connected.")
-        if existing.expired:
-            existing = await self.refresh(authority)
-        return existing.access_token
+        connection = self._connections.get_google_connection_for_authority(authority)
+        client_secret = self._google.resolve_client_secret(authority)
+        if (
+            existing is None
+            or not existing.refresh_token
+            or connection is None
+            or client_secret is None
+        ):
+            raise GoogleOAuthError("Google authorization must be reconnected.")
+        try:
+            token = await request_oauth_token(
+                token_endpoint=GOOGLE_TOKEN_ENDPOINT,
+                form={
+                    "grant_type": "refresh_token",
+                    "refresh_token": existing.refresh_token,
+                    "client_id": connection.client_id,
+                    "client_secret": client_secret,
+                },
+                http_client_factory=self._http_client_factory,
+            )
+        except OAuthTokenExchangeError as exc:
+            raise GoogleOAuthError("Google token refresh failed.") from exc
+        expires_at = (
+            datetime.now(UTC) + timedelta(seconds=token.expires_in)
+            if token.expires_in is not None
+            else None
+        )
+        refreshed = GoogleOAuthTokenState(
+            access_token=token.access_token,
+            refresh_token=token.refresh_token or existing.refresh_token,
+            expires_at=expires_at.isoformat() if expires_at is not None else None,
+            scopes=token.scopes or existing.scopes,
+            token_type=token.token_type,
+            account_id=existing.account_id,
+            account_email=existing.account_email,
+        )
+        self._google.save_token_state(authority, refreshed)
+        return refreshed
 
     async def _load_identity(self, access_token: str) -> dict[str, object]:
         try:
