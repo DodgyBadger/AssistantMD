@@ -84,6 +84,11 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.mcp",
         description="Principal-owned MCP connection definitions and policy.",
     ),
+    "connections": SystemDatabaseDefinition(
+        name="connections",
+        owner="core.connections",
+        description="Principal-owned built-in connection metadata and preferences.",
+    ),
 }
 
 

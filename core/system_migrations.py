@@ -19,6 +19,11 @@ from core.chat.schema import (
 from core.chat.schema import (
     MIGRATION_NAMESPACE as CHAT_SESSIONS_MIGRATION_NAMESPACE,
 )
+from core.connections.schema import CONNECTION_MIGRATIONS, ensure_connections_schema
+from core.connections.schema import DB_NAME as CONNECTIONS_DB_NAME
+from core.connections.schema import (
+    MIGRATION_NAMESPACE as CONNECTIONS_MIGRATION_NAMESPACE,
+)
 from core.database import get_system_database_path
 from core.database_migrations import SQLiteMigration
 from core.goals.schema import (
@@ -120,6 +125,15 @@ class SystemMigrationStatus:
 
 
 MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
+    SystemMigrationTarget(
+        db_name=CONNECTIONS_DB_NAME,
+        namespace=CONNECTIONS_MIGRATION_NAMESPACE,
+        migrations=CONNECTION_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_connections_schema(
+            system_root,
+            apply_migrations=True,
+        ),
+    ),
     SystemMigrationTarget(
         db_name=CHAT_SESSIONS_DB_NAME,
         namespace=CHAT_SESSIONS_MIGRATION_NAMESPACE,
