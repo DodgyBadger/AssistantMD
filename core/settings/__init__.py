@@ -22,6 +22,7 @@ from core.llm.openai_auth import (
     resolve_openai_auth,
 )
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
+from core.runtime.public_url import PublicOrigin
 from core.settings.secrets_store import get_secret_value, load_secrets, secret_has_value
 from core.settings.store import (
     SETTINGS_TEMPLATE,
@@ -98,6 +99,7 @@ class AppSettings(BaseSettings):
     )
 
     vaults_root_path: Path | None = Field(default=None, alias="VAULTS_ROOT_PATH")
+    public_url: str | None = Field(default=None, alias="ASSISTANTMD_PUBLIC_URL")
 
     _LLM_SECRET_KEYS = [
         "OPENAI_API_KEY",
@@ -117,6 +119,14 @@ class AppSettings(BaseSettings):
         if isinstance(value, Path):
             return value.expanduser()
         return Path(value).expanduser()
+
+    @field_validator("public_url", mode="before")
+    @classmethod
+    def _normalize_public_url(cls, value: Any) -> str | None:
+        """Normalize the optional deployment origin at the environment boundary."""
+        if value in (None, ""):
+            return None
+        return PublicOrigin.parse(str(value)).value
 
     def available_llm_keys(self) -> dict[str, str]:
         """
