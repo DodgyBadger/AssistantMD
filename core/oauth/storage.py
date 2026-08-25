@@ -39,6 +39,12 @@ class EncryptedOAuthStorage:
     async def get(
         self, key: str, *, collection: str | None = None
     ) -> dict[str, Any] | None:
+        return self.get_sync(key, collection=collection)
+
+    def get_sync(
+        self, key: str, *, collection: str | None = None
+    ) -> dict[str, Any] | None:
+        """Read OAuth JSON from synchronous service boundaries."""
         stored = self._load(key, collection=collection)
         return stored.value if stored is not None else None
 
@@ -63,6 +69,17 @@ class EncryptedOAuthStorage:
         collection: str | None = None,
         ttl: SupportsFloat | None = None,
     ) -> None:
+        self.put_sync(key, value, collection=collection, ttl=ttl)
+
+    def put_sync(
+        self,
+        key: str,
+        value: Mapping[str, Any],
+        *,
+        collection: str | None = None,
+        ttl: SupportsFloat | None = None,
+    ) -> None:
+        """Write OAuth JSON from synchronous service boundaries."""
         expires_at = time.time() + float(ttl) if ttl is not None else None
         payload = json.dumps(
             {"value": dict(value), "expires_at": expires_at},
@@ -77,6 +94,10 @@ class EncryptedOAuthStorage:
         )
 
     async def delete(self, key: str, *, collection: str | None = None) -> bool:
+        return self.delete_sync(key, collection=collection)
+
+    def delete_sync(self, key: str, *, collection: str | None = None) -> bool:
+        """Delete OAuth JSON from synchronous service boundaries."""
         name = _storage_name(key, collection)
         existed = self._secrets.get_for_authority(
             self._authority, self._namespace, name

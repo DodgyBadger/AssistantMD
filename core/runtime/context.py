@@ -15,9 +15,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.authoring.template_discovery import WorkflowLoader
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
+from core.connections import BuiltInConnectionService
 from core.identity import AuthorizationService
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.integrations.google import GoogleConnectionService
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
 from core.mcp.oauth import MCPOAuthCoordinator
@@ -75,6 +77,8 @@ class RuntimeContext:
     task_runner: ExecutionTaskRunner
     workflow_governor: WorkflowGovernor
     workflow_run_store: WorkflowRunStore
+    built_in_connections: BuiltInConnectionService
+    google_connection: GoogleConnectionService | None
     mcp_connections: MCPConnectionService | None
     mcp_manager: MCPConnectionManager | None
     mcp_oauth: MCPOAuthCoordinator | None

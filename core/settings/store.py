@@ -16,6 +16,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from core.connections import ConnectionRequirement
 from core.runtime.paths import get_system_root
 
 SETTINGS_TEMPLATE = Path(__file__).parent / "settings.template.yaml"
@@ -51,6 +52,7 @@ class ToolConfig(BaseModel):
     requires_secrets: list[str] = Field(default_factory=list)
     user_editable: bool = False
     chat_visible: bool = True
+    requires_connection: ConnectionRequirement | None = None
 
     def required_secret_keys(self) -> list[str]:
         return list(self.requires_secrets)
@@ -258,8 +260,21 @@ def get_disabled_tool_names() -> list[str]:
 
 def get_enabled_tools_config() -> dict[str, ToolConfig]:
     """Return configured tools filtered by the app-wide enabled tool list."""
+    from core.connections import connection_requirement_available
+
     tools = get_tools_config()
-    return {name: tools[name] for name in get_enabled_tool_names() if name in tools}
+    enabled: dict[str, ToolConfig] = {}
+    for name in get_enabled_tool_names():
+        config = tools.get(name)
+        if config is None:
+            continue
+        requirement = config.requires_connection
+        if requirement is not None and not connection_requirement_available(
+            requirement
+        ):
+            continue
+        enabled[name] = config
+    return enabled
 
 
 def get_models_config() -> dict[str, ModelConfig]:

@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.authoring.template_discovery import WorkflowLoader, seed_system_templates
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
+from core.connections import BuiltInConnectionService
 from core.identity import (
     LOCAL_USER_AUTHORITY,
     AuthorizationService,
@@ -21,6 +22,7 @@ from core.identity import (
 from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
+from core.integrations.google import GoogleConnectionService
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
 from core.mcp.network import insecure_http_allowed_from_environment
@@ -164,6 +166,17 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 ),
             },
         )
+        built_in_connections = BuiltInConnectionService(
+            system_root=str(config.system_root)
+        )
+        google_connection = (
+            GoogleConnectionService(
+                connections=built_in_connections,
+                secrets=get_encrypted_secrets_service(),
+            )
+            if secrets_status.ready
+            else None
+        )
 
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(
@@ -292,6 +305,8 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             task_runner=task_runner,
             workflow_governor=workflow_governor,
             workflow_run_store=workflow_run_store,
+            built_in_connections=built_in_connections,
+            google_connection=google_connection,
             mcp_connections=mcp_connections,
             mcp_manager=mcp_manager,
             mcp_oauth=mcp_oauth,

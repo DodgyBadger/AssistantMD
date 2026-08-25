@@ -4,15 +4,18 @@
 
 Accepted and in progress.
 
-Completed Slice 1 foundations:
+Completed Slice 1:
 
 - shared provider-neutral OAuth state/PKCE/completion and encrypted storage
   primitives, with MCP regression coverage (`35edc4b`); and
 - principal-owned built-in connection metadata plus typed Google/Gmail
   preferences and managed `connections.db` migration (`81ea907`).
+- principal-owned encrypted Google client/token/account state, sanitized
+  connection status, and scope-aware Gmail capability gating; and
+- runtime-owned built-in/Google connection services that fail closed while
+  secrets are unavailable.
 
-Remaining Slice 1 work starts with the Google connection/OAuth domain skeleton
-and scope-aware Gmail tool-availability contract.
+Next: Slice 2 Google OAuth configuration, authorization flow, API, and System UI.
 
 ## Objective
 
