@@ -7,7 +7,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
 from fastmcp import Client
@@ -15,11 +15,19 @@ from fastmcp.client.auth import OAuth
 from fastmcp.client.auth.oauth import TokenStorageAdapter
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from mcp.client.auth.exceptions import OAuthFlowError
-from mcp.client.auth.oauth2 import PKCEParameters
 from mcp.shared.auth import OAuthToken
 from pydantic import AnyHttpUrl
 
 from core.identity import ExecutionAuthority
+from core.oauth import (
+    OAuthCompletionError,
+    OAuthPKCEState,
+    required_query_value,
+    validate_redirect_uri,
+)
+from core.oauth import (
+    parse_oauth_completion as parse_shared_oauth_completion,
+)
 from core.runtime.public_url import PublicOrigin
 
 from .manager import MCPConnectionManager
@@ -168,8 +176,8 @@ class _HeadlessOAuth(OAuth):
                 self.context.get_authorization_base_url(self.context.server_url),
                 "/authorize",
             )
-        pkce = PKCEParameters.generate()
-        state = secrets.token_urlsafe(32)
+        pkce = OAuthPKCEState.generate()
+        state = pkce.state
         redirect_uri = str(self.context.client_metadata.redirect_uris[0])
         auth_params = {
             "response_type": "code",
@@ -177,7 +185,7 @@ class _HeadlessOAuth(OAuth):
             "redirect_uri": redirect_uri,
             "state": state,
             "code_challenge": pkce.code_challenge,
-            "code_challenge_method": "S256",
+            "code_challenge_method": pkce.code_challenge_method,
         }
         resource: str | None = None
         if self.context.should_include_resource_param(self.context.protocol_version):
@@ -573,35 +581,29 @@ class MCPOAuthCoordinator:
 def parse_oauth_completion(
     *, redirect_url: str | None, code: str | None, state: str | None
 ) -> tuple[str, str]:
-    if redirect_url:
-        parsed = urlparse(redirect_url)
-        query = parse_qs(parsed.query)
-        code = _single_query_value(query, "code")
-        state = _single_query_value(query, "state")
-    if not code or not state:
-        raise MCPOAuthError("MCP OAuth completion requires both code and state.")
-    return code, state
+    try:
+        return parse_shared_oauth_completion(
+            redirect_url=redirect_url, code=code, state=state
+        )
+    except OAuthCompletionError as exc:
+        raise MCPOAuthError(
+            "MCP OAuth completion requires both code and state."
+        ) from exc
 
 
 def _validate_redirect_uri(value: str) -> str:
-    parsed = urlparse(str(value or "").strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise MCPOAuthError("MCP OAuth redirect URI must be an absolute HTTP URL.")
-    if parsed.username or parsed.password or parsed.fragment:
-        raise MCPOAuthError("MCP OAuth redirect URI is invalid.")
-    return parsed.geturl()
+    try:
+        return validate_redirect_uri(value)
+    except OAuthCompletionError as exc:
+        message = str(exc).replace("OAuth redirect", "MCP OAuth redirect", 1)
+        raise MCPOAuthError(message) from exc
 
 
 def _required_query_value(url: str, key: str) -> str:
-    value = _single_query_value(parse_qs(urlparse(url).query), key)
-    if value is None:
-        raise MCPOAuthError(f"MCP OAuth authorization URL omitted {key}.")
-    return value
-
-
-def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
-    values = query.get(key, [])
-    return values[0] if len(values) == 1 and values[0] else None
+    try:
+        return required_query_value(url, key)
+    except OAuthCompletionError as exc:
+        raise MCPOAuthError(f"MCP OAuth authorization URL omitted {key}.") from exc
 
 
 async def _prime_oauth_authorization(auth: _HeadlessOAuth, mcp_url: str) -> None:
