@@ -253,6 +253,15 @@ class GoogleOAuthCoordinator:
             self._google.save_token_state(authority, refreshed)
             return refreshed
 
+    async def access_token(self, authority: ExecutionAuthority) -> str:
+        """Resolve a usable access token, refreshing expired grants once."""
+        existing = self._google.load_token_state(authority)
+        if existing is None:
+            raise GoogleOAuthError("Google authorization must be connected.")
+        if existing.expired:
+            existing = await self.refresh(authority)
+        return existing.access_token
+
     async def _load_identity(self, access_token: str) -> dict[str, object]:
         try:
             async with self._http_client_factory() as client:

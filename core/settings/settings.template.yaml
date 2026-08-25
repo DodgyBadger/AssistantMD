@@ -472,6 +472,13 @@ providers:
     user_editable: true
 
 tools:
+  gmail:
+    module: core.tools.gmail
+    description: "Read the connected Gmail account using bounded search, message, and thread operations"
+    requires_secrets: []
+    requires_connection: google.gmail.read
+    user_editable: false
+    chat_visible: true
   content_import:
     module: core.tools.content_import
     description: "Submit URLs or vault files for durable import to Markdown and inspect import jobs"

@@ -9,6 +9,15 @@ from .connection import (
     GoogleConnectionStatus,
     GoogleOAuthTokenState,
 )
+from .gmail import (
+    GmailAPIClient,
+    GmailAttachment,
+    GmailError,
+    GmailMessage,
+    GmailSearchResult,
+    GmailThread,
+)
+from .gmail_service import GmailResourceService
 from .oauth import GoogleOAuthCoordinator, GoogleOAuthError, GoogleOAuthStart
 
 __all__ = [
@@ -22,4 +31,11 @@ __all__ = [
     "GoogleOAuthCoordinator",
     "GoogleOAuthError",
     "GoogleOAuthStart",
+    "GmailAPIClient",
+    "GmailAttachment",
+    "GmailError",
+    "GmailMessage",
+    "GmailSearchResult",
+    "GmailThread",
+    "GmailResourceService",
 ]

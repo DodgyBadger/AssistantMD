@@ -141,6 +141,19 @@ API-key fallback from OAuth mode is opt-in through
 paths. If OAuth is selected but unavailable and fallback is not enabled, model
 construction fails with actionable reconnect/switch-auth guidance.
 
+## Connection-backed Gmail Tool
+
+The built-in `gmail` tool uses the normal settings-backed first-class tool path,
+but effective bindings include it only when the execution principal's Google
+connection has a usable grant containing `gmail.readonly`. It provides
+read-only status, search, message, and thread operations through a provider
+resource service independent from LLM formatting.
+
+Email content is marked as untrusted external data. Message bodies, search
+results, thread sizes, and attachment descriptor counts are bounded before they
+reach model context. Attachments are metadata-only; downloading and converting
+attachment bytes remains an ingestion responsibility.
+
 ## Delegate and Code Execution
 
 `delegate` creates a bounded child agent with an isolated prompt, optional model

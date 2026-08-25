@@ -19,7 +19,11 @@ from core.connections import BuiltInConnectionService
 from core.identity import AuthorizationService
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
-from core.integrations.google import GoogleConnectionService, GoogleOAuthCoordinator
+from core.integrations.google import (
+    GmailResourceService,
+    GoogleConnectionService,
+    GoogleOAuthCoordinator,
+)
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
 from core.mcp.oauth import MCPOAuthCoordinator
@@ -80,6 +84,7 @@ class RuntimeContext:
     built_in_connections: BuiltInConnectionService
     google_connection: GoogleConnectionService | None
     google_oauth: GoogleOAuthCoordinator | None
+    gmail: GmailResourceService | None
     mcp_connections: MCPConnectionService | None
     mcp_manager: MCPConnectionManager | None
     mcp_oauth: MCPOAuthCoordinator | None

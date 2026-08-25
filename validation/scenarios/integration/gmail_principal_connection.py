@@ -40,6 +40,7 @@ from core.integrations.google import (  # noqa: E402
     GoogleOAuthTokenState,
 )
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
+from core.settings.store import get_enabled_tools_config  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -129,6 +130,10 @@ class GmailPrincipalConnectionScenario(BaseScenario):
                     ConnectionRequirement.GOOGLE_GMAIL_READ
                 ),
                 "Tool binding requirements should resolve the ready Gmail grant",
+            )
+            self.soft_assert(
+                "gmail" in get_enabled_tools_config(),
+                "A ready scoped grant should expose the settings-backed Gmail tool",
             )
         self.soft_assert_equal(
             google.status(other).state,

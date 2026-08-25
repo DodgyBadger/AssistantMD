@@ -15,7 +15,7 @@ Completed Slice 1:
 - runtime-owned built-in/Google connection services that fail closed while
   secrets are unavailable.
 
-Next: Slice 3 read-only Gmail resource client and first-class chat tools.
+Next: Slice 4 workflow hardening and operational polish after manual chat validation.
 
 ## Objective
 
@@ -518,6 +518,12 @@ deployed/headless environment and confirm automatic plus displayed/manual URL
 behavior.
 
 ### Slice 3: Read-only Gmail client and built-in tool
+
+Status: complete. The bounded Gmail REST/resource service, MIME normalization,
+attachment descriptors, retry policy, virtual tool documentation, and
+connection-gated first-class `gmail` tool are implemented. The configured local
+account passed a live read-only search smoke check without exposing message
+content in validation output.
 
 - Implement bounded Gmail REST operations, MIME normalization, pagination, and
   retry/error translation.

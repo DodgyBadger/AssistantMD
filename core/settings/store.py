@@ -172,6 +172,7 @@ def load_settings() -> SettingsFile:
 def refresh_settings_cache() -> None:
     """Clear the settings cache so future calls reload from disk."""
     load_settings.cache_clear()  # type: ignore[attr-defined]
+    _get_template_tools_config.cache_clear()
 
 
 def save_settings(settings: SettingsFile) -> None:
@@ -202,13 +203,27 @@ def get_general_settings() -> dict[str, SettingsEntry]:
 
 def get_tools_config() -> dict[str, ToolConfig]:
     """Get tools configuration section from settings."""
-    return load_settings().tools
+    configured = load_settings().tools
+    return {**_get_template_tools_config(), **configured}
+
+
+@lru_cache(maxsize=1)
+def _get_template_tools_config() -> dict[str, ToolConfig]:
+    """Load packaged built-in tools so additions work before settings repair."""
+    try:
+        template_raw = (
+            yaml.safe_load(SETTINGS_TEMPLATE.read_text(encoding="utf-8")) or {}
+        )
+        return SettingsFile.model_validate(
+            {"tools": template_raw.get("tools", {})}
+        ).tools
+    except (FileNotFoundError, ValidationError, yaml.YAMLError):
+        return {}
 
 
 def get_enabled_tool_names() -> list[str]:
     """Return registered tool names not disabled by app-wide policy."""
-    settings = load_settings()
-    tools = settings.tools
+    tools = get_tools_config()
     disabled = set(get_disabled_tool_names())
     return [
         name
@@ -220,7 +235,7 @@ def get_enabled_tool_names() -> list[str]:
 def get_disabled_tool_names() -> list[str]:
     """Return configured disabled tool names that still exist in the registry."""
     settings = load_settings()
-    tools = settings.tools
+    tools = get_tools_config()
     entry = settings.settings.get("disabled_tools")
     raw_disabled = getattr(entry, "value", None)
     if entry is None:

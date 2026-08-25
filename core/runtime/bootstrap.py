@@ -22,7 +22,11 @@ from core.identity import (
 from core.ingestion.jobs import fail_processing_jobs
 from core.ingestion.service import IngestionService
 from core.ingestion.worker import IngestionWorker
-from core.integrations.google import GoogleConnectionService, GoogleOAuthCoordinator
+from core.integrations.google import (
+    GmailResourceService,
+    GoogleConnectionService,
+    GoogleOAuthCoordinator,
+)
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
 from core.mcp.network import insecure_http_allowed_from_environment
@@ -186,6 +190,15 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             if google_connection is not None
             else None
         )
+        gmail = (
+            GmailResourceService(
+                connections=built_in_connections,
+                google=google_connection,
+                oauth=google_oauth,
+            )
+            if google_connection is not None and google_oauth is not None
+            else None
+        )
 
         # Initialize workflow loader with configured data root
         workflow_loader = WorkflowLoader(
@@ -317,6 +330,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             built_in_connections=built_in_connections,
             google_connection=google_connection,
             google_oauth=google_oauth,
+            gmail=gmail,
             mcp_connections=mcp_connections,
             mcp_manager=mcp_manager,
             mcp_oauth=mcp_oauth,
