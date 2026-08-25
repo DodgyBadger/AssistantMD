@@ -59,6 +59,7 @@ surface used by endpoints and validation.
   scheduler-owned worker run through `/api/import/run-now`.
 - The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
 - OpenAI OAuth controls live in the System provider configuration surface and call the provider OAuth endpoints; API responses expose only sanitized OAuth status, not token material.
+- The System Connections surface groups built-in connections and MCP connections. Google client metadata and Gmail preferences use `/api/system/connections/google`; its client secret and OAuth tokens remain write-only, and the API reports sanitized account, scope, and capability readiness.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.
 - `/api/chat/tasks` is the canonical chat execution entrypoint. It creates a task-owned streaming chat run; clients observe live events through `/api/chat/tasks/{task_id}/events`, task status through `/api/tasks/{task_id}`, or persisted history through session detail endpoints.

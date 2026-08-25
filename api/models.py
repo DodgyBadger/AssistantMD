@@ -1709,6 +1709,79 @@ class MCPOAuthStatusResponse(BaseModel):
     pending_expires_at: str | None = None
 
 
+class GmailConnectionPreferencesRequest(BaseModel):
+    """Principal-owned Gmail result and content limits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search_default_results: int = Field(20, ge=1, le=500)
+    search_max_results: int = Field(100, ge=1, le=500)
+    message_max_characters: int = Field(50_000, ge=1, le=250_000)
+    thread_max_messages: int = Field(25, ge=1, le=100)
+
+
+class GoogleConnectionUpdateRequest(BaseModel):
+    """Replace current-principal Google connection metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_id: str = Field(..., min_length=1, max_length=2048)
+    gmail: GmailConnectionPreferencesRequest = Field(
+        default_factory=lambda: GmailConnectionPreferencesRequest(
+            search_default_results=20,
+            search_max_results=100,
+            message_max_characters=50_000,
+            thread_max_messages=25,
+        )
+    )
+
+
+class GoogleClientSecretUpdateRequest(BaseModel):
+    """Write-only Google OAuth client secret update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_secret: SecretStr = Field(..., min_length=1, max_length=16384)
+
+
+class GoogleConnectionResponse(BaseModel):
+    """Sanitized Google connection configuration and authorization state."""
+
+    state: Literal[
+        "not_configured", "authorization_required", "ready", "reconnect_required"
+    ]
+    configured: bool
+    connected: bool
+    client_id: str | None
+    client_secret_present: bool
+    account_email: str | None
+    granted_scopes: list[str] = Field(default_factory=list)
+    config_version: int | None
+    gmail: GmailConnectionPreferencesRequest
+    gmail_available: bool
+    gmail_missing_scopes: list[str] = Field(default_factory=list)
+    oauth_redirect_uri: str | None
+
+
+class GoogleOAuthStartResponse(BaseModel):
+    """Google authorization URL and pending request details."""
+
+    authorization_url: str
+    redirect_uri: str
+    expires_at: str
+    requested_scopes: list[str]
+
+
+class GoogleOAuthCompleteRequest(BaseModel):
+    """Complete Google OAuth from a callback or pasted redirect URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    redirect_url: str | None = Field(None, max_length=4096)
+    code: str | None = Field(None, max_length=4096)
+    state: str | None = Field(None, max_length=4096)
+
+
 class SystemActivityEntryInfo(BaseModel):
     """One parsed retained System Activity entry."""
 

@@ -9,6 +9,7 @@ from .connection import (
     GoogleConnectionStatus,
     GoogleOAuthTokenState,
 )
+from .oauth import GoogleOAuthCoordinator, GoogleOAuthError, GoogleOAuthStart
 
 __all__ = [
     "GMAIL_READONLY_SCOPE",
@@ -18,4 +19,7 @@ __all__ = [
     "GoogleConnectionService",
     "GoogleConnectionStatus",
     "GoogleOAuthTokenState",
+    "GoogleOAuthCoordinator",
+    "GoogleOAuthError",
+    "GoogleOAuthStart",
 ]

@@ -559,7 +559,69 @@
                     </div>
                 </details>
 
-                <details id="config-mcp-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                <details id="config-connections-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
+                    <summary class="collapsible-summary">
+                        <div class="summary-text">
+                            <span class="summary-title">Connections</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </summary>
+                    <div class="p-4 pt-0 space-y-4">
+                        <h3 class="text-sm font-medium text-txt-primary">Built-in connections</h3>
+                        <p class="text-sm text-txt-secondary">
+                            Built-in connections add tools only after you configure and authorize them. One Google connection can support Gmail and future Google capabilities.
+                        </p>
+                        <form id="google-connection-form" class="rounded-lg border border-border-primary bg-app-card p-4 space-y-4">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <h3 class="font-medium text-txt-primary">Google</h3>
+                                    <div id="google-connection-status" class="mt-1 text-sm text-txt-secondary">Loading Google connection…</div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" data-google-action="disconnect" class="ui-icon-button is-danger" data-icon="link" data-icon-label="Disconnect Google account"></button>
+                                    <button type="button" data-google-action="delete" class="ui-icon-button is-danger" data-icon="trash" data-icon-label="Remove Google connection"></button>
+                                    <button type="submit" class="ui-icon-button is-primary" data-icon="save" data-icon-label="Save Google settings"></button>
+                                </div>
+                            </div>
+                            <div class="grid gap-3 md:grid-cols-2">
+                                <label class="text-xs text-txt-secondary">OAuth client ID
+                                    <input name="client_id" required maxlength="2048" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="off" />
+                                </label>
+                                <label class="text-xs text-txt-secondary">OAuth client secret (write-only)
+                                    <input name="client_secret" type="password" maxlength="16384" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" placeholder="Leave blank to preserve stored secret" />
+                                </label>
+                                <label class="text-xs text-txt-secondary md:col-span-2">Authorized redirect URI
+                                    <input name="redirect_uri" readonly class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" placeholder="Set ASSISTANTMD_PUBLIC_URL to generate the callback URI" />
+                                </label>
+                            </div>
+                            <fieldset class="rounded-md border border-border-primary p-3 space-y-3">
+                                <legend class="px-1 text-sm font-medium text-txt-primary">Gmail read limits</legend>
+                                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                    <label class="text-xs text-txt-secondary">Default search results<input name="search_default_results" type="number" min="1" max="500" value="20" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                                    <label class="text-xs text-txt-secondary">Maximum search results<input name="search_max_results" type="number" min="1" max="500" value="100" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                                    <label class="text-xs text-txt-secondary">Message characters<input name="message_max_characters" type="number" min="1" max="250000" value="50000" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                                    <label class="text-xs text-txt-secondary">Thread messages<input name="thread_max_messages" type="number" min="1" max="100" value="25" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                                </div>
+                            </fieldset>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button type="button" data-google-action="authorize" class="px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Authorize Google</button>
+                                <span class="text-xs text-txt-secondary">Save the client settings first, then authorize Gmail read access.</span>
+                            </div>
+                            <label class="text-xs text-txt-secondary">Authorization URL
+                                <textarea name="authorization_url" readonly rows="3" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize Google to generate a URL you can copy into another browser."></textarea>
+                            </label>
+                            <details class="rounded-md border border-border-primary px-3 py-2">
+                                <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
+                                <div class="pt-2 space-y-2">
+                                    <p class="text-xs text-txt-secondary">If the browser cannot reach AssistantMD's callback, paste the full redirected URL here.</p>
+                                    <div class="flex flex-col gap-2 sm:flex-row"><input name="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-google-action="complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish authorization</button></div>
+                                </div>
+                            </details>
+                            <div id="google-connection-feedback" class="text-sm text-txt-secondary"></div>
+                        </form>
+                <details id="config-mcp-section" class="border border-border-primary rounded-lg">
                     <summary class="collapsible-summary">
                         <div class="summary-text">
                             <span class="summary-title">MCP Connections</span>
@@ -622,6 +684,8 @@
                         <div id="mcp-connections-list" class="flex flex-col gap-3">
                             <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">Loading MCP connections…</div>
                         </div>
+                    </div>
+                </details>
                     </div>
                 </details>
 

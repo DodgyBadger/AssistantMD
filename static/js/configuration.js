@@ -22,6 +22,8 @@
         isSavingProvider: false,
         isLoadingSecrets: false,
         isSavingSecret: false,
+        isLoadingGoogle: false,
+        isSavingGoogle: false,
         isLoadingMcp: false,
         isSavingMcp: false,
         isTestingMcp: false,
@@ -43,6 +45,7 @@
         models: [],
         providers: [],
         secrets: [],
+        googleConnection: null,
         mcpConnections: [],
         mcpOAuthStatuses: {},
         importVaults: [],
@@ -144,6 +147,10 @@
         secretsList: null,
         secretFeedback: null,
         secretAddBtn: null,
+
+        googleConnectionForm: null,
+        googleConnectionStatus: null,
+        googleConnectionFeedback: null,
 
         mcpCreateForm: null,
         mcpConnectionsList: null,
@@ -269,6 +276,10 @@
         elements.secretFeedback = document.getElementById('secret-feedback');
         elements.secretAddBtn = document.getElementById('secret-add-row');
 
+        elements.googleConnectionForm = document.getElementById('google-connection-form');
+        elements.googleConnectionStatus = document.getElementById('google-connection-status');
+        elements.googleConnectionFeedback = document.getElementById('google-connection-feedback');
+
         elements.mcpCreateForm = document.getElementById('mcp-create-form');
         elements.mcpConnectionsList = document.getElementById('mcp-connections-list');
         elements.mcpFeedback = document.getElementById('mcp-feedback');
@@ -354,6 +365,8 @@
         elements.secretAddBtn?.addEventListener('click', startNewSecret);
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretsList?.addEventListener('input', handleSecretInputChange);
+        elements.googleConnectionForm?.addEventListener('submit', saveGoogleConnection);
+        elements.googleConnectionForm?.addEventListener('click', handleGoogleConnectionAction);
         elements.mcpCreateForm?.addEventListener('submit', handleMcpCreate);
         elements.mcpConnectionsList?.addEventListener('click', handleMcpConnectionAction);
         elements.mcpCreateForm?.addEventListener('change', updateMcpCreateAuthFields);
@@ -2204,6 +2217,151 @@ async function saveModelRow(rowKey) {
         }
     }
 
+    async function loadGoogleConnection() {
+        if (!elements.googleConnectionForm || state.isLoadingGoogle) return;
+        state.isLoadingGoogle = true;
+        try {
+            const response = await fetch('api/system/connections/google', { cache: 'no-store' });
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            state.googleConnection = payload;
+            renderGoogleConnection();
+        } catch (error) {
+            setStatus(elements.googleConnectionStatus, `Google connection unavailable: ${error.message}`, 'error');
+        } finally {
+            state.isLoadingGoogle = false;
+        }
+    }
+
+    function renderGoogleConnection() {
+        const form = elements.googleConnectionForm;
+        const connection = state.googleConnection;
+        if (!(form instanceof HTMLFormElement) || !connection) return;
+        const setValue = (name, value) => {
+            const input = form.elements.namedItem(name);
+            if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = value ?? '';
+        };
+        setValue('client_id', connection.client_id);
+        setValue('client_secret', '');
+        setValue('redirect_uri', connection.oauth_redirect_uri);
+        setValue('search_default_results', connection.gmail?.search_default_results ?? 20);
+        setValue('search_max_results', connection.gmail?.search_max_results ?? 100);
+        setValue('message_max_characters', connection.gmail?.message_max_characters ?? 50000);
+        setValue('thread_max_messages', connection.gmail?.thread_max_messages ?? 25);
+        const labels = {
+            not_configured: connection.client_id ? 'Client secret required' : 'Not configured',
+            authorization_required: 'Ready to authorize',
+            ready: connection.gmail_available ? 'Connected; Gmail tools available' : 'Connected; Gmail scope required',
+            reconnect_required: 'Reconnect required',
+        };
+        const account = connection.account_email ? ` as ${connection.account_email}` : '';
+        setStatus(elements.googleConnectionStatus, `${labels[connection.state] || connection.state}${account}.`, connection.gmail_available ? 'success' : 'info');
+        const authorize = form.querySelector('[data-google-action="authorize"]');
+        const disconnect = form.querySelector('[data-google-action="disconnect"]');
+        const remove = form.querySelector('[data-google-action="delete"]');
+        if (authorize instanceof HTMLButtonElement) authorize.textContent = connection.connected ? 'Reauthorize Google' : 'Authorize Google';
+        if (disconnect instanceof HTMLButtonElement) disconnect.disabled = !connection.connected;
+        if (remove instanceof HTMLButtonElement) remove.disabled = !connection.client_id && !connection.client_secret_present;
+    }
+
+    async function saveGoogleConnection(event) {
+        event.preventDefault();
+        const form = elements.googleConnectionForm;
+        if (!(form instanceof HTMLFormElement) || state.isSavingGoogle) return;
+        const values = new FormData(form);
+        const payload = {
+            client_id: String(values.get('client_id') || '').trim(),
+            gmail: {
+                search_default_results: Number(values.get('search_default_results')),
+                search_max_results: Number(values.get('search_max_results')),
+                message_max_characters: Number(values.get('message_max_characters')),
+                thread_max_messages: Number(values.get('thread_max_messages')),
+            },
+        };
+        const saved = await mutateGoogle('api/system/connections/google', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'Google settings saved.', false);
+        const clientSecret = String(values.get('client_secret') || '').trim();
+        if (saved && clientSecret) {
+            await mutateGoogle('api/system/connections/google/client-secret', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_secret: clientSecret }) }, 'Google settings and client secret saved.');
+        } else if (saved) {
+            await loadGoogleConnection();
+            await notifyConfigChanged();
+        }
+    }
+
+    async function handleGoogleConnectionAction(event) {
+        const button = event.target instanceof Element ? event.target.closest('[data-google-action]') : null;
+        if (!(button instanceof HTMLButtonElement) || state.isSavingGoogle) return;
+        const action = button.dataset.googleAction;
+        if (action === 'authorize') {
+            await startGoogleOAuth();
+        } else if (action === 'complete') {
+            const redirect = elements.googleConnectionForm?.elements.namedItem('oauth_redirect')?.value || '';
+            if (!redirect.trim()) {
+                setStatus(elements.googleConnectionFeedback, 'Paste the full redirected URL first.', 'error');
+                return;
+            }
+            await mutateGoogle('api/system/connections/google/oauth/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirect, code: null, state: null }) }, 'Google account connected.');
+        } else if (action === 'disconnect') {
+            if (window.confirm('Disconnect the authorized Google account? Client settings will be preserved.')) {
+                await mutateGoogle('api/system/connections/google/oauth', { method: 'DELETE' }, 'Google account disconnected.');
+            }
+        } else if (action === 'delete') {
+            if (window.confirm('Remove the Google connection, client secret, and authorized account?')) {
+                await mutateGoogle('api/system/connections/google', { method: 'DELETE' }, 'Google connection removed.');
+            }
+        }
+    }
+
+    async function startGoogleOAuth() {
+        state.isSavingGoogle = true;
+        setStatus(elements.googleConnectionFeedback, 'Starting Google authorization…');
+        try {
+            const response = await fetch('api/system/connections/google/oauth/start', { method: 'POST' });
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            const field = elements.googleConnectionForm?.elements.namedItem('authorization_url');
+            if (field instanceof HTMLTextAreaElement) field.value = payload.authorization_url;
+            const popup = window.open(payload.authorization_url, '_blank', 'noopener,noreferrer');
+            setStatus(elements.googleConnectionFeedback, popup ? 'Finish authorization in the new tab. The URL is also available below.' : 'The browser blocked the new tab. Copy the authorization URL below.', popup ? 'success' : 'warning');
+            void pollGoogleConnection(Date.now() + 10 * 60 * 1000);
+        } catch (error) {
+            setStatus(elements.googleConnectionFeedback, error.message, 'error');
+        } finally {
+            state.isSavingGoogle = false;
+        }
+    }
+
+    async function pollGoogleConnection(deadline) {
+        if (Date.now() >= deadline) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        await loadGoogleConnection();
+        if (state.googleConnection?.connected) {
+            setStatus(elements.googleConnectionFeedback, 'Google account connected.', 'success');
+            await notifyConfigChanged();
+            return;
+        }
+        void pollGoogleConnection(deadline);
+    }
+
+    async function mutateGoogle(url, options, successMessage, reload = true) {
+        state.isSavingGoogle = true;
+        setStatus(elements.googleConnectionFeedback, 'Saving…');
+        try {
+            const response = await fetch(url, options);
+            const payload = await safeJson(response);
+            if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            setStatus(elements.googleConnectionFeedback, successMessage, 'success');
+            if (reload) await loadGoogleConnection();
+            await notifyConfigChanged();
+            return true;
+        } catch (error) {
+            setStatus(elements.googleConnectionFeedback, error.message, 'error');
+            return false;
+        } finally {
+            state.isSavingGoogle = false;
+        }
+    }
+
     async function loadMcpConnections() {
         if (!elements.mcpConnectionsList || state.isLoadingMcp) return;
         state.isLoadingMcp = true;
@@ -2863,6 +3021,7 @@ async function saveModelRow(rowKey) {
 
         const result = await response.json();
         await loadSecrets();
+        await loadGoogleConnection();
         await loadMcpConnections();
         await loadProviders();
         await notifyConfigChanged();

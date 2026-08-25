@@ -99,6 +99,15 @@ configure `OPENAI_API_KEY` for the default `embeddings` model alias. OAuth is
 for OpenAI chat model auth and does not replace the API key used by the current
 embeddings setup.
 
+To connect Gmail, create a Google OAuth 2.0 **Web application** client and add
+the exact callback shown under **System → Connections → Built-in connections →
+Google** to its authorized redirect URIs. Save that client ID and write-only
+client secret in AssistantMD, then choose **Authorize Google**. The OAuth consent
+screen must permit the account you use, and the Gmail API must be enabled for
+the Google Cloud project. Gmail access is read-only. Google authorization
+requires `ASSISTANTMD_PUBLIC_URL`; the displayed authorization URL can be copied
+to another browser when the new tab cannot be opened automatically.
+
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 
 - `AssistantMD/Skills/` — reusable procedures the agent can follow

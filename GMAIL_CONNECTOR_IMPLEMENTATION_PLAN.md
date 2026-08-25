@@ -15,7 +15,7 @@ Completed Slice 1:
 - runtime-owned built-in/Google connection services that fail closed while
   secrets are unavailable.
 
-Next: Slice 2 Google OAuth configuration, authorization flow, API, and System UI.
+Next: Slice 3 read-only Gmail resource client and first-class chat tools.
 
 ## Objective
 
@@ -496,6 +496,11 @@ Validation target: new
 existing MCP OAuth coordinator/storage scenarios.
 
 ### Slice 2: OAuth configuration and connection UI
+
+Status: complete. The reusable Google OAuth coordinator, fixed public callback,
+encrypted grant lifecycle, principal-owned API, and grouped Connections UI are
+implemented. Deployed Gmail authorization remains the manual checkpoint before
+the Gmail resource client is bound to chat.
 
 - Implement the reusable encrypted principal-owned Google client configuration
   and pending/connected OAuth state.

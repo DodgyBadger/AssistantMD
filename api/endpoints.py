@@ -90,6 +90,11 @@ from .models import (
     ExecutionTaskListResponse,
     GoalCleanupRequest,
     GoalCleanupResponse,
+    GoogleClientSecretUpdateRequest,
+    GoogleConnectionResponse,
+    GoogleConnectionUpdateRequest,
+    GoogleOAuthCompleteRequest,
+    GoogleOAuthStartResponse,
     MCPConnectionCreateRequest,
     MCPConnectionInfo,
     MCPConnectionTestResponse,
@@ -237,6 +242,15 @@ from .services import (
     upsert_configurable_model,
     upsert_configurable_provider,
 )
+from .services.google_connections import (
+    complete_google_oauth,
+    delete_google_connection,
+    disconnect_google_oauth,
+    get_google_connection,
+    set_google_client_secret,
+    start_google_oauth,
+    update_google_connection,
+)
 from .services.mcp import (
     clear_mcp_credential,
     complete_mcp_oauth,
@@ -267,6 +281,21 @@ _VAULT_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 
 def _mcp_oauth_callback_page(*, success: bool) -> str:
     title = "MCP OAuth connected" if success else "MCP OAuth failed"
+    message = (
+        "Authorization completed. You can close this tab and return to AssistantMD."
+        if success
+        else "Authorization could not be completed. Close this tab and retry from AssistantMD."
+    )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title}</title></head><body>"
+        f"<main><h1>{title}</h1><p>{message}</p></main>"
+        "</body></html>"
+    )
+
+
+def _google_oauth_callback_page(*, success: bool) -> str:
+    title = "Google account connected" if success else "Google OAuth failed"
     message = (
         "Authorization completed. You can close this tab and return to AssistantMD."
         if success
@@ -1212,6 +1241,111 @@ async def delete_secret_endpoint(secret_name: str) -> OperationResult | JSONResp
         return delete_secret_entry(secret_name)
     except Exception as e:
         return create_error_response(e)
+
+
+@router.get(
+    "/system/connections/google",
+    response_model=GoogleConnectionResponse,
+)
+async def get_google_connection_endpoint() -> GoogleConnectionResponse | JSONResponse:
+    """Return the current principal's sanitized Google connection."""
+    try:
+        return get_google_connection()
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.put(
+    "/system/connections/google",
+    response_model=GoogleConnectionResponse,
+)
+async def update_google_connection_endpoint(
+    payload: GoogleConnectionUpdateRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Create or update Google OAuth client metadata and Gmail preferences."""
+    try:
+        return update_google_connection(payload)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.put(
+    "/system/connections/google/client-secret",
+    response_model=GoogleConnectionResponse,
+)
+async def set_google_client_secret_endpoint(
+    payload: GoogleClientSecretUpdateRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Set the write-only Google OAuth client secret."""
+    try:
+        return set_google_client_secret(payload)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.post(
+    "/system/connections/google/oauth/start",
+    response_model=GoogleOAuthStartResponse,
+)
+async def start_google_oauth_endpoint() -> GoogleOAuthStartResponse | JSONResponse:
+    """Start Google OAuth for the Gmail read capability."""
+    try:
+        return start_google_oauth()
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.get("/system/connections/google/oauth/callback")
+async def complete_google_oauth_callback_endpoint(
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+) -> HTMLResponse:
+    """Complete Google OAuth from its registered browser callback."""
+    try:
+        await complete_google_oauth(
+            GoogleOAuthCompleteRequest(redirect_url=None, code=code, state=state)
+        )
+        return HTMLResponse(_google_oauth_callback_page(success=True))
+    except Exception:
+        return HTMLResponse(_google_oauth_callback_page(success=False), status_code=400)
+
+
+@router.post(
+    "/system/connections/google/oauth/complete",
+    response_model=GoogleConnectionResponse,
+)
+async def complete_google_oauth_manual_endpoint(
+    payload: GoogleOAuthCompleteRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Complete Google OAuth using a pasted callback URL."""
+    try:
+        return await complete_google_oauth(payload)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.delete(
+    "/system/connections/google/oauth",
+    response_model=OperationResult,
+)
+async def disconnect_google_oauth_endpoint() -> OperationResult | JSONResponse:
+    """Disconnect the Google account while preserving client configuration."""
+    try:
+        return disconnect_google_oauth()
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.delete(
+    "/system/connections/google",
+    response_model=OperationResult,
+)
+async def delete_google_connection_endpoint() -> OperationResult | JSONResponse:
+    """Remove all current-principal Google connection state."""
+    try:
+        return delete_google_connection()
+    except Exception as exc:
+        return create_error_response(exc)
 
 
 @router.get("/system/mcp/connections", response_model=list[MCPConnectionInfo])
