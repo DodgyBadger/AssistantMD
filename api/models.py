@@ -1656,6 +1656,8 @@ class MCPConnectionInfo(BaseModel):
     oauth_client_id: str | None
     oauth_client_secret_present: bool
     oauth_scopes: list[str] | None
+    oauth_redirect_uri: str | None
+    oauth_redirect_source: Literal["configured", "browser_fallback"]
     config_version: int
     created_at: str
     updated_at: str
@@ -1686,6 +1688,7 @@ class MCPOAuthStartResponse(BaseModel):
     state: str
     redirect_uri: str
     expires_at: str
+    redirect_source: Literal["configured", "browser_fallback"]
 
 
 class MCPOAuthCompleteRequest(BaseModel):

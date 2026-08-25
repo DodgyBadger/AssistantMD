@@ -6,7 +6,7 @@ import asyncio
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import httpx
@@ -20,6 +20,7 @@ from mcp.shared.auth import OAuthToken
 from pydantic import AnyHttpUrl
 
 from core.identity import ExecutionAuthority
+from core.runtime.public_url import PublicOrigin
 
 from .manager import MCPConnectionManager
 from .models import MCPAuthMode, MCPConnection, MCPTransport
@@ -53,6 +54,50 @@ class MCPOAuthStatus:
     status: str
     connected: bool
     pending_expires_at: str | None = None
+
+
+@dataclass(frozen=True)
+class MCPOAuthRedirect:
+    redirect_uri: str
+    source: Literal["configured", "browser_fallback"]
+
+
+def resolve_mcp_oauth_redirect(
+    *,
+    connection_id: str,
+    public_origin: PublicOrigin | None,
+    fallback_uri: str,
+) -> MCPOAuthRedirect:
+    """Resolve a callback from deployment config or a validated request fallback."""
+    callback_path = mcp_oauth_callback_path(connection_id)
+    if public_origin is not None:
+        return MCPOAuthRedirect(
+            redirect_uri=public_origin.build_url(callback_path),
+            source="configured",
+        )
+    clean_fallback = _validate_redirect_uri(fallback_uri)
+    if urlparse(clean_fallback).path != callback_path:
+        raise MCPOAuthError("MCP OAuth redirect URI has an unexpected callback path.")
+    return MCPOAuthRedirect(
+        redirect_uri=clean_fallback,
+        source="browser_fallback",
+    )
+
+
+def mcp_oauth_callback_path(connection_id: str) -> str:
+    """Return the stable application callback path for one MCP connection."""
+    clean_id = str(connection_id or "").strip()
+    if (
+        not clean_id
+        or len(clean_id) > 128
+        or any(
+            character
+            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+            for character in clean_id
+        )
+    ):
+        raise MCPOAuthError("MCP connection ID is invalid.")
+    return f"/api/system/mcp/connections/{clean_id}/oauth/callback"
 
 
 @dataclass

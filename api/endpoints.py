@@ -38,6 +38,7 @@ from core.ingestion.models import JobStatus
 from core.llm.openai_oauth import OPENAI_OAUTH_LOOPBACK_REDIRECT_URI
 from core.llm.thinking import normalize_thinking_value, thinking_value_to_label
 from core.logger import UnifiedLogger
+from core.mcp.oauth import resolve_mcp_oauth_redirect
 from core.runtime.execution_tasks import TERMINAL_STATUS_VALUES
 from core.runtime.state import RuntimeStateError, get_runtime_context
 from core.settings import (
@@ -1311,13 +1312,22 @@ async def start_mcp_oauth_endpoint(
 ) -> MCPOAuthStartResponse | JSONResponse:
     """Start a headless-safe OAuth attempt for one MCP connection."""
     try:
-        redirect_uri = payload.redirect_uri or str(
+        request_fallback = payload.redirect_uri or str(
             request.url_for(
                 "complete_mcp_oauth_callback_endpoint",
                 connection_id=connection_id,
             )
         )
-        return await start_mcp_oauth(connection_id, redirect_uri=redirect_uri)
+        resolved = resolve_mcp_oauth_redirect(
+            connection_id=connection_id,
+            public_origin=get_runtime_context().config.public_origin,
+            fallback_uri=request_fallback,
+        )
+        return await start_mcp_oauth(
+            connection_id,
+            redirect_uri=resolved.redirect_uri,
+            redirect_source=resolved.source,
+        )
     except Exception as e:
         return create_error_response(e)
 

@@ -21,6 +21,7 @@ if __name__ == "__main__":
     system_root.mkdir()
     set_bootstrap_roots(data_root=data_root, system_root=system_root)
 
+from core.mcp.oauth import resolve_mcp_oauth_redirect  # noqa: E402
 from core.runtime.config import RuntimeConfig  # noqa: E402
 from core.runtime.public_url import PublicOrigin, PublicUrlError  # noqa: E402
 from core.settings import AppSettings  # noqa: E402
@@ -110,6 +111,40 @@ class PublicUrlConfigurationScenario(BaseScenario):
             validation_runtime.public_origin,
             None,
             "Validation runtime should not inherit deployment environment state",
+        )
+        configured_redirect = resolve_mcp_oauth_redirect(
+            connection_id="connection-1",
+            public_origin=origin,
+            fallback_uri=(
+                "https://attacker.example/api/system/mcp/connections/"
+                "connection-1/oauth/callback"
+            ),
+        )
+        self.soft_assert_equal(
+            (configured_redirect.redirect_uri, configured_redirect.source),
+            (
+                "https://assistant.example.com/api/system/mcp/connections/"
+                "connection-1/oauth/callback",
+                "configured",
+            ),
+            "Configured origin should override a conflicting browser callback",
+        )
+        fallback_redirect = resolve_mcp_oauth_redirect(
+            connection_id="connection-1",
+            public_origin=None,
+            fallback_uri=(
+                "https://browser.example/api/system/mcp/connections/"
+                "connection-1/oauth/callback"
+            ),
+        )
+        self.soft_assert_equal(
+            (fallback_redirect.redirect_uri, fallback_redirect.source),
+            (
+                "https://browser.example/api/system/mcp/connections/"
+                "connection-1/oauth/callback",
+                "browser_fallback",
+            ),
+            "Missing deployment origin should retain a validated browser callback",
         )
 
         self.assert_no_failures()

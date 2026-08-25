@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from typing import Literal
 
 from core.identity import require_current_execution_authority
 from core.logger import UnifiedLogger
@@ -16,7 +17,11 @@ from core.mcp import (
     MCPConnectionUpdate,
     MCPTransport,
 )
-from core.mcp.oauth import MCPOAuthCoordinator, parse_oauth_completion
+from core.mcp.oauth import (
+    MCPOAuthCoordinator,
+    mcp_oauth_callback_path,
+    parse_oauth_completion,
+)
 from core.runtime.state import get_runtime_context
 
 from ..exceptions import APIException
@@ -182,7 +187,10 @@ async def test_mcp_connection(connection_id: str) -> MCPConnectionTestResponse:
 
 
 async def start_mcp_oauth(
-    connection_id: str, *, redirect_uri: str
+    connection_id: str,
+    *,
+    redirect_uri: str,
+    redirect_source: Literal["configured", "browser_fallback"],
 ) -> MCPOAuthStartResponse:
     """Start interactive OAuth without launching a browser on the backend."""
     coordinator = _oauth_coordinator()
@@ -194,9 +202,13 @@ async def start_mcp_oauth(
         )
     logger.info(
         "MCP OAuth authorization started",
-        data={"event": "mcp_oauth_started", "connection_id": connection_id},
+        data={
+            "event": "mcp_oauth_started",
+            "connection_id": connection_id,
+            "redirect_source": redirect_source,
+        },
     )
-    return MCPOAuthStartResponse(**asdict(result))
+    return MCPOAuthStartResponse(**asdict(result), redirect_source=redirect_source)
 
 
 async def complete_mcp_oauth(
@@ -280,6 +292,15 @@ def _to_info(connection: MCPConnection) -> MCPConnectionInfo:
     )
     oauth_scopes = payload.get("oauth_scopes")
     payload["oauth_scopes"] = list(oauth_scopes) if oauth_scopes is not None else None
+    public_origin = get_runtime_context().config.public_origin
+    payload["oauth_redirect_uri"] = (
+        public_origin.build_url(mcp_oauth_callback_path(connection.connection_id))
+        if public_origin is not None and connection.auth_mode is MCPAuthMode.OAUTH
+        else None
+    )
+    payload["oauth_redirect_source"] = (
+        "configured" if public_origin is not None else "browser_fallback"
+    )
     return MCPConnectionInfo.model_validate(payload)
 
 
