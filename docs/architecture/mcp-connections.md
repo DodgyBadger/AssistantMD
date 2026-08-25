@@ -80,6 +80,20 @@ The normal callback can complete automatically when the AssistantMD URL is
 reachable; otherwise the user can paste the redirected URL into the connection
 card.
 
+When `ASSISTANTMD_PUBLIC_URL` is configured, its normalized origin is
+authoritative for MCP callback construction even if the browser or reverse
+proxy reports a different host. The connection API and UI expose the resolved
+callback URI and identify its source without exposing OAuth state. When the
+setting is absent, an interactive start may supply a browser-derived callback
+only when its path exactly matches the owned connection callback route. The UI
+warns when its current origin differs from the configured callback origin.
+
+OAuth discovery follows protected-resource and authorization-server metadata
+before MCP initialization. Servers may use dynamic client registration or a
+pre-registered client ID and encrypted client secret. Optional configured
+scopes override metadata scope selection. These are capability branches, not
+provider-named pathways.
+
 OAuth tokens and dynamic client-registration state use the encrypted,
 principal-and-connection-scoped secrets store. Chat and connection tests may use
 and refresh an existing token, but they cannot initiate interactive

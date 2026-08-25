@@ -1,5 +1,8 @@
 # Canonical Public URL Implementation Plan
 
+Implementation status: completed on `dev/mcp-experimental` in four validated
+slices.
+
 ## Goal
 
 Give each AssistantMD installation an optional, canonical externally reachable

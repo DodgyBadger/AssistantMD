@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
@@ -48,7 +49,8 @@ class PublicOrigin:
             raise PublicUrlError(
                 "AssistantMD public URL requires HTTPS except on a loopback host."
             )
-        host = f"[{hostname.lower()}]" if ":" in hostname else hostname.lower()
+        normalized_host = _normalize_hostname(hostname)
+        host = f"[{normalized_host}]" if ":" in normalized_host else normalized_host
         authority = f"{host}:{port}" if port is not None else host
         return cls(f"{scheme}://{authority}")
 
@@ -64,9 +66,9 @@ class PublicOrigin:
             or parsed.netloc
             or parsed.query
             or parsed.fragment
-            or "\\" in raw_path
+            or "\\" in decoded_path
             or any(part in {".", ".."} for part in decoded_path.split("/"))
-            or any(ord(character) < 32 for character in raw_path)
+            or any(ord(character) < 32 for character in decoded_path)
         ):
             raise PublicUrlError(
                 "External application URLs require a safe absolute application path."
@@ -81,3 +83,26 @@ def _is_loopback_host(hostname: str) -> bool:
         return ipaddress.ip_address(hostname).is_loopback
     except ValueError:
         return False
+
+
+def _normalize_hostname(hostname: str) -> str:
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        try:
+            ascii_hostname = hostname.encode("idna").decode("ascii").lower()
+        except UnicodeError as exc:
+            raise PublicUrlError(
+                "AssistantMD public URL has an invalid hostname."
+            ) from exc
+        if len(ascii_hostname) > 253 or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in ascii_hostname.rstrip(".").split(".")
+        ):
+            raise PublicUrlError(
+                "AssistantMD public URL has an invalid hostname."
+            ) from None
+        return ascii_hostname.rstrip(".")
+    if isinstance(address, ipaddress.IPv6Address) and address.scope_id is not None:
+        raise PublicUrlError("AssistantMD public URL has an invalid hostname.")
+    return address.compressed

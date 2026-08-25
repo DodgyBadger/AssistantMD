@@ -22,7 +22,6 @@ from core.llm.openai_auth import (
     resolve_openai_auth,
 )
 from core.llm.thinking import ThinkingValue, normalize_thinking_value
-from core.runtime.public_url import PublicOrigin
 from core.settings.secrets_store import get_secret_value, load_secrets, secret_has_value
 from core.settings.store import (
     SETTINGS_TEMPLATE,
@@ -122,11 +121,11 @@ class AppSettings(BaseSettings):
 
     @field_validator("public_url", mode="before")
     @classmethod
-    def _normalize_public_url(cls, value: Any) -> str | None:
-        """Normalize the optional deployment origin at the environment boundary."""
+    def _strip_public_url(cls, value: Any) -> str | None:
+        """Strip optional deployment input before sanitized runtime validation."""
         if value in (None, ""):
             return None
-        return PublicOrigin.parse(str(value)).value
+        return str(value).strip() or None
 
     def available_llm_keys(self) -> dict[str, str]:
         """

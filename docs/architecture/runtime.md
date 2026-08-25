@@ -8,6 +8,7 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - `core/runtime/context.py`
 - `core/runtime/state.py`
 - `core/runtime/config.py`
+- `core/runtime/public_url.py`
 - `core/runtime/reload_service.py`
 - `core/runtime/execution_tasks.py`
 - `core/runtime/workflow_governor.py`
@@ -90,8 +91,25 @@ Custom scripts should do the same if they import settings/path-sensitive modules
 - `system_root`
 - scheduler worker limits
 - feature flags (`features`)
+- optional canonical external origin (`public_origin`)
 
 `RuntimeConfig.__post_init__` ensures required directories exist and validates worker/log-level settings.
+
+## Canonical External Origin
+
+`ASSISTANTMD_PUBLIC_URL` is optional instance-level infrastructure
+configuration. Production startup parses it into `RuntimeConfig.public_origin`;
+validation runtimes receive no ambient origin unless they inject one
+explicitly. The value is an origin only: non-loopback hosts require HTTPS, and
+credentials, paths, query strings, and fragments are rejected.
+
+`core/runtime/public_url.py` is the only URL-normalization and safe
+application-path joining boundary. A configured origin is authoritative for
+consumers that require externally reachable application URLs. Those consumers
+must opt in explicitly; AssistantMD does not rewrite FastAPI request URLs or
+trust arbitrary forwarded headers globally. Missing configuration remains a
+supported browser-origin fallback for interactive callbacks and is surfaced as
+a non-blocking System notice.
 
 ## Reload and Runtime Metadata
 

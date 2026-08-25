@@ -56,6 +56,8 @@ class PublicUrlConfigurationScenario(BaseScenario):
             "https://assistant.example.com?next=elsewhere",
             "https://assistant.example.com/#fragment",
             "https://assistant.example.com:invalid",
+            "https://bad host.example.com",
+            "https://bad_host.example.com",
         )
         for raw in invalid:
             try:
@@ -79,6 +81,8 @@ class PublicUrlConfigurationScenario(BaseScenario):
             "/callback?code=secret",
             "/callback#fragment",
             "/callback\\elsewhere",
+            "/callback%5celsewhere",
+            "/callback%0aelsewhere",
         ):
             try:
                 origin.build_url(path)
@@ -90,8 +94,8 @@ class PublicUrlConfigurationScenario(BaseScenario):
         settings = AppSettings(ASSISTANTMD_PUBLIC_URL="https://Assistant.Example.com/")
         self.soft_assert_equal(
             settings.public_url,
-            "https://assistant.example.com",
-            "Infrastructure settings should expose only the normalized origin",
+            "https://Assistant.Example.com/",
+            "Infrastructure settings should preserve input for runtime validation",
         )
         runtime = RuntimeConfig.for_production(
             data_root=str(self.run_path / "data"),
@@ -103,6 +107,19 @@ class PublicUrlConfigurationScenario(BaseScenario):
             PublicOrigin("https://assistant.example.com"),
             "Production runtime should own the parsed public origin",
         )
+        try:
+            RuntimeConfig.for_production(
+                data_root=str(self.run_path / "invalid-data"),
+                system_root=str(self.run_path / "invalid-system"),
+                public_url="https://user:do-not-log@example.com",
+            )
+        except PublicUrlError as exc:
+            self.soft_assert(
+                "do-not-log" not in str(exc),
+                "Invalid deployment URL errors must not echo raw credential input",
+            )
+        else:
+            self.soft_assert(False, "Invalid deployment URL should fail startup config")
         validation_runtime = RuntimeConfig.for_validation(
             self.run_path,
             self.run_path / "validation-data",
