@@ -2267,6 +2267,7 @@ async function saveModelRow(rowKey) {
                         </div>
                         <p class="text-xs text-txt-secondary">Save any client ID, client secret, or scope changes before choosing Authorize. Servers that support dynamic registration can leave these fields blank.</p>
                         <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. AssistantMD detects the callback automatically when this address is reachable from your browser.</p>
+                        <label class="text-xs text-txt-secondary">Authorization URL<textarea data-mcp-field="oauth_authorization_url" readonly rows="3" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize to generate a URL you can copy into another browser."></textarea></label>
                         <details class="rounded-md border border-border-primary px-3 py-2">
                             <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
                             <div class="pt-2 space-y-2">
@@ -2439,10 +2440,12 @@ async function saveModelRow(rowKey) {
             });
             const payload = await safeJson(response);
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+            const authorizationUrl = card.querySelector('[data-mcp-field="oauth_authorization_url"]');
+            if (authorizationUrl instanceof HTMLTextAreaElement) authorizationUrl.value = payload.auth_url;
             const popup = window.open(payload.auth_url, '_blank', 'noopener,noreferrer');
             const statusElement = card.querySelector('[data-mcp-oauth-status]');
             if (statusElement) statusElement.textContent = 'OAuth status: pending';
-            setStatus(elements.mcpFeedback, popup ? 'Finish authorization in the new tab. AssistantMD will detect the callback automatically.' : 'The browser blocked the authorization tab. Allow pop-ups and choose Authorize again.', popup ? 'success' : 'error');
+            setStatus(elements.mcpFeedback, popup ? 'Finish authorization in the new tab, or copy the authorization URL into an external browser.' : 'The browser blocked the authorization tab. Copy the authorization URL into an external browser.', popup ? 'success' : 'error');
             void pollMcpOAuthStatus(card, endpoint, Date.now() + 10 * 60 * 1000);
         } catch (error) {
             setStatus(elements.mcpFeedback, error.message, 'error');
