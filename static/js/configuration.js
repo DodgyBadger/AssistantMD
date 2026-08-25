@@ -2433,10 +2433,11 @@ async function saveModelRow(rowKey) {
         state.isSavingMcp = true;
         setStatus(elements.mcpFeedback, 'Starting OAuth…');
         try {
+            const redirectUri = new URL(`${endpoint}/oauth/callback`, window.location.href).href;
             const response = await fetch(`${endpoint}/oauth/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ redirect_uri: null }),
+                body: JSON.stringify({ redirect_uri: redirectUri }),
             });
             const payload = await safeJson(response);
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
