@@ -2231,6 +2231,7 @@ async function saveModelRow(rowKey) {
             const allowedTools = Array.isArray(connection.allowed_tools) ? connection.allowed_tools.join(', ') : '';
             const staticAuth = connection.auth_mode === 'bearer' || connection.auth_mode === 'header';
             const oauthAuth = connection.auth_mode === 'oauth';
+            const oauthCallbackUrl = new URL(`api/system/mcp/connections/${encodeURIComponent(connection.connection_id)}/oauth/callback`, window.location.href).href;
             return `
                 <div class="rounded-lg border border-border-primary bg-app-card p-4 shadow-sm space-y-3" data-mcp-id="${escapeHtml(connection.connection_id)}">
                     <div class="flex items-center justify-between gap-3">
@@ -2255,6 +2256,7 @@ async function saveModelRow(rowKey) {
                             <label class="text-xs text-txt-secondary">OAuth client ID<input data-mcp-field="oauth_client_id" value="${escapeHtml(connection.oauth_client_id || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses dynamic registration" /></label>
                             <label class="text-xs text-txt-secondary">OAuth client secret (${connection.oauth_client_secret_present ? 'stored' : 'not set'})<input data-mcp-field="oauth_client_secret" type="password" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Leave blank to preserve" autocomplete="new-password" /></label>
                             <label class="text-xs text-txt-secondary md:col-span-2">OAuth scopes<input data-mcp-field="oauth_scopes" value="${escapeHtml(Array.isArray(connection.oauth_scopes) ? connection.oauth_scopes.join(', ') : '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses server metadata" /></label>
+                            <label class="text-xs text-txt-secondary md:col-span-2">Authorized redirect URI<input readonly value="${escapeHtml(oauthCallbackUrl)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-muted font-mono text-xs text-txt-primary" /></label>
                         </div>
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div data-mcp-oauth-status class="text-sm text-txt-secondary">OAuth status: loading…</div>
