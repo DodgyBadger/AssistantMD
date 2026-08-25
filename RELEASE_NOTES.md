@@ -1,5 +1,50 @@
 # Release Notes
 
+## Unreleased
+
+### MCP server connections
+
+- AssistantMD can connect to trusted Streamable HTTP and SSE MCP servers from
+  **System → Connections**, test readiness, restrict exposed tools with an
+  allowlist, and use their tools in chat.
+- MCP tools are discovered on demand so large remote catalogs do not fill the
+  initial chat context. Discovered tools use the normal tool budget, activity,
+  failure, recovery, and oversized-result cache behavior.
+- Connections support no authentication, bearer tokens, custom headers, and
+  OAuth. OAuth works with dynamic or pre-registered clients and provides both
+  automatic browser callbacks and a copy/paste flow for headless deployments.
+- Remote endpoints require HTTPS. Controlled local development can opt into
+  private-network HTTP with `ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true`.
+
+### Built-in Google and Gmail connection
+
+- A reusable Google connection can authorize read-only Gmail access. Chat can
+  search mail and read bounded messages or threads, including attachment
+  metadata without downloading attachment bytes.
+- Gmail is absent from chat until its connection is ready. Email content is
+  treated as untrusted external data, while long results use AssistantMD's
+  existing tool-output cache and remain available to `code_execution`.
+
+### Encrypted principal-owned credentials
+
+- Provider, MCP, Google, and OAuth credentials are encrypted at rest in
+  `system/secrets.db` and owned by an execution principal. The current UI
+  remains single-user while the backend preserves a future multi-user boundary.
+- Installations require `ASSISTANTMD_SECRETS_KEYS` and
+  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION`. Losing the installation key requires
+  re-entering stored credentials. Existing non-OAuth secrets are imported once
+  from `system/secrets.yaml`; OAuth connections must be reauthorized.
+- Set `ASSISTANTMD_PUBLIC_URL` to the externally routed AssistantMD origin for
+  stable OAuth callback URLs behind a reverse proxy.
+
+### After upgrading
+
+1. Generate and back up the installation encryption key in `.env` before
+   starting the upgraded application.
+2. Confirm the one-time secrets migration in System status and reauthorize any
+   OAuth connections.
+3. Configure MCP and built-in connections under **System → Connections**.
+
 ## v0.7.3
 
 ### Long-running chats recover more reliably

@@ -36,18 +36,21 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   and resumed chat execution with shared activity/output hooks, tool budgets,
   conservative recovery, unavailable-server isolation, and bounded lease
   cleanup.
-- Slice 9 is next: add principal-owned MCP OAuth using the existing headless-safe
-  browser/manual-completion strategy, then expose connect, status, reconnect,
-  and disconnect actions in the System UI.
-- Slice 9 groundwork is in progress: FastMCP's token-storage contract now has an
+- Slice 9 is complete: FastMCP's token-storage contract has an
   encrypted, principal-and-connection-scoped adapter with durable expiry and
   client-registration state. Retained chat connections can use and refresh
   stored tokens without ever launching an interactive browser flow; missing or
   exhausted authorization fails with an actionable reconnect requirement. The
   authorization coordinator and UI/API actions are now implemented with
   browser-callback and pasted-redirect completion, and encrypted PKCE state can
-  complete after an application restart. A real-provider interoperability pass
-  remains before the slice is complete.
+  complete after an application restart. Metadata-driven dynamic and
+  pre-registered client paths were exercised against real remote OAuth through
+  Logfire without provider-named pathways.
+- Slice 10 is complete: isolation, malformed/unavailable failure behavior,
+  connection cleanup, frozen catalog invalidation, tool discovery/replay,
+  oversized output caching, network policy, redaction, explicit dependencies,
+  packaging, and current-contract documentation are covered. Maintainers retain
+  ownership of the final full validation-suite run.
 
 ## Invariants
 
@@ -711,10 +714,9 @@ Planning rather than being silently decided in code.
 
 ## Next Phase
 
-Complete the focused contract probes and encrypted-secrets ADR, then move to
-Feature Development beginning with encrypted secrets, followed by workflow
-ownership, principal-owned MCP persistence/runtime composition, and the chat
-tool-search vertical slice.
+The MCP client milestone is implementation-complete. Run the maintainer-owned
+full validation suite, address any resulting regressions, and proceed through
+review preparation and cleanup before merge.
 
 The later multi-user branch should be able to retain the database schemas and
 domain services from this work. Its primary additions should be authentication,

@@ -110,3 +110,13 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 - Gmail tools are read-only and are absent unless the active principal has the
   required scope. Treat every email header and body as untrusted external data;
   attachment bytes are not exposed to chat.
+- MCP servers are trusted tool providers, not passive content sources. Enabling
+  a connection permits the model to call every allowed server tool; AssistantMD
+  cannot infer whether an MCP tool reads data or causes external side effects.
+  Use exact allowlists, connect only servers you trust, and apply the same
+  caution to unattended workflows.
+- MCP definitions and OAuth/static credentials are principal-owned. Credentials
+  and OAuth state are encrypted in `system/secrets.db`, while sanitized
+  connection metadata is stored in `system/mcp.db`. Remote endpoints require
+  HTTPS; the local/private HTTP override is for controlled development networks
+  and never permits public plaintext endpoints.

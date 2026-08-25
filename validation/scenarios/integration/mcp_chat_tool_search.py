@@ -46,6 +46,7 @@ from core.llm.capabilities.chat_tool_output_cache import (  # noqa: E402
 )
 from core.llm.capabilities.mcp_tools import (  # noqa: E402
     acquire_mcp_chat_capabilities,
+    mcp_unavailable_instruction,  # noqa: E402
 )
 from core.mcp import (  # noqa: E402
     MCPAuthMode,
@@ -53,6 +54,7 @@ from core.mcp import (  # noqa: E402
     MCPConnectionLease,
     MCPReadinessSnapshot,
     MCPTransport,
+    MCPUnavailableConnection,
 )
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -202,6 +204,24 @@ class MCPChatToolSearchScenario(BaseScenario):
 
         self.soft_assert(
             released, "Chat completion should release the MCP catalog lease"
+        )
+        self.soft_assert_equal(
+            mcp_unavailable_instruction(
+                (
+                    MCPUnavailableConnection(
+                        connection_id="offline-id",
+                        display_name="Offline Server",
+                        status="unreachable",
+                        message="The MCP server could not be reached.",
+                    ),
+                )
+            ),
+            (
+                "MCP availability note: these configured servers were unavailable "
+                "during preflight and their tools cannot be used in this run: "
+                "Offline Server. Other built-in and MCP tools remain available."
+            ),
+            "Unavailable servers should produce a sanitized compact instruction",
         )
         self.assert_no_failures()
         self.teardown_scenario()

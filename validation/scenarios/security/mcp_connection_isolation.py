@@ -202,6 +202,32 @@ class MCPConnectionIsolationScenario(BaseScenario):
             "Connection-test failures must not expose credentials or raw URLs",
         )
 
+        with patch("core.mcp.testing.Client", return_value=_MalformedTestClient()):
+            malformed_result = await test_mcp_connection_runtime(
+                updated,
+                "owner-token",
+            )
+        self.soft_assert_equal(
+            (malformed_result.status, malformed_result.ready),
+            ("connection_failed", False),
+            "Malformed MCP initialization should have a stable failure status",
+        )
+        self.soft_assert(
+            "malformed-secret-detail" not in malformed_result.message,
+            "Malformed server details must not enter user-visible failures",
+        )
+
+        with patch("core.mcp.testing.Client", return_value=_TimeoutTestClient()):
+            timeout_result = await test_mcp_connection_runtime(
+                updated,
+                "owner-token",
+            )
+        self.soft_assert_equal(
+            timeout_result.status,
+            "timeout",
+            "MCP initialization timeouts should remain distinguishable",
+        )
+
         with use_execution_authority(owner):
             service.delete_connection(owner_connection.connection_id)
             replacement = service.create_connection(
@@ -385,6 +411,22 @@ class _RejectedTestClient:
             request=request,
             response=response,
         )
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _MalformedTestClient:
+    async def __aenter__(self) -> _MalformedTestClient:
+        raise ValueError("malformed-secret-detail")
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _TimeoutTestClient:
+    async def __aenter__(self) -> _TimeoutTestClient:
+        raise TimeoutError
 
     async def __aexit__(self, *_args: object) -> None:
         return None

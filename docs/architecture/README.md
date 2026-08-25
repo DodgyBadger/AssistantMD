@@ -51,8 +51,9 @@ The web UI (`static/`) talks to API endpoints, and those endpoints route into th
 | [Session Summaries](session-summaries.md) | Derived chat-session summary storage, indexing, and retrieval | `core/memory/`, `core/chat/history_service.py` |
 | [Goals](goals.md) | Lightweight durable goal state, checkpoints, source provenance, and goal-related activity | `core/goals/`, `core/tools/goal_ops.py` |
 | [LLM + Tools](llm-tools.md) | Agent creation, settings-backed tool binding, capability composition, model resolution | `core/llm/`, `core/tools/` |
+| [MCP Connections](mcp-connections.md) | Principal-owned MCP client configuration, retained transports, deferred tool discovery, and OAuth | `core/mcp/`, `core/llm/capabilities/mcp_tools.py` |
 | Web Retrieval | Provider strategies, normalized web results, bounded URL transport, public-network policy | `core/web/` |
 | [Multimodal](multimodal.md) | Image inputs, chunking, prompt assembly, attachment policies | `core/chunking/`, `core/utils/image_inputs.py`, `core/tools/file_read.py` |
-| [Settings + Secrets](settings-secrets.md) | Typed config store and YAML-backed secrets store | `core/settings/` |
+| [Settings + Secrets](settings-secrets.md) | Typed configuration and principal-owned encrypted secret storage | `core/settings/`, `core/secrets/` |
 | [Ingestion Pipeline](ingestion-pipeline.md) | Import queue, extraction strategies, rendering/storage, worker execution | `core/ingestion/`, `api/services/ingestion.py` |
 | [Validation](validation.md) | End-to-end test scenarios and artifacts | `validation/` |

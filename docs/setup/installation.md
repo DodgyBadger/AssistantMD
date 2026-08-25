@@ -108,6 +108,29 @@ the Google Cloud project. Gmail access is read-only. Google authorization
 requires `ASSISTANTMD_PUBLIC_URL`; the displayed authorization URL can be copied
 to another browser when the new tab cannot be opened automatically.
 
+To add an MCP server, open **System → Connections → MCP connections** and enter
+its Streamable HTTP or SSE endpoint. Configure an exact-name tool allowlist when
+you do not intend to trust every tool exposed by the server, save the
+connection, and use **Test connection** before enabling it for chat. Static
+bearer and custom-header credentials are write-only and encrypted at rest.
+
+For OAuth servers, save any pre-registered client ID, client secret, or explicit
+scopes required by the server, then choose **Authorize**. Servers advertising
+dynamic client registration do not require those client fields. AssistantMD
+shows the authorization URL for headless use and supports a pasted callback URL
+when automatic completion is unavailable. A configured
+`ASSISTANTMD_PUBLIC_URL` provides the stable callback origin.
+
+Remote MCP endpoints require HTTPS. Local/private HTTP endpoints are intended
+for development only and require:
+
+```env
+ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true
+```
+
+Do not enable that option to connect to public HTTP servers; public plaintext
+MCP endpoints remain rejected.
+
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 
 - `AssistantMD/Skills/` — reusable procedures the agent can follow
