@@ -1,49 +1,74 @@
 # Release Notes
 
-## Unreleased
+## v0.8.0
 
-### MCP server connections
+This is a major configuration and credential-storage release. Existing
+installations must create an `.env` file containing an installation encryption
+key before upgrading. Read **Upgrade requirements** below before replacing the
+running container.
 
-- AssistantMD can connect to trusted Streamable HTTP and SSE MCP servers from
-  **System → Connections**, test readiness, restrict exposed tools with an
-  allowlist, and use their tools in chat.
-- MCP tools are discovered on demand so large remote catalogs do not fill the
-  initial chat context. Discovered tools use the normal tool budget, activity,
-  failure, recovery, and oversized-result cache behavior.
-- Connections support no authentication, bearer tokens, custom headers, and
-  OAuth. OAuth works with dynamic or pre-registered clients and provides both
-  automatic browser callbacks and a copy/paste flow for headless deployments.
-- Remote endpoints require HTTPS. Controlled local development can opt into
-  private-network HTTP with `ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true`.
+### Upgrade requirements
 
-### Built-in Google and Gmail connection
+- Generate `ASSISTANTMD_SECRETS_KEYS` and
+  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` in `.env`, then ensure the Compose
+  service retains `env_file: .env`. The installation instructions provide a
+  Linux/OpenSSL command that writes a suitable key without printing it.
+- Back up both `.env` and the existing `system/` directory before upgrading,
+  and keep those backups separate. The key in `.env` is required to decrypt
+  `system/secrets.db`; a database backup alone cannot recover credentials.
+- On first successful startup, AssistantMD imports non-OAuth values from
+  `system/secrets.yaml` into encrypted `system/secrets.db`, verifies the stored
+  values, records the migration, and removes the plaintext YAML file. This
+  migration is idempotent and does not run again after completion.
+- Existing OAuth state is deliberately not migrated. Reconnect OpenAI and other
+  OAuth accounts after the upgrade.
+- If the key is missing or invalid, AssistantMD still opens for diagnostics but
+  providers, models, connections, and secret mutation remain unavailable. It
+  never falls back to plaintext credential storage.
+- Reverse-proxy installations should also set `ASSISTANTMD_PUBLIC_URL` to the
+  exact externally routed origin, including `https://`, so OAuth callbacks use
+  a stable registered address.
 
-- A reusable Google connection can authorize read-only Gmail access. Chat can
-  search mail and read bounded messages or threads, including attachment
-  metadata without downloading attachment bytes.
-- Gmail is absent from chat until its connection is ready. Email content is
-  treated as untrusted external data, while long results use AssistantMD's
-  existing tool-output cache and remain available to `code_execution`.
+### Connect AssistantMD to more of your tools
 
-### Encrypted principal-owned credentials
+- AssistantMD can now use compatible MCP servers, opening up connections to
+  local tools and remote services without requiring each one to be built into
+  the application.
+- Add, authorize, and test connections from **System → Connections**. Once a
+  connection is ready, its tools become available to chat when they are needed.
+- Connections can use OAuth, bearer tokens, custom headers, or no
+  authentication. Headless installations can complete OAuth by copying and
+  pasting the authorization response when an automatic callback is unavailable.
+- You can limit which tools AssistantMD may use from each server.
 
-- Provider, MCP, Google, and OAuth credentials are encrypted at rest in
-  `system/secrets.db` and owned by an execution principal. The current UI
-  remains single-user while the backend preserves a future multi-user boundary.
-- Installations require `ASSISTANTMD_SECRETS_KEYS` and
-  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION`. Losing the installation key requires
-  re-entering stored credentials. Existing non-OAuth secrets are imported once
-  from `system/secrets.yaml`; OAuth connections must be reauthorized.
-- Set `ASSISTANTMD_PUBLIC_URL` to the externally routed AssistantMD origin for
-  stable OAuth callback URLs behind a reverse proxy.
+### Search and read Gmail from chat
+
+- Connect a Google account to let AssistantMD search your Gmail and read
+  relevant messages or complete threads.
+- Gmail access is read-only in this release: AssistantMD cannot send, modify,
+  move, or delete your mail.
+- Searches include useful attachment details, but AssistantMD does not download
+  or process attachment contents yet.
+- The Gmail tools only appear after you configure the connection, so users who
+  do not connect Gmail will see no change to their chats.
+
+### Credentials are now encrypted at rest
+
+- Model-provider keys, connection credentials, and OAuth tokens are now stored
+  in an encrypted database rather than a plaintext YAML file.
+- AssistantMD remains single-user in this release. The new storage foundation
+  prepares credentials and connections for future per-user ownership.
+- Losing the installation key requires re-entering stored credentials, so back
+  up `.env` if you need to preserve access to them.
 
 ### After upgrading
 
-1. Generate and back up the installation encryption key in `.env` before
-   starting the upgraded application.
-2. Confirm the one-time secrets migration in System status and reauthorize any
-   OAuth connections.
-3. Configure MCP and built-in connections under **System → Connections**.
+1. Open the System tab and confirm encrypted secrets report ready and the
+   one-time database migration reports complete.
+2. Confirm model providers still report their imported API keys, then reconnect
+   any OAuth accounts.
+3. Configure and test MCP or built-in connections under **System →
+   Connections** as needed.
 
 ## v0.7.3
 
