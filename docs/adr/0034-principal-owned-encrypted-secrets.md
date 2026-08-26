@@ -86,7 +86,9 @@ The existing `system/secrets.yaml` transition is a one-time, idempotent bootstra
 migration. It imports static values for `local-user`, assigns known operational
 values such as `LOGFIRE_TOKEN` to `system`, does not import OAuth token/pending
 state, authenticates every imported value, and retires the live YAML file only
-after verification. Normal runtime code has no YAML fallback after migration.
+after verification by renaming it to `system/secrets.yaml.bak`. An existing
+backup is never overwritten. Normal runtime code has no YAML fallback after
+migration.
 
 ## Rationale
 

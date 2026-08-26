@@ -64,7 +64,9 @@ unset key
 `scripts/dev setup` checks for this configuration and prints the command when
 it is missing, but does not generate or overwrite `.env`. The encrypted secrets
 store initializes—and any legacy `system/secrets.yaml` values migrate—when the
-application next starts with `scripts/dev run`.
+application next starts with `scripts/dev run`. After AssistantMD verifies the
+encrypted values, it preserves the legacy file as `system/secrets.yaml.bak` for
+rollback; the backup is not used by the current runtime.
 
 `.env.example` documents the required names but contains no usable key.
 `scripts/dev run` loads `.env` when it exists. A missing or unusable key leaves

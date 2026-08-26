@@ -14,6 +14,7 @@ from .schema import connect_secrets
 from .service import EncryptedSecretsService, SecretWrite
 
 MIGRATION_NAME = "legacy-secrets-yaml-v1"
+LEGACY_BACKUP_FILENAME = "secrets.yaml.bak"
 DEFAULT_NAMESPACE = "configuration"
 SYSTEM_SECRET_NAMES = frozenset({"LOGFIRE_TOKEN"})
 SKIPPED_OAUTH_SECRET_NAMES = frozenset(
@@ -37,6 +38,13 @@ def migrate_legacy_secrets_yaml(
     """Import, verify, and retire legacy YAML without a runtime fallback."""
     root = Path(system_root)
     source_path = root / "secrets.yaml"
+    backup_path = root / LEGACY_BACKUP_FILENAME
+    if source_path.exists() and backup_path.exists():
+        raise FileExistsError(
+            "Legacy secrets migration cannot preserve secrets.yaml because "
+            f"{LEGACY_BACKUP_FILENAME} already exists. Move or rename the existing "
+            "backup before retrying."
+        )
     state = _read_migration_state(root)
     if state is not None and state[0] == "complete":
         return LegacySecretsMigrationResult(
@@ -78,7 +86,7 @@ def migrate_legacy_secrets_yaml(
         values = _parse_legacy_yaml(source_bytes)
         writes, skipped_oauth_count = _build_writes(values)
         _verify_writes(service, writes)
-        source_path.unlink()
+        source_path.rename(backup_path)
     else:
         _verify_recorded_items(root, service)
 

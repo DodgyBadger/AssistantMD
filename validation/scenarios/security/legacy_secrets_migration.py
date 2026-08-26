@@ -28,6 +28,7 @@ from core.identity import LOCAL_USER_AUTHORITY, SYSTEM_AUTHORITY  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from core.secrets.legacy_migration import (  # noqa: E402
     DEFAULT_NAMESPACE,
+    LEGACY_BACKUP_FILENAME,
     migrate_legacy_secrets_yaml,
 )
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -71,6 +72,15 @@ EMPTY_VALUE:
         self.soft_assert(
             not source_path.exists(),
             "Verified migration should retire the live plaintext file",
+        )
+        backup_path = successful_root / LEGACY_BACKUP_FILENAME
+        self.soft_assert(
+            backup_path.exists(),
+            "Verified migration should preserve the legacy file as a backup",
+        )
+        self.soft_assert(
+            "OPENAI_API_KEY: user-api-key" in backup_path.read_text(encoding="utf-8"),
+            "The retired backup should retain the original rollback data",
         )
         self.soft_assert_equal(
             service.get_for_authority(
@@ -144,6 +154,32 @@ EMPTY_VALUE:
         )
         self.soft_assert_equal(
             migration_count, 0, "Failed migration must not record completion"
+        )
+
+        collision_root = self.run_path / "backup-collision-system"
+        collision_root.mkdir()
+        collision_source = collision_root / "secrets.yaml"
+        collision_source.write_text("OPENAI_API_KEY: new-value\n", encoding="utf-8")
+        collision_backup = collision_root / LEGACY_BACKUP_FILENAME
+        collision_backup.write_text("OPENAI_API_KEY: old-value\n", encoding="utf-8")
+        collision_service = EncryptedSecretsService(
+            system_root=str(collision_root), keyring=keyring
+        )
+        collision_failed = False
+        try:
+            migrate_legacy_secrets_yaml(
+                system_root=collision_root, service=collision_service
+            )
+        except FileExistsError:
+            collision_failed = True
+        self.soft_assert(
+            collision_failed,
+            "Migration should not overwrite an existing legacy backup",
+        )
+        self.soft_assert_equal(
+            collision_backup.read_text(encoding="utf-8"),
+            "OPENAI_API_KEY: old-value\n",
+            "A backup collision should preserve the existing rollback file",
         )
 
         self.assert_no_failures()
