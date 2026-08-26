@@ -59,7 +59,7 @@ surface used by endpoints and validation.
   scheduler-owned worker run through `/api/import/run-now`.
 - The System tab hosts app settings, provider/model configuration, secrets, logs, cleanup, system jobs, system authoring refresh, and database migration status/manual fallback.
 - OpenAI OAuth controls live in the System provider configuration surface and call the provider OAuth endpoints; API responses expose only sanitized OAuth status, not token material.
-- The System Connections surface groups built-in connections and MCP connections. Google client metadata and Gmail preferences use `/api/system/connections/google`; its client secret and OAuth tokens remain write-only, and the API reports sanitized account, scope, and capability readiness.
+- The System Connections surface presents Google and MCP connections as peer collapsible cards created from a lean add-action row. Named Google connections use collection and item routes under `/api/system/connections/google/connections`; client secrets and OAuth tokens remain write-only, and responses report sanitized identity, default, scope, and capability readiness.
 - MCP connection APIs expose principal-owned sanitized definitions, credential presence, readiness tests, and OAuth lifecycle actions. Owner IDs and credential values are never accepted or returned. The UI displays generated callback and authorization URLs for browser or headless completion.
 - Chat and workflow execution endpoints register process-local execution tasks through runtime services.
 - `/api/tasks`, `/api/tasks/{task_id}`, and `/api/tasks/{task_id}/cancel` expose task snapshots and cancellation.

@@ -121,12 +121,13 @@ should only be accessed through `core/llm/openai_oauth.py`. Pending auth state
 has a short TTL and is lazily cleared when status or completion paths observe
 that it has expired.
 
-Built-in Google connections keep non-secret client metadata and capability
-preferences in principal-owned `connections.db` records. The OAuth client
-secret, pending PKCE request, access token, refresh token, granted scopes, and
-connected account identity use internal principal-owned entries in the
+Built-in Google connections keep named, non-secret client metadata and
+capability preferences in principal-owned `connections.db` records. Each
+connection has an immutable ID and slug, and one connection is the principal's
+default. OAuth client secrets, pending PKCE requests, tokens, granted scopes,
+and connected account identities use connection-scoped internal entries in the
 `oauth.google` encrypted namespace. Generic Secrets APIs do not expose those
-entries. Google capabilities become available only when the stored grant
+entries. Google capabilities become available when at least one stored grant
 contains their required scopes.
 
 ## Configuration Health and Availability

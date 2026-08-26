@@ -86,6 +86,10 @@ class GoogleConnectionStatus:
         "ready",
         "reconnect_required",
     ]
+    connection_id: str | None
+    slug: str | None
+    display_name: str | None
+    is_default: bool
     configured: bool
     connected: bool
     client_id: str | None
@@ -118,50 +122,64 @@ class GoogleConnectionService:
         self._secrets = secrets
 
     def set_client_secret(
-        self, authority: ExecutionAuthority, client_secret: str
+        self,
+        authority: ExecutionAuthority,
+        client_secret: str,
+        connection_id: str | None = None,
     ) -> None:
         """Store a write-only Google OAuth client secret for one principal."""
-        if self._connections.get_google_connection_for_authority(authority) is None:
+        connection = self._connection(authority, connection_id)
+        if connection is None:
             raise ValueError("Save Google connection configuration first.")
         clean_secret = str(client_secret or "").strip()
         if not clean_secret:
             raise ValueError("Google OAuth client secret cannot be empty.")
-        self._storage(authority).put_sync(
+        self._storage(authority, connection.connection_id).put_sync(
             _CLIENT_SECRET_KEY,
             {"value": clean_secret},
             collection=_OAUTH_COLLECTION,
         )
-        self.clear_token_state(authority)
+        self.clear_token_state(authority, connection.connection_id)
 
-    def resolve_client_secret(self, authority: ExecutionAuthority) -> str | None:
+    def resolve_client_secret(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> str | None:
         """Resolve a client secret only beneath an explicit authority boundary."""
-        payload = self._storage(authority).get_sync(
-            _CLIENT_SECRET_KEY, collection=_OAUTH_COLLECTION
+        connection = self._connection(authority, connection_id)
+        if connection is None:
+            return None
+        payload = self._load_connection_payload(
+            authority, connection, _CLIENT_SECRET_KEY
         )
         value = payload.get("value") if payload is not None else None
         return value if isinstance(value, str) and value else None
 
     def save_token_state(
-        self, authority: ExecutionAuthority, token_state: GoogleOAuthTokenState
+        self,
+        authority: ExecutionAuthority,
+        token_state: GoogleOAuthTokenState,
+        connection_id: str | None = None,
     ) -> None:
         """Persist a validated connected Google grant under principal authority."""
-        if self._connections.get_google_connection_for_authority(authority) is None:
+        connection = self._connection(authority, connection_id)
+        if connection is None:
             raise ValueError("Google connection is not configured.")
-        if self.resolve_client_secret(authority) is None:
+        if self.resolve_client_secret(authority, connection.connection_id) is None:
             raise ValueError("Google OAuth client secret is not configured.")
-        self._storage(authority).put_sync(
+        self._storage(authority, connection.connection_id).put_sync(
             _TOKEN_STATE_KEY,
             asdict(token_state),
             collection=_OAUTH_COLLECTION,
         )
 
     def load_token_state(
-        self, authority: ExecutionAuthority
+        self, authority: ExecutionAuthority, connection_id: str | None = None
     ) -> GoogleOAuthTokenState | None:
         """Load and validate one principal's encrypted Google token grant."""
-        payload = self._storage(authority).get_sync(
-            _TOKEN_STATE_KEY, collection=_OAUTH_COLLECTION
-        )
+        connection = self._connection(authority, connection_id)
+        if connection is None:
+            return None
+        payload = self._load_connection_payload(authority, connection, _TOKEN_STATE_KEY)
         if payload is None:
             return None
         try:
@@ -180,25 +198,45 @@ class GoogleConnectionService:
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Stored Google OAuth token state is invalid.") from exc
 
-    def clear_token_state(self, authority: ExecutionAuthority) -> None:
+    def clear_token_state(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> None:
         """Remove connected token/account state while preserving client setup."""
-        self._storage(authority).delete_sync(
+        connection = self._connection(authority, connection_id)
+        if connection is None:
+            return
+        self._storage(authority, connection.connection_id).delete_sync(
             _TOKEN_STATE_KEY, collection=_OAUTH_COLLECTION
         )
 
-    def disconnect(self, authority: ExecutionAuthority) -> None:
+    def disconnect(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> None:
         """Remove all encrypted Google OAuth material for one principal."""
-        storage = self._storage(authority)
+        connection = self._connection(authority, connection_id)
+        if connection is None:
+            return
+        self.disconnect_by_connection_id(authority, connection.connection_id)
+
+    def disconnect_by_connection_id(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> None:
+        """Remove scoped OAuth material after metadata deletion has been authorized."""
+        storage = self._storage(authority, connection_id)
         for key in (_TOKEN_STATE_KEY, _CLIENT_SECRET_KEY):
             storage.delete_sync(key, collection=_OAUTH_COLLECTION)
 
-    def status(self, authority: ExecutionAuthority) -> GoogleConnectionStatus:
+    def status(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> GoogleConnectionStatus:
         """Return sanitized configuration and authorization status."""
-        connection = self._connections.get_google_connection_for_authority(authority)
+        connection = self._connection(authority, connection_id)
         if connection is None:
             return _status_not_configured()
-        client_secret_present = self.resolve_client_secret(authority) is not None
-        token_state = self.load_token_state(authority)
+        client_secret_present = (
+            self.resolve_client_secret(authority, connection.connection_id) is not None
+        )
+        token_state = self.load_token_state(authority, connection.connection_id)
         if not client_secret_present:
             return _status_for_connection(
                 connection,
@@ -229,9 +267,10 @@ class GoogleConnectionService:
         self,
         authority: ExecutionAuthority,
         capability: GoogleCapability,
+        connection_id: str | None = None,
     ) -> GoogleCapabilityAvailability:
         """Resolve whether one capability should enter effective tool bindings."""
-        status = self.status(authority)
+        status = self.status(authority, connection_id)
         missing_scopes = tuple(
             sorted(capability.required_scopes.difference(status.granted_scopes))
         )
@@ -242,16 +281,59 @@ class GoogleConnectionService:
             missing_scopes=missing_scopes,
         )
 
-    def _storage(self, authority: ExecutionAuthority) -> EncryptedOAuthStorage:
-        return EncryptedOAuthStorage(
+    def any_capability_available(
+        self, authority: ExecutionAuthority, capability: GoogleCapability
+    ) -> bool:
+        return any(
+            self.capability_availability(
+                authority, capability, connection.connection_id
+            ).available
+            for connection in self._connections.list_google_connections_for_authority(
+                authority
+            )
+        )
+
+    def _connection(
+        self, authority: ExecutionAuthority, connection_id: str | None
+    ) -> GoogleConnection | None:
+        return self._connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+
+    def _load_connection_payload(
+        self, authority: ExecutionAuthority, connection: GoogleConnection, key: str
+    ) -> dict[str, object] | None:
+        storage = self._storage(authority, connection.connection_id)
+        payload = storage.get_sync(key, collection=_OAUTH_COLLECTION)
+        if payload is not None or not connection.is_default:
+            return payload
+        legacy = EncryptedOAuthStorage(
             secrets=self._secrets,
             authority=authority,
             namespace=GOOGLE_OAUTH_NAMESPACE,
+        )
+        payload = legacy.get_sync(key, collection=_OAUTH_COLLECTION)
+        if payload is not None:
+            storage.put_sync(key, payload, collection=_OAUTH_COLLECTION)
+            legacy.delete_sync(key, collection=_OAUTH_COLLECTION)
+        return payload
+
+    def _storage(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> EncryptedOAuthStorage:
+        return EncryptedOAuthStorage(
+            secrets=self._secrets,
+            authority=authority,
+            namespace=f"{GOOGLE_OAUTH_NAMESPACE}.{connection_id}",
         )
 
 
 def _status_not_configured() -> GoogleConnectionStatus:
     return GoogleConnectionStatus(
+        connection_id=None,
+        slug=None,
+        display_name=None,
+        is_default=False,
         state="not_configured",
         configured=False,
         connected=False,
@@ -276,6 +358,10 @@ def _status_for_connection(
     token_state: GoogleOAuthTokenState | None,
 ) -> GoogleConnectionStatus:
     return GoogleConnectionStatus(
+        connection_id=connection.connection_id,
+        slug=connection.slug,
+        display_name=connection.display_name,
+        is_default=connection.is_default,
         state=state,
         configured=client_secret_present,
         connected=state == "ready",

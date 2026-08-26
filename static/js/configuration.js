@@ -45,7 +45,8 @@
         models: [],
         providers: [],
         secrets: [],
-        googleConnection: null,
+        googleConnections: [],
+        googleDraft: false,
         mcpConnections: [],
         mcpOAuthStatuses: {},
         importVaults: [],
@@ -151,6 +152,10 @@
         googleConnectionForm: null,
         googleConnectionStatus: null,
         googleConnectionFeedback: null,
+        googleConnectionsList: null,
+        connectionAddGoogle: null,
+        connectionAddMcp: null,
+        connectionsFeedback: null,
 
         mcpCreateForm: null,
         mcpConnectionsList: null,
@@ -233,6 +238,7 @@
             x: icon.X_ICON_SVG,
             circleX: icon.CIRCLE_X_ICON_SVG,
             check: icon.CHECK_ICON_SVG,
+            copy: icon.COPY_ICON_SVG,
             link: icon.LINK_ICON_SVG,
         };
         return svgByName[iconName] || icon.SETTINGS_ICON_SVG;
@@ -279,6 +285,10 @@
         elements.googleConnectionForm = document.getElementById('google-connection-form');
         elements.googleConnectionStatus = document.getElementById('google-connection-status');
         elements.googleConnectionFeedback = document.getElementById('google-connection-feedback');
+        elements.googleConnectionsList = document.getElementById('google-connections-list');
+        elements.connectionAddGoogle = document.getElementById('connection-add-google');
+        elements.connectionAddMcp = document.getElementById('connection-add-mcp');
+        elements.connectionsFeedback = document.getElementById('connections-feedback');
 
         elements.mcpCreateForm = document.getElementById('mcp-create-form');
         elements.mcpConnectionsList = document.getElementById('mcp-connections-list');
@@ -365,9 +375,21 @@
         elements.secretAddBtn?.addEventListener('click', startNewSecret);
         elements.secretsList?.addEventListener('click', handleSecretsTableClick);
         elements.secretsList?.addEventListener('input', handleSecretInputChange);
-        elements.googleConnectionForm?.addEventListener('submit', saveGoogleConnection);
-        elements.googleConnectionForm?.addEventListener('click', handleGoogleConnectionAction);
+        elements.connectionAddGoogle?.addEventListener('click', startGoogleConnectionDraft);
+        elements.connectionAddMcp?.addEventListener('click', () => {
+            elements.mcpCreateForm?.classList.remove('hidden');
+            elements.mcpCreateForm?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+        elements.googleConnectionsList?.addEventListener('submit', saveGoogleConnection);
+        elements.googleConnectionsList?.addEventListener('click', handleGoogleConnectionAction);
         elements.mcpCreateForm?.addEventListener('submit', handleMcpCreate);
+        elements.mcpCreateForm?.addEventListener('click', (event) => {
+            const cancel = event.target instanceof Element ? event.target.closest('[data-mcp-create-action="cancel"]') : null;
+            if (!cancel) return;
+            elements.mcpCreateForm.reset();
+            elements.mcpCreateForm.classList.add('hidden');
+            updateMcpCreateAuthFields();
+        });
         elements.mcpConnectionsList?.addEventListener('click', handleMcpConnectionAction);
         elements.mcpCreateForm?.addEventListener('change', updateMcpCreateAuthFields);
         elements.refreshSystemAuthoringBtn?.addEventListener('click', handleRefreshSystemAuthoring);
@@ -2218,59 +2240,109 @@ async function saveModelRow(rowKey) {
     }
 
     async function loadGoogleConnection() {
-        if (!elements.googleConnectionForm || state.isLoadingGoogle) return;
+        if (!elements.googleConnectionsList || state.isLoadingGoogle) return;
         state.isLoadingGoogle = true;
         try {
-            const response = await fetch('api/system/connections/google', { cache: 'no-store' });
+            const response = await fetch('api/system/connections/google/connections', { cache: 'no-store' });
             const payload = await safeJson(response);
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
-            state.googleConnection = payload;
+            state.googleConnections = Array.isArray(payload) ? payload : [];
             renderGoogleConnection();
         } catch (error) {
-            setStatus(elements.googleConnectionStatus, `Google connection unavailable: ${error.message}`, 'error');
+            setStatus(elements.connectionsFeedback, `Google connections unavailable: ${error.message}`, 'error');
         } finally {
             state.isLoadingGoogle = false;
         }
     }
 
     function renderGoogleConnection() {
-        const form = elements.googleConnectionForm;
-        const connection = state.googleConnection;
-        if (!(form instanceof HTMLFormElement) || !connection) return;
+        const list = elements.googleConnectionsList;
+        const template = elements.googleConnectionForm;
+        if (!(list instanceof HTMLElement) || !(template instanceof HTMLFormElement)) return;
+        list.replaceChildren();
+        state.googleConnections.forEach((connection) => appendGoogleConnectionCard(connection));
+        if (state.googleDraft) appendGoogleConnectionCard(null);
+    }
+
+    function appendGoogleConnectionCard(connection) {
+        const list = elements.googleConnectionsList;
+        const template = elements.googleConnectionForm;
+        if (!(list instanceof HTMLElement) || !(template instanceof HTMLFormElement)) return;
+        const details = document.createElement('details');
+        details.className = 'rounded-lg border border-border-primary bg-app-card shadow-sm';
+        details.open = !connection;
+        details.dataset.googleId = connection?.connection_id || 'draft';
+        const summary = document.createElement('summary');
+        summary.className = 'collapsible-summary connection-card-summary';
+        const statusIcon = connection ? `<span class="connection-card-status-icon ${connection.gmail_available ? 'state-success' : 'text-txt-secondary'}" title="${connection.gmail_available ? 'Connected' : 'Setup required'}">${iconSvg(connection.gmail_available ? 'check' : 'x')}</span>` : '';
+        summary.innerHTML = `<div class="summary-text"><span class="summary-title">${escapeHtml(connection?.display_name || 'New Google connection')}</span>${statusIcon}</div><svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+        const form = template.cloneNode(true);
+        form.removeAttribute('id');
+        form.classList.remove('hidden');
+        form.classList.remove('rounded-lg', 'border', 'border-border-primary', 'shadow-sm');
+        form.dataset.googleId = connection?.connection_id || 'draft';
+        details.append(summary, form);
+        list.append(details);
         const setValue = (name, value) => {
             const input = form.elements.namedItem(name);
             if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = value ?? '';
         };
-        setValue('client_id', connection.client_id);
+        setValue('display_name', connection?.display_name || '');
+        setValue('client_id', connection?.client_id || '');
         setValue('client_secret', '');
-        setValue('redirect_uri', connection.oauth_redirect_uri);
-        setValue('search_default_results', connection.gmail?.search_default_results ?? 20);
-        setValue('search_max_results', connection.gmail?.search_max_results ?? 100);
-        setValue('message_max_characters', connection.gmail?.message_max_characters ?? 50000);
-        setValue('thread_max_messages', connection.gmail?.thread_max_messages ?? 25);
+        setValue('redirect_uri', connection?.oauth_redirect_uri);
+        setValue('search_default_results', connection?.gmail?.search_default_results ?? 20);
+        setValue('search_max_results', connection?.gmail?.search_max_results ?? 100);
+        setValue('message_max_characters', connection?.gmail?.message_max_characters ?? 50000);
+        setValue('thread_max_messages', connection?.gmail?.thread_max_messages ?? 25);
+        const defaultInput = form.elements.namedItem('is_default');
+        if (defaultInput instanceof HTMLInputElement) {
+            defaultInput.checked = connection?.is_default || (!connection && state.googleConnections.length === 0);
+        }
         const labels = {
-            not_configured: connection.client_id ? 'Client secret required' : 'Not configured',
+            not_configured: connection?.client_id ? 'Client secret required' : 'Not configured',
             authorization_required: 'Ready to authorize',
-            ready: connection.gmail_available ? 'Connected; Gmail tools available' : 'Connected; Gmail scope required',
+            ready: connection?.gmail_available ? 'Connected; Gmail tools available' : 'Connected; Gmail scope required',
             reconnect_required: 'Reconnect required',
         };
-        const account = connection.account_email ? ` as ${connection.account_email}` : '';
-        setStatus(elements.googleConnectionStatus, `${labels[connection.state] || connection.state}${account}.`, connection.gmail_available ? 'success' : 'info');
+        const account = connection?.account_email ? ` as ${connection.account_email}` : '';
+        const status = form.querySelector('#google-connection-status');
+        if (status) status.removeAttribute('id');
+        setStatus(status, connection ? `${labels[connection.state] || connection.state}${account}.` : 'Enter Google OAuth client settings.', connection?.gmail_available ? 'success' : 'info');
+        const feedback = form.querySelector('#google-connection-feedback');
+        if (feedback) feedback.removeAttribute('id');
         const authorize = form.querySelector('[data-google-action="authorize"]');
         const disconnect = form.querySelector('[data-google-action="disconnect"]');
         const remove = form.querySelector('[data-google-action="delete"]');
-        if (authorize instanceof HTMLButtonElement) authorize.textContent = connection.connected ? 'Reauthorize Google' : 'Authorize Google';
-        if (disconnect instanceof HTMLButtonElement) disconnect.disabled = !connection.connected;
-        if (remove instanceof HTMLButtonElement) remove.disabled = !connection.client_id && !connection.client_secret_present;
+        if (authorize instanceof HTMLButtonElement) {
+            authorize.textContent = connection?.connected ? 'Reauthorize Google' : 'Authorize Google';
+            authorize.disabled = !connection;
+        }
+        if (disconnect instanceof HTMLButtonElement) disconnect.disabled = !connection?.connected;
+        if (remove instanceof HTMLButtonElement) remove.dataset.googleAction = connection ? 'delete' : 'cancel';
+    }
+
+    function startGoogleConnectionDraft() {
+        if (state.googleDraft) {
+            elements.googleConnectionsList?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+        state.googleDraft = true;
+        renderGoogleConnection();
+        elements.googleConnectionsList?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     async function saveGoogleConnection(event) {
         event.preventDefault();
-        const form = elements.googleConnectionForm;
+        const form = event.target;
         if (!(form instanceof HTMLFormElement) || state.isSavingGoogle) return;
         const values = new FormData(form);
+        const id = form.dataset.googleId;
+        const creating = id === 'draft';
         const payload = {
+            display_name: String(values.get('display_name') || '').trim(),
             client_id: String(values.get('client_id') || '').trim(),
+            is_default: values.get('is_default') === 'on',
             gmail: {
                 search_default_results: Number(values.get('search_default_results')),
                 search_max_results: Number(values.get('search_max_results')),
@@ -2278,84 +2350,102 @@ async function saveModelRow(rowKey) {
                 thread_max_messages: Number(values.get('thread_max_messages')),
             },
         };
-        const saved = await mutateGoogle('api/system/connections/google', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'Google settings saved.', false);
+        const endpoint = creating ? 'api/system/connections/google/connections' : `api/system/connections/google/connections/${encodeURIComponent(id)}`;
+        const saved = await mutateGoogle(endpoint, { method: creating ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'Google settings saved.', false);
         const clientSecret = String(values.get('client_secret') || '').trim();
         if (saved && clientSecret) {
-            await mutateGoogle('api/system/connections/google/client-secret', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_secret: clientSecret }) }, 'Google settings and client secret saved.');
+            const savedId = creating ? saved.connection_id : id;
+            state.googleDraft = false;
+            await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(savedId)}/client-secret`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_secret: clientSecret }) }, 'Google settings and client secret saved.');
         } else if (saved) {
+            state.googleDraft = false;
             await loadGoogleConnection();
             await notifyConfigChanged();
         }
     }
 
     async function handleGoogleConnectionAction(event) {
+        const copyButton = event.target instanceof Element ? event.target.closest('[data-google-copy]') : null;
+        if (copyButton instanceof HTMLButtonElement) {
+            const form = copyButton.closest('form[data-google-id]');
+            const field = form?.elements.namedItem(copyButton.dataset.googleCopy || '');
+            await copyConnectionField(copyButton, field);
+            return;
+        }
         const button = event.target instanceof Element ? event.target.closest('[data-google-action]') : null;
-        if (!(button instanceof HTMLButtonElement) || state.isSavingGoogle) return;
+        const form = button?.closest('form[data-google-id]');
+        if (!(button instanceof HTMLButtonElement) || !(form instanceof HTMLFormElement) || state.isSavingGoogle) return;
+        const id = form.dataset.googleId;
         const action = button.dataset.googleAction;
         if (action === 'authorize') {
-            await startGoogleOAuth();
+            await startGoogleOAuth(form, id);
         } else if (action === 'complete') {
-            const redirect = elements.googleConnectionForm?.elements.namedItem('oauth_redirect')?.value || '';
+            const redirect = form.elements.namedItem('oauth_redirect')?.value || '';
             if (!redirect.trim()) {
-                setStatus(elements.googleConnectionFeedback, 'Paste the full redirected URL first.', 'error');
+                setStatus(form.querySelector('[id="google-connection-feedback"]') || elements.connectionsFeedback, 'Paste the full redirected URL first.', 'error');
                 return;
             }
-            await mutateGoogle('api/system/connections/google/oauth/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirect, code: null, state: null }) }, 'Google account connected.');
+            await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}/oauth/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirect, code: null, state: null }) }, 'Google account connected.');
         } else if (action === 'disconnect') {
             if (window.confirm('Disconnect the authorized Google account? Client settings will be preserved.')) {
-                await mutateGoogle('api/system/connections/google/oauth', { method: 'DELETE' }, 'Google account disconnected.');
+                await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}/oauth`, { method: 'DELETE' }, 'Google account disconnected.');
             }
         } else if (action === 'delete') {
             if (window.confirm('Remove the Google connection, client secret, and authorized account?')) {
-                await mutateGoogle('api/system/connections/google', { method: 'DELETE' }, 'Google connection removed.');
+                const replacement = state.googleConnections.find((item) => item.connection_id !== id)?.connection_id;
+                const query = replacement ? `?replacement_default_id=${encodeURIComponent(replacement)}` : '';
+                await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}${query}`, { method: 'DELETE' }, 'Google connection removed.');
             }
+        } else if (action === 'cancel') {
+            state.googleDraft = false;
+            renderGoogleConnection();
         }
     }
 
-    async function startGoogleOAuth() {
+    async function startGoogleOAuth(form, id) {
         state.isSavingGoogle = true;
-        setStatus(elements.googleConnectionFeedback, 'Starting Google authorization…');
+        setStatus(elements.connectionsFeedback, 'Starting Google authorization…');
         try {
-            const response = await fetch('api/system/connections/google/oauth/start', { method: 'POST' });
+            const response = await fetch(`api/system/connections/google/connections/${encodeURIComponent(id)}/oauth/start`, { method: 'POST' });
             const payload = await safeJson(response);
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
-            const field = elements.googleConnectionForm?.elements.namedItem('authorization_url');
+            const field = form.elements.namedItem('authorization_url');
             if (field instanceof HTMLTextAreaElement) field.value = payload.authorization_url;
             const popup = window.open(payload.authorization_url, '_blank', 'noopener,noreferrer');
-            setStatus(elements.googleConnectionFeedback, popup ? 'Finish authorization in the new tab. The URL is also available below.' : 'The browser blocked the new tab. Copy the authorization URL below.', popup ? 'success' : 'warning');
-            void pollGoogleConnection(Date.now() + 10 * 60 * 1000);
+            setStatus(elements.connectionsFeedback, popup ? 'Finish authorization in the new tab. The URL is also available below.' : 'The browser blocked the new tab. Copy the authorization URL below.', popup ? 'success' : 'warning');
+            void pollGoogleConnection(id, Date.now() + 10 * 60 * 1000);
         } catch (error) {
-            setStatus(elements.googleConnectionFeedback, error.message, 'error');
+            setStatus(elements.connectionsFeedback, error.message, 'error');
         } finally {
             state.isSavingGoogle = false;
         }
     }
 
-    async function pollGoogleConnection(deadline) {
+    async function pollGoogleConnection(id, deadline) {
         if (Date.now() >= deadline) return;
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
         await loadGoogleConnection();
-        if (state.googleConnection?.connected) {
-            setStatus(elements.googleConnectionFeedback, 'Google account connected.', 'success');
+        if (state.googleConnections.find((connection) => connection.connection_id === id)?.connected) {
+            setStatus(elements.connectionsFeedback, 'Google account connected.', 'success');
             await notifyConfigChanged();
             return;
         }
-        void pollGoogleConnection(deadline);
+        void pollGoogleConnection(id, deadline);
     }
 
     async function mutateGoogle(url, options, successMessage, reload = true) {
         state.isSavingGoogle = true;
-        setStatus(elements.googleConnectionFeedback, 'Saving…');
+        setStatus(elements.connectionsFeedback, 'Saving…');
         try {
             const response = await fetch(url, options);
             const payload = await safeJson(response);
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
-            setStatus(elements.googleConnectionFeedback, successMessage, 'success');
+            setStatus(elements.connectionsFeedback, successMessage, 'success');
             if (reload) await loadGoogleConnection();
             await notifyConfigChanged();
-            return true;
+            return payload;
         } catch (error) {
-            setStatus(elements.googleConnectionFeedback, error.message, 'error');
+            setStatus(elements.connectionsFeedback, error.message, 'error');
             return false;
         } finally {
             state.isSavingGoogle = false;
@@ -2382,7 +2472,7 @@ async function saveModelRow(rowKey) {
     function renderMcpConnections() {
         if (!elements.mcpConnectionsList) return;
         if (!state.mcpConnections.length) {
-            elements.mcpConnectionsList.innerHTML = '<div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">No MCP connections configured.</div>';
+            elements.mcpConnectionsList.innerHTML = '';
             return;
         }
         elements.mcpConnectionsList.innerHTML = state.mcpConnections.map((connection) => {
@@ -2393,11 +2483,10 @@ async function saveModelRow(rowKey) {
             const oauthCallbackUrl = connection.oauth_redirect_uri || browserCallbackUrl;
             const oauthOriginMismatch = connection.oauth_redirect_source === 'configured' && new URL(oauthCallbackUrl).origin !== window.location.origin;
             return `
-                <div class="rounded-lg border border-border-primary bg-app-card p-4 shadow-sm space-y-3" data-mcp-id="${escapeHtml(connection.connection_id)}">
-                    <div class="flex items-center justify-between gap-3">
-                        <div><div class="font-medium text-txt-primary">${escapeHtml(connection.display_name)}</div><div class="font-mono text-xs text-txt-secondary">${escapeHtml(connection.slug)}</div></div>
-                        <span class="text-xs ${connection.enabled ? 'state-success' : 'text-txt-secondary'}">${connection.enabled ? 'Enabled' : 'Disabled'}</span>
-                    </div>
+                <details class="rounded-lg border border-border-primary bg-app-card shadow-sm" data-mcp-id="${escapeHtml(connection.connection_id)}">
+                    <summary class="collapsible-summary connection-card-summary"><div class="summary-text"><span class="summary-title">${escapeHtml(connection.display_name)}</span><span class="connection-card-status-icon ${connection.enabled ? 'state-success' : 'text-txt-secondary'}" title="${connection.enabled ? 'Enabled' : 'Disabled'}">${iconSvg(connection.enabled ? 'check' : 'x')}</span></div><svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
+                    <div class="p-4 pt-0 space-y-3">
+                    <div class="text-xs font-medium text-txt-secondary">MCP connection</div>
                     <div class="grid gap-3 md:grid-cols-2">
                         <label class="text-xs text-txt-secondary">Display name<input data-mcp-field="display_name" value="${escapeHtml(connection.display_name)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                         <label class="text-xs text-txt-secondary">Server URL<input data-mcp-field="url" value="${escapeHtml(connection.url)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
@@ -2416,7 +2505,7 @@ async function saveModelRow(rowKey) {
                             <label class="text-xs text-txt-secondary">OAuth client ID<input data-mcp-field="oauth_client_id" value="${escapeHtml(connection.oauth_client_id || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses dynamic registration" /></label>
                             <label class="text-xs text-txt-secondary">OAuth client secret (${connection.oauth_client_secret_present ? 'stored' : 'not set'})<input data-mcp-field="oauth_client_secret" type="password" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Leave blank to preserve" autocomplete="new-password" /></label>
                             <label class="text-xs text-txt-secondary md:col-span-2">OAuth scopes<input data-mcp-field="oauth_scopes" value="${escapeHtml(Array.isArray(connection.oauth_scopes) ? connection.oauth_scopes.join(', ') : '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank uses server metadata" /></label>
-                            <label class="text-xs text-txt-secondary md:col-span-2">Authorized redirect URI (${connection.oauth_redirect_source === 'configured' ? 'configured' : 'browser fallback'})<input data-mcp-field="oauth_callback_uri" readonly value="${escapeHtml(oauthCallbackUrl)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" /></label>
+                            <label class="text-xs text-txt-secondary md:col-span-2">Authorized redirect URI (${connection.oauth_redirect_source === 'configured' ? 'configured' : 'browser fallback'})<span class="mt-1 flex items-start gap-2"><input data-mcp-field="oauth_callback_uri" readonly value="${escapeHtml(oauthCallbackUrl)}" class="min-w-0 flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" /><button type="button" data-mcp-copy="oauth_callback_uri" ${iconButton('copy', 'Copy authorized redirect URI')}>${iconSvg('copy')}</button></span></label>
                             ${oauthOriginMismatch ? `<div class="md:col-span-2 text-xs state-warning">This browser is using ${escapeHtml(window.location.origin)}, but OAuth callbacks use the configured origin ${escapeHtml(new URL(oauthCallbackUrl).origin)}.</div>` : ''}
                         </div>
                         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -2428,24 +2517,30 @@ async function saveModelRow(rowKey) {
                         </div>
                         <p class="text-xs text-txt-secondary">Save any client ID, client secret, or scope changes before choosing Authorize. Servers that support dynamic registration can leave these fields blank.</p>
                         <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. AssistantMD detects the callback automatically when this address is reachable from your browser.</p>
-                        <label class="text-xs text-txt-secondary">Authorization URL<textarea data-mcp-field="oauth_authorization_url" readonly rows="3" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize to generate a URL you can copy into another browser."></textarea></label>
-                        <details class="rounded-md border border-border-primary px-3 py-2">
-                            <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
-                            <div class="pt-2 space-y-2">
-                                <p class="text-xs text-txt-secondary">Only use this if the browser cannot reach AssistantMD's callback. Copy the full redirected URL from the browser address bar.</p>
-                                <div class="flex flex-col gap-2 sm:flex-row"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish from redirected URL</button></div>
-                            </div>
-                        </details>
+                        <label class="text-xs text-txt-secondary">Authorization URL<span class="mt-1 flex items-start gap-2"><textarea data-mcp-field="oauth_authorization_url" readonly rows="3" class="min-w-0 flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize to generate a URL you can copy into another browser."></textarea><button type="button" data-mcp-copy="oauth_authorization_url" ${iconButton('copy', 'Copy authorization URL')}>${iconSvg('copy')}</button></span></label>
+                        <div class="space-y-2">
+                            <p class="text-xs text-txt-secondary">Only use this if the browser cannot reach AssistantMD's callback. Copy the full redirected URL from the browser address bar.</p>
+                            <div class="flex flex-col gap-2 sm:flex-row"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish from redirected URL</button></div>
+                        </div>
                     </div>` : ''}
                     <div data-mcp-test-result class="text-sm text-txt-secondary"></div>
                     <div class="flex justify-end gap-2"><button type="button" data-mcp-action="test" ${iconButton('play', 'Test MCP connection')}>${iconSvg('play')}</button><button type="button" data-mcp-action="delete" ${iconButton('trash', 'Delete MCP connection', 'is-danger')}>${iconSvg('trash')}</button><button type="button" data-mcp-action="save" ${iconButton('save', 'Save MCP connection', 'is-primary')}>${iconSvg('save')}</button></div>
-                </div>`;
+                    </div>
+                </details>`;
         }).join('');
     }
 
     function parseMcpAllowedTools(value) {
         const tools = String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
         return tools.length ? [...new Set(tools)] : null;
+    }
+
+    async function copyConnectionField(button, field) {
+        const value = field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
+            ? field.value.trim()
+            : '';
+        const copied = value ? await window.AssistantMDUtils.handleCopy(value) : false;
+        window.AssistantMDUtils.flashCopyFeedback(button, copied);
     }
 
     function updateMcpCreateAuthFields() {
@@ -2511,11 +2606,19 @@ async function saveModelRow(rowKey) {
         const saved = await mutateMcp('api/system/mcp/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection added.');
         if (saved) {
             elements.mcpCreateForm.reset();
+            elements.mcpCreateForm.classList.add('hidden');
             updateMcpCreateAuthFields();
         }
     }
 
     async function handleMcpConnectionAction(event) {
+        const copyButton = event.target instanceof Element ? event.target.closest('[data-mcp-copy]') : null;
+        if (copyButton instanceof HTMLButtonElement) {
+            const card = copyButton.closest('[data-mcp-id]');
+            const field = card?.querySelector(`[data-mcp-field="${CSS.escape(copyButton.dataset.mcpCopy || '')}"]`);
+            await copyConnectionField(copyButton, field);
+            return;
+        }
         const button = event.target instanceof Element ? event.target.closest('[data-mcp-action]') : null;
         const card = button?.closest('[data-mcp-id]');
         if (!(button instanceof HTMLButtonElement) || !(card instanceof HTMLElement) || state.isSavingMcp) return;

@@ -6,7 +6,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 
-from core.connections import GmailPreferences, GoogleConnectionUpdate
+from core.connections import (
+    GmailPreferences,
+    GoogleConnectionCreate,
+    GoogleConnectionUpdate,
+)
 from core.identity import require_current_execution_authority
 from core.integrations.google import GoogleCapability, GoogleOAuthCoordinator
 from core.logger import UnifiedLogger
@@ -16,6 +20,7 @@ from core.runtime.state import get_runtime_context
 from ..exceptions import APIException
 from ..models import (
     GoogleClientSecretUpdateRequest,
+    GoogleConnectionCreateRequest,
     GoogleConnectionResponse,
     GoogleConnectionUpdateRequest,
     GoogleOAuthCompleteRequest,
@@ -27,19 +32,63 @@ logger = UnifiedLogger(tag="google-connections")
 GOOGLE_OAUTH_CALLBACK_PATH = "/api/system/connections/google/oauth/callback"
 
 
+def list_google_connections() -> list[GoogleConnectionResponse]:
+    authority = require_current_execution_authority()
+    runtime = get_runtime_context()
+    return [
+        _google_connection_response(connection.connection_id)
+        for connection in runtime.built_in_connections.list_google_connections_for_authority(
+            authority
+        )
+    ]
+
+
+def create_google_connection(
+    request: GoogleConnectionCreateRequest,
+) -> GoogleConnectionResponse:
+    with _domain_errors():
+        connection = (
+            get_runtime_context().built_in_connections.create_google_connection(
+                GoogleConnectionCreate(
+                    display_name=request.display_name,
+                    client_id=request.client_id,
+                    is_default=request.is_default,
+                    gmail=GmailPreferences(**request.gmail.model_dump()),
+                )
+            )
+        )
+    return _google_connection_response(connection.connection_id)
+
+
 def get_google_connection() -> GoogleConnectionResponse:
     """Return sanitized configuration and readiness for the request principal."""
+    return _google_connection_response(None)
+
+
+def get_google_connection_by_id(connection_id: str) -> GoogleConnectionResponse:
+    with _domain_errors():
+        connection = get_runtime_context().built_in_connections.get_google_connection_for_authority(
+            require_current_execution_authority(), connection_id
+        )
+        if connection is None:
+            raise LookupError("Google connection not found.")
+    return _google_connection_response(connection.connection_id)
+
+
+def _google_connection_response(
+    connection_id: str | None,
+) -> GoogleConnectionResponse:
     authority = require_current_execution_authority()
     runtime = get_runtime_context()
     connection = runtime.built_in_connections.get_google_connection_for_authority(
-        authority
+        authority, connection_id
     )
     service = runtime.google_connection
     if service is None:
         raise _secrets_locked()
-    status = service.status(authority)
+    status = service.status(authority, connection_id)
     availability = service.capability_availability(
-        authority, GoogleCapability.GMAIL_READ
+        authority, GoogleCapability.GMAIL_READ, connection_id
     )
     gmail = connection.gmail if connection is not None else GmailPreferences()
     return GoogleConnectionResponse.model_validate(
@@ -49,7 +98,9 @@ def get_google_connection() -> GoogleConnectionResponse:
             "gmail": asdict(gmail),
             "gmail_available": availability.available,
             "gmail_missing_scopes": list(availability.missing_scopes),
-            "oauth_redirect_uri": _oauth_redirect_uri(required=False),
+            "oauth_redirect_uri": _oauth_redirect_uri(
+                connection_id=status.connection_id, required=False
+            ),
         }
     )
 
@@ -62,6 +113,8 @@ def update_google_connection(
         connection = get_runtime_context().built_in_connections.set_google_connection(
             GoogleConnectionUpdate(
                 client_id=request.client_id,
+                display_name=request.display_name,
+                is_default=request.is_default,
                 gmail=GmailPreferences(**request.gmail.model_dump()),
             )
         )
@@ -75,8 +128,25 @@ def update_google_connection(
     return get_google_connection()
 
 
+def update_google_connection_by_id(
+    connection_id: str, request: GoogleConnectionUpdateRequest
+) -> GoogleConnectionResponse:
+    with _domain_errors():
+        get_runtime_context().built_in_connections.update_google_connection(
+            connection_id,
+            GoogleConnectionUpdate(
+                client_id=request.client_id,
+                display_name=request.display_name,
+                is_default=request.is_default,
+                gmail=GmailPreferences(**request.gmail.model_dump()),
+            ),
+        )
+    return _google_connection_response(connection_id)
+
+
 def set_google_client_secret(
     request: GoogleClientSecretUpdateRequest,
+    connection_id: str | None = None,
 ) -> GoogleConnectionResponse:
     """Persist the write-only Google OAuth client secret."""
     service = get_runtime_context().google_connection
@@ -86,17 +156,18 @@ def set_google_client_secret(
         service.set_client_secret(
             require_current_execution_authority(),
             request.client_secret.get_secret_value(),
+            connection_id,
         )
     logger.info(
         "Google OAuth client secret updated",
         data={"event": "google_oauth_client_secret_updated"},
     )
-    return get_google_connection()
+    return _google_connection_response(connection_id)
 
 
-def start_google_oauth() -> GoogleOAuthStartResponse:
+def start_google_oauth(connection_id: str | None = None) -> GoogleOAuthStartResponse:
     """Start authorization for the first Gmail read capability."""
-    redirect_uri = _oauth_redirect_uri(required=True)
+    redirect_uri = _oauth_redirect_uri(connection_id=connection_id, required=True)
     if redirect_uri is None:  # pragma: no cover - guarded by required=True
         raise AssertionError("Required Google OAuth redirect URI was not resolved.")
     with _domain_errors():
@@ -104,6 +175,7 @@ def start_google_oauth() -> GoogleOAuthStartResponse:
             authority=require_current_execution_authority(),
             redirect_uri=redirect_uri,
             capabilities=(GoogleCapability.GMAIL_READ,),
+            connection_id=connection_id,
         )
     logger.info("Google OAuth started", data={"event": "google_oauth_started"})
     payload = asdict(result)
@@ -113,6 +185,7 @@ def start_google_oauth() -> GoogleOAuthStartResponse:
 
 async def complete_google_oauth(
     request: GoogleOAuthCompleteRequest,
+    connection_id: str | None = None,
 ) -> GoogleConnectionResponse:
     """Complete one callback or pasted-redirect Google OAuth attempt."""
     with _domain_errors():
@@ -122,18 +195,21 @@ async def complete_google_oauth(
             state=request.state,
         )
         await _oauth_coordinator().complete(
-            authority=require_current_execution_authority(), code=code, state=state
+            authority=require_current_execution_authority(),
+            code=code,
+            state=state,
+            connection_id=connection_id,
         )
     logger.info("Google OAuth completed", data={"event": "google_oauth_completed"})
-    return get_google_connection()
+    return _google_connection_response(connection_id)
 
 
-def disconnect_google_oauth() -> OperationResult:
+def disconnect_google_oauth(connection_id: str | None = None) -> OperationResult:
     """Clear the connected grant while preserving reusable client configuration."""
     service = get_runtime_context().google_connection
     if service is None:
         raise _secrets_locked()
-    service.clear_token_state(require_current_execution_authority())
+    service.clear_token_state(require_current_execution_authority(), connection_id)
     logger.info(
         "Google OAuth disconnected", data={"event": "google_oauth_disconnected"}
     )
@@ -144,15 +220,28 @@ def disconnect_google_oauth() -> OperationResult:
     )
 
 
-def delete_google_connection() -> OperationResult:
+def delete_google_connection(
+    connection_id: str | None = None,
+    *,
+    replacement_default_id: str | None = None,
+) -> OperationResult:
     """Remove Google metadata and all encrypted Google credentials."""
     runtime = get_runtime_context()
     service = runtime.google_connection
     if service is None:
         raise _secrets_locked()
     authority = require_current_execution_authority()
-    service.disconnect(authority)
-    runtime.built_in_connections.delete_google_connection_for_authority(authority)
+    connection = runtime.built_in_connections.get_google_connection_for_authority(
+        authority, connection_id
+    )
+    if connection is None:
+        raise LookupError("Google connection not found.")
+    runtime.built_in_connections.delete_google_connection_for_authority(
+        authority,
+        connection.connection_id,
+        replacement_default_id=replacement_default_id,
+    )
+    service.disconnect_by_connection_id(authority, connection.connection_id)
     logger.info(
         "Google connection deleted", data={"event": "google_connection_deleted"}
     )
@@ -170,7 +259,7 @@ def _oauth_coordinator() -> GoogleOAuthCoordinator:
     return coordinator
 
 
-def _oauth_redirect_uri(*, required: bool) -> str | None:
+def _oauth_redirect_uri(*, connection_id: str | None, required: bool) -> str | None:
     public_origin = get_runtime_context().config.public_origin
     if public_origin is None:
         if required:
@@ -183,7 +272,12 @@ def _oauth_redirect_uri(*, required: bool) -> str | None:
                 ),
             )
         return None
-    return public_origin.build_url(GOOGLE_OAUTH_CALLBACK_PATH)
+    callback_path = (
+        f"/api/system/connections/google/connections/{connection_id}/oauth/callback"
+        if connection_id is not None
+        else GOOGLE_OAUTH_CALLBACK_PATH
+    )
+    return public_origin.build_url(callback_path)
 
 
 def _secrets_locked() -> APIException:

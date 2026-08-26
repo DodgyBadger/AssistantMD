@@ -1725,7 +1725,9 @@ class GoogleConnectionUpdateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    display_name: str | None = Field(None, min_length=1, max_length=120)
     client_id: str = Field(..., min_length=1, max_length=2048)
+    is_default: bool | None = None
     gmail: GmailConnectionPreferencesRequest = Field(
         default_factory=lambda: GmailConnectionPreferencesRequest(
             search_default_results=20,
@@ -1747,6 +1749,10 @@ class GoogleClientSecretUpdateRequest(BaseModel):
 class GoogleConnectionResponse(BaseModel):
     """Sanitized Google connection configuration and authorization state."""
 
+    connection_id: str | None
+    slug: str | None
+    display_name: str | None
+    is_default: bool
     state: Literal[
         "not_configured", "authorization_required", "ready", "reconnect_required"
     ]
@@ -1761,6 +1767,13 @@ class GoogleConnectionResponse(BaseModel):
     gmail_available: bool
     gmail_missing_scopes: list[str] = Field(default_factory=list)
     oauth_redirect_uri: str | None
+
+
+class GoogleConnectionCreateRequest(GoogleConnectionUpdateRequest):
+    """Create a named principal-owned Google connection."""
+
+    display_name: str = Field(..., min_length=1, max_length=120)
+    is_default: bool = False
 
 
 class GoogleOAuthStartResponse(BaseModel):
@@ -1940,3 +1953,7 @@ class ConfigurationError(BaseModel):
     error_message: str
     error_type: str
     timestamp: datetime
+    connection_id: str | None = None
+    slug: str | None = None
+    display_name: str | None = None
+    is_default: bool = False

@@ -26,7 +26,5 @@ def connection_requirement_available(requirement: ConnectionRequirement) -> bool
         return False
     authority = require_current_execution_authority()
     if requirement is ConnectionRequirement.GOOGLE_GMAIL_READ:
-        return google.capability_availability(
-            authority, GoogleCapability.GMAIL_READ
-        ).available
+        return google.any_capability_available(authority, GoogleCapability.GMAIL_READ)
     return False

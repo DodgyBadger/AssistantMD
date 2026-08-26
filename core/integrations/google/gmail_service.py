@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from core.connections import BuiltInConnectionService, GmailPreferences
+from core.connections import (
+    BuiltInConnectionService,
+    GmailPreferences,
+    GoogleConnection,
+)
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
 
@@ -31,14 +35,20 @@ class GmailResourceService:
         self._oauth = oauth
         self._client_factory = client_factory
 
-    def status(self, authority: ExecutionAuthority) -> dict[str, object]:
+    def status(
+        self, authority: ExecutionAuthority, connection: str | None = None
+    ) -> dict[str, object]:
         """Return sanitized Gmail account and capability readiness."""
-        status = self._google.status(authority)
+        selected = self._resolve_connection(authority, connection)
+        status = self._google.status(authority, selected.connection_id)
         availability = self._google.capability_availability(
-            authority, GoogleCapability.GMAIL_READ
+            authority, GoogleCapability.GMAIL_READ, selected.connection_id
         )
         return {
             "provider": "google",
+            "connection": selected.slug,
+            "connection_name": selected.display_name,
+            "is_default": selected.is_default,
             "capability": GoogleCapability.GMAIL_READ.value,
             "available": availability.available,
             "connection_state": availability.connection_state,
@@ -46,15 +56,27 @@ class GmailResourceService:
             "missing_scopes": list(availability.missing_scopes),
         }
 
+    def list_connections(
+        self, authority: ExecutionAuthority
+    ) -> list[dict[str, object]]:
+        """List sanitized Google account selectors and Gmail readiness."""
+        return [
+            self.status(authority, connection.slug)
+            for connection in self._connections.list_google_connections_for_authority(
+                authority
+            )
+        ]
+
     async def search(
         self,
         authority: ExecutionAuthority,
         *,
         query: str,
         max_results: int | None = None,
+        connection: str | None = None,
     ) -> tuple[GmailSearchResult, bool]:
         """Search under principal configuration and report request capping."""
-        preferences = self._preferences(authority)
+        selected, preferences = self._preferences(authority, connection)
         requested = max_results or preferences.search_default_results
         effective = min(requested, preferences.search_max_results)
         capped = requested > effective
@@ -63,12 +85,13 @@ class GmailResourceService:
             data={
                 "event": "gmail_search_started",
                 "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
                 "max_results": effective,
                 "request_capped": capped,
             },
         )
         try:
-            result = await self._client(authority).search(
+            result = await self._client(authority, selected.connection_id).search(
                 query=query, max_results=effective
             )
         except Exception as exc:
@@ -79,6 +102,7 @@ class GmailResourceService:
             data={
                 "event": "gmail_search_completed",
                 "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
                 "result_count": result.result_count,
                 "partial": result.partial,
             },
@@ -86,11 +110,15 @@ class GmailResourceService:
         return result, capped
 
     async def get_message(
-        self, authority: ExecutionAuthority, message_id: str
+        self,
+        authority: ExecutionAuthority,
+        message_id: str,
+        *,
+        connection: str | None = None,
     ) -> GmailMessage:
-        preferences = self._preferences(authority)
+        selected, preferences = self._preferences(authority, connection)
         try:
-            result = await self._client(authority).get_message(
+            result = await self._client(authority, selected.connection_id).get_message(
                 message_id, max_characters=preferences.message_max_characters
             )
         except Exception as exc:
@@ -101,6 +129,7 @@ class GmailResourceService:
             data={
                 "event": "gmail_message_read_completed",
                 "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
                 "text_characters": len(result.text),
                 "text_truncated": result.text_truncated,
                 "attachment_count": len(result.attachments),
@@ -110,11 +139,15 @@ class GmailResourceService:
         return result
 
     async def get_thread(
-        self, authority: ExecutionAuthority, thread_id: str
+        self,
+        authority: ExecutionAuthority,
+        thread_id: str,
+        *,
+        connection: str | None = None,
     ) -> GmailThread:
-        preferences = self._preferences(authority)
+        selected, preferences = self._preferences(authority, connection)
         try:
-            result = await self._client(authority).get_thread(
+            result = await self._client(authority, selected.connection_id).get_thread(
                 thread_id,
                 max_messages=preferences.thread_max_messages,
                 max_characters=preferences.message_max_characters,
@@ -127,6 +160,7 @@ class GmailResourceService:
             data={
                 "event": "gmail_thread_read_completed",
                 "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
                 "message_count": len(result.messages),
                 "omitted_message_count": result.omitted_message_count,
                 "truncated": result.truncated,
@@ -134,24 +168,50 @@ class GmailResourceService:
         )
         return result
 
-    def _preferences(self, authority: ExecutionAuthority) -> GmailPreferences:
+    def _preferences(
+        self, authority: ExecutionAuthority, selector: str | None
+    ) -> tuple[GoogleConnection, GmailPreferences]:
+        connection = self._resolve_connection(authority, selector)
         availability = self._google.capability_availability(
-            authority, GoogleCapability.GMAIL_READ
+            authority, GoogleCapability.GMAIL_READ, connection.connection_id
         )
         if not availability.available:
             raise ValueError(
                 "Gmail connection is unavailable. Reconnect Google with Gmail read access."
             )
-        connection = self._connections.get_google_connection_for_authority(authority)
-        if connection is None:
-            raise ValueError("Google connection is not configured.")
-        return connection.gmail
+        return connection, connection.gmail
 
-    def _client(self, authority: ExecutionAuthority) -> GmailAPIClient:
+    def _resolve_connection(
+        self, authority: ExecutionAuthority, selector: str | None
+    ) -> GoogleConnection:
+        if selector is None or not str(selector).strip():
+            connection = self._connections.get_google_connection_for_authority(
+                authority
+            )
+        else:
+            connection = self._connections.get_google_connection_by_slug_for_authority(
+                authority, str(selector).strip()
+            )
+        if connection is None:
+            available = ", ".join(
+                item.slug
+                for item in self._connections.list_google_connections_for_authority(
+                    authority
+                )
+            )
+            suffix = f" Available connections: {available}." if available else ""
+            raise ValueError(f"Google connection was not found.{suffix}")
+        return connection
+
+    def _client(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> GmailAPIClient:
         if self._client_factory is not None:
             return self._client_factory(authority)
         return GmailAPIClient(
-            access_token_provider=lambda: self._oauth.access_token(authority)
+            access_token_provider=lambda: self._oauth.access_token(
+                authority, connection_id
+            )
         )
 
 

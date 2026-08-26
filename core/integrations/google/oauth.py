@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from core.connections import BuiltInConnectionService
+from core.connections import BuiltInConnectionService, GoogleConnection
 from core.identity import ExecutionAuthority
 from core.oauth import (
     EncryptedOAuthStorage,
@@ -74,25 +74,31 @@ class GoogleOAuthCoordinator:
         authority: ExecutionAuthority,
         redirect_uri: str,
         capabilities: tuple[GoogleCapability, ...],
+        connection_id: str | None = None,
     ) -> GoogleOAuthStart:
         """Create and durably store one authorization-code/PKCE attempt."""
-        connection = self._connections.get_google_connection_for_authority(authority)
+        connection = self._connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
         if connection is None:
             raise GoogleOAuthError("Save Google connection configuration first.")
-        if self._google.resolve_client_secret(authority) is None:
+        if (
+            self._google.resolve_client_secret(authority, connection.connection_id)
+            is None
+        ):
             raise GoogleOAuthError("Save the Google OAuth client secret first.")
         try:
             clean_redirect = validate_redirect_uri(redirect_uri)
         except ValueError as exc:
             raise GoogleOAuthError("Google OAuth redirect URI is invalid.") from exc
-        existing = self._google.load_token_state(authority)
+        existing = self._google.load_token_state(authority, connection.connection_id)
         requested = set(existing.scopes if existing is not None else ())
         for capability in capabilities:
             requested.update(capability.required_scopes)
         requested_scopes = tuple(sorted(requested))
         pkce = OAuthPKCEState.generate()
         expires_at = datetime.now(UTC) + timedelta(seconds=GOOGLE_OAUTH_PENDING_SECONDS)
-        self._storage(authority).put_sync(
+        self._storage(authority, connection.connection_id).put_sync(
             _PENDING_KEY,
             {
                 "state": pkce.state,
@@ -132,9 +138,15 @@ class GoogleOAuthCoordinator:
         authority: ExecutionAuthority,
         code: str,
         state: str,
+        connection_id: str | None = None,
     ) -> GoogleOAuthTokenState:
         """Exchange one persisted attempt and verify the connected identity."""
-        pending = self._load_pending(authority)
+        connection = self._connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+        if connection is None:
+            raise GoogleOAuthError("Google connection was not found.")
+        pending = self._load_pending(authority, connection.connection_id)
         if pending is None:
             raise GoogleOAuthError("No active Google authorization attempt was found.")
         try:
@@ -145,11 +157,10 @@ class GoogleOAuthCoordinator:
                 code_challenge="unused",
             ).matches_state(state):
                 raise GoogleOAuthError("Google OAuth state did not match.")
-            connection = self._connections.get_google_connection_for_authority(
-                authority
+            client_secret = self._google.resolve_client_secret(
+                authority, connection.connection_id
             )
-            client_secret = self._google.resolve_client_secret(authority)
-            if connection is None or client_secret is None:
+            if client_secret is None:
                 raise GoogleOAuthError("Google OAuth client configuration is missing.")
             token = await request_oauth_token(
                 token_endpoint=GOOGLE_TOKEN_ENDPOINT,
@@ -172,7 +183,9 @@ class GoogleOAuthCoordinator:
                     "Google authorization returned a different account. "
                     "Disconnect the existing account before replacing it."
                 )
-            existing = self._google.load_token_state(authority)
+            existing = self._google.load_token_state(
+                authority, connection.connection_id
+            )
             refresh_token = token.refresh_token or (
                 existing.refresh_token if existing is not None else None
             )
@@ -196,41 +209,57 @@ class GoogleOAuthCoordinator:
                 account_id=account_id,
                 account_email=account_email,
             )
-            self._google.save_token_state(authority, result)
+            self._google.save_token_state(authority, result, connection.connection_id)
             return result
         except OAuthTokenExchangeError as exc:
             raise GoogleOAuthError(
                 "Google rejected OAuth completion. Start authorization again."
             ) from exc
         finally:
-            self._storage(authority).delete_sync(
+            self._storage(authority, connection.connection_id).delete_sync(
                 _PENDING_KEY, collection=_OAUTH_COLLECTION
             )
 
-    async def refresh(self, authority: ExecutionAuthority) -> GoogleOAuthTokenState:
+    async def refresh(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> GoogleOAuthTokenState:
         """Refresh one Google grant under a per-principal serialization lock."""
-        lock = self._refresh_locks.setdefault(authority.principal_id, asyncio.Lock())
+        connection = self._require_connection(authority, connection_id)
+        lock = self._refresh_locks.setdefault(
+            f"{authority.principal_id}:{connection.connection_id}", asyncio.Lock()
+        )
         async with lock:
-            return await self._refresh_locked(authority)
+            return await self._refresh_locked(authority, connection.connection_id)
 
-    async def access_token(self, authority: ExecutionAuthority) -> str:
+    async def access_token(
+        self, authority: ExecutionAuthority, connection_id: str | None = None
+    ) -> str:
         """Resolve a usable access token, refreshing expired grants once."""
-        lock = self._refresh_locks.setdefault(authority.principal_id, asyncio.Lock())
+        connection = self._require_connection(authority, connection_id)
+        lock = self._refresh_locks.setdefault(
+            f"{authority.principal_id}:{connection.connection_id}", asyncio.Lock()
+        )
         async with lock:
-            existing = self._google.load_token_state(authority)
+            existing = self._google.load_token_state(
+                authority, connection.connection_id
+            )
             if existing is None:
                 raise GoogleOAuthError("Google authorization must be connected.")
             if existing.expired:
-                existing = await self._refresh_locked(authority)
+                existing = await self._refresh_locked(
+                    authority, connection.connection_id
+                )
             return existing.access_token
 
     async def _refresh_locked(
-        self, authority: ExecutionAuthority
+        self, authority: ExecutionAuthority, connection_id: str
     ) -> GoogleOAuthTokenState:
         """Refresh while the caller holds the principal's serialization lock."""
-        existing = self._google.load_token_state(authority)
-        connection = self._connections.get_google_connection_for_authority(authority)
-        client_secret = self._google.resolve_client_secret(authority)
+        existing = self._google.load_token_state(authority, connection_id)
+        connection = self._connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+        client_secret = self._google.resolve_client_secret(authority, connection_id)
         if (
             existing is None
             or not existing.refresh_token
@@ -265,7 +294,7 @@ class GoogleOAuthCoordinator:
             account_id=existing.account_id,
             account_email=existing.account_email,
         )
-        self._google.save_token_state(authority, refreshed)
+        self._google.save_token_state(authority, refreshed, connection_id)
         return refreshed
 
     async def _load_identity(self, access_token: str) -> dict[str, object]:
@@ -285,16 +314,30 @@ class GoogleOAuthCoordinator:
                 "Google account identity could not be verified."
             ) from exc
 
-    def _load_pending(self, authority: ExecutionAuthority) -> dict[str, object] | None:
-        return self._storage(authority).get_sync(
+    def _load_pending(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> dict[str, object] | None:
+        return self._storage(authority, connection_id).get_sync(
             _PENDING_KEY, collection=_OAUTH_COLLECTION
         )
 
-    def _storage(self, authority: ExecutionAuthority) -> EncryptedOAuthStorage:
+    def _require_connection(
+        self, authority: ExecutionAuthority, connection_id: str | None
+    ) -> GoogleConnection:
+        connection = self._connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+        if connection is None:
+            raise GoogleOAuthError("Google connection was not found.")
+        return connection
+
+    def _storage(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> EncryptedOAuthStorage:
         return EncryptedOAuthStorage(
             secrets=self._secrets,
             authority=authority,
-            namespace=GOOGLE_OAUTH_NAMESPACE,
+            namespace=f"{GOOGLE_OAUTH_NAMESPACE}.{connection_id}",
         )
 
 

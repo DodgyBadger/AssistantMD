@@ -435,24 +435,6 @@
             </div>
 
             <div class="space-y-4">
-                <details id="config-deployment-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm" open>
-                    <summary class="collapsible-summary">
-                        <div class="summary-text">
-                            <span class="summary-title">Deployment</span>
-                        </div>
-                        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                    </summary>
-                    <div class="p-4 pt-0 space-y-2">
-                        <p class="text-sm text-txt-secondary">Instance-level values are configured in <code>.env</code> and require an application restart.</p>
-                        <label class="block text-xs text-txt-secondary">Canonical public URL
-                            <input id="configured-public-url" readonly class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" value="Loading…" />
-                        </label>
-                        <div id="configured-public-url-help" class="text-xs text-txt-secondary"></div>
-                    </div>
-                </details>
-
                 <details id="config-models-section" class="bg-app-card border border-border-primary rounded-lg shadow-sm">
                     <summary class="collapsible-summary">
                         <div class="summary-text">
@@ -569,11 +551,13 @@
                         </svg>
                     </summary>
                     <div class="p-4 pt-0 space-y-4">
-                        <h3 class="text-sm font-medium text-txt-primary">Built-in connections</h3>
-                        <p class="text-sm text-txt-secondary">
-                            Built-in connections add tools only after you configure and authorize them. One Google connection can support Gmail and future Google capabilities.
-                        </p>
-                        <form id="google-connection-form" class="rounded-lg border border-border-primary bg-app-card p-4 space-y-4">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button id="connection-add-google" type="button" class="px-3 py-2 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-hover">Add Google</button>
+                            <button id="connection-add-mcp" type="button" class="px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Add MCP</button>
+                        </div>
+                        <div id="connections-feedback" class="text-sm text-txt-secondary"></div>
+                        <div id="google-connections-list" class="flex flex-col gap-3"></div>
+                        <form id="google-connection-form" class="hidden rounded-lg border border-border-primary bg-app-card p-4 space-y-4">
                             <div class="flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                     <h3 class="font-medium text-txt-primary">Google</h3>
@@ -586,6 +570,10 @@
                                 </div>
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
+                                <label class="text-xs text-txt-secondary">Connection name
+                                    <input name="display_name" required maxlength="120" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Personal Google" />
+                                </label>
+                                <label class="flex items-center self-end pb-2 text-sm text-txt-primary"><input name="is_default" type="checkbox" class="mr-2" />Use as default Google connection</label>
                                 <label class="text-xs text-txt-secondary">OAuth client ID
                                     <input name="client_id" required maxlength="2048" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="off" />
                                 </label>
@@ -593,7 +581,7 @@
                                     <input name="client_secret" type="password" maxlength="16384" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" autocomplete="new-password" placeholder="Leave blank to preserve stored secret" />
                                 </label>
                                 <label class="text-xs text-txt-secondary md:col-span-2">Authorized redirect URI
-                                    <input name="redirect_uri" readonly class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" placeholder="Set ASSISTANTMD_PUBLIC_URL to generate the callback URI" />
+                                    <span class="mt-1 flex items-start gap-2"><input name="redirect_uri" readonly class="min-w-0 flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" placeholder="Set ASSISTANTMD_PUBLIC_URL to generate the callback URI" /><button type="button" data-google-copy="redirect_uri" class="ui-icon-button is-compact" data-icon="copy" data-icon-label="Copy authorized redirect URI"></button></span>
                                 </label>
                             </div>
                             <fieldset class="rounded-md border border-border-primary p-3 space-y-3">
@@ -610,19 +598,16 @@
                                 <span class="text-xs text-txt-secondary">Save the client settings first, then authorize Gmail read access.</span>
                             </div>
                             <label class="text-xs text-txt-secondary">Authorization URL
-                                <textarea name="authorization_url" readonly rows="3" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize Google to generate a URL you can copy into another browser."></textarea>
+                                <span class="mt-1 flex items-start gap-2"><textarea name="authorization_url" readonly rows="3" class="min-w-0 flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize Google to generate a URL you can copy into another browser."></textarea><button type="button" data-google-copy="authorization_url" class="ui-icon-button is-compact" data-icon="copy" data-icon-label="Copy authorization URL"></button></span>
                             </label>
-                            <details class="rounded-md border border-border-primary px-3 py-2">
-                                <summary class="cursor-pointer text-xs font-medium text-txt-primary">Headless callback fallback</summary>
-                                <div class="pt-2 space-y-2">
-                                    <p class="text-xs text-txt-secondary">If the browser cannot reach AssistantMD's callback, paste the full redirected URL here.</p>
-                                    <div class="flex flex-col gap-2 sm:flex-row"><input name="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-google-action="complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish authorization</button></div>
-                                </div>
-                            </details>
+                            <div class="space-y-2">
+                                <p class="text-xs text-txt-secondary">If the browser cannot reach AssistantMD's callback, paste the full redirected URL here.</p>
+                                <div class="flex flex-col gap-2 sm:flex-row"><input name="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-google-action="complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish authorization</button></div>
+                            </div>
                             <div id="google-connection-feedback" class="text-sm text-txt-secondary"></div>
                         </form>
-                <details id="config-mcp-section" class="border border-border-primary rounded-lg">
-                    <summary class="collapsible-summary">
+                <details id="config-mcp-section" class="contents" open>
+                    <summary class="hidden">
                         <div class="summary-text">
                             <span class="summary-title">MCP Connections</span>
                         </div>
@@ -630,11 +615,8 @@
                             <path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                         </svg>
                     </summary>
-                    <div class="p-4 pt-0 space-y-4">
-                        <p class="text-sm text-txt-secondary">
-                            Enabled servers make their allowed tools available for discovery in every chat. Only connect servers you trust: AssistantMD does not infer whether an MCP tool is read-only or mutating.
-                        </p>
-                        <form id="mcp-create-form" class="rounded-lg border border-border-primary bg-app-card p-4 space-y-3">
+                    <div class="contents">
+                        <form id="mcp-create-form" class="hidden rounded-lg border border-border-primary bg-app-card p-4 space-y-3">
                             <div class="grid gap-3 md:grid-cols-2">
                                 <label class="text-xs text-txt-secondary">Display name
                                     <input name="display_name" required maxlength="120" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Gmail" />
@@ -677,13 +659,14 @@
                             </div>
                             <div class="flex items-center justify-between gap-3">
                                 <label class="text-sm text-txt-primary"><input name="enabled" type="checkbox" checked class="mr-2" />Enabled</label>
-                                <button type="submit" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Connection"></button>
+                                <div class="flex items-center gap-2">
+                                    <button type="button" data-mcp-create-action="cancel" class="ui-icon-button is-danger" data-icon="trash" data-icon-label="Cancel new MCP connection"></button>
+                                    <button type="submit" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Connection"></button>
+                                </div>
                             </div>
                         </form>
                         <div id="mcp-feedback" class="text-sm text-txt-secondary"></div>
-                        <div id="mcp-connections-list" class="flex flex-col gap-3">
-                            <div class="rounded-lg border border-border-primary bg-app-card px-4 py-3 text-sm text-txt-secondary text-center shadow-sm">Loading MCP connections…</div>
-                        </div>
+                        <div id="mcp-connections-list" class="flex flex-col gap-3"></div>
                     </div>
                 </details>
                     </div>
@@ -768,9 +751,10 @@
                         </svg>
                     </summary>
                     <div class="p-4 pt-0 space-y-4">
-                        <p class="text-sm text-txt-secondary">
-                            Manual maintenance actions that do not fit elsewhere.
-                        </p>
+                        <div class="bg-app-elevated border border-border-primary rounded-md p-4 space-y-2">
+                            <p class="text-xs text-txt-secondary">Configured by <code>ASSISTANTMD_PUBLIC_URL</code> in <code>.env</code> and applied when AssistantMD starts.</p>
+                            <input id="configured-public-url" aria-label="Canonical public URL" readonly class="w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" value="Loading…" />
+                        </div>
                         <div class="bg-app-elevated border border-border-primary rounded-md p-4 space-y-3">
                             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                                 <div>

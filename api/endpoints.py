@@ -91,6 +91,7 @@ from .models import (
     GoalCleanupRequest,
     GoalCleanupResponse,
     GoogleClientSecretUpdateRequest,
+    GoogleConnectionCreateRequest,
     GoogleConnectionResponse,
     GoogleConnectionUpdateRequest,
     GoogleOAuthCompleteRequest,
@@ -244,12 +245,16 @@ from .services import (
 )
 from .services.google_connections import (
     complete_google_oauth,
+    create_google_connection,
     delete_google_connection,
     disconnect_google_oauth,
     get_google_connection,
+    get_google_connection_by_id,
+    list_google_connections,
     set_google_client_secret,
     start_google_oauth,
     update_google_connection,
+    update_google_connection_by_id,
 )
 from .services.mcp import (
     clear_mcp_credential,
@@ -1344,6 +1349,155 @@ async def delete_google_connection_endpoint() -> OperationResult | JSONResponse:
     """Remove all current-principal Google connection state."""
     try:
         return delete_google_connection()
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.get(
+    "/system/connections/google/connections",
+    response_model=list[GoogleConnectionResponse],
+)
+async def list_google_connections_endpoint() -> (
+    list[GoogleConnectionResponse] | JSONResponse
+):
+    """List the current principal's Google connections."""
+    try:
+        return list_google_connections()
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.post(
+    "/system/connections/google/connections",
+    response_model=GoogleConnectionResponse,
+)
+async def create_google_connection_endpoint(
+    payload: GoogleConnectionCreateRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Create a named Google connection for the current principal."""
+    try:
+        return create_google_connection(payload)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.get(
+    "/system/connections/google/connections/{connection_id}",
+    response_model=GoogleConnectionResponse,
+)
+async def get_google_connection_by_id_endpoint(
+    connection_id: str,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Return one current-principal Google connection."""
+    try:
+        return get_google_connection_by_id(connection_id)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.put(
+    "/system/connections/google/connections/{connection_id}",
+    response_model=GoogleConnectionResponse,
+)
+async def update_google_connection_by_id_endpoint(
+    connection_id: str,
+    payload: GoogleConnectionUpdateRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Update one named Google connection."""
+    try:
+        return update_google_connection_by_id(connection_id, payload)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.put(
+    "/system/connections/google/connections/{connection_id}/client-secret",
+    response_model=GoogleConnectionResponse,
+)
+async def set_google_client_secret_by_id_endpoint(
+    connection_id: str,
+    payload: GoogleClientSecretUpdateRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Set the write-only client secret for one Google connection."""
+    try:
+        return set_google_client_secret(payload, connection_id)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.post(
+    "/system/connections/google/connections/{connection_id}/oauth/start",
+    response_model=GoogleOAuthStartResponse,
+)
+async def start_google_oauth_by_id_endpoint(
+    connection_id: str,
+) -> GoogleOAuthStartResponse | JSONResponse:
+    """Start OAuth for one Google connection."""
+    try:
+        return start_google_oauth(connection_id)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.get("/system/connections/google/connections/{connection_id}/oauth/callback")
+async def complete_google_oauth_callback_by_id_endpoint(
+    connection_id: str,
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+) -> HTMLResponse:
+    """Complete OAuth for one Google connection from its browser callback."""
+    try:
+        await complete_google_oauth(
+            GoogleOAuthCompleteRequest(redirect_url=None, code=code, state=state),
+            connection_id,
+        )
+        return HTMLResponse(_google_oauth_callback_page(success=True))
+    except Exception:
+        return HTMLResponse(_google_oauth_callback_page(success=False), status_code=400)
+
+
+@router.post(
+    "/system/connections/google/connections/{connection_id}/oauth/complete",
+    response_model=GoogleConnectionResponse,
+)
+async def complete_google_oauth_manual_by_id_endpoint(
+    connection_id: str,
+    payload: GoogleOAuthCompleteRequest,
+) -> GoogleConnectionResponse | JSONResponse:
+    """Complete OAuth for one connection using a pasted callback URL."""
+    try:
+        return await complete_google_oauth(payload, connection_id)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.delete(
+    "/system/connections/google/connections/{connection_id}/oauth",
+    response_model=OperationResult,
+)
+async def disconnect_google_oauth_by_id_endpoint(
+    connection_id: str,
+) -> OperationResult | JSONResponse:
+    """Disconnect one Google grant while preserving its client configuration."""
+    try:
+        return disconnect_google_oauth(connection_id)
+    except Exception as exc:
+        return create_error_response(exc)
+
+
+@router.delete(
+    "/system/connections/google/connections/{connection_id}",
+    response_model=OperationResult,
+)
+async def delete_google_connection_by_id_endpoint(
+    connection_id: str,
+    replacement_default_id: str | None = Query(None),
+) -> OperationResult | JSONResponse:
+    """Delete one Google connection and its encrypted credentials."""
+    try:
+        return delete_google_connection(
+            connection_id, replacement_default_id=replacement_default_id
+        )
     except Exception as exc:
         return create_error_response(exc)
 

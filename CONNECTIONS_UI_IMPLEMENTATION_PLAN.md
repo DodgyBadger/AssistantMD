@@ -98,16 +98,16 @@ when the intended account is ambiguous.
 
 ## Implementation slices
 
-1. Build a shared connection-card shell and lean add-action row, then render MCP
+1. **Complete.** Build a shared connection-card shell and lean add-action row, then render MCP
    create/edit forms through that shell without changing MCP APIs.
-2. Add the multi-Google schema, service, credential migration, and collection
+2. **Complete.** Add the multi-Google schema, service, credential migration, and collection
    API contracts using the existing MCP identity pattern.
-3. Convert Google OAuth and Gmail resource services to explicit connection IDs.
-4. Render Google draft and saved cards through the shared UI, including names,
+3. **Complete.** Convert Google OAuth and Gmail resource services to explicit connection IDs.
+4. **Complete.** Render Google draft and saved cards through the shared UI, including names,
    default selection, per-card feedback, authorization, disconnect, and
    deletion.
-5. Implement default and explicit-slug Gmail selection in chat and workflows.
-6. Remove the permanent forms and built-in/MCP subsection disclosures, align
+5. **Complete.** Implement default and explicit-slug Gmail selection in chat and workflows.
+6. **Complete.** Remove the permanent forms and built-in/MCP subsection disclosures, align
    current-contract documentation, and complete accessibility, responsive,
    empty-state, and mixed-card review.
 

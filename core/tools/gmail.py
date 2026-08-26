@@ -32,14 +32,16 @@ class Gmail(BaseTool):
             max_results: int | None = None,
             message_id: str = "",
             thread_id: str = "",
+            connection: str = "",
         ) -> str:
             """Read a configured Gmail account without changing mailbox state.
 
-            :param operation: status, search, get_message, or get_thread
+            :param operation: connections, status, search, get_message, or get_thread
             :param query: Gmail search syntax for the search operation
             :param max_results: Optional requested search result count
             :param message_id: Message handle returned by search
             :param thread_id: Thread handle returned by search or get_message
+            :param connection: Optional Google connection slug; omitted uses the default
             """
             runtime = get_runtime_context()
             service = runtime.gmail
@@ -49,20 +51,35 @@ class Gmail(BaseTool):
                 )
             authority = require_current_execution_authority()
             normalized = str(operation or "").strip().lower()
-            if normalized == "status":
-                payload = service.status(authority)
+            payload: dict[str, object]
+            if normalized == "connections":
+                payload = {"connections": service.list_connections(authority)}
+            elif normalized == "status":
+                payload = service.status(authority, connection or None)
             elif normalized == "search":
                 result, capped = await service.search(
-                    authority, query=query, max_results=max_results
+                    authority,
+                    query=query,
+                    max_results=max_results,
+                    connection=connection or None,
                 )
                 payload = {**asdict(result), "max_results_capped": capped}
             elif normalized == "get_message":
-                payload = asdict(await service.get_message(authority, message_id))
+                payload = asdict(
+                    await service.get_message(
+                        authority, message_id, connection=connection or None
+                    )
+                )
             elif normalized == "get_thread":
-                payload = asdict(await service.get_thread(authority, thread_id))
+                payload = asdict(
+                    await service.get_thread(
+                        authority, thread_id, connection=connection or None
+                    )
+                )
             else:
                 raise ValueError(
-                    "Gmail operation must be status, search, get_message, or get_thread."
+                    "Gmail operation must be connections, status, search, get_message, "
+                    "or get_thread."
                 )
             return json.dumps(
                 {"untrusted_content_notice": _UNTRUSTED_NOTICE, **payload},
@@ -74,8 +91,10 @@ class Gmail(BaseTool):
             gmail,
             name="gmail",
             description=(
-                "Read the configured Gmail account. Search first, then retrieve a "
-                "message or thread by ID. Read __virtual_docs__/tools/gmail.md before use."
+                "Read configured Gmail accounts. List connections when account choice "
+                "is unclear; omitted connection uses the default. Search first, then "
+                "retrieve a message or thread by ID. Read "
+                "__virtual_docs__/tools/gmail.md before use."
             ),
         )
 

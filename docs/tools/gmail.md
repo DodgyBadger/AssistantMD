@@ -1,12 +1,17 @@
 # Gmail
 
-Use `gmail` only for the Google account configured under **System →
-Connections**. It is read-only and cannot send, draft, label, archive, delete,
-or mark messages read.
+Use `gmail` only for Google accounts configured under **System → Connections**.
+It is read-only and cannot send, draft, label, archive, delete, or mark messages
+read. Omit `connection` to use the default account, or pass a connection slug
+to select another account explicitly.
 
 Operations:
 
-- `status` reports sanitized connection readiness and account identity.
+- `connections` lists available connection slugs, display names, account
+  identities, default status, and Gmail readiness. Use it when the intended
+  account is unclear.
+- `status` reports sanitized readiness and account identity for the selected
+  connection.
 - `search` accepts Gmail search syntax in `query` and an optional
   `max_results`. It returns compact message handles, headers, labels, and
   snippets—not complete bodies.

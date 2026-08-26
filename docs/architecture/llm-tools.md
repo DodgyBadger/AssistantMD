@@ -144,10 +144,11 @@ construction fails with actionable reconnect/switch-auth guidance.
 ## Connection-backed Gmail Tool
 
 The built-in `gmail` tool uses the normal settings-backed first-class tool path,
-but effective bindings include it only when the execution principal's Google
-connection has a usable grant containing `gmail.readonly`. It provides
-read-only status, search, message, and thread operations through a provider
-resource service independent from LLM formatting.
+but effective bindings include it only when the execution principal has a
+Google connection with a usable `gmail.readonly` grant. It provides read-only
+connection discovery, status, search, message, and thread operations through a
+provider resource service independent from LLM formatting. Calls use the
+principal's explicit default unless a stable connection slug is supplied.
 
 Email content is marked as untrusted external data. Message bodies, search
 results, thread sizes, and attachment descriptor counts are bounded before they

@@ -28,6 +28,7 @@ if __name__ == "__main__":
 from core.connections import (  # noqa: E402
     BuiltInConnectionService,
     ConnectionRequirement,
+    GoogleConnectionCreate,
     GoogleConnectionUpdate,
     connection_requirement_available,
 )
@@ -35,8 +36,10 @@ from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E
 from core.integrations.google import (  # noqa: E402
     GMAIL_READONLY_SCOPE,
     GOOGLE_IDENTITY_SCOPES,
+    GmailResourceService,
     GoogleCapability,
     GoogleConnectionService,
+    GoogleOAuthCoordinator,
     GoogleOAuthTokenState,
 )
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
@@ -141,6 +144,52 @@ class GmailPrincipalConnectionScenario(BaseScenario):
             "Another principal must not inherit Google configuration or tokens",
         )
 
+        work = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Work Gmail",
+                client_id="work.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "work-client-secret", work.connection_id)
+        google.save_token_state(
+            owner,
+            GoogleOAuthTokenState(
+                access_token="work-access-token",
+                refresh_token="work-refresh-token",
+                expires_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                scopes=(*GOOGLE_IDENTITY_SCOPES, GMAIL_READONLY_SCOPE),
+                account_id="work-account-id",
+                account_email="work@example.com",
+            ),
+            work.connection_id,
+        )
+        gmail = GmailResourceService(
+            connections=connections,
+            google=google,
+            oauth=GoogleOAuthCoordinator(
+                connections=connections,
+                google=google,
+                secrets=secrets,
+            ),
+        )
+        discovered = gmail.list_connections(owner)
+        self.soft_assert_equal(
+            [(item["connection"], item["account_email"]) for item in discovered],
+            [("google", "owner@example.com"), ("work-gmail", "work@example.com")],
+            "Gmail should expose stable account selectors and sanitized identities",
+        )
+        self.soft_assert_equal(
+            gmail.status(owner)["account_email"],
+            "owner@example.com",
+            "An omitted Gmail selector should resolve the explicit default",
+        )
+        self.soft_assert_equal(
+            gmail.status(owner, "work-gmail")["account_email"],
+            "work@example.com",
+            "An explicit Gmail slug should select the requested account",
+        )
+
         database_bytes = (system_root / "secrets.db").read_bytes()
         for sensitive in (
             b"owner-client-secret",
@@ -148,6 +197,8 @@ class GmailPrincipalConnectionScenario(BaseScenario):
             b"owner-refresh-token",
             b"owner@example.com",
             b"owner-account-id",
+            b"work-client-secret",
+            b"work-access-token",
         ):
             self.soft_assert(
                 sensitive not in database_bytes,
