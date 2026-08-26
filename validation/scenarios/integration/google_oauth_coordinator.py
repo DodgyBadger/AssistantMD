@@ -27,6 +27,7 @@ if __name__ == "__main__":
 
 from core.connections import (  # noqa: E402
     BuiltInConnectionService,
+    GoogleConnectionCreate,
     GoogleConnectionUpdate,
 )
 from core.identity import ExecutionAuthority  # noqa: E402
@@ -67,6 +68,14 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             secrets=secrets,
             http_client_factory=lambda: _oauth_client(requests),
         )
+        secondary = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Secondary Google",
+                client_id="secondary.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "secondary-secret", secondary.connection_id)
 
         started = coordinator.start(
             authority=owner,
@@ -85,6 +94,15 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             "Google authorization should request offline incremental PKCE consent",
         )
         state = query["state"][0]
+        secondary_started = coordinator.start(
+            authority=owner,
+            redirect_uri=started.redirect_uri,
+            capabilities=(GoogleCapability.GMAIL_READ,),
+            connection_id=secondary.connection_id,
+        )
+        secondary_state = parse_qs(urlparse(secondary_started.authorization_url).query)[
+            "state"
+        ][0]
         completed = await coordinator.complete(
             authority=owner,
             code="authorization-code",
@@ -98,6 +116,19 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             ),
             ("owner@example.com", "initial-refresh-token", "ready"),
             "OAuth completion should verify identity and persist a ready grant",
+        )
+        secondary_completed = await coordinator.complete(
+            authority=owner,
+            code="secondary-authorization-code",
+            state=secondary_state,
+        )
+        self.soft_assert_equal(
+            (
+                secondary_completed.account_email,
+                google.status(owner, secondary.connection_id).state,
+            ),
+            ("owner@example.com", "ready"),
+            "A shared callback should resolve the pending non-default connection by state",
         )
 
         refreshed = await coordinator.refresh(owner)

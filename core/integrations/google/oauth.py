@@ -141,8 +141,12 @@ class GoogleOAuthCoordinator:
         connection_id: str | None = None,
     ) -> GoogleOAuthTokenState:
         """Exchange one persisted attempt and verify the connected identity."""
-        connection = self._connections.get_google_connection_for_authority(
-            authority, connection_id
+        connection = (
+            self._connection_for_pending_state(authority, state)
+            if connection_id is None
+            else self._connections.get_google_connection_for_authority(
+                authority, connection_id
+            )
         )
         if connection is None:
             raise GoogleOAuthError("Google connection was not found.")
@@ -219,6 +223,25 @@ class GoogleOAuthCoordinator:
             self._storage(authority, connection.connection_id).delete_sync(
                 _PENDING_KEY, collection=_OAUTH_COLLECTION
             )
+
+    def _connection_for_pending_state(
+        self, authority: ExecutionAuthority, state: str
+    ) -> GoogleConnection | None:
+        """Resolve an installation callback to its principal-owned attempt."""
+        for connection in self._connections.list_google_connections_for_authority(
+            authority
+        ):
+            pending = self._load_pending(authority, connection.connection_id)
+            if pending is None:
+                continue
+            expected = str(pending.get("state") or "")
+            if expected and OAuthPKCEState(
+                state=expected,
+                code_verifier="unused",
+                code_challenge="unused",
+            ).matches_state(state):
+                return connection
+        return None
 
     async def refresh(
         self, authority: ExecutionAuthority, connection_id: str | None = None

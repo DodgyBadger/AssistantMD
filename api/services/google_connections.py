@@ -260,6 +260,7 @@ def _oauth_coordinator() -> GoogleOAuthCoordinator:
 
 
 def _oauth_redirect_uri(*, connection_id: str | None, required: bool) -> str | None:
+    del connection_id
     public_origin = get_runtime_context().config.public_origin
     if public_origin is None:
         if required:
@@ -272,12 +273,7 @@ def _oauth_redirect_uri(*, connection_id: str | None, required: bool) -> str | N
                 ),
             )
         return None
-    callback_path = (
-        f"/api/system/connections/google/connections/{connection_id}/oauth/callback"
-        if connection_id is not None
-        else GOOGLE_OAUTH_CALLBACK_PATH
-    )
-    return public_origin.build_url(callback_path)
+    return public_origin.build_url(GOOGLE_OAUTH_CALLBACK_PATH)
 
 
 def _secrets_locked() -> APIException:

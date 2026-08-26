@@ -44,8 +44,10 @@ connection per principal.
   mutable unique display name.
 - Scope client secrets, OAuth pending state, tokens, and account identity by
   principal and connection ID, following the existing MCP credential pattern.
-- Make Google API and OAuth routes connection-specific, including the callback
-  route, so simultaneous authorization attempts cannot collide.
+- Make Google API and OAuth actions connection-specific while using one stable
+  installation callback URI. Cryptographic OAuth state resolves callbacks to
+  connection-scoped pending attempts so simultaneous authorizations cannot
+  collide.
 - Keep OAuth client ID and client secret on each Google connection for the first
   iteration. Users may reuse the same Google OAuth client values across cards;
   extracting shared Google application credentials can be considered later if

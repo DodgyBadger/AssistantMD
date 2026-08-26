@@ -2290,7 +2290,7 @@ async function saveModelRow(rowKey) {
         setValue('display_name', connection?.display_name || '');
         setValue('client_id', connection?.client_id || '');
         setValue('client_secret', '');
-        setValue('redirect_uri', connection?.oauth_redirect_uri);
+        setValue('redirect_uri', connection?.oauth_redirect_uri || googleDraftRedirectUri());
         setValue('search_default_results', connection?.gmail?.search_default_results ?? 20);
         setValue('search_max_results', connection?.gmail?.search_max_results ?? 100);
         setValue('message_max_characters', connection?.gmail?.message_max_characters ?? 50000);
@@ -2330,6 +2330,16 @@ async function saveModelRow(rowKey) {
         state.googleDraft = true;
         renderGoogleConnection();
         elements.googleConnectionsList?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function googleDraftRedirectUri() {
+        const publicUrl = document.getElementById('configured-public-url')?.value?.trim();
+        if (!publicUrl || publicUrl === 'Loading…' || publicUrl === 'Not configured') return '';
+        try {
+            return new URL('/api/system/connections/google/oauth/callback', publicUrl).href;
+        } catch (_error) {
+            return '';
+        }
     }
 
     async function saveGoogleConnection(event) {
