@@ -9,10 +9,9 @@ running container.
 
 ### Upgrade requirements
 
-- Generate `ASSISTANTMD_SECRETS_KEYS` and
-  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` in `.env`, then ensure the Compose
-  service includes `env_file: .env`. The installation instructions provide a
-  Linux/OpenSSL command that writes a suitable key without printing it.
+- Generate `ASSISTANTMD_SECRETS_KEY` in `.env`, then ensure the Compose service
+  includes `env_file: .env`. The installation instructions provide a
+  Linux/OpenSSL command that generates a suitable value to copy into the file.
 - Back up both `.env` and the existing `system/` directory before upgrading,
   and keep those backups separate. The key in `.env` is required to decrypt
   `system/secrets.db`; a database backup alone cannot recover credentials.

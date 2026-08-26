@@ -52,14 +52,13 @@ scripts/dev setup
 ```
 
 Create a local encryption key before starting the application. The same
-restricted-file command used by production installations works on Linux:
+command used by production installations works on Linux:
 
 ```bash
-umask 077
-key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
-printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
-unset key
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 ```
+
+Copy the generated value into `.env` as `ASSISTANTMD_SECRETS_KEY`.
 
 `scripts/dev setup` checks for this configuration and prints the command when
 it is missing, but does not generate or overwrite `.env`. The encrypted secrets

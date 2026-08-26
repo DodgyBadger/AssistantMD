@@ -32,18 +32,20 @@ Create the installation encryption key in `.env` before starting AssistantMD.
 On Linux with OpenSSL installed, run:
 
 ```bash
-umask 077
-key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
-printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
-unset key
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 ```
 
-This command writes the key directly to a user-readable-only file without
-printing it. Keep `.env` separate from `system/secrets.db` backups. If `.env` is
-lost, AssistantMD can still start and display system diagnostics, but providers
-and models remain unavailable until the matching key is restored or encrypted
-credentials are reset and re-entered. AssistantMD does not provide key export or
-managed key backup.
+Copy the generated value into `.env`:
+
+```text
+ASSISTANTMD_SECRETS_KEY=PASTE_GENERATED_KEY_HERE
+```
+
+Keep `.env` separate from `system/secrets.db` backups. If `.env` is lost,
+AssistantMD can still start and display system diagnostics, but providers and
+models remain unavailable until the matching key is restored or encrypted
+credentials are reset and re-entered. AssistantMD does not provide key export
+or managed key backup.
 
 For an installation reached through a reverse proxy, also add the externally
 visible AssistantMD origin to `.env`:

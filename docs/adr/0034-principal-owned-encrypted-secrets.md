@@ -46,35 +46,24 @@ contain envelope version, key version, nonce, ciphertext, and created/updated
 timestamps. Secret values are UTF-8 text at the service boundary. Internal OAuth
 namespaces are not returned by generic enumeration APIs.
 
-Installation instructions require the user to generate the initial 32-byte key
-with a cryptographically secure platform command that writes directly to
-`.env` without printing the key. A committed `.env.example` supplies placeholders
-only. The application reads a versioned keyring from
-`ASSISTANTMD_SECRETS_KEYS`, encoded as a compact JSON object whose string keys
-are positive integer versions and whose values are unpadded URL-safe
-base64-encoded 32-byte keys. `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` selects the
-key for new writes. Initial installation creates version `1` and selects it.
+Installation instructions require the user to generate a 32-byte key with a
+cryptographically secure platform command and copy its unpadded URL-safe Base64
+representation into `ASSISTANTMD_SECRETS_KEY`. A committed `.env.example`
+supplies a placeholder only. The runtime treats this installation key as
+internal key version `1`; encrypted records retain their key version so a safe
+rotation workflow can be added later without changing the database format.
 
-When the keyring is missing, malformed, contains a non-32-byte key, omits the
-active version, or cannot authenticate existing records, startup enters an
-explicit secrets-locked state. The API and UI remain available for diagnosis,
-but model/provider execution and secret mutation are disabled, the YAML import
-is not attempted or marked complete, and encrypted state remains untouched. The
-System tab identifies the recovery action but never includes key material,
-plaintext, ciphertext, OAuth payloads, or credential values. There is no
-plaintext or newly generated-key fallback.
+When the key is missing, malformed, does not decode to 32 bytes, or cannot
+authenticate existing records, startup enters an explicit secrets-locked state.
+The API and UI remain available for diagnosis, but model/provider execution and
+secret mutation are disabled, the YAML import is not attempted or marked
+complete, and encrypted state remains untouched. The System tab identifies the
+recovery action but never includes key material, plaintext, ciphertext, OAuth
+payloads, or credential values. There is no plaintext or newly generated-key
+fallback.
 
-Rotation is explicit and versioned:
-
-1. Add a newly generated version to the `.env` keyring and select it as active.
-2. Re-encrypt all records using fresh nonces in one SQLite transaction, reading
-   each record back and authenticating it before commit.
-3. Remove an old key from `.env` only after the database proves no record still
-   references that version.
-
-Normal writes always use the active version. Reads may use inactive versions
-still present in the keyring, which makes interrupted operational rotation
-recoverable without silently accepting unknown keys.
+AssistantMD does not currently provide key rotation. Users must retain the same
+installation key while encrypted records exist.
 
 AssistantMD does not expose encryption-key download, export, escrow, or managed
 backup. Setup and recovery documentation warns that `.env` is plaintext key

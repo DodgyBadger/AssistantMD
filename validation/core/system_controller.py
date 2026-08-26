@@ -7,7 +7,6 @@ Manages AssistantMD system startup, shutdown, and configuration.
 import asyncio
 import base64
 import datetime as dt_module
-import json
 import os
 import subprocess
 from datetime import datetime
@@ -29,7 +28,7 @@ from core.runtime.config import RuntimeConfig
 from core.runtime.paths import set_bootstrap_roots
 from core.runtime.state import clear_runtime_context
 from core.secrets import reset_secrets_bootstrap_status
-from core.secrets.crypto import ACTIVE_KEY_VERSION_ENV, KEYRING_ENV
+from core.secrets.crypto import SECRET_KEY_ENV
 from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
 
 
@@ -66,14 +65,11 @@ class SystemController:
         set_bootstrap_roots(Path(self.test_data_root), self._system_root)
         self._seed_validation_settings()
 
-        self._original_secret_keyring = os.environ.get(KEYRING_ENV)
-        self._original_active_key_version = os.environ.get(ACTIVE_KEY_VERSION_ENV)
-        validation_key = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
-        self._validation_secret_keyring = json.dumps(
-            {"1": validation_key}, separators=(",", ":")
+        self._original_secret_key = os.environ.get(SECRET_KEY_ENV)
+        self._validation_secret_key = (
+            base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
         )
-        os.environ[KEYRING_ENV] = self._validation_secret_keyring
-        os.environ[ACTIVE_KEY_VERSION_ENV] = "1"
+        os.environ[SECRET_KEY_ENV] = self._validation_secret_key
 
         # Store current date for restoration
         self._current_test_date = None
@@ -136,8 +132,7 @@ class SystemController:
         if self.is_running:
             return
 
-        os.environ[KEYRING_ENV] = self._validation_secret_keyring
-        os.environ[ACTIVE_KEY_VERSION_ENV] = "1"
+        os.environ[SECRET_KEY_ENV] = self._validation_secret_key
         # Clear any existing runtime context for test isolation
         clear_runtime_context()
         reset_secrets_bootstrap_status()
@@ -215,14 +210,10 @@ class SystemController:
 
         self.is_running = False
 
-        if self._original_secret_keyring is None:
-            os.environ.pop(KEYRING_ENV, None)
+        if self._original_secret_key is None:
+            os.environ.pop(SECRET_KEY_ENV, None)
         else:
-            os.environ[KEYRING_ENV] = self._original_secret_keyring
-        if self._original_active_key_version is None:
-            os.environ.pop(ACTIVE_KEY_VERSION_ENV, None)
-        else:
-            os.environ[ACTIVE_KEY_VERSION_ENV] = self._original_active_key_version
+            os.environ[SECRET_KEY_ENV] = self._original_secret_key
 
     def set_context_manager_now(self, value: datetime | None) -> None:
         """Override cache clock used by context manager in validation runs."""

@@ -102,8 +102,9 @@ Primary implementation: `core/settings/secrets_store.py`
 Key behavior:
 
 - AES-256-GCM encrypts every value with identity-bound authenticated metadata.
-- `ASSISTANTMD_SECRETS_KEYS` supplies the versioned installation keyring and
-  `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` selects the key used for writes.
+- `ASSISTANTMD_SECRETS_KEY` supplies the installation's URL-safe Base64-encoded
+  32-byte key. Stored records retain an internal key version for future safe
+  rotation support.
 - Generic provider and tool credentials belong to the active execution
   principal. System infrastructure credentials such as `LOGFIRE_TOKEN` belong
   to the system principal.

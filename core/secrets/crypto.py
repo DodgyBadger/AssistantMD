@@ -14,8 +14,9 @@ from types import MappingProxyType
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-KEYRING_ENV = "ASSISTANTMD_SECRETS_KEYS"
-ACTIVE_KEY_VERSION_ENV = "ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION"
+SECRET_KEY_ENV = "ASSISTANTMD_SECRETS_KEY"
+LEGACY_KEYRING_ENV = "ASSISTANTMD_SECRETS_KEYS"
+LEGACY_ACTIVE_KEY_VERSION_ENV = "ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION"
 ENVELOPE_VERSION = 1
 NONCE_BYTES = 12
 
@@ -63,8 +64,18 @@ class SecretKeyring:
     @classmethod
     def from_environment(cls) -> SecretKeyring:
         """Parse and validate the installation keyring from environment variables."""
-        raw_keyring = os.environ.get(KEYRING_ENV)
-        raw_active = os.environ.get(ACTIVE_KEY_VERSION_ENV)
+        raw_key = os.environ.get(SECRET_KEY_ENV)
+        if raw_key is not None:
+            try:
+                return cls(keys={1: _decode_key(raw_key)}, active_version=1)
+            except (ValueError, binascii.Error) as exc:
+                raise RuntimeError(
+                    "Secret encryption configuration is malformed. Restore a valid "
+                    "installation key or reinitialize secrets."
+                ) from exc
+
+        raw_keyring = os.environ.get(LEGACY_KEYRING_ENV)
+        raw_active = os.environ.get(LEGACY_ACTIVE_KEY_VERSION_ENV)
         if not raw_keyring or not raw_active:
             raise RuntimeError(
                 "Secret encryption is not configured. Restore the installation "

@@ -126,17 +126,17 @@ ACTION REQUIRED: configure the encrypted secrets key before starting AssistantMD
 Without it, the UI remains available for diagnostics, but providers, models,
 MCP configuration, and secret mutation stay locked.
 
-Generate a key into a new .env file with:
+Generate a key with:
 
-  umask 077
-  key="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
-  printf 'ASSISTANTMD_SECRETS_KEYS='"'"'{"1":"%s"}'"'"'\nASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION=1\n' "$key" > .env
-  unset key
+  openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
 
-If .env already contains other settings, add these entries without overwriting
-that file. Back up .env separately if you need to retain access to encrypted
-credentials. Existing system/secrets.yaml values migrate on application startup
-after a valid key is available.
+Copy the generated value into .env as:
+
+  ASSISTANTMD_SECRETS_KEY=PASTE_GENERATED_KEY_HERE
+
+Back up .env separately if you need to retain access to encrypted credentials.
+Existing system/secrets.yaml values migrate on application startup after a
+valid key is available.
 EOF
 }
 

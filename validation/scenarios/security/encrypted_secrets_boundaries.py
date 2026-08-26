@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import sqlite3
 import sys
 import tempfile
@@ -36,8 +38,9 @@ from core.secrets import (  # noqa: E402
     reset_secrets_bootstrap_status,
 )
 from core.secrets.crypto import (  # noqa: E402
-    ACTIVE_KEY_VERSION_ENV,
-    KEYRING_ENV,
+    LEGACY_ACTIVE_KEY_VERSION_ENV,
+    LEGACY_KEYRING_ENV,
+    SECRET_KEY_ENV,
 )
 from core.system_migrations import run_system_migrations  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -47,10 +50,39 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
     """Prove ownership, integrity, and rotation without exposing values."""
 
     async def test_scenario(self) -> None:
+        encoded_key = base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("=")
+        with patch.dict("os.environ", {SECRET_KEY_ENV: encoded_key}, clear=True):
+            configured_keyring = SecretKeyring.from_environment()
+        self.soft_assert_equal(
+            configured_keyring.active_version,
+            1,
+            "The installation key should map to internal key version 1",
+        )
+
+        legacy_keyring = json.dumps({"1": encoded_key}, separators=(",", ":"))
+        with patch.dict(
+            "os.environ",
+            {
+                LEGACY_KEYRING_ENV: legacy_keyring,
+                LEGACY_ACTIVE_KEY_VERSION_ENV: "1",
+            },
+            clear=True,
+        ):
+            legacy_configuration = SecretKeyring.from_environment()
+        self.soft_assert_equal(
+            legacy_configuration.keys[1],
+            bytes(range(32)),
+            "Existing development keyring configuration should remain readable",
+        )
+
         locked_root = self.run_path / "locked-system"
         with patch.dict(
             "os.environ",
-            {KEYRING_ENV: "", ACTIVE_KEY_VERSION_ENV: ""},
+            {
+                SECRET_KEY_ENV: "",
+                LEGACY_KEYRING_ENV: "",
+                LEGACY_ACTIVE_KEY_VERSION_ENV: "",
+            },
             clear=False,
         ):
             locked_status = initialize_secrets_bootstrap(locked_root)
