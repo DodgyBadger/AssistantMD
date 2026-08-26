@@ -38,13 +38,46 @@ class GmailPreferences:
 
 
 @dataclass(frozen=True)
-class GoogleConnectionUpdate:
-    """Mutable non-secret Google connection configuration."""
+class GoogleConnectionCreate:
+    """User-controlled fields accepted when creating a Google connection."""
 
+    display_name: str
     client_id: str
+    is_default: bool = False
     gmail: GmailPreferences = field(default_factory=GmailPreferences)
 
     def __post_init__(self) -> None:
+        clean_name = str(self.display_name or "").strip()
+        if not clean_name:
+            raise ValueError("Google connection display name cannot be empty.")
+        if len(clean_name) > 120:
+            raise ValueError("Google connection display name is too long.")
+        object.__setattr__(self, "display_name", clean_name)
+        clean_client_id = str(self.client_id or "").strip()
+        if not clean_client_id:
+            raise ValueError("Google OAuth client ID cannot be empty.")
+        if len(clean_client_id) > 2048:
+            raise ValueError("Google OAuth client ID is too long.")
+        object.__setattr__(self, "client_id", clean_client_id)
+
+
+@dataclass(frozen=True)
+class GoogleConnectionUpdate:
+    """Mutable Google fields; immutable identity and slug are absent."""
+
+    client_id: str
+    display_name: str | None = None
+    is_default: bool | None = None
+    gmail: GmailPreferences = field(default_factory=GmailPreferences)
+
+    def __post_init__(self) -> None:
+        if self.display_name is not None:
+            clean_name = str(self.display_name or "").strip()
+            if not clean_name:
+                raise ValueError("Google connection display name cannot be empty.")
+            if len(clean_name) > 120:
+                raise ValueError("Google connection display name is too long.")
+            object.__setattr__(self, "display_name", clean_name)
         clean_client_id = str(self.client_id or "").strip()
         if not clean_client_id:
             raise ValueError("Google OAuth client ID cannot be empty.")
@@ -57,7 +90,11 @@ class GoogleConnectionUpdate:
 class GoogleConnection:
     """Sanitized principal-owned Google connection metadata."""
 
+    connection_id: str
+    slug: str
+    display_name: str
     client_id: str
+    is_default: bool
     gmail: GmailPreferences
     config_version: int
     created_at: str

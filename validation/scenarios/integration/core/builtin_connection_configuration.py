@@ -25,6 +25,7 @@ if __name__ == "__main__":
 from core.connections import (  # noqa: E402
     BuiltInConnectionService,
     GmailPreferences,
+    GoogleConnectionCreate,
     GoogleConnectionUpdate,
 )
 from core.identity import ExecutionAuthority  # noqa: E402
@@ -53,6 +54,9 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 created.gmail.message_max_characters,
                 created.gmail.thread_max_messages,
                 created.config_version,
+                created.display_name,
+                created.slug,
+                created.is_default,
             ),
             (
                 "owner.apps.googleusercontent.com",
@@ -61,6 +65,9 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 50_000,
                 25,
                 1,
+                "Google",
+                "google",
+                True,
             ),
             "Google connection creation should apply accepted Gmail defaults",
         )
@@ -101,6 +108,76 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             "Google connection updates should persist typed preferences and version",
         )
 
+        secondary = service.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Work Gmail",
+                client_id="work.apps.googleusercontent.com",
+            ),
+        )
+        self.soft_assert_equal(
+            (secondary.slug, secondary.is_default),
+            ("work-gmail", False),
+            "Additional Google connections should have stable slugs without replacing the default",
+        )
+        self.soft_assert_equal(
+            len(service.list_google_connections_for_authority(owner)),
+            2,
+            "One principal should own multiple Google connections",
+        )
+        duplicate_rejected = False
+        try:
+            service.create_google_connection_for_authority(
+                owner,
+                GoogleConnectionCreate(
+                    display_name="work gmail",
+                    client_id="duplicate.apps.googleusercontent.com",
+                ),
+            )
+        except ValueError:
+            duplicate_rejected = True
+        self.soft_assert(
+            duplicate_rejected,
+            "Google display names should be unique per principal regardless of case",
+        )
+
+        promoted = service.update_google_connection_for_authority(
+            owner,
+            secondary.connection_id,
+            GoogleConnectionUpdate(
+                display_name=secondary.display_name,
+                client_id=secondary.client_id,
+                is_default=True,
+                gmail=secondary.gmail,
+            ),
+        )
+        self.soft_assert(promoted.is_default, "A second connection can become default")
+        self.soft_assert_equal(
+            service.get_google_connection_for_authority(owner).connection_id,
+            secondary.connection_id,
+            "Compatibility access should resolve the effective default",
+        )
+
+        protected_default = False
+        try:
+            service.delete_google_connection_for_authority(
+                owner, secondary.connection_id
+            )
+        except ValueError:
+            protected_default = True
+        self.soft_assert(
+            protected_default,
+            "Deleting a default should require an explicit replacement",
+        )
+        self.soft_assert(
+            service.delete_google_connection_for_authority(
+                owner,
+                secondary.connection_id,
+                replacement_default_id=created.connection_id,
+            ),
+            "The default should be deletable with an explicit replacement",
+        )
+
         invalid_cases = (
             {"search_default_results": 101, "search_max_results": 100},
             {"search_default_results": 1, "search_max_results": 501},
@@ -119,7 +196,9 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 )
 
         self.soft_assert(
-            service.delete_google_connection_for_authority(owner),
+            service.delete_google_connection_for_authority(
+                owner, created.connection_id
+            ),
             "The owner should be able to remove Google connection metadata",
         )
         self.soft_assert_equal(

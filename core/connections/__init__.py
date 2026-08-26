@@ -1,7 +1,12 @@
 """Principal-owned built-in connection configuration."""
 
 from .availability import ConnectionRequirement, connection_requirement_available
-from .models import GmailPreferences, GoogleConnection, GoogleConnectionUpdate
+from .models import (
+    GmailPreferences,
+    GoogleConnection,
+    GoogleConnectionCreate,
+    GoogleConnectionUpdate,
+)
 from .service import BuiltInConnectionService
 
 __all__ = [
@@ -9,6 +14,7 @@ __all__ = [
     "ConnectionRequirement",
     "GmailPreferences",
     "GoogleConnection",
+    "GoogleConnectionCreate",
     "GoogleConnectionUpdate",
     "connection_requirement_available",
 ]
