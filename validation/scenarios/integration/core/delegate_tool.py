@@ -21,12 +21,13 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from validation.core.base_scenario import BaseScenario
+from validation.core.base_scenario import BaseScenario, with_local_user_authority
 
 
 class DelegateToolScenario(BaseScenario):
     """Validate delegate tool behavior via stable validation events and output artifacts."""
 
+    @with_local_user_authority
     async def test_scenario(self):
         vault = self.create_vault("DelegateToolVault")
         self.create_file(vault, "notes/content.md", "DELEGATE_CONTENT")

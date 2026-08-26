@@ -10,7 +10,9 @@ import inspect
 import json
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Coroutine
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import yaml
 
-from core.identity import LOCAL_USER_AUTHORITY
+from core.identity import LOCAL_USER_AUTHORITY, use_execution_authority
 from core.logger import UnifiedLogger
 from core.runtime.execution_tasks import ExecutionTaskSource
 from core.runtime.state import get_runtime_context
@@ -32,6 +34,19 @@ from .vault_manager import VaultManager
 
 # Type definitions
 VaultPath = Path  # Simple alias for now
+
+
+def with_local_user_authority[ScenarioResult](
+    function: Callable[..., Coroutine[Any, Any, ScenarioResult]],
+) -> Callable[..., Coroutine[Any, Any, ScenarioResult]]:
+    """Run a direct-call scenario as the single user represented by the UI."""
+
+    @wraps(function)
+    async def wrapped(*args: Any, **kwargs: Any) -> ScenarioResult:
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            return await function(*args, **kwargs)
+
+    return wrapped
 
 
 class WorkflowResult:

@@ -84,8 +84,12 @@ def resolve_tool_binding(
         )
 
     normalized = DirectiveValueParser.normalize_string(normalized_value, to_lower=True)
+    configs = get_enabled_tools_config()
     if normalized in ["true", "yes", "1", "on", "all"]:
-        tool_names = list(get_enabled_tool_names())
+        # Connection-gated tools are intentionally absent until configured.
+        # An "all" declaration means every currently available tool, not every
+        # globally enabled tool that could become available later.
+        tool_names = list(configs)
     elif normalized in ["false", "no", "0", "off", "none"]:
         return ToolBindingResult(tool_functions=[], tool_instructions="", tool_specs=[])
     else:
@@ -95,7 +99,6 @@ def resolve_tool_binding(
             if name not in tool_names:
                 tool_names.append(name)
 
-    configs = get_enabled_tools_config()
     disabled_or_unknown = [
         tool_name for tool_name in tool_names if tool_name not in configs
     ]

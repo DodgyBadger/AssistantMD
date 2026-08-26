@@ -39,12 +39,13 @@ from core.tools.base import (
     tool_recovery_metadata,
 )
 from core.tools.code_execution import CodeExecution
-from validation.core.base_scenario import BaseScenario
+from validation.core.base_scenario import BaseScenario, with_local_user_authority
 
 
 class ToolRecoveryPolicyScenario(BaseScenario):
     """Prove recovery policy travels with tools and unknown fails closed."""
 
+    @with_local_user_authority
     async def test_scenario(self) -> None:
         vault = self.create_vault("ToolRecoveryPolicyVault")
         await self.start_system()

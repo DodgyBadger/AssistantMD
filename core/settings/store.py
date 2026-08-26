@@ -178,7 +178,10 @@ def refresh_settings_cache() -> None:
 def save_settings(settings: SettingsFile) -> None:
     """Persist settings configuration to disk using atomic write."""
     path = get_active_settings_path()
-    data = settings.model_dump(mode="python")
+    # Settings may contain string-backed enums used by runtime-only availability
+    # checks. Dump through Pydantic's JSON mode so the persisted YAML contains
+    # their stable string values rather than Python enum objects.
+    data = settings.model_dump(mode="json")
 
     tmp_path = path.with_suffix(".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)

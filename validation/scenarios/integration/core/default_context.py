@@ -15,12 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from validation.core.base_scenario import BaseScenario
+from validation.core.base_scenario import BaseScenario, with_local_user_authority
 
 
 class DefaultContextScenario(BaseScenario):
     """Ensure default.md composes vault, workspace, and user context."""
 
+    @with_local_user_authority
     async def test_scenario(self):
         vault = self.create_vault("DefaultContextVault")
         self.create_file(

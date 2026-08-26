@@ -551,7 +551,7 @@ class ApiEndpointsScenario(BaseScenario):
         ], "MCP list contains only the created current-user connection"
 
         with patch(
-            "api.services.mcp.test_mcp_connection_runtime",
+            "core.mcp.manager.MCPConnectionManager.test_connection",
             new=AsyncMock(
                 return_value=MCPConnectionTestResult(
                     status="ready",

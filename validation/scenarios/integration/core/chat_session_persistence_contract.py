@@ -11,12 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from validation.core.base_scenario import BaseScenario
+from validation.core.base_scenario import BaseScenario, with_local_user_authority
 
 
 class ChatSessionPersistenceContractScenario(BaseScenario):
     """Validate persisted chat messages and tool events across restart."""
 
+    @with_local_user_authority
     async def test_scenario(self):
         vault = self.create_vault("ChatSessionPersistenceContractVault")
         other_vault = self.create_vault("ChatSessionPersistenceOtherVault")

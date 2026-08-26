@@ -346,10 +346,14 @@ class PrincipalExecutionAuthorityScenario(BaseScenario):
             missing_workflow_authority_rejected,
             "API workflows should fail without request or task authority",
         )
-        self.soft_assert_equal(
-            _authority_for_workflow_source(ExecutionTaskSource.SCHEDULER).principal_id,
-            SYSTEM_AUTHORITY.principal_id,
-            "Scheduled workflows should default to system authority",
+        missing_scheduler_authority_rejected = False
+        try:
+            _authority_for_workflow_source(ExecutionTaskSource.SCHEDULER)
+        except RuntimeError:
+            missing_scheduler_authority_rejected = True
+        self.soft_assert(
+            missing_scheduler_authority_rejected,
+            "Scheduled workflows should require their captured owner authority",
         )
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             inherited_workflow = _authority_for_workflow_source(
