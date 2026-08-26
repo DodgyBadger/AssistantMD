@@ -18,7 +18,7 @@ running container.
 - On first successful startup, AssistantMD imports non-OAuth values from
   `system/secrets.yaml` into encrypted `system/secrets.db`, verifies the stored
   values, records the migration, and renames the plaintext file to
-  `system/secrets.yaml.bak` for rollback. This migration is idempotent and does
+  `system/migration_backups/secrets.yaml.bak` for rollback. This migration is idempotent and does
   not run again after completion.
 - Existing OAuth state is deliberately not migrated. Reconnect OpenAI and other
   OAuth accounts after the upgrade.

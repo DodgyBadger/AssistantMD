@@ -60,6 +60,10 @@ from core.memory.schema import (
     SESSION_SUMMARY_MIGRATIONS,
     ensure_session_summary_schema,
 )
+from core.migration_backups import (
+    get_migration_backup_directory,
+    organize_legacy_migration_backups,
+)
 from core.runtime.paths import get_system_root
 from core.secrets.bootstrap import get_secrets_bootstrap_status
 from core.secrets.schema import DB_NAME as SECRETS_DB_NAME
@@ -225,6 +229,7 @@ def run_system_migrations(
 ) -> SystemMigrationStatus:
     """Apply all registered system database migrations and return final status."""
     root = _resolve_system_root(system_root)
+    organized_backup_count = organize_legacy_migration_backups(root)
     before = get_system_migration_status(root)
     secrets_status = get_secrets_bootstrap_status()
     excluded_db_names = (
@@ -265,6 +270,7 @@ def run_system_migrations(
             "pending_before": before.pending_count,
             "pending_after": result.pending_count,
             "backups_created": len(backup_paths),
+            "legacy_backups_organized": organized_backup_count,
             "excluded_locked_databases": sorted(excluded_db_names),
         },
     )
@@ -341,6 +347,7 @@ def _backup_pending_databases(
     status: SystemMigrationStatus, *, excluded_db_names: frozenset[str]
 ) -> dict[str, str]:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    backup_directory = get_migration_backup_directory(status.system_root)
     backups: dict[str, str] = {}
     for target in status.targets:
         if (
@@ -350,7 +357,10 @@ def _backup_pending_databases(
         ):
             continue
         source = Path(target.db_path)
-        backup_path = source.with_name(f"{source.name}.backup-{timestamp}")
+        backup_directory.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_directory / f"{source.name}.backup-{timestamp}"
+        if backup_path.exists():
+            raise FileExistsError(f"Migration backup already exists: {backup_path}")
         shutil.copy2(source, backup_path)
         backups[target.db_name] = str(backup_path)
     return backups

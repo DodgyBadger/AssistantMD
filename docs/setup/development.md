@@ -64,7 +64,8 @@ Copy the generated value into `.env` as `ASSISTANTMD_SECRETS_KEY`.
 it is missing, but does not generate or overwrite `.env`. The encrypted secrets
 store initializes—and any legacy `system/secrets.yaml` values migrate—when the
 application next starts with `scripts/dev run`. After AssistantMD verifies the
-encrypted values, it preserves the legacy file as `system/secrets.yaml.bak` for
+encrypted values, it preserves the legacy file as
+`system/migration_backups/secrets.yaml.bak` for
 rollback; the backup is not used by the current runtime.
 
 `.env.example` documents the required names but contains no usable key.

@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from core.chat import ChatStore
 from core.ingestion.service import IngestionService
+from core.migration_backups import MIGRATION_BACKUP_DIRECTORY
 from core.runtime.paths import set_bootstrap_roots
 from core.system_migrations import get_system_migration_status, run_system_migrations
 from validation.core.base_scenario import BaseScenario
@@ -25,6 +26,8 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         self._create_legacy_chat_sessions_db(chat_db)
         ingestion_db = system_root / "ingestion_jobs.db"
         self._create_legacy_ingestion_jobs_db(ingestion_db)
+        legacy_backup = system_root / "vault_state.db.backup-legacy"
+        legacy_backup.write_bytes(b"legacy migration backup")
 
         ChatStore(str(system_root))
         set_bootstrap_roots(self.artifacts_dir / "data", system_root)
@@ -47,6 +50,16 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         after = run_system_migrations(system_root, backup=True)
         self.soft_assert_equal(
             after.pending_count, 0, "Registered migrations should be applied"
+        )
+        backup_directory = system_root / MIGRATION_BACKUP_DIRECTORY
+        self.soft_assert(
+            not legacy_backup.exists(),
+            "A migration run should remove managed legacy backups from the system root",
+        )
+        self.soft_assert_equal(
+            (backup_directory / legacy_backup.name).read_bytes(),
+            b"legacy migration backup",
+            "A migration run should preserve legacy backups in migration_backups",
         )
 
         target_by_db = {target.db_name: target for target in after.targets}
@@ -82,6 +95,11 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         if chat_target.backup_path:
             self.soft_assert(
                 Path(chat_target.backup_path).exists(), "Chat DB backup should exist"
+            )
+            self.soft_assert_equal(
+                Path(chat_target.backup_path).parent,
+                backup_directory,
+                "New database backups should be isolated from live system databases",
             )
 
         with sqlite3.connect(chat_db) as conn:

@@ -27,7 +27,8 @@ Runtime is the backbone that wires configuration, scheduler, loaders, and shared
 - Refresh vault-state manifests and attach task terminal observers for rollback.
 - Coordinate workflow execution lanes by vault.
 - Own the durable workflow run store used by workflow execution and status.
-- Run registered system database migrations during startup.
+- Run registered system database migrations during startup, placing rollback
+  copies under `system/migration_backups/`.
 - Track reload metadata (`last_config_reload`).
 - Provide runtime summary/health context to API surfaces.
 

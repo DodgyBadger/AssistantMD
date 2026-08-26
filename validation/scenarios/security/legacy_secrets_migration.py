@@ -25,6 +25,7 @@ if __name__ == "__main__":
     set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
 
 from core.identity import LOCAL_USER_AUTHORITY, SYSTEM_AUTHORITY  # noqa: E402
+from core.migration_backups import MIGRATION_BACKUP_DIRECTORY  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from core.secrets.legacy_migration import (  # noqa: E402
     DEFAULT_NAMESPACE,
@@ -73,7 +74,9 @@ EMPTY_VALUE:
             not source_path.exists(),
             "Verified migration should retire the live plaintext file",
         )
-        backup_path = successful_root / LEGACY_BACKUP_FILENAME
+        backup_path = (
+            successful_root / MIGRATION_BACKUP_DIRECTORY / LEGACY_BACKUP_FILENAME
+        )
         self.soft_assert(
             backup_path.exists(),
             "Verified migration should preserve the legacy file as a backup",

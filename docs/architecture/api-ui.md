@@ -102,7 +102,7 @@ surface used by endpoints and validation.
 - `/api/vaults/{vault_name}/files/revisions` exposes retained exact-path revisions for the Vault Explorer file history view.
 - `/api/vaults/{vault_name}/files/revisions/{snapshot_id}/restore` restores a retained revision under optimistic concurrency and records a new Explorer mutation.
 - `/api/vault-state/cleanup` deletes expired vault activity, mutation, and retained task snapshot artifacts.
-- `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution.
+- `/api/system/migrations/status` and `/api/system/migrations/run` expose registered system database migration status and manual execution. Migration rollback copies are retained under `system/migration_backups/`.
 - `/api/system/activity-log` returns newest-first parsed System Activity entries
   with opaque cursor pagination and server-side time, level, tag, and text
   filters across retained daily segments. It includes the earliest retained

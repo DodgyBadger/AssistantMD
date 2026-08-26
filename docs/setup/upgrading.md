@@ -24,7 +24,8 @@ for AssistantMD to receive the encryption key and optional
 
 Back up `.env` separately from `system/`. On successful startup, AssistantMD
 migrates static secrets into the encrypted database and preserves the old file
-as `system/secrets.yaml.bak`. Existing OAuth accounts must be reconnected.
+as `system/migration_backups/secrets.yaml.bak`. Existing OAuth accounts must be
+reconnected.
 
 ***If you are using the default docker image:***
 ```
