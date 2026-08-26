@@ -11,7 +11,7 @@ running container.
 
 - Generate `ASSISTANTMD_SECRETS_KEYS` and
   `ASSISTANTMD_SECRETS_ACTIVE_KEY_VERSION` in `.env`, then ensure the Compose
-  service retains `env_file: .env`. The installation instructions provide a
+  service includes `env_file: .env`. The installation instructions provide a
   Linux/OpenSSL command that writes a suitable key without printing it.
 - Back up both `.env` and the existing `system/` directory before upgrading,
   and keep those backups separate. The key in `.env` is required to decrypt
