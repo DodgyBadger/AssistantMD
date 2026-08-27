@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -42,6 +43,10 @@ from core.integrations.google import (  # noqa: E402
     GoogleOAuthCoordinator,
     GoogleOAuthTokenState,
 )
+from core.integrations.google.connection import (  # noqa: E402
+    GOOGLE_OAUTH_NAMESPACE,
+)
+from core.oauth import EncryptedOAuthStorage  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from core.settings.store import get_enabled_tools_config  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -61,6 +66,69 @@ class GmailPrincipalConnectionScenario(BaseScenario):
         google = GoogleConnectionService(connections=connections, secrets=secrets)
         owner = ExecutionAuthority("google-owner")
         other = ExecutionAuthority("google-other")
+
+        migration_owner = ExecutionAuthority("google-migration-owner")
+        migration_connection = connections.set_google_connection_for_authority(
+            migration_owner,
+            GoogleConnectionUpdate(client_id="migration.apps.googleusercontent.com"),
+        )
+        legacy_storage = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=migration_owner,
+            namespace=GOOGLE_OAUTH_NAMESPACE,
+        )
+        scoped_storage = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=migration_owner,
+            namespace=f"{GOOGLE_OAUTH_NAMESPACE}.{migration_connection.connection_id}",
+        )
+        legacy_storage.put_sync(
+            "client-secret",
+            {"value": "legacy-client-secret"},
+            collection="google",
+        )
+        self.soft_assert_equal(
+            google.resolve_client_secret(migration_owner),
+            "legacy-client-secret",
+            "A default connection should resolve legacy Google client state",
+        )
+        migrated_secret = scoped_storage.get_sync("client-secret", collection="google")
+        self.soft_assert_equal(
+            (
+                legacy_storage.get_sync("client-secret", collection="google"),
+                migrated_secret.get("value") if migrated_secret else None,
+                migrated_secret.get("oauth_generation") if migrated_secret else None,
+                bool(migrated_secret and migrated_secret.get("credential_id")),
+            ),
+            (None, "legacy-client-secret", 1, True),
+            "Legacy Google state should move atomically and bind to current identity",
+        )
+        legacy_storage.put_sync(
+            "token-state",
+            {
+                "access_token": "must-not-resurrect",
+                "refresh_token": "legacy-refresh",
+                "scopes": [*GOOGLE_IDENTITY_SCOPES, GMAIL_READONLY_SCOPE],
+                "account_id": "legacy-account",
+                "account_email": "legacy@example.com",
+            },
+            collection="google",
+        )
+        self.soft_assert_equal(
+            google.status(migration_owner).state,
+            "authorization_required",
+            "Unbound legacy token state must not be trusted as a current grant",
+        )
+        google.disconnect(migration_owner)
+        self.soft_assert_equal(
+            (
+                google.resolve_client_secret(migration_owner),
+                legacy_storage.get_sync("token-state", collection="google"),
+                scoped_storage.get_sync("client-secret", collection="google"),
+            ),
+            (None, None, None),
+            "Disconnect should atomically clear scoped and unmigrated legacy state",
+        )
 
         self.soft_assert_equal(
             google.status(owner).state,
@@ -208,6 +276,62 @@ class GmailPrincipalConnectionScenario(BaseScenario):
             b"owner.apps.googleusercontent.com"
             in (system_root / "connections.db").read_bytes(),
             "The non-secret Google client ID should live in connection metadata",
+        )
+
+        with patch.object(
+            google,
+            "_delete_connection_keys",
+            side_effect=sqlite3.OperationalError("injected cleanup failure"),
+        ):
+            google.set_client_secret(owner, "rotated-client-secret")
+        self.soft_assert_equal(
+            google.status(owner).state,
+            "authorization_required",
+            "Credential binding should invalidate an old token even when cleanup fails",
+        )
+
+        owner_connection = connections.get_google_connection_for_authority(owner)
+        if owner_connection is None:
+            raise AssertionError("Expected the owner's default Google connection")
+        changed_identity = connections.update_google_connection_for_authority(
+            owner,
+            owner_connection.connection_id,
+            GoogleConnectionUpdate(
+                client_id="changed.apps.googleusercontent.com",
+                display_name=owner_connection.display_name,
+                gmail=owner_connection.gmail,
+            ),
+        )
+        self.soft_assert_equal(
+            (
+                changed_identity.oauth_generation,
+                google.status(owner).state,
+                google.capability_availability(
+                    owner, GoogleCapability.GMAIL_READ
+                ).available,
+            ),
+            (owner_connection.oauth_generation + 1, "not_configured", False),
+            "Changing client identity should immediately invalidate readiness",
+        )
+        restored_name = connections.update_google_connection_for_authority(
+            owner,
+            owner_connection.connection_id,
+            GoogleConnectionUpdate(
+                client_id=owner_connection.client_id,
+                display_name=owner_connection.display_name,
+                gmail=owner_connection.gmail,
+            ),
+        )
+        self.soft_assert_equal(
+            (restored_name.oauth_generation, google.status(owner).state),
+            (owner_connection.oauth_generation + 2, "not_configured"),
+            "Returning to an old client ID must not resurrect its former grant",
+        )
+        google.set_client_secret(owner, "replacement-client-secret")
+        self.soft_assert_equal(
+            google.status(owner).state,
+            "authorization_required",
+            "A replacement client secret should require a new authorization grant",
         )
 
         google.disconnect(owner)

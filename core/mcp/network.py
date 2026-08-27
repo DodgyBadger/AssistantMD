@@ -6,10 +6,21 @@ import asyncio
 import ipaddress
 import os
 import socket
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+import httpcore
+import httpx
+
 MCP_INSECURE_HTTP_ENV = "ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP"
+
+SocketOption = (
+    tuple[int, int, int]
+    | tuple[int, int, bytes | bytearray]
+    | tuple[int, int, None, int]
+)
 
 
 class MCPNetworkPolicyError(ValueError):
@@ -51,6 +62,23 @@ async def validate_mcp_endpoint(
     if not hostname:
         raise MCPNetworkPolicyError("MCP server URL must include a hostname.")
 
+    addresses = await resolve_mcp_addresses(hostname)
+    parsed_addresses = tuple(ipaddress.ip_address(address) for address in addresses)
+    has_public = any(address.is_global for address in parsed_addresses)
+    if scheme == "http" and (not allow_insecure_http or has_public):
+        raise MCPNetworkPolicyError(
+            "Plain HTTP MCP connections require the explicit local-development allowance."
+        )
+
+    return MCPResolvedEndpoint(
+        hostname=hostname,
+        addresses=tuple(str(address) for address in parsed_addresses),
+        secure=scheme == "https",
+    )
+
+
+async def resolve_mcp_addresses(hostname: str) -> tuple[str, ...]:
+    """Resolve one hostname and reject the complete set unless policy allows it."""
     try:
         addresses = await asyncio.to_thread(_resolve_addresses, hostname)
     except OSError as exc:
@@ -63,23 +91,91 @@ async def validate_mcp_endpoint(
     parsed_addresses = tuple(ipaddress.ip_address(address) for address in addresses)
     if any(_is_forbidden_address(address) for address in parsed_addresses):
         raise MCPNetworkPolicyError("MCP server resolved to a prohibited address.")
-
     has_local = any(_is_local_address(address) for address in parsed_addresses)
     has_public = any(address.is_global for address in parsed_addresses)
     if has_local and has_public:
         raise MCPNetworkPolicyError(
             "MCP server hostname resolved to mixed public and local addresses."
         )
-    if scheme == "http" and (not allow_insecure_http or has_public):
-        raise MCPNetworkPolicyError(
-            "Plain HTTP MCP connections require the explicit local-development allowance."
-        )
+    return tuple(str(address) for address in parsed_addresses)
 
-    return MCPResolvedEndpoint(
-        hostname=hostname,
-        addresses=tuple(str(address) for address in parsed_addresses),
-        secure=scheme == "https",
-    )
+
+class MCPNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Connect sockets only to numeric addresses approved by MCP policy."""
+
+    def __init__(self, *, delegate: httpcore.AsyncNetworkBackend | None = None) -> None:
+        self._delegate = delegate or httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[SocketOption] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        addresses = await resolve_mcp_addresses(host)
+        started_at = time.monotonic()
+        last_error: httpcore.ConnectError | httpcore.ConnectTimeout | None = None
+        for address in addresses:
+            remaining_timeout = (
+                max(0.0, timeout - (time.monotonic() - started_at))
+                if timeout is not None
+                else None
+            )
+            if remaining_timeout == 0.0 and last_error is not None:
+                raise last_error
+            try:
+                return await self._delegate.connect_tcp(
+                    host=address,
+                    port=port,
+                    timeout=remaining_timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_error = exc
+        if last_error is None:  # pragma: no cover - resolution guarantees addresses
+            raise MCPNetworkPolicyError("MCP server hostname could not be resolved.")
+        raise last_error
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[SocketOption] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        del path, timeout, socket_options
+        raise MCPNetworkPolicyError("MCP connections cannot use Unix sockets.")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._delegate.sleep(seconds)
+
+
+class MCPAsyncHTTPTransport(httpx.AsyncHTTPTransport):
+    """HTTPX 0.28 adapter that installs the MCP policy connection pool.
+
+    Remove this private ``_pool`` integration when a stable HTTPX release exposes
+    public async network-backend injection (tracked upstream as encode/httpx#3749).
+    Keep the socket-authority tests when migrating to that public API.
+    """
+
+    def __init__(self, *, network_backend: MCPNetworkBackend | None = None) -> None:
+        limits = httpx.Limits(
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=5.0,
+        )
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(verify=True, trust_env=False),
+            max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry,
+            http1=True,
+            http2=False,
+            retries=0,
+            network_backend=network_backend or MCPNetworkBackend(),
+        )
 
 
 def _resolve_addresses(hostname: str) -> tuple[str, ...]:

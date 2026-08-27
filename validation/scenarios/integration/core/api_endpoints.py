@@ -3,10 +3,12 @@ Integration scenario that exercises every documented API endpoint using the
 validation harness' shared FastAPI TestClient.
 """
 
+import asyncio
 import base64
 import json
 import re
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -14,10 +16,22 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.identity import LOCAL_USER_AUTHORITY
-from core.llm.openai_oauth import (
+_direct_run_root: tempfile.TemporaryDirectory[str] | None = None
+if __name__ == "__main__":
+    from core.runtime.paths import set_bootstrap_roots
+
+    _direct_run_root = tempfile.TemporaryDirectory(prefix="assistantmd-api-endpoints-")
+    direct_root = Path(_direct_run_root.name)
+    data_root = direct_root / "data"
+    bootstrap_system_root = direct_root / "system"
+    data_root.mkdir()
+    bootstrap_system_root.mkdir()
+    set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
+
+from core.identity import LOCAL_USER_AUTHORITY  # noqa: E402
+from core.llm.openai_oauth import (  # noqa: E402
     OPENAI_OAUTH_CLIENT_ID,
     OPENAI_OAUTH_LOOPBACK_REDIRECT_URI,
     OPENAI_OAUTH_ORIGINATOR,
@@ -28,10 +42,10 @@ from core.llm.openai_oauth import (
     StaticOpenAIOAuthTokenAdapter,
     set_openai_oauth_token_adapter,
 )
-from core.mcp import MCPConnectionTestResult
-from core.runtime.execution_tasks import ExecutionTaskSource
-from core.runtime.state import get_runtime_context
-from validation.core.base_scenario import BaseScenario
+from core.mcp import MCPConnectionTestResult  # noqa: E402
+from core.runtime.execution_tasks import ExecutionTaskSource  # noqa: E402
+from core.runtime.state import get_runtime_context  # noqa: E402
+from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
 class ApiEndpointsScenario(BaseScenario):
@@ -1101,3 +1115,7 @@ description: API system workflow routing probe
 await finish(status="completed", reason="api-system-probe")
 ```
 """
+
+
+if __name__ == "__main__":
+    asyncio.run(ApiEndpointsScenario().test_scenario())

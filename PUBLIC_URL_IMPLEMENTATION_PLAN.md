@@ -223,5 +223,6 @@ validation suite.
 
 ## Next Phase
 
-Proceed to Feature Development with Slice 1. Keep each completed slice as a
-validated commit boundary before starting the next.
+The canonical public-origin milestone is implementation-complete. Request the
+maintainer-owned full validation results and proceed through review preparation
+and cleanup before merge. ADR 0036 records the resulting durable decision.

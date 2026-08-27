@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
+import httpcore
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -35,7 +37,14 @@ from core.mcp import (  # noqa: E402
     MCPConnectionUpdate,
     MCPTransport,
 )
-from core.mcp.network import MCPNetworkPolicyError, validate_mcp_endpoint  # noqa: E402
+from core.mcp import manager as mcp_manager  # noqa: E402
+from core.mcp.network import (  # noqa: E402
+    MCPAsyncHTTPTransport,
+    MCPNetworkBackend,
+    MCPNetworkPolicyError,
+    SocketOption,
+    validate_mcp_endpoint,
+)
 from core.mcp.testing import test_mcp_connection_runtime  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
@@ -383,6 +392,123 @@ class MCPConnectionIsolationScenario(BaseScenario):
                 secure.secure,
                 "Public MCP connections should require and accept HTTPS",
             )
+        request_client = mcp_manager._mcp_http_client_factory(
+            allow_insecure_http=False
+        )()
+        request_hook = request_client.event_hooks["request"][0]
+        try:
+            with patch(
+                "core.mcp.network._resolve_addresses",
+                side_effect=(("8.8.8.8",), ("169.254.169.254",)),
+            ):
+                await request_hook(httpx.Request("POST", "https://public.example/mcp"))
+                try:
+                    await request_hook(
+                        httpx.Request("POST", "https://public.example/mcp")
+                    )
+                except MCPNetworkPolicyError:
+                    rebound_request_rejected = True
+                else:
+                    rebound_request_rejected = False
+        finally:
+            await request_client.aclose()
+        self.soft_assert(
+            rebound_request_rejected,
+            "Every retained-client request should recheck DNS network policy",
+        )
+
+        delegate = _RecordingNetworkBackend(failures=1)
+        backend = MCPNetworkBackend(delegate=delegate)
+        with patch(
+            "core.mcp.network._resolve_addresses",
+            return_value=("8.8.8.8", "1.1.1.1"),
+        ):
+            stream = await backend.connect_tcp(
+                "public.example",
+                443,
+                timeout=5.0,
+                local_address="0.0.0.0",
+                socket_options=((1, 2, 3),),
+            )
+        self.soft_assert_equal(
+            delegate.hosts,
+            ["8.8.8.8", "1.1.1.1"],
+            "Socket fallback should use only numeric addresses from one approved set",
+        )
+        self.soft_assert(
+            all(
+                timeout is not None and 0 <= timeout <= 5.0
+                for timeout in delegate.timeouts
+            ),
+            "Address fallback should share the original connection timeout budget",
+        )
+        self.soft_assert_equal(
+            (delegate.local_addresses, delegate.socket_options),
+            (["0.0.0.0", "0.0.0.0"], [((1, 2, 3),), ((1, 2, 3),)]),
+            "Socket policy should preserve local-address and socket options",
+        )
+        await stream.start_tls(
+            httpcore.default_ssl_context(),
+            server_hostname="public.example",
+            timeout=5.0,
+        )
+        self.soft_assert_equal(
+            delegate.stream.tls_hostnames,
+            ["public.example"],
+            "Numeric TCP pinning must preserve the original hostname for TLS SNI",
+        )
+
+        transport_delegate = _RecordingNetworkBackend()
+        transport = MCPAsyncHTTPTransport(
+            network_backend=MCPNetworkBackend(delegate=transport_delegate)
+        )
+        with patch(
+            "core.mcp.network._resolve_addresses",
+            return_value=("8.8.4.4",),
+        ):
+            async with httpx.AsyncClient(transport=transport) as client:
+                response = await client.get("https://public.example/mcp")
+        self.soft_assert_equal(
+            (response.status_code, response.text, transport_delegate.hosts),
+            (200, "ok", ["8.8.4.4"]),
+            "HTTPX adapter should send a request through the policy-pinned address",
+        )
+        self.soft_assert_equal(
+            transport_delegate.stream.tls_hostnames,
+            ["public.example"],
+            "The HTTPX/httpcore pool should retain the original hostname for TLS SNI",
+        )
+
+        rebound_delegate = _RecordingNetworkBackend()
+        rebound_backend = MCPNetworkBackend(delegate=rebound_delegate)
+        with patch(
+            "core.mcp.network._resolve_addresses",
+            side_effect=(("8.8.8.8",), ("169.254.169.254",)),
+        ):
+            await validate_mcp_endpoint(
+                "https://public.example/mcp",
+                allow_insecure_http=False,
+            )
+            try:
+                await rebound_backend.connect_tcp("public.example", 443)
+            except MCPNetworkPolicyError:
+                socket_rebinding_rejected = True
+            else:
+                socket_rebinding_rejected = False
+        self.soft_assert(
+            socket_rebinding_rejected and not rebound_delegate.hosts,
+            "Socket connect must reject a prohibited DNS change before dialing",
+        )
+        try:
+            await backend.connect_unix_socket("/tmp/untrusted-mcp.sock")
+        except MCPNetworkPolicyError:
+            unix_socket_rejected = True
+        else:
+            unix_socket_rejected = False
+        self.soft_assert(
+            unix_socket_rejected,
+            "MCP network policy must not admit Unix-domain socket bypasses",
+        )
 
 
 @dataclass(frozen=True)
@@ -445,6 +571,74 @@ class _ManagedTestClient:
     async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
         assert max_pages > 0
         return [_TestTool("search_messages")]
+
+
+class _RecordingNetworkStream(httpcore.AsyncNetworkStream):
+    def __init__(self) -> None:
+        self.tls_hostnames: list[str | None] = []
+        self._response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+
+    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        del timeout
+        result = self._response[:max_bytes]
+        self._response = self._response[max_bytes:]
+        return result
+
+    async def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        del buffer, timeout
+
+    async def aclose(self) -> None:
+        return None
+
+    async def start_tls(
+        self,
+        ssl_context: object,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        del ssl_context, timeout
+        self.tls_hostnames.append(server_hostname)
+        return self
+
+
+class _RecordingNetworkBackend(httpcore.AsyncNetworkBackend):
+    def __init__(self, *, failures: int = 0) -> None:
+        self.failures = failures
+        self.hosts: list[str] = []
+        self.timeouts: list[float | None] = []
+        self.local_addresses: list[str | None] = []
+        self.socket_options: list[tuple[SocketOption, ...]] = []
+        self.stream = _RecordingNetworkStream()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[SocketOption] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        del port
+        self.hosts.append(host)
+        self.timeouts.append(timeout)
+        self.local_addresses.append(local_address)
+        self.socket_options.append(tuple(socket_options or ()))
+        if self.failures:
+            self.failures -= 1
+            raise httpcore.ConnectError("injected connection failure")
+        return self.stream
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[SocketOption] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        del path, timeout, socket_options
+        raise AssertionError("Unix socket delegate must not be called")
+
+    async def sleep(self, seconds: float) -> None:
+        del seconds
 
 
 async def _allow_endpoint(*_args: object, **_kwargs: object) -> None:

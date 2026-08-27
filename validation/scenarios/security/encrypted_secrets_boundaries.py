@@ -31,8 +31,13 @@ from core.identity import ExecutionAuthority  # noqa: E402
 from core.identity.context import use_execution_authority  # noqa: E402
 from core.secrets import (  # noqa: E402
     EncryptedSecretsService,
+    SecretCopy,
+    SecretGuardMismatchError,
+    SecretIdentity,
     SecretIntegrityError,
     SecretKeyring,
+    SecretNamespaceDeletion,
+    SecretRelocation,
     initialize_secrets_bootstrap,
     require_secrets_ready,
     reset_secrets_bootstrap_status,
@@ -166,6 +171,229 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
                 [("mcp", "gmail-token"), ("providers", "API_KEY")],
                 "Metadata should expose names but never values",
             )
+
+        service.set_for_authority(owner, "legacy", "preserved", "legacy-value")
+        service.set_for_authority(owner, "canonical", "preserved", "canonical-value")
+        preserved = service.mutate_for_authority(
+            owner,
+            relocations=(
+                SecretRelocation(
+                    source=SecretIdentity("legacy", "preserved"),
+                    destination=SecretIdentity("canonical", "preserved"),
+                ),
+            ),
+        )
+        self.soft_assert_equal(
+            (
+                preserved.relocated_count,
+                service.get_for_authority(owner, "legacy", "preserved"),
+                service.get_for_authority(owner, "canonical", "preserved"),
+            ),
+            (1, None, "canonical-value"),
+            "Atomic relocation should preserve a canonical destination and retire legacy state",
+        )
+
+        service.set_for_authority(owner, "staging", "replacement", "new-value")
+        service.set_for_authority(owner, "canonical", "replacement", "old-value")
+        service.mutate_for_authority(
+            owner,
+            relocations=(
+                SecretRelocation(
+                    source=SecretIdentity("staging", "replacement"),
+                    destination=SecretIdentity("canonical", "replacement"),
+                    overwrite=True,
+                ),
+            ),
+        )
+        self.soft_assert_equal(
+            (
+                service.get_for_authority(owner, "staging", "replacement"),
+                service.get_for_authority(owner, "canonical", "replacement"),
+            ),
+            (None, "new-value"),
+            "Atomic relocation should promote an explicit replacement when requested",
+        )
+
+        service.set_for_authority(owner, "saga-stage", "credential", "new-token")
+        service.set_for_authority(owner, "saga-live", "credential", "old-token")
+        copied = service.mutate_for_authority(
+            owner,
+            copies=(
+                SecretCopy(
+                    source=SecretIdentity("saga-stage", "credential"),
+                    destination=SecretIdentity("saga-live", "credential"),
+                    overwrite=True,
+                ),
+            ),
+        )
+        replayed = service.mutate_for_authority(
+            owner,
+            copies=(
+                SecretCopy(
+                    source=SecretIdentity("saga-stage", "credential"),
+                    destination=SecretIdentity("saga-live", "credential"),
+                    overwrite=True,
+                ),
+            ),
+        )
+        self.soft_assert_equal(
+            (
+                copied.copied_count,
+                replayed.copied_count,
+                service.get_for_authority(owner, "saga-stage", "credential"),
+                service.get_for_authority(owner, "saga-live", "credential"),
+            ),
+            (1, 1, "new-token", "new-token"),
+            "Copy promotion should preserve staging and remain safe to replay",
+        )
+
+        service.set_for_authority(owner, "oauth-state", "token", "owner-token")
+        service.set_for_authority(owner, "oauth-state", "pending", "owner-pending")
+        service.set_for_authority(owner, "oauth-state.child", "token", "child-token")
+        service.set_for_authority(other, "oauth-state", "token", "other-token")
+        namespace_cleanup = service.mutate_for_authority(
+            owner,
+            namespace_deletions=(SecretNamespaceDeletion("oauth-state"),),
+        )
+        self.soft_assert_equal(
+            (
+                namespace_cleanup.deleted_count,
+                service.list_metadata_for_authority(owner, "oauth-state"),
+                service.get_for_authority(owner, "oauth-state.child", "token"),
+                service.get_for_authority(other, "oauth-state", "token"),
+            ),
+            (2, [], "child-token", "other-token"),
+            "Namespace deletion should be exact and principal scoped",
+        )
+        service.delete_for_authority(other, "oauth-state", "token")
+
+        service.set_for_authority(owner, "oauth-fence", "marker", "fence-v1")
+        service.guarded_set_for_authority(
+            owner,
+            guard=SecretIdentity("oauth-fence", "marker"),
+            expected_guard_value="fence-v1",
+            target=SecretIdentity("oauth-fence.state", "token"),
+            value="guarded-token",
+        )
+        try:
+            service.guarded_set_for_authority(
+                owner,
+                guard=SecretIdentity("oauth-fence", "marker"),
+                expected_guard_value="stale-fence",
+                target=SecretIdentity("oauth-fence.state", "token"),
+                value="stale-overwrite",
+            )
+        except SecretGuardMismatchError:
+            pass
+        else:
+            self.soft_assert(False, "A stale encrypted guard should reject its write")
+        self.soft_assert_equal(
+            service.get_for_authority(owner, "oauth-fence.state", "token"),
+            "guarded-token",
+            "A guard mismatch must preserve the previously committed target",
+        )
+
+        service.set_for_authority(owner, "copy-rollback", "source", "copy-value")
+        service.set_for_authority(owner, "delete-rollback", "blocked", "keep-value")
+        with sqlite3.connect(system_root / "secrets.db") as conn:
+            conn.execute(
+                """
+                CREATE TRIGGER reject_namespace_delete
+                BEFORE DELETE ON encrypted_secrets
+                WHEN OLD.owner_principal_id = 'secret-owner'
+                  AND OLD.namespace = 'delete-rollback'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected namespace deletion failure');
+                END
+                """
+            )
+        try:
+            service.mutate_for_authority(
+                owner,
+                copies=(
+                    SecretCopy(
+                        source=SecretIdentity("copy-rollback", "source"),
+                        destination=SecretIdentity("copy-rollback", "destination"),
+                    ),
+                ),
+                namespace_deletions=(SecretNamespaceDeletion("delete-rollback"),),
+            )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            self.soft_assert(
+                False, "Injected namespace deletion failure should propagate"
+            )
+        with sqlite3.connect(system_root / "secrets.db") as conn:
+            conn.execute("DROP TRIGGER reject_namespace_delete")
+        self.soft_assert_equal(
+            (
+                service.get_for_authority(owner, "copy-rollback", "source"),
+                service.get_for_authority(owner, "copy-rollback", "destination"),
+                service.get_for_authority(owner, "delete-rollback", "blocked"),
+            ),
+            ("copy-value", None, "keep-value"),
+            "A namespace deletion failure should roll back a preceding copy",
+        )
+
+        service.set_for_authority(owner, "rollback", "source", "rollback-value")
+        with sqlite3.connect(system_root / "secrets.db") as conn:
+            conn.execute(
+                """
+                CREATE TRIGGER reject_relocation_delete
+                BEFORE DELETE ON encrypted_secrets
+                WHEN OLD.owner_principal_id = 'secret-owner'
+                  AND OLD.namespace = 'rollback'
+                  AND OLD.name = 'source'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected relocation failure');
+                END
+                """
+            )
+        try:
+            service.mutate_for_authority(
+                owner,
+                relocations=(
+                    SecretRelocation(
+                        source=SecretIdentity("rollback", "source"),
+                        destination=SecretIdentity("rollback", "destination"),
+                    ),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            self.soft_assert(False, "Injected relocation failure should propagate")
+        with sqlite3.connect(system_root / "secrets.db") as conn:
+            conn.execute("DROP TRIGGER reject_relocation_delete")
+        self.soft_assert_equal(
+            (
+                service.get_for_authority(owner, "rollback", "source"),
+                service.get_for_authority(owner, "rollback", "destination"),
+            ),
+            ("rollback-value", None),
+            "A relocation failure must roll back both destination and source changes",
+        )
+        cleanup = service.mutate_for_authority(
+            owner,
+            deletions=(
+                SecretIdentity("canonical", "preserved"),
+                SecretIdentity("canonical", "replacement"),
+                SecretIdentity("rollback", "source"),
+                SecretIdentity("saga-stage", "credential"),
+                SecretIdentity("saga-live", "credential"),
+                SecretIdentity("oauth-state.child", "token"),
+                SecretIdentity("copy-rollback", "source"),
+                SecretIdentity("delete-rollback", "blocked"),
+                SecretIdentity("oauth-fence", "marker"),
+                SecretIdentity("oauth-fence.state", "token"),
+            ),
+        )
+        self.soft_assert_equal(
+            cleanup.deleted_count,
+            10,
+            "Atomic batch deletion should remove every requested existing identity",
+        )
 
         rotating_service = EncryptedSecretsService(
             system_root=str(system_root),

@@ -97,5 +97,6 @@ class GoogleConnection:
     is_default: bool
     gmail: GmailPreferences
     config_version: int
+    oauth_generation: int
     created_at: str
     updated_at: str

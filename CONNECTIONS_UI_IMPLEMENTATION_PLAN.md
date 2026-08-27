@@ -1,5 +1,7 @@
 # Unified Connections UI and Multi-Google Plan
 
+Implementation status: complete on `dev/mcp-experimental`.
+
 ## Objective
 
 Make **System → Connections** a lean, unified collection of configured
@@ -125,5 +127,7 @@ when the intended account is ambiguous.
 
 ## Next phase
 
-Move to **Feature Development** with the multi-Google persistence migration and
-shared card shell before changing OAuth behavior.
+The unified connection and multi-Google milestone is implementation-complete.
+Request the maintainer-owned full validation results and proceed through review
+preparation and cleanup before merge. ADR 0038 records the resulting durable
+identity and default-selection decision.

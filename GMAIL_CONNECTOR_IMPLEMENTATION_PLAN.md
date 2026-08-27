@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted and in progress.
+Accepted; the approved read-only milestone is implementation-complete.
 
 Completed Slice 1:
 
@@ -15,7 +15,8 @@ Completed Slice 1:
 - runtime-owned built-in/Google connection services that fail closed while
   secrets are unavailable.
 
-Next: optional mailbox mutation slices require separate approval.
+Optional mailbox mutation slices remain unapproved and require a separate
+planning and review effort.
 
 ## Objective
 
@@ -35,7 +36,7 @@ The initial useful release will let the local user:
 
 1. configure a reusable Google OAuth web client in the System UI;
 2. see and copy the exact AssistantMD OAuth callback URI;
-3. connect or reconnect one Google account through a browser-visible,
+3. connect or reconnect one or more Google accounts through a browser-visible,
    headless-safe OAuth flow;
 4. verify the connected account and connection health;
 5. let chat and scheduled workflows search Gmail and read bounded message or
@@ -139,11 +140,11 @@ The settings/API contract must never return client secrets, access tokens,
 refresh tokens, authorization codes, or PKCE verifiers. The owner principal ID
 must be derived from execution authority, never accepted from the browser.
 
-Only one Google account connection is exposed for `local-user` in this branch,
-and only its Gmail capability is implemented, but the
-service API must be shaped around principal ownership rather than a process-wide
-singleton. Multiple Google accounts are explicitly deferred; it should be
-possible later without another credential-storage migration.
+Multiple Google account connections are exposed for `local-user`, while Gmail
+is the only implemented Google capability. Service APIs and credential storage
+are principal- and connection-scoped rather than process-wide singletons. One
+connection is the explicit default, and Gmail can select another by immutable
+connection slug.
 
 ### OAuth deployment model
 
@@ -650,9 +651,9 @@ real migration is introduced.
   transport or Google OAuth.
 
 Using a disposable Gmail account is optional manual-testing guidance, not a
-product or implementation decision. No decision about multi-account support,
-sending, deletion, or unattended mailbox mutation is required for the read-only
-milestone.
+product or implementation decision. Multi-account selection follows ADR 0038.
+Sending, deletion, and unattended mailbox mutation remain outside the approved
+read-only milestone.
 
 ## Delivery and Validation Gates
 
@@ -667,6 +668,8 @@ full-suite results before merge.
 
 ## Next Phase
 
-After this plan is accepted and its four review decisions are resolved, move to
-Feature Development beginning with Slice 1's failing scenario contracts and
-domain skeleton.
+Request the maintainer-owned full validation results for the completed
+read-only milestone and proceed through review preparation and cleanup before
+merge. ADR 0037 records the native connection-backed integration boundary.
+Any mailbox mutation capability requires separate approval and a new or updated
+root implementation plan.

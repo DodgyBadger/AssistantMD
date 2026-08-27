@@ -85,6 +85,16 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
         secrets_status = initialize_secrets_bootstrap(config.system_root)
+        migration_status = run_system_migrations(config.system_root, backup=True)
+        logger.info(
+            "Startup system database migration check completed",
+            data={
+                "pending_after": migration_status.pending_count,
+                "backups_created": sum(
+                    1 for target in migration_status.targets if target.backup_path
+                ),
+            },
+        )
         mcp_connections: MCPConnectionService | None = None
         mcp_manager: MCPConnectionManager | None = None
         mcp_oauth: MCPOAuthCoordinator | None = None
@@ -125,6 +135,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 secrets=secrets_service,
                 on_change=invalidate_mcp_connection,
             )
+            mcp_connections.reconcile_pending_mutations()
             mcp_manager = MCPConnectionManager(
                 connections=mcp_connections,
                 allow_insecure_http=insecure_http_allowed_from_environment(),
@@ -160,16 +171,6 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         os.environ["CONTAINER_DATA_ROOT"] = str(config.data_root)
         os.environ["CONTAINER_SYSTEM_ROOT"] = str(config.system_root)
-        migration_status = run_system_migrations(config.system_root, backup=True)
-        logger.info(
-            "Startup system database migration check completed",
-            data={
-                "pending_after": migration_status.pending_count,
-                "backups_created": sum(
-                    1 for target in migration_status.targets if target.backup_path
-                ),
-            },
-        )
         built_in_connections = BuiltInConnectionService(
             system_root=str(config.system_root)
         )

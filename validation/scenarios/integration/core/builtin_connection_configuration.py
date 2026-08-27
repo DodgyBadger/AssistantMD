@@ -54,6 +54,7 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 created.gmail.message_max_characters,
                 created.gmail.thread_max_messages,
                 created.config_version,
+                created.oauth_generation,
                 created.display_name,
                 created.slug,
                 created.is_default,
@@ -64,6 +65,7 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 100,
                 50_000,
                 25,
+                1,
                 1,
                 "Google",
                 "google",
@@ -94,6 +96,7 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 updated.client_id,
                 updated.gmail,
                 updated.config_version,
+                updated.oauth_generation,
             ),
             (
                 "replacement.apps.googleusercontent.com",
@@ -104,8 +107,27 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     thread_max_messages=30,
                 ),
                 2,
+                2,
             ),
-            "Google connection updates should persist typed preferences and version",
+            "Client identity updates should persist preferences and advance OAuth generation",
+        )
+
+        preferences_only = service.set_google_connection_for_authority(
+            owner,
+            GoogleConnectionUpdate(
+                client_id=updated.client_id,
+                gmail=GmailPreferences(
+                    search_default_results=12,
+                    search_max_results=40,
+                    message_max_characters=75_000,
+                    thread_max_messages=30,
+                ),
+            ),
+        )
+        self.soft_assert_equal(
+            (preferences_only.config_version, preferences_only.oauth_generation),
+            (3, 2),
+            "Non-identity edits should advance config version without invalidating OAuth",
         )
 
         secondary = service.create_google_connection_for_authority(

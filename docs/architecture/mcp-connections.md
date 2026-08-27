@@ -15,6 +15,14 @@ Sanitized connection definitions live in `system/mcp.db`. Each connection has:
 - an explicit auth mode and, for custom-header auth, a non-secret header name;
 - a monotonically increasing configuration version for runtime invalidation.
 
+Connections also have an internal mutation lifecycle. Only connections in the
+`active` lifecycle with no unresolved mutation are visible to runtime clients.
+Creates, updates, credential changes, and deletion use a durable mutation intent
+while coordinating `mcp.db` with the separately owned encrypted secrets store.
+Startup reconciles incomplete intents before the MCP manager starts. A failed
+operation remains unavailable and retryable rather than exposing partially
+applied metadata or credentials.
+
 Slug reservations survive connection deletion, so a model-facing prefix is
 never reassigned to a different server and persisted tool history cannot drift.
 
@@ -49,9 +57,28 @@ without returning credentials or raw transport errors.
 
 Remote endpoints require HTTPS. Plain HTTP is accepted only for local/private
 addresses when `ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true`; `scripts/dev run`
-sets that development allowance automatically. MCP clients ignore ambient HTTP
-proxy configuration and do not follow redirects, preventing credentials from
-being forwarded outside the explicitly configured endpoint.
+sets that development allowance automatically. Retained and OAuth MCP clients
+repeat URL network-policy checks immediately before every outbound request. A
+socket-level network backend resolves each new connection, rejects the complete
+address set unless it satisfies policy, and gives the operating system only an
+approved numeric address. HTTP origin, `Host`, TLS SNI, and certificate checks
+continue to use the configured hostname. Clients ignore ambient HTTP proxy
+configuration and do not follow redirects.
+
+### HTTP transport dependency boundary
+
+HTTPX 0.28 does not expose its httpcore network-backend injection through the
+public `AsyncHTTPTransport` constructor. `MCPAsyncHTTPTransport` is therefore a
+version-bounded adapter that installs an `AsyncConnectionPool` using HTTPX's
+private `_pool` integration point. `pyproject.toml` bounds HTTPX below 0.29 and
+declares httpcore 1.x directly so dependency resolution cannot silently change
+that boundary.
+
+Replace this adapter when a stable HTTPX release provides public async
+network-backend injection. The replacement must retain the socket-authority,
+numeric-address, HTTP origin, TLS SNI, streaming cleanup, exception mapping, and
+OAuth transport assertions before the HTTPX upper bound is removed. Upstream
+tracking: `encode/httpx#3749`.
 
 ## Chat tool contract
 
@@ -101,3 +128,9 @@ authorization. Disconnecting, deleting, or changing a connection away from
 OAuth clears its stored OAuth state. Short-lived PKCE completion state is also
 encrypted, allowing a callback or pasted redirect to complete after an
 AssistantMD restart until the attempt expires.
+
+Each active connection has an OAuth persistence fence shared with an encrypted
+marker. OAuth storage writes verify that marker in the same secrets transaction
+that stores the value. OAuth-sensitive reconfiguration and deletion rotate the
+marker while clearing the namespace, preventing an adapter issued before the
+lifecycle change from recreating cleared authorization state.

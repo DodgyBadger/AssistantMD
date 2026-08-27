@@ -23,7 +23,11 @@ from .models import (
     MCPConnectionTestResult,
     MCPTransport,
 )
-from .network import MCPNetworkPolicyError, validate_mcp_endpoint
+from .network import (
+    MCPAsyncHTTPTransport,
+    MCPNetworkPolicyError,
+    validate_mcp_endpoint,
+)
 from .oauth_storage import (
     ConnectedMCPOAuth,
     EncryptedMCPOAuthStorage,
@@ -177,6 +181,8 @@ class MCPConnectionManager:
                 require_enabled=False,
             )
         except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
             unavailable = _unavailable(connection, exc)
             return MCPConnectionTestResult(
                 status=unavailable.status,
@@ -338,14 +344,18 @@ class MCPConnectionManager:
                 connection.url,
                 headers=headers,
                 auth=auth,
-                httpx_client_factory=_mcp_http_client,
+                httpx_client_factory=_mcp_http_client_factory(
+                    allow_insecure_http=self._allow_insecure_http
+                ),
             )
             if connection.transport is MCPTransport.STREAMABLE_HTTP
             else SSETransport(
                 connection.url,
                 headers=headers,
                 auth=auth,
-                httpx_client_factory=_mcp_http_client,
+                httpx_client_factory=_mcp_http_client_factory(
+                    allow_insecure_http=self._allow_insecure_http
+                ),
             )
         )
         client = Client(
@@ -486,20 +496,34 @@ def _build_auth(
     return None, None
 
 
-def _mcp_http_client(
-    headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-    **_kwargs: object,
-) -> httpx.AsyncClient:
-    """Create a credential-safe client independent of ambient proxy settings."""
-    return httpx.AsyncClient(
-        headers=headers,
-        timeout=timeout or httpx.Timeout(30.0, read=MCP_READ_TIMEOUT_SECONDS),
-        auth=auth,
-        follow_redirects=False,
-        trust_env=False,
-    )
+def _mcp_http_client_factory(
+    *, allow_insecure_http: bool
+) -> Callable[..., httpx.AsyncClient]:
+    """Create clients that enforce network policy immediately before each request."""
+
+    async def validate_request(request: httpx.Request) -> None:
+        await validate_mcp_endpoint(
+            str(request.url),
+            allow_insecure_http=allow_insecure_http,
+        )
+
+    def create_client(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+        **_kwargs: object,
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout or httpx.Timeout(30.0, read=MCP_READ_TIMEOUT_SECONDS),
+            auth=auth,
+            follow_redirects=False,
+            trust_env=False,
+            event_hooks={"request": [validate_request]},
+            transport=MCPAsyncHTTPTransport(),
+        )
+
+    return create_client
 
 
 class _CatalogChangeHandler(MessageHandler):

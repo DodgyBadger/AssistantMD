@@ -10,15 +10,31 @@ from .bootstrap import (
     reset_secrets_bootstrap_status,
 )
 from .crypto import SecretIntegrityError, SecretKeyring
-from .service import EncryptedSecretsService, SecretMetadata, SecretWrite
+from .service import (
+    EncryptedSecretsService,
+    SecretCopy,
+    SecretGuardMismatchError,
+    SecretIdentity,
+    SecretMetadata,
+    SecretMutationResult,
+    SecretNamespaceDeletion,
+    SecretRelocation,
+    SecretWrite,
+)
 
 __all__ = [
     "EncryptedSecretsService",
+    "SecretCopy",
+    "SecretGuardMismatchError",
     "SecretsBootstrapState",
     "SecretsBootstrapStatus",
     "SecretIntegrityError",
     "SecretKeyring",
+    "SecretIdentity",
     "SecretMetadata",
+    "SecretMutationResult",
+    "SecretNamespaceDeletion",
+    "SecretRelocation",
     "SecretWrite",
     "get_secrets_bootstrap_status",
     "get_encrypted_secrets_service",

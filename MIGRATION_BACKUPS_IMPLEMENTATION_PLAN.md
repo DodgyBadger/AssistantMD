@@ -1,5 +1,7 @@
 # Migration Backup Directory Plan
 
+Implementation status: complete on `dev/mcp-experimental`.
+
 ## Objective
 
 Keep live system databases easy to identify by storing registered database-
@@ -22,3 +24,10 @@ migration backups under `system/migration_backups/`.
 - Extend the system database migration scenario to assert both relocation of a
   legacy backup and creation of new backups in `migration_backups/`.
 - Run the focused scenario and the production Python quality gate.
+
+## Next Phase
+
+Request the maintainer-owned full validation results and proceed through review
+preparation and cleanup before merge. The backup location remains an
+operational consequence of ADR 0015 and ADR 0034 rather than a separate
+architecture decision.

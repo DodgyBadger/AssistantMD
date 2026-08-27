@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from hmac import compare_digest
 from typing import cast
 
 from core.identity import ExecutionAuthority, require_current_execution_authority
@@ -21,6 +22,10 @@ class SecretMetadata:
     has_value: bool = True
 
 
+class SecretGuardMismatchError(RuntimeError):
+    """Raised when an encrypted guard is missing or no longer matches."""
+
+
 @dataclass(frozen=True)
 class SecretWrite:
     """One trusted principal-owned value for an atomic batch write."""
@@ -29,6 +34,48 @@ class SecretWrite:
     namespace: str
     name: str
     value: str
+
+
+@dataclass(frozen=True)
+class SecretIdentity:
+    """One principal-relative encrypted secret identity."""
+
+    namespace: str
+    name: str
+
+
+@dataclass(frozen=True)
+class SecretRelocation:
+    """Move one encrypted value to a new AAD-bound identity atomically."""
+
+    source: SecretIdentity
+    destination: SecretIdentity
+    overwrite: bool = False
+
+
+@dataclass(frozen=True)
+class SecretCopy:
+    """Copy one encrypted value to a new AAD-bound identity atomically."""
+
+    source: SecretIdentity
+    destination: SecretIdentity
+    overwrite: bool = False
+
+
+@dataclass(frozen=True)
+class SecretNamespaceDeletion:
+    """Delete every principal-owned value in one exact namespace atomically."""
+
+    namespace: str
+
+
+@dataclass(frozen=True)
+class SecretMutationResult:
+    """Counts from one committed atomic secret mutation."""
+
+    relocated_count: int
+    copied_count: int
+    deleted_count: int
 
 
 class EncryptedSecretsService:
@@ -151,6 +198,117 @@ class EncryptedSecretsService:
                     (authority.principal_id, namespace, name),
                 )
                 return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def guarded_set_for_authority(
+        self,
+        authority: ExecutionAuthority,
+        *,
+        guard: SecretIdentity,
+        expected_guard_value: str,
+        target: SecretIdentity,
+        value: str,
+    ) -> None:
+        """Set a value only while an authenticated encrypted guard matches."""
+        prepared_guard = SecretIdentity(
+            *_normalize_identity(guard.namespace, guard.name)
+        )
+        prepared_target = SecretIdentity(
+            *_normalize_identity(target.namespace, target.name)
+        )
+        if prepared_guard == prepared_target:
+            raise ValueError("Secret guard and target identities must be distinct.")
+        if not isinstance(expected_guard_value, str) or not expected_guard_value:
+            raise ValueError("Expected secret guard value must be a non-empty string.")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Secret value must be a non-empty string.")
+        encrypted = self._keyring.encrypt(
+            value,
+            owner_principal_id=authority.principal_id,
+            namespace=prepared_target.namespace,
+            name=prepared_target.name,
+        )
+        conn = connect_secrets(self._system_root)
+        try:
+            with conn:
+                guard_row = self._select_row(
+                    conn,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_guard.namespace,
+                    name=prepared_guard.name,
+                )
+                if guard_row is None:
+                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
+                actual_guard_value = self._decrypt_row(
+                    guard_row,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_guard.namespace,
+                    name=prepared_guard.name,
+                )
+                if not compare_digest(actual_guard_value, expected_guard_value):
+                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
+                self._upsert_encrypted(
+                    conn,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_target.namespace,
+                    name=prepared_target.name,
+                    encrypted=encrypted,
+                )
+                self._verify_value(
+                    conn,
+                    authority=authority,
+                    identity=prepared_target,
+                    expected=value,
+                )
+        finally:
+            conn.close()
+
+    def guarded_delete_for_authority(
+        self,
+        authority: ExecutionAuthority,
+        *,
+        guard: SecretIdentity,
+        expected_guard_value: str,
+        target: SecretIdentity,
+    ) -> bool:
+        """Delete a value only while an authenticated encrypted guard matches."""
+        prepared_guard = SecretIdentity(
+            *_normalize_identity(guard.namespace, guard.name)
+        )
+        prepared_target = SecretIdentity(
+            *_normalize_identity(target.namespace, target.name)
+        )
+        if prepared_guard == prepared_target:
+            raise ValueError("Secret guard and target identities must be distinct.")
+        if not isinstance(expected_guard_value, str) or not expected_guard_value:
+            raise ValueError("Expected secret guard value must be a non-empty string.")
+        conn = connect_secrets(self._system_root)
+        try:
+            with conn:
+                guard_row = self._select_row(
+                    conn,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_guard.namespace,
+                    name=prepared_guard.name,
+                )
+                if guard_row is None:
+                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
+                actual_guard_value = self._decrypt_row(
+                    guard_row,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_guard.namespace,
+                    name=prepared_guard.name,
+                )
+                if not compare_digest(actual_guard_value, expected_guard_value):
+                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
+                return bool(
+                    self._delete_identity(
+                        conn,
+                        authority=authority,
+                        identity=prepared_target,
+                    )
+                )
         finally:
             conn.close()
 
@@ -288,6 +446,152 @@ class EncryptedSecretsService:
             conn.close()
         return len(prepared)
 
+    def mutate_for_authority(
+        self,
+        authority: ExecutionAuthority,
+        *,
+        copies: tuple[SecretCopy, ...] = (),
+        relocations: tuple[SecretRelocation, ...] = (),
+        deletions: tuple[SecretIdentity, ...] = (),
+        namespace_deletions: tuple[SecretNamespaceDeletion, ...] = (),
+    ) -> SecretMutationResult:
+        """Copy, relocate, and delete principal-owned secrets atomically."""
+        prepared_copies = tuple(
+            SecretCopy(
+                source=SecretIdentity(
+                    *_normalize_identity(item.source.namespace, item.source.name)
+                ),
+                destination=SecretIdentity(
+                    *_normalize_identity(
+                        item.destination.namespace,
+                        item.destination.name,
+                    )
+                ),
+                overwrite=item.overwrite,
+            )
+            for item in copies
+        )
+        prepared_relocations = tuple(
+            SecretRelocation(
+                source=SecretIdentity(
+                    *_normalize_identity(
+                        item.source.namespace,
+                        item.source.name,
+                    )
+                ),
+                destination=SecretIdentity(
+                    *_normalize_identity(
+                        item.destination.namespace,
+                        item.destination.name,
+                    )
+                ),
+                overwrite=item.overwrite,
+            )
+            for item in relocations
+        )
+        prepared_deletions = tuple(
+            SecretIdentity(*_normalize_identity(item.namespace, item.name))
+            for item in deletions
+        )
+        prepared_namespace_deletions = tuple(
+            SecretNamespaceDeletion(_normalize_namespace(item.namespace))
+            for item in namespace_deletions
+        )
+        _validate_secret_mutation(
+            prepared_copies,
+            prepared_relocations,
+            prepared_deletions,
+            prepared_namespace_deletions,
+        )
+
+        relocated_count = 0
+        copied_count = 0
+        deleted_count = 0
+        conn = connect_secrets(self._system_root)
+        try:
+            with conn:
+                for copy in prepared_copies:
+                    if self._copy_secret(
+                        conn,
+                        authority=authority,
+                        source=copy.source,
+                        destination=copy.destination,
+                        overwrite=copy.overwrite,
+                    ):
+                        copied_count += 1
+                for relocation in prepared_relocations:
+                    source = self._select_row(
+                        conn,
+                        owner_principal_id=authority.principal_id,
+                        namespace=relocation.source.namespace,
+                        name=relocation.source.name,
+                    )
+                    if source is None:
+                        continue
+                    destination = self._select_row(
+                        conn,
+                        owner_principal_id=authority.principal_id,
+                        namespace=relocation.destination.namespace,
+                        name=relocation.destination.name,
+                    )
+                    if destination is None or relocation.overwrite:
+                        value = self._decrypt_row(
+                            source,
+                            owner_principal_id=authority.principal_id,
+                            namespace=relocation.source.namespace,
+                            name=relocation.source.name,
+                        )
+                        encrypted = self._keyring.encrypt(
+                            value,
+                            owner_principal_id=authority.principal_id,
+                            namespace=relocation.destination.namespace,
+                            name=relocation.destination.name,
+                        )
+                        self._upsert_encrypted(
+                            conn,
+                            owner_principal_id=authority.principal_id,
+                            namespace=relocation.destination.namespace,
+                            name=relocation.destination.name,
+                            encrypted=encrypted,
+                        )
+                        self._verify_value(
+                            conn,
+                            authority=authority,
+                            identity=relocation.destination,
+                            expected=value,
+                        )
+                    else:
+                        self._decrypt_row(
+                            destination,
+                            owner_principal_id=authority.principal_id,
+                            namespace=relocation.destination.namespace,
+                            name=relocation.destination.name,
+                        )
+                    deleted_count += self._delete_identity(
+                        conn, authority=authority, identity=relocation.source
+                    )
+                    relocated_count += 1
+                for identity in prepared_deletions:
+                    deleted_count += self._delete_identity(
+                        conn, authority=authority, identity=identity
+                    )
+                for namespace_deletion in prepared_namespace_deletions:
+                    cursor = conn.execute(
+                        """
+                        DELETE FROM encrypted_secrets
+                        WHERE owner_principal_id = ? AND namespace = ?
+                        """,
+                        (authority.principal_id, namespace_deletion.namespace),
+                    )
+                    deleted_count += cursor.rowcount
+        finally:
+            conn.close()
+        return SecretMutationResult(
+            relocated_count=relocated_count,
+            copied_count=copied_count,
+            deleted_count=deleted_count,
+        )
+
     def verify_all(self) -> None:
         """Authenticate every stored record without returning secret values."""
         conn = connect_secrets(self._system_root)
@@ -383,14 +687,166 @@ class EncryptedSecretsService:
             name=name,
         )
 
+    def _verify_value(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        authority: ExecutionAuthority,
+        identity: SecretIdentity,
+        expected: str,
+    ) -> None:
+        row = self._select_row(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=identity.namespace,
+            name=identity.name,
+        )
+        if (
+            row is None
+            or self._decrypt_row(
+                row,
+                owner_principal_id=authority.principal_id,
+                namespace=identity.namespace,
+                name=identity.name,
+            )
+            != expected
+        ):
+            raise RuntimeError("Relocated secret verification failed.")
+
+    def _copy_secret(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        authority: ExecutionAuthority,
+        source: SecretIdentity,
+        destination: SecretIdentity,
+        overwrite: bool,
+    ) -> bool:
+        source_row = self._select_row(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=source.namespace,
+            name=source.name,
+        )
+        if source_row is None:
+            return False
+        destination_row = self._select_row(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=destination.namespace,
+            name=destination.name,
+        )
+        if destination_row is not None and not overwrite:
+            self._decrypt_row(
+                destination_row,
+                owner_principal_id=authority.principal_id,
+                namespace=destination.namespace,
+                name=destination.name,
+            )
+            return True
+        value = self._decrypt_row(
+            source_row,
+            owner_principal_id=authority.principal_id,
+            namespace=source.namespace,
+            name=source.name,
+        )
+        encrypted = self._keyring.encrypt(
+            value,
+            owner_principal_id=authority.principal_id,
+            namespace=destination.namespace,
+            name=destination.name,
+        )
+        self._upsert_encrypted(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=destination.namespace,
+            name=destination.name,
+            encrypted=encrypted,
+        )
+        self._verify_value(
+            conn,
+            authority=authority,
+            identity=destination,
+            expected=value,
+        )
+        return True
+
+    @staticmethod
+    def _delete_identity(
+        conn: sqlite3.Connection,
+        *,
+        authority: ExecutionAuthority,
+        identity: SecretIdentity,
+    ) -> int:
+        cursor = conn.execute(
+            """
+            DELETE FROM encrypted_secrets
+            WHERE owner_principal_id = ? AND namespace = ? AND name = ?
+            """,
+            (authority.principal_id, identity.namespace, identity.name),
+        )
+        return cursor.rowcount
+
 
 def _normalize_identity(namespace: str, name: str) -> tuple[str, str]:
-    normalized_namespace = str(namespace or "").strip()
+    normalized_namespace = _normalize_namespace(namespace)
     normalized_name = str(name or "").strip()
-    if not normalized_namespace:
-        raise ValueError("Secret namespace is required.")
     if not normalized_name:
         raise ValueError("Secret name is required.")
     if len(normalized_namespace) > 128 or len(normalized_name) > 256:
         raise ValueError("Secret namespace or name exceeds its storage limit.")
     return normalized_namespace, normalized_name
+
+
+def _normalize_namespace(namespace: str) -> str:
+    normalized = str(namespace or "").strip()
+    if not normalized:
+        raise ValueError("Secret namespace is required.")
+    if len(normalized) > 128:
+        raise ValueError("Secret namespace exceeds its storage limit.")
+    return normalized
+
+
+def _validate_secret_mutation(
+    copies: tuple[SecretCopy, ...],
+    relocations: tuple[SecretRelocation, ...],
+    deletions: tuple[SecretIdentity, ...],
+    namespace_deletions: tuple[SecretNamespaceDeletion, ...],
+) -> None:
+    copy_sources = {(item.source.namespace, item.source.name) for item in copies}
+    copy_destinations = {
+        (item.destination.namespace, item.destination.name) for item in copies
+    }
+    relocation_sources = {
+        (item.source.namespace, item.source.name) for item in relocations
+    }
+    relocation_destinations = {
+        (item.destination.namespace, item.destination.name) for item in relocations
+    }
+    sources = copy_sources | relocation_sources
+    destinations = {
+        *copy_destinations,
+        *relocation_destinations,
+    }
+    deletion_identities = {(item.namespace, item.name) for item in deletions}
+    deleted_namespaces = {item.namespace for item in namespace_deletions}
+    operation_count = len(copies) + len(relocations)
+    if len(sources) != operation_count or len(destinations) != operation_count:
+        raise ValueError("Secret mutation identities must be unique.")
+    if len(deletion_identities) != len(deletions):
+        raise ValueError("Secret deletion identities must be unique.")
+    if len(deleted_namespaces) != len(namespace_deletions):
+        raise ValueError("Secret namespace deletions must be unique.")
+    if any(item.source == item.destination for item in copies) or any(
+        item.source == item.destination for item in relocations
+    ):
+        raise ValueError("Secret copy or relocation requires distinct identities.")
+    if sources.intersection(destinations):
+        raise ValueError("Secret relocation chains are not supported.")
+    if destinations.intersection(deletion_identities):
+        raise ValueError("A copied or relocated secret cannot also be deleted.")
+    touched_namespaces = {
+        namespace for namespace, _name in sources | destinations | deletion_identities
+    }
+    if touched_namespaces.intersection(deleted_namespaces):
+        raise ValueError("A secret namespace deletion cannot overlap another mutation.")

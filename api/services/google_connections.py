@@ -109,8 +109,13 @@ def update_google_connection(
     request: GoogleConnectionUpdateRequest,
 ) -> GoogleConnectionResponse:
     """Persist non-secret Google client metadata and Gmail preferences."""
+    authority = require_current_execution_authority()
+    runtime = get_runtime_context()
+    previous = runtime.built_in_connections.get_google_connection_for_authority(
+        authority
+    )
     with _domain_errors():
-        connection = get_runtime_context().built_in_connections.set_google_connection(
+        connection = runtime.built_in_connections.set_google_connection(
             GoogleConnectionUpdate(
                 client_id=request.client_id,
                 display_name=request.display_name,
@@ -118,6 +123,10 @@ def update_google_connection(
                 gmail=GmailPreferences(**request.gmail.model_dump()),
             )
         )
+        if previous is not None and runtime.google_connection is not None:
+            runtime.google_connection.handle_metadata_update(
+                authority, previous, connection
+            )
     logger.info(
         "Google connection configuration changed",
         data={
@@ -131,8 +140,15 @@ def update_google_connection(
 def update_google_connection_by_id(
     connection_id: str, request: GoogleConnectionUpdateRequest
 ) -> GoogleConnectionResponse:
+    authority = require_current_execution_authority()
+    runtime = get_runtime_context()
+    previous = runtime.built_in_connections.get_google_connection_for_authority(
+        authority, connection_id
+    )
     with _domain_errors():
-        get_runtime_context().built_in_connections.update_google_connection(
+        if previous is None:
+            raise LookupError("Google connection not found.")
+        updated = runtime.built_in_connections.update_google_connection(
             connection_id,
             GoogleConnectionUpdate(
                 client_id=request.client_id,
@@ -141,6 +157,10 @@ def update_google_connection_by_id(
                 gmail=GmailPreferences(**request.gmail.model_dump()),
             ),
         )
+        if runtime.google_connection is not None:
+            runtime.google_connection.handle_metadata_update(
+                authority, previous, updated
+            )
     return _google_connection_response(connection_id)
 
 
@@ -209,7 +229,14 @@ def disconnect_google_oauth(connection_id: str | None = None) -> OperationResult
     service = get_runtime_context().google_connection
     if service is None:
         raise _secrets_locked()
-    service.clear_token_state(require_current_execution_authority(), connection_id)
+    authority = require_current_execution_authority()
+    with _domain_errors():
+        connection = get_runtime_context().built_in_connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+        if connection is None:
+            raise LookupError("Google connection not found.")
+        service.clear_token_state(authority, connection.connection_id)
     logger.info(
         "Google OAuth disconnected", data={"event": "google_oauth_disconnected"}
     )
@@ -231,17 +258,18 @@ def delete_google_connection(
     if service is None:
         raise _secrets_locked()
     authority = require_current_execution_authority()
-    connection = runtime.built_in_connections.get_google_connection_for_authority(
-        authority, connection_id
-    )
-    if connection is None:
-        raise LookupError("Google connection not found.")
-    runtime.built_in_connections.delete_google_connection_for_authority(
-        authority,
-        connection.connection_id,
-        replacement_default_id=replacement_default_id,
-    )
-    service.disconnect_by_connection_id(authority, connection.connection_id)
+    with _domain_errors():
+        connection = runtime.built_in_connections.validate_google_connection_deletion_for_authority(
+            authority,
+            connection_id,
+            replacement_default_id=replacement_default_id,
+        )
+        service.disconnect_by_connection_id(authority, connection.connection_id)
+        runtime.built_in_connections.delete_google_connection_for_authority(
+            authority,
+            connection.connection_id,
+            replacement_default_id=replacement_default_id,
+        )
     logger.info(
         "Google connection deleted", data={"event": "google_connection_deleted"}
     )
@@ -290,7 +318,13 @@ def _domain_errors() -> Iterator[None]:
         yield
     except APIException:
         raise
-    except (LookupError, ValueError) as exc:
+    except LookupError as exc:
+        raise APIException(
+            status_code=404,
+            error_type="GoogleConnectionNotFound",
+            message="Google connection not found.",
+        ) from exc
+    except ValueError as exc:
         raise APIException(
             status_code=400,
             error_type="InvalidGoogleConnection",

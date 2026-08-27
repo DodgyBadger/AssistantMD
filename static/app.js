@@ -1266,6 +1266,9 @@ function setupTabs() {
 }
 
 function switchTab(tabName) {
+    if (tabName !== 'configuration') {
+        window.ConfigurationPanel?.onTabDeactivated?.();
+    }
     Object.entries(tabs).forEach(([name, tabControls]) => {
         if (!tabControls.button || !tabControls.content) return;
 

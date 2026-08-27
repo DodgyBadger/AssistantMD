@@ -6,6 +6,9 @@ import asyncio
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
+
+import httpcore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -27,10 +30,15 @@ from mcp.shared.auth import OAuthToken  # noqa: E402
 from core.identity import ExecutionAuthority  # noqa: E402
 from core.mcp import ConnectedMCPOAuth, EncryptedMCPOAuthStorage  # noqa: E402
 from core.mcp.oauth_storage import (  # noqa: E402
+    MCP_OAUTH_FENCE_NAME,  # noqa: E402
     has_mcp_oauth_tokens,
     mcp_oauth_http_client_factory,
 )
-from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
+from core.secrets import (  # noqa: E402
+    EncryptedSecretsService,
+    SecretGuardMismatchError,
+    SecretKeyring,
+)
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -46,15 +54,21 @@ class MCPOAuthStorageScenario(BaseScenario):
         )
         owner = ExecutionAuthority("oauth-owner")
         other = ExecutionAuthority("oauth-other")
+        fence_token = "oauth-storage-fence"
+        namespace = "mcp.connection.shared-connection-id"
+        secrets.set_for_authority(owner, namespace, MCP_OAUTH_FENCE_NAME, fence_token)
+        secrets.set_for_authority(other, namespace, MCP_OAUTH_FENCE_NAME, fence_token)
         owner_store = EncryptedMCPOAuthStorage(
             secrets=secrets,
             authority=owner,
             connection_id="shared-connection-id",
+            fence_token=fence_token,
         )
         other_store = EncryptedMCPOAuthStorage(
             secrets=secrets,
             authority=other,
             connection_id="shared-connection-id",
+            fence_token=fence_token,
         )
         owner_adapter = TokenStorageAdapter(
             async_key_value=owner_store,
@@ -147,11 +161,71 @@ class MCPOAuthStorageScenario(BaseScenario):
         else:
             self.soft_assert(False, "Runtime OAuth must never launch a browser flow")
         factory = mcp_oauth_http_client_factory(allow_insecure_http=False)
-        async with factory(follow_redirects=True) as client:  # type: ignore[call-arg]
+        mock_backend = httpcore.AsyncMockBackend(
+            [b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"]
+        )
+        with (
+            patch(
+                "core.mcp.network.httpcore.AnyIOBackend",
+                return_value=mock_backend,
+            ),
+            patch(
+                "core.mcp.network._resolve_addresses",
+                return_value=("8.8.8.8",),
+            ),
+        ):
+            async with factory(
+                follow_redirects=True  # type: ignore[call-arg]
+            ) as client:
+                response = await client.get("https://mail.example/oauth/token")
+                self.soft_assert(
+                    not client.follow_redirects and not client.trust_env,
+                    "FastMCP runtime kwargs must not weaken OAuth client policy",
+                )
+        self.soft_assert_equal(
+            (response.status_code, response.text),
+            (200, "ok"),
+            "MCP OAuth HTTP clients should use the socket-authoritative transport",
+        )
+
+        secrets.set_for_authority(
+            other, namespace, MCP_OAUTH_FENCE_NAME, "rotated-oauth-fence"
+        )
+        rotated_store = EncryptedMCPOAuthStorage(
+            secrets=secrets,
+            authority=other,
+            connection_id="shared-connection-id",
+            fence_token="rotated-oauth-fence",
+        )
+        await rotated_store.put("guarded-delete", {"token": "preserve-after-rotation"})
+        try:
+            await other_store.delete("guarded-delete")
+        except SecretGuardMismatchError:
+            pass
+        else:
             self.soft_assert(
-                not client.follow_redirects and not client.trust_env,
-                "FastMCP runtime kwargs must not weaken OAuth client policy",
+                False,
+                "An OAuth adapter issued before fence rotation must not delete state",
             )
+        self.soft_assert_equal(
+            await other_store.get("guarded-delete"),
+            {"token": "preserve-after-rotation"},
+            "Rejected stale OAuth deletes must preserve the current encrypted record",
+        )
+        try:
+            await other_store.put("stale-write", {"token": "must-not-persist"})
+        except SecretGuardMismatchError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                "An OAuth adapter issued before fence rotation must not persist state",
+            )
+        self.soft_assert_equal(
+            await other_store.get("stale-write"),
+            None,
+            "Rejected stale OAuth writes must leave no encrypted record",
+        )
 
         self.assert_no_failures()
         self.teardown_scenario()

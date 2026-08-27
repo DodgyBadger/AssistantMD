@@ -61,6 +61,19 @@ running container.
 - Losing the installation key requires re-entering stored credentials, so back
   up `.env` if you need to preserve access to them.
 
+### Safer upgrades and connection recovery
+
+- Database migration rollback copies now include committed SQLite WAL data and
+  are integrity-checked before an upgrade changes the live store.
+- Interrupted MCP connection, credential, OAuth, and deletion changes remain
+  unavailable until startup recovery finishes them, preventing partially
+  applied configuration from being used.
+- MCP and OAuth network connections enforce endpoint policy at the socket
+  destination, including when DNS answers change between validation and connect.
+- Changing Google OAuth client identity now requires fresh authorization, and
+  stale browser authorization polling is canceled when connection settings or
+  the active System view change.
+
 ### After upgrading
 
 1. Open the System tab and confirm encrypted secrets report ready and the

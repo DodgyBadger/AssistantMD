@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -361,6 +360,22 @@ def _backup_pending_databases(
         backup_path = backup_directory / f"{source.name}.backup-{timestamp}"
         if backup_path.exists():
             raise FileExistsError(f"Migration backup already exists: {backup_path}")
-        shutil.copy2(source, backup_path)
+        source_conn = sqlite3.connect(source)
+        backup_conn = sqlite3.connect(backup_path)
+        try:
+            source_conn.backup(backup_conn)
+            integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or str(integrity[0]).lower() != "ok":
+                raise RuntimeError(
+                    f"Migration backup integrity check failed: {backup_path}"
+                )
+        except BaseException:
+            backup_conn.close()
+            source_conn.close()
+            backup_path.unlink(missing_ok=True)
+            raise
+        else:
+            backup_conn.close()
+            source_conn.close()
         backups[target.db_name] = str(backup_path)
     return backups

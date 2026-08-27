@@ -94,6 +94,16 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             "Google authorization should request offline incremental PKCE consent",
         )
         state = query["state"][0]
+        try:
+            await coordinator.complete(
+                authority=owner,
+                code="untrusted-authorization-code",
+                state="wrong-state",
+            )
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(False, "Google OAuth should reject a mismatched state")
         secondary_started = coordinator.start(
             authority=owner,
             redirect_uri=started.redirect_uri,
@@ -107,6 +117,10 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             authority=owner,
             code="authorization-code",
             state=state,
+        )
+        self.soft_assert(
+            completed.access_token == "initial-access-token",
+            "A mismatched callback must not consume the legitimate pending attempt",
         )
         self.soft_assert_equal(
             (
@@ -183,6 +197,55 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             pass
         else:
             self.soft_assert(False, "Completed Google OAuth state must be single-use")
+
+        stale = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Changing Client",
+                client_id="changing.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "changing-secret", stale.connection_id)
+        stale_started = coordinator.start(
+            authority=owner,
+            redirect_uri=started.redirect_uri,
+            capabilities=(GoogleCapability.GMAIL_READ,),
+            connection_id=stale.connection_id,
+        )
+        stale_state = parse_qs(urlparse(stale_started.authorization_url).query)[
+            "state"
+        ][0]
+        connections.update_google_connection_for_authority(
+            owner,
+            stale.connection_id,
+            GoogleConnectionUpdate(
+                client_id="replacement.apps.googleusercontent.com",
+                display_name=stale.display_name,
+                gmail=stale.gmail,
+            ),
+        )
+        token_request_count = sum(
+            request.url.path.endswith("/token") for request in requests
+        )
+        try:
+            await coordinator.complete(
+                authority=owner,
+                connection_id=stale.connection_id,
+                code="stale-client-code",
+                state=stale_state,
+            )
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                "A callback bound to changed client metadata should be rejected",
+            )
+        self.soft_assert_equal(
+            sum(request.url.path.endswith("/token") for request in requests),
+            token_request_count,
+            "A stale Google callback must be rejected before token exchange",
+        )
 
         self.assert_no_failures()
         self.teardown_scenario()

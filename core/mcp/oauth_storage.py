@@ -11,11 +11,12 @@ from mcp.shared._httpx_utils import McpHttpClientFactory
 
 from core.identity import ExecutionAuthority
 from core.oauth import EncryptedOAuthStorage
-from core.secrets import EncryptedSecretsService
+from core.secrets import EncryptedSecretsService, SecretIdentity
 
-from .network import validate_mcp_endpoint
+from .network import MCPAsyncHTTPTransport, validate_mcp_endpoint
 
 _OAUTH_NAMESPACE_SUFFIX = ".oauth"
+MCP_OAUTH_FENCE_NAME = "oauth_fence_token"
 
 
 class EncryptedMCPOAuthStorage(EncryptedOAuthStorage):
@@ -27,11 +28,17 @@ class EncryptedMCPOAuthStorage(EncryptedOAuthStorage):
         secrets: EncryptedSecretsService,
         authority: ExecutionAuthority,
         connection_id: str,
+        fence_token: str,
     ) -> None:
+        namespace = f"mcp.connection.{connection_id}"
         super().__init__(
             secrets=secrets,
             authority=authority,
-            namespace=f"mcp.connection.{connection_id}{_OAUTH_NAMESPACE_SUFFIX}",
+            namespace=f"{namespace}{_OAUTH_NAMESPACE_SUFFIX}",
+            write_guard=(
+                SecretIdentity(namespace=namespace, name=MCP_OAUTH_FENCE_NAME),
+                fence_token,
+            ),
         )
 
 
@@ -110,6 +117,7 @@ def mcp_oauth_http_client_factory(*, allow_insecure_http: bool) -> McpHttpClient
             follow_redirects=False,
             trust_env=False,
             event_hooks={"request": [validate_request]},
+            transport=MCPAsyncHTTPTransport(),
         )
 
     return create_client

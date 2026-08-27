@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from typing import Any, SupportsFloat
 
 from core.identity import ExecutionAuthority
-from core.secrets import EncryptedSecretsService
+from core.secrets import (
+    EncryptedSecretsService,
+    SecretIdentity,
+    SecretRelocation,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,7 @@ class EncryptedOAuthStorage:
         secrets: EncryptedSecretsService,
         authority: ExecutionAuthority,
         namespace: str,
+        write_guard: tuple[SecretIdentity, str] | None = None,
     ) -> None:
         clean_namespace = str(namespace or "").strip()
         if not clean_namespace:
@@ -35,6 +40,7 @@ class EncryptedOAuthStorage:
         self._secrets = secrets
         self._authority = authority
         self._namespace = clean_namespace
+        self._write_guard = write_guard
 
     async def get(
         self, key: str, *, collection: str | None = None
@@ -86,24 +92,87 @@ class EncryptedOAuthStorage:
             separators=(",", ":"),
             sort_keys=True,
         )
-        self._secrets.set_for_authority(
-            self._authority,
-            self._namespace,
-            _storage_name(key, collection),
-            payload,
-        )
+        target = self._identity(key, collection)
+        if self._write_guard is None:
+            self._secrets.set_for_authority(
+                self._authority,
+                target.namespace,
+                target.name,
+                payload,
+            )
+        else:
+            guard, expected_value = self._write_guard
+            self._secrets.guarded_set_for_authority(
+                self._authority,
+                guard=guard,
+                expected_guard_value=expected_value,
+                target=target,
+                value=payload,
+            )
 
     async def delete(self, key: str, *, collection: str | None = None) -> bool:
         return self.delete_sync(key, collection=collection)
 
     def delete_sync(self, key: str, *, collection: str | None = None) -> bool:
         """Delete OAuth JSON from synchronous service boundaries."""
-        name = _storage_name(key, collection)
+        target = self._identity(key, collection)
         existed = self._secrets.get_for_authority(
-            self._authority, self._namespace, name
+            self._authority, target.namespace, target.name
         )
-        self._secrets.delete_for_authority(self._authority, self._namespace, name)
+        if self._write_guard is None:
+            self._secrets.delete_for_authority(
+                self._authority, target.namespace, target.name
+            )
+        else:
+            guard, expected_value = self._write_guard
+            self._secrets.guarded_delete_for_authority(
+                self._authority,
+                guard=guard,
+                expected_guard_value=expected_value,
+                target=target,
+            )
         return existed is not None
+
+    def relocate_sync(
+        self,
+        key: str,
+        *,
+        destination: EncryptedOAuthStorage,
+        collection: str | None = None,
+        overwrite: bool = False,
+    ) -> bool:
+        """Move one OAuth entry atomically without exposing its hashed identity."""
+        self._require_compatible_storage(destination)
+        result = self._secrets.mutate_for_authority(
+            self._authority,
+            relocations=(
+                SecretRelocation(
+                    source=self._identity(key, collection),
+                    destination=destination._identity(key, collection),
+                    overwrite=overwrite,
+                ),
+            ),
+        )
+        return result.relocated_count == 1
+
+    def delete_many_sync(
+        self,
+        keys: Sequence[str],
+        *,
+        collection: str | None = None,
+        additional_storages: Sequence[EncryptedOAuthStorage] = (),
+    ) -> int:
+        """Delete entries across compatible OAuth namespaces atomically."""
+        storages = (self, *additional_storages)
+        for storage in storages[1:]:
+            self._require_compatible_storage(storage)
+        identities = tuple(
+            storage._identity(key, collection) for storage in storages for key in keys
+        )
+        return self._secrets.mutate_for_authority(
+            self._authority,
+            deletions=identities,
+        ).deleted_count
 
     async def get_many(
         self, keys: Sequence[str], *, collection: str | None = None
@@ -154,9 +223,32 @@ class EncryptedOAuthStorage:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("Stored OAuth state is invalid.") from exc
         if expires_at is not None and expires_at <= time.time():
-            self._secrets.delete_for_authority(self._authority, self._namespace, name)
+            if self._write_guard is None:
+                self._secrets.delete_for_authority(
+                    self._authority, self._namespace, name
+                )
+            else:
+                guard, expected_value = self._write_guard
+                self._secrets.guarded_delete_for_authority(
+                    self._authority,
+                    guard=guard,
+                    expected_guard_value=expected_value,
+                    target=SecretIdentity(namespace=self._namespace, name=name),
+                )
             return None
         return _StoredValue(value=value, expires_at=expires_at)
+
+    def _identity(self, key: str, collection: str | None) -> SecretIdentity:
+        return SecretIdentity(
+            namespace=self._namespace,
+            name=_storage_name(key, collection),
+        )
+
+    def _require_compatible_storage(self, other: EncryptedOAuthStorage) -> None:
+        if self._secrets is not other._secrets or self._authority != other._authority:
+            raise ValueError(
+                "OAuth storage mutation requires one service and authority."
+            )
 
 
 def _storage_name(key: str, collection: str | None) -> str:

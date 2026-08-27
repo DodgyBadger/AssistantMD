@@ -11,6 +11,7 @@ import httpx
 
 from core.connections import BuiltInConnectionService, GoogleConnection
 from core.identity import ExecutionAuthority
+from core.logger import UnifiedLogger
 from core.oauth import (
     EncryptedOAuthStorage,
     OAuthHTTPClientFactory,
@@ -24,6 +25,7 @@ from core.settings import get_default_api_timeout
 
 from .connection import (
     GOOGLE_OAUTH_NAMESPACE,
+    GOOGLE_OAUTH_PENDING_KEY,
     GoogleCapability,
     GoogleConnectionService,
     GoogleOAuthTokenState,
@@ -33,8 +35,9 @@ GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_OAUTH_PENDING_SECONDS = 10 * 60
-_PENDING_KEY = "pending-authorization"
 _OAUTH_COLLECTION = "google"
+
+logger = UnifiedLogger(tag="google-connections")
 
 
 class GoogleOAuthError(ValueError):
@@ -82,10 +85,10 @@ class GoogleOAuthCoordinator:
         )
         if connection is None:
             raise GoogleOAuthError("Save Google connection configuration first.")
-        if (
-            self._google.resolve_client_secret(authority, connection.connection_id)
-            is None
-        ):
+        credential = self._google.resolve_client_credential(
+            authority, connection.connection_id
+        )
+        if credential is None:
             raise GoogleOAuthError("Save the Google OAuth client secret first.")
         try:
             clean_redirect = validate_redirect_uri(redirect_uri)
@@ -99,7 +102,7 @@ class GoogleOAuthCoordinator:
         pkce = OAuthPKCEState.generate()
         expires_at = datetime.now(UTC) + timedelta(seconds=GOOGLE_OAUTH_PENDING_SECONDS)
         self._storage(authority, connection.connection_id).put_sync(
-            _PENDING_KEY,
+            GOOGLE_OAUTH_PENDING_KEY,
             {
                 "state": pkce.state,
                 "code_verifier": pkce.code_verifier,
@@ -108,6 +111,8 @@ class GoogleOAuthCoordinator:
                 "existing_account_id": (
                     existing.account_id if existing is not None else None
                 ),
+                "oauth_generation": credential.oauth_generation,
+                "credential_id": credential.credential_id,
                 "expires_at": expires_at.isoformat(),
             },
             collection=_OAUTH_COLLECTION,
@@ -153,18 +158,21 @@ class GoogleOAuthCoordinator:
         pending = self._load_pending(authority, connection.connection_id)
         if pending is None:
             raise GoogleOAuthError("No active Google authorization attempt was found.")
+        expected = str(pending["state"])
+        if not OAuthPKCEState(
+            state=expected,
+            code_verifier=str(pending["code_verifier"]),
+            code_challenge="unused",
+        ).matches_state(state):
+            raise GoogleOAuthError("Google OAuth state did not match.")
+        self._storage(authority, connection.connection_id).delete_sync(
+            GOOGLE_OAUTH_PENDING_KEY, collection=_OAUTH_COLLECTION
+        )
         try:
-            expected = str(pending["state"])
-            if not OAuthPKCEState(
-                state=expected,
-                code_verifier=str(pending["code_verifier"]),
-                code_challenge="unused",
-            ).matches_state(state):
-                raise GoogleOAuthError("Google OAuth state did not match.")
-            client_secret = self._google.resolve_client_secret(
+            credential = self._google.resolve_client_credential(
                 authority, connection.connection_id
             )
-            if client_secret is None:
+            if credential is None:
                 raise GoogleOAuthError("Google OAuth client configuration is missing.")
             token = await request_oauth_token(
                 token_endpoint=GOOGLE_TOKEN_ENDPOINT,
@@ -172,7 +180,7 @@ class GoogleOAuthCoordinator:
                     "grant_type": "authorization_code",
                     "code": str(code or ""),
                     "client_id": connection.client_id,
-                    "client_secret": client_secret,
+                    "client_secret": credential.value,
                     "redirect_uri": str(pending["redirect_uri"]),
                     "code_verifier": str(pending["code_verifier"]),
                 },
@@ -219,10 +227,6 @@ class GoogleOAuthCoordinator:
             raise GoogleOAuthError(
                 "Google rejected OAuth completion. Start authorization again."
             ) from exc
-        finally:
-            self._storage(authority, connection.connection_id).delete_sync(
-                _PENDING_KEY, collection=_OAUTH_COLLECTION
-            )
 
     def _connection_for_pending_state(
         self, authority: ExecutionAuthority, state: str
@@ -282,12 +286,12 @@ class GoogleOAuthCoordinator:
         connection = self._connections.get_google_connection_for_authority(
             authority, connection_id
         )
-        client_secret = self._google.resolve_client_secret(authority, connection_id)
+        credential = self._google.resolve_client_credential(authority, connection_id)
         if (
             existing is None
             or not existing.refresh_token
             or connection is None
-            or client_secret is None
+            or credential is None
         ):
             raise GoogleOAuthError("Google authorization must be reconnected.")
         try:
@@ -297,7 +301,7 @@ class GoogleOAuthCoordinator:
                     "grant_type": "refresh_token",
                     "refresh_token": existing.refresh_token,
                     "client_id": connection.client_id,
-                    "client_secret": client_secret,
+                    "client_secret": credential.value,
                 },
                 http_client_factory=self._http_client_factory,
             )
@@ -340,9 +344,33 @@ class GoogleOAuthCoordinator:
     def _load_pending(
         self, authority: ExecutionAuthority, connection_id: str
     ) -> dict[str, object] | None:
-        return self._storage(authority, connection_id).get_sync(
-            _PENDING_KEY, collection=_OAUTH_COLLECTION
+        storage = self._storage(authority, connection_id)
+        pending = storage.get_sync(
+            GOOGLE_OAUTH_PENDING_KEY, collection=_OAUTH_COLLECTION
         )
+        if pending is None:
+            return None
+        credential = self._google.resolve_client_credential(authority, connection_id)
+        if credential is None or (
+            pending.get("oauth_generation") != credential.oauth_generation
+            or pending.get("credential_id") != credential.credential_id
+        ):
+            try:
+                storage.delete_sync(
+                    GOOGLE_OAUTH_PENDING_KEY,
+                    collection=_OAUTH_COLLECTION,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Stale Google OAuth pending cleanup deferred",
+                    data={
+                        "event": "google_oauth_stale_cleanup_deferred",
+                        "connection_id": connection_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+            return None
+        return pending
 
     def _require_connection(
         self, authority: ExecutionAuthority, connection_id: str | None

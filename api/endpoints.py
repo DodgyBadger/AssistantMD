@@ -1311,7 +1311,14 @@ async def complete_google_oauth_callback_endpoint(
             GoogleOAuthCompleteRequest(redirect_url=None, code=code, state=state)
         )
         return HTMLResponse(_google_oauth_callback_page(success=True))
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Google OAuth browser callback failed",
+            data={
+                "event": "google_oauth_callback_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return HTMLResponse(_google_oauth_callback_page(success=False), status_code=400)
 
 
@@ -1452,7 +1459,14 @@ async def complete_google_oauth_callback_by_id_endpoint(
             connection_id,
         )
         return HTMLResponse(_google_oauth_callback_page(success=True))
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Google OAuth browser callback failed",
+            data={
+                "event": "google_oauth_callback_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return HTMLResponse(_google_oauth_callback_page(success=False), status_code=400)
 
 

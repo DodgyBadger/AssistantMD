@@ -15,6 +15,7 @@ from core.mcp import (
     MCPConnectionCreate,
     MCPConnectionService,
     MCPConnectionUpdate,
+    MCPMutationUnavailableError,
     MCPTransport,
 )
 from core.mcp.oauth import (
@@ -323,6 +324,12 @@ def _log_change(event: str, connection: MCPConnection) -> None:
 def _domain_errors() -> Iterator[None]:
     try:
         yield
+    except MCPMutationUnavailableError as exc:
+        raise APIException(
+            status_code=503,
+            error_type="MCPMutationUnavailable",
+            message="MCP connection configuration is temporarily unavailable.",
+        ) from exc
     except LookupError as exc:
         raise APIException(
             status_code=404,

@@ -2,18 +2,37 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.chat import ChatStore
-from core.ingestion.service import IngestionService
-from core.migration_backups import MIGRATION_BACKUP_DIRECTORY
-from core.runtime.paths import set_bootstrap_roots
-from core.system_migrations import get_system_migration_status, run_system_migrations
-from validation.core.base_scenario import BaseScenario
+_direct_run_root: tempfile.TemporaryDirectory[str] | None = None
+if __name__ == "__main__":
+    from core.runtime.paths import set_bootstrap_roots
+
+    _direct_run_root = tempfile.TemporaryDirectory(
+        prefix="assistantmd-system-migrations-"
+    )
+    direct_root = Path(_direct_run_root.name)
+    data_root = direct_root / "data"
+    bootstrap_system_root = direct_root / "system"
+    data_root.mkdir()
+    bootstrap_system_root.mkdir()
+    set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
+
+from core.chat import ChatStore  # noqa: E402
+from core.ingestion.service import IngestionService  # noqa: E402
+from core.migration_backups import MIGRATION_BACKUP_DIRECTORY  # noqa: E402
+from core.runtime.paths import set_bootstrap_roots  # noqa: E402
+from core.system_migrations import (  # noqa: E402
+    get_system_migration_status,
+    run_system_migrations,
+)
+from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
 class SystemDatabaseMigrationsScenario(BaseScenario):
@@ -43,7 +62,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            18,
+            20,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -259,3 +278,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             (table_name,),
         ).fetchone()
         return row is not None
+
+
+if __name__ == "__main__":
+    asyncio.run(SystemDatabaseMigrationsScenario().test_scenario())

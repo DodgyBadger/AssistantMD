@@ -403,12 +403,7 @@ class MCPOAuthCoordinator:
         connection = self._require_oauth_connection(authority, connection_id)
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
-        await self._clear_pending(authority, connection)
-        adapter = TokenStorageAdapter(
-            async_key_value=self._connections.oauth_storage(authority, connection_id),
-            server_url=connection.url,
-        )
-        await adapter.clear()
+        self._connections.disconnect_oauth(authority, connection_id)
         self._manager.invalidate(authority.principal_id, connection_id)
 
     async def shutdown(self) -> None:

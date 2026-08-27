@@ -186,6 +186,8 @@ class BuiltInConnectionService:
                         is_default = ?, gmail_search_default_results = ?,
                         gmail_search_max_results = ?, gmail_message_max_characters = ?,
                         gmail_thread_max_messages = ?, config_version = config_version + 1,
+                        oauth_generation = oauth_generation +
+                            CASE WHEN client_id <> ? THEN 1 ELSE 0 END,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE owner_principal_id = ? AND connection_id = ?
                     """,
@@ -197,6 +199,7 @@ class BuiltInConnectionService:
                         request.gmail.search_max_results,
                         request.gmail.message_max_characters,
                         request.gmail.thread_max_messages,
+                        request.client_id,
                         authority.principal_id,
                         existing.connection_id,
                     ),
@@ -254,31 +257,20 @@ class BuiltInConnectionService:
         *,
         replacement_default_id: str | None = None,
     ) -> bool:
-        existing = (
-            self.get_google_connection_for_authority(authority, connection_id)
-            if connection_id is not None
-            else self.get_google_connection_for_authority(authority)
+        existing = self.validate_google_connection_deletion_for_authority(
+            authority,
+            connection_id,
+            replacement_default_id=replacement_default_id,
         )
-        if existing is None:
-            return False
-        others = [
-            item
-            for item in self.list_google_connections_for_authority(authority)
-            if item.connection_id != existing.connection_id
-        ]
-        replacement: GoogleConnection | None = None
-        if existing.is_default and others:
-            if replacement_default_id is None:
-                raise ValueError(
-                    "Choose a replacement default before deleting this Google connection."
-                )
-            replacement = self._require_for_authority(authority, replacement_default_id)
-            if replacement.connection_id == existing.connection_id:
-                raise ValueError("Replacement default must be another connection.")
+        replacement_connection_id = (
+            self._require_for_authority(authority, replacement_default_id).connection_id
+            if existing.is_default and replacement_default_id is not None
+            else None
+        )
         conn = connect_connections(self._system_root)
         try:
             with conn:
-                if replacement is not None:
+                if replacement_connection_id is not None:
                     conn.execute(
                         """
                         UPDATE google_connections SET is_default = 0
@@ -293,7 +285,7 @@ class BuiltInConnectionService:
                             updated_at = CURRENT_TIMESTAMP
                         WHERE owner_principal_id = ? AND connection_id = ?
                         """,
-                        (authority.principal_id, replacement.connection_id),
+                        (authority.principal_id, replacement_connection_id),
                     )
                 cursor = conn.execute(
                     """
@@ -305,6 +297,36 @@ class BuiltInConnectionService:
                 return cursor.rowcount > 0
         finally:
             conn.close()
+
+    def validate_google_connection_deletion_for_authority(
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str | None = None,
+        *,
+        replacement_default_id: str | None = None,
+    ) -> GoogleConnection:
+        """Validate deletion policy without mutating metadata."""
+        existing = (
+            self.get_google_connection_for_authority(authority, connection_id)
+            if connection_id is not None
+            else self.get_google_connection_for_authority(authority)
+        )
+        if existing is None:
+            raise LookupError("Google connection not found.")
+        others = [
+            item
+            for item in self.list_google_connections_for_authority(authority)
+            if item.connection_id != existing.connection_id
+        ]
+        if existing.is_default and others:
+            if replacement_default_id is None:
+                raise ValueError(
+                    "Choose a replacement default before deleting this Google connection."
+                )
+            replacement = self._require_for_authority(authority, replacement_default_id)
+            if replacement.connection_id == existing.connection_id:
+                raise ValueError("Replacement default must be another connection.")
+        return existing
 
     def _require_for_authority(
         self, authority: ExecutionAuthority, connection_id: str
@@ -349,6 +371,7 @@ def _row_to_google_connection(row: sqlite3.Row) -> GoogleConnection:
             thread_max_messages=int(row["gmail_thread_max_messages"]),
         ),
         config_version=int(row["config_version"]),
+        oauth_generation=int(row["oauth_generation"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )

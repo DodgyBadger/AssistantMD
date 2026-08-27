@@ -130,6 +130,30 @@ and connected account identities use connection-scoped internal entries in the
 entries. Google capabilities become available when at least one stored grant
 contains their required scopes.
 
+Each Google connection carries an internal OAuth generation. Client secrets,
+pending authorization attempts, and token grants are encrypted with payload
+metadata binding them to that generation and to the current client-secret
+identity. Changing the OAuth client ID advances the generation; replacing the
+client secret changes the credential identity. Status, callback completion,
+refresh, and capability checks reject stale bindings before using credentials
+or contacting Google. Display, default, and Gmail preference changes preserve
+the generation and existing authorization.
+
+Internal OAuth state relocation and multi-record cleanup execute as one
+`secrets.db` transaction. Because encrypted record identity participates in
+authenticated encryption, relocation decrypts the source identity, re-encrypts
+for the destination identity, verifies the destination, and removes the source
+before commit. Google disconnect and deletion atomically clear all applicable
+connection and default-connection OAuth identities so removed state cannot be
+loaded again through another namespace.
+
+Internal connection mutation helpers can also copy staged values while retaining
+their source as recovery evidence, delete an exact principal-owned namespace,
+and condition a write on an authenticated encrypted guard. Copy, deletion, guard
+comparison, target authentication, and commit remain within one secrets-store
+transaction. These primitives support durable cross-database coordination
+without exposing OAuth storage hashes or secret values to connection metadata.
+
 ## Configuration Health and Availability
 
 Primary implementation: `core/settings/__init__.py`

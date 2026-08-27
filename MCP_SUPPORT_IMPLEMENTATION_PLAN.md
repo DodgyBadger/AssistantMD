@@ -94,9 +94,9 @@ within one AssistantMD installation, not multi-tenant infrastructure.
   `core/chat/executor.py`.
 - The pinned Pydantic AI 2.19 API provides `MCPToolset`, the `MCP` capability,
   toolset-level `defer_loading()`, capability-level `defer_loading`, and the
-  provider-adaptive `ToolSearch` capability. `mcp` and `fastmcp` are present in
-  the current lock/environment transitively, but MCP support is not declared as
-  an intentional project dependency and should be made explicit.
+  provider-adaptive `ToolSearch` capability. `mcp` and the FastMCP client are
+  explicit, pinned project dependencies because the runtime depends on their
+  client and toolset contracts.
 - Principal-owned credentials are stored in encrypted `system/secrets.db`;
   sanitized MCP definitions and immutable slugs are stored in `system/mcp.db`.
   Normal runtime code has no plaintext YAML fallback.
@@ -716,7 +716,8 @@ Planning rather than being silently decided in code.
 
 The MCP client milestone is implementation-complete. Run the maintainer-owned
 full validation suite, address any resulting regressions, and proceed through
-review preparation and cleanup before merge.
+review preparation and cleanup before merge. ADR 0035 records the resulting
+durable client, persistence, lifecycle, and tool-discovery decisions.
 
 The later multi-user branch should be able to retain the database schemas and
 domain services from this work. Its primary additions should be authentication,

@@ -20,6 +20,11 @@ CONNECTION_MIGRATIONS = (
         name="multi_google_connections",
         apply=lambda conn: _migrate_google_connections_collection(conn),
     ),
+    SQLiteMigration(
+        version=3,
+        name="google_oauth_generation",
+        apply=lambda conn: _add_google_oauth_generation(conn),
+    ),
 )
 
 
@@ -97,6 +102,7 @@ def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
             gmail_message_max_characters INTEGER NOT NULL DEFAULT 50000,
             gmail_thread_max_messages INTEGER NOT NULL DEFAULT 25,
             config_version INTEGER NOT NULL DEFAULT 1,
+            oauth_generation INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (owner_principal_id, connection_id),
@@ -112,7 +118,8 @@ def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
             CHECK (gmail_search_default_results <= gmail_search_max_results),
             CHECK (gmail_message_max_characters BETWEEN 1 AND 250000),
             CHECK (gmail_thread_max_messages BETWEEN 1 AND 100),
-            CHECK (config_version > 0)
+            CHECK (config_version > 0),
+            CHECK (oauth_generation > 0)
         )
         """
     )
@@ -173,3 +180,17 @@ def _migrate_google_connections_collection(conn: sqlite3.Connection) -> None:
             ),
         )
     conn.execute("DROP TABLE google_connections_v1")
+
+
+def _add_google_oauth_generation(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
+    }
+    if "oauth_generation" not in columns:
+        conn.execute(
+            """
+            ALTER TABLE google_connections
+            ADD COLUMN oauth_generation INTEGER NOT NULL DEFAULT 1
+            CHECK (oauth_generation > 0)
+            """
+        )

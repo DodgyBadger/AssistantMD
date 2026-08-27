@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 _direct_run_root: tempfile.TemporaryDirectory[str] | None = None
 if __name__ == "__main__":

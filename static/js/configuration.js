@@ -114,6 +114,9 @@
     };
     let activityLogSearchTimer = null;
     let importJobPollTimer = null;
+    const googleOAuthPolls = new Map();
+    const mcpOAuthPolls = new Map();
+    let mcpOAuthStatusRequest = null;
 
     const elements = {
         activityLogViewer: null,
@@ -2348,6 +2351,7 @@ async function saveModelRow(rowKey) {
         if (!(form instanceof HTMLFormElement) || state.isSavingGoogle) return;
         const values = new FormData(form);
         const id = form.dataset.googleId;
+        if (id && id !== 'draft') cancelGoogleOAuthPoll(id);
         const creating = id === 'draft';
         const payload = {
             display_name: String(values.get('display_name') || '').trim(),
@@ -2395,13 +2399,16 @@ async function saveModelRow(rowKey) {
                 setStatus(form.querySelector('[id="google-connection-feedback"]') || elements.connectionsFeedback, 'Paste the full redirected URL first.', 'error');
                 return;
             }
+            cancelGoogleOAuthPoll(id);
             await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}/oauth/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirect, code: null, state: null }) }, 'Google account connected.');
         } else if (action === 'disconnect') {
             if (window.confirm('Disconnect the authorized Google account? Client settings will be preserved.')) {
+                cancelGoogleOAuthPoll(id);
                 await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}/oauth`, { method: 'DELETE' }, 'Google account disconnected.');
             }
         } else if (action === 'delete') {
             if (window.confirm('Remove the Google connection, client secret, and authorized account?')) {
+                cancelGoogleOAuthPoll(id);
                 const replacement = state.googleConnections.find((item) => item.connection_id !== id)?.connection_id;
                 const query = replacement ? `?replacement_default_id=${encodeURIComponent(replacement)}` : '';
                 await mutateGoogle(`api/system/connections/google/connections/${encodeURIComponent(id)}${query}`, { method: 'DELETE' }, 'Google connection removed.');
@@ -2413,6 +2420,7 @@ async function saveModelRow(rowKey) {
     }
 
     async function startGoogleOAuth(form, id) {
+        cancelGoogleOAuthPoll(id);
         state.isSavingGoogle = true;
         setStatus(elements.connectionsFeedback, 'Starting Google authorization…');
         try {
@@ -2423,7 +2431,7 @@ async function saveModelRow(rowKey) {
             if (field instanceof HTMLTextAreaElement) field.value = payload.authorization_url;
             const popup = window.open(payload.authorization_url, '_blank', 'noopener,noreferrer');
             setStatus(elements.connectionsFeedback, popup ? 'Finish authorization in the new tab. The URL is also available below.' : 'The browser blocked the new tab. Copy the authorization URL below.', popup ? 'success' : 'warning');
-            void pollGoogleConnection(id, Date.now() + 10 * 60 * 1000);
+            startGoogleOAuthPoll(id);
         } catch (error) {
             setStatus(elements.connectionsFeedback, error.message, 'error');
         } finally {
@@ -2431,16 +2439,110 @@ async function saveModelRow(rowKey) {
         }
     }
 
-    async function pollGoogleConnection(id, deadline) {
-        if (Date.now() >= deadline) return;
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-        await loadGoogleConnection();
-        if (state.googleConnections.find((connection) => connection.connection_id === id)?.connected) {
-            setStatus(elements.connectionsFeedback, 'Google account connected.', 'success');
-            await notifyConfigChanged();
-            return;
+    function createOAuthPoll(owners, id, durationMs) {
+        const owner = {
+            controller: new AbortController(),
+            timerId: null,
+            deadline: Date.now() + durationMs,
+            generation: Symbol(id),
+            timerResolve: null,
+        };
+        owners.set(id, owner);
+        return owner;
+    }
+
+    function ownsOAuthPoll(owners, id, owner) {
+        const current = owners.get(id);
+        return current?.generation === owner.generation && !owner.controller.signal.aborted;
+    }
+
+    function cancelOAuthPoll(owners, id) {
+        const owner = owners.get(id);
+        if (!owner) return;
+        owners.delete(id);
+        owner.controller.abort();
+        if (owner.timerId !== null) window.clearTimeout(owner.timerId);
+        owner.timerResolve?.(false);
+        owner.timerResolve = null;
+    }
+
+    function finishOAuthPoll(owners, id, owner) {
+        if (!ownsOAuthPoll(owners, id, owner)) return false;
+        owners.delete(id);
+        if (owner.timerId !== null) window.clearTimeout(owner.timerId);
+        owner.timerResolve?.(false);
+        owner.timerResolve = null;
+        return true;
+    }
+
+    function waitForOAuthPoll(owners, id, owner, delayMs) {
+        return new Promise((resolve) => {
+            if (!ownsOAuthPoll(owners, id, owner)) {
+                resolve(false);
+                return;
+            }
+            owner.timerId = window.setTimeout(() => {
+                owner.timerId = null;
+                owner.timerResolve = null;
+                resolve(ownsOAuthPoll(owners, id, owner));
+            }, delayMs);
+            owner.timerResolve = resolve;
+        });
+    }
+
+    function cancelGoogleOAuthPoll(id) {
+        cancelOAuthPoll(googleOAuthPolls, id);
+    }
+
+    function cancelMcpOAuthPoll(id) {
+        cancelOAuthPoll(mcpOAuthPolls, id);
+    }
+
+    function cancelAllOAuthPolls() {
+        [...googleOAuthPolls.keys()].forEach(cancelGoogleOAuthPoll);
+        [...mcpOAuthPolls.keys()].forEach(cancelMcpOAuthPoll);
+        if (mcpOAuthStatusRequest) {
+            mcpOAuthStatusRequest.controller.abort();
+            mcpOAuthStatusRequest = null;
         }
-        void pollGoogleConnection(id, deadline);
+    }
+
+    function startGoogleOAuthPoll(id) {
+        cancelGoogleOAuthPoll(id);
+        const owner = createOAuthPoll(googleOAuthPolls, id, 10 * 60 * 1000);
+        void pollGoogleConnection(id, owner);
+    }
+
+    async function pollGoogleConnection(id, owner) {
+        try {
+            while (ownsOAuthPoll(googleOAuthPolls, id, owner)) {
+                if (Date.now() >= owner.deadline) {
+                    if (finishOAuthPoll(googleOAuthPolls, id, owner)) {
+                        setStatus(elements.connectionsFeedback, 'Google authorization expired. Start a new attempt.', 'warning');
+                    }
+                    return;
+                }
+                if (!await waitForOAuthPoll(googleOAuthPolls, id, owner, 1500)) return;
+                const response = await fetch('api/system/connections/google/connections', {
+                    cache: 'no-store',
+                    signal: owner.controller.signal,
+                });
+                const payload = await safeJson(response);
+                if (!ownsOAuthPoll(googleOAuthPolls, id, owner)) return;
+                if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
+                state.googleConnections = Array.isArray(payload) ? payload : [];
+                renderGoogleConnection();
+                if (state.googleConnections.find((connection) => connection.connection_id === id)?.connected) {
+                    if (!finishOAuthPoll(googleOAuthPolls, id, owner)) return;
+                    setStatus(elements.connectionsFeedback, 'Google account connected.', 'success');
+                    await notifyConfigChanged();
+                    return;
+                }
+            }
+        } catch (error) {
+            if (error.name === 'AbortError' || !ownsOAuthPoll(googleOAuthPolls, id, owner)) return;
+            if (await waitForOAuthPoll(googleOAuthPolls, id, owner, 1500)) void pollGoogleConnection(id, owner);
+        }
     }
 
     async function mutateGoogle(url, options, successMessage, reload = true) {
@@ -2576,24 +2678,32 @@ async function saveModelRow(rowKey) {
     }
 
     async function loadMcpOAuthStatuses() {
+        if (mcpOAuthStatusRequest) mcpOAuthStatusRequest.controller.abort();
+        const request = { controller: new AbortController(), generation: Symbol('mcp-status') };
+        mcpOAuthStatusRequest = request;
         const oauthConnections = state.mcpConnections.filter((connection) => connection.auth_mode === 'oauth');
         await Promise.all(oauthConnections.map(async (connection) => {
-            const card = elements.mcpConnectionsList?.querySelector(`[data-mcp-id="${CSS.escape(connection.connection_id)}"]`);
-            const statusElement = card?.querySelector('[data-mcp-oauth-status]');
             try {
-                const response = await fetch(`api/system/mcp/connections/${encodeURIComponent(connection.connection_id)}/oauth/status`, { cache: 'no-store' });
+                const response = await fetch(`api/system/mcp/connections/${encodeURIComponent(connection.connection_id)}/oauth/status`, { cache: 'no-store', signal: request.controller.signal });
                 const payload = await safeJson(response);
+                if (mcpOAuthStatusRequest !== request || request.controller.signal.aborted) return;
                 if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
                 state.mcpOAuthStatuses[connection.connection_id] = payload;
+                const card = elements.mcpConnectionsList?.querySelector(`[data-mcp-id="${CSS.escape(connection.connection_id)}"]`);
+                const statusElement = card?.querySelector('[data-mcp-oauth-status]');
                 if (statusElement) statusElement.textContent = `OAuth status: ${payload.status}`;
                 const authorizeButton = card?.querySelector('[data-mcp-action="oauth-connect"]');
                 const disconnectButton = card?.querySelector('[data-mcp-action="oauth-disconnect"]');
                 if (authorizeButton instanceof HTMLButtonElement) authorizeButton.textContent = payload.connected ? 'Reauthorize' : (payload.status === 'pending' ? 'Restart authorization' : 'Authorize');
                 if (disconnectButton instanceof HTMLButtonElement) disconnectButton.disabled = !payload.connected && payload.status !== 'pending';
             } catch (error) {
+                if (error.name === 'AbortError' || mcpOAuthStatusRequest !== request) return;
+                const card = elements.mcpConnectionsList?.querySelector(`[data-mcp-id="${CSS.escape(connection.connection_id)}"]`);
+                const statusElement = card?.querySelector('[data-mcp-oauth-status]');
                 if (statusElement) statusElement.textContent = `OAuth status unavailable: ${error.message}`;
             }
         }));
+        if (mcpOAuthStatusRequest === request) mcpOAuthStatusRequest = null;
     }
 
     async function handleMcpCreate(event) {
@@ -2646,10 +2756,12 @@ async function saveModelRow(rowKey) {
                 setStatus(elements.mcpFeedback, 'Paste the full redirected URL before using the headless fallback.', 'error');
                 return;
             }
+            cancelMcpOAuthPoll(id);
             await mutateMcp(`${endpoint}/oauth/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_url: redirectUrl, code: null, state: null }) }, 'MCP OAuth connected.');
             return;
         }
         if (action === 'oauth-disconnect') {
+            cancelMcpOAuthPoll(id);
             await mutateMcp(`${endpoint}/oauth`, { method: 'DELETE' }, 'MCP OAuth disconnected.');
             return;
         }
@@ -2659,19 +2771,23 @@ async function saveModelRow(rowKey) {
         }
         if (action === 'delete') {
             if (!window.confirm('Delete this MCP connection and its stored credential?')) return;
+            cancelMcpOAuthPoll(id);
             await mutateMcp(endpoint, { method: 'DELETE' }, 'MCP connection deleted.');
             return;
         }
         if (action === 'clear-credential') {
+            cancelMcpOAuthPoll(id);
             await mutateMcp(`${endpoint}/credential`, { method: 'DELETE' }, 'MCP credential cleared.');
             return;
         }
         if (action === 'credential') {
+            cancelMcpOAuthPoll(id);
             const credential = card.querySelector('[data-mcp-field="credential"]')?.value || '';
             await mutateMcp(`${endpoint}/credential`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) }, 'MCP credential saved.');
             return;
         }
         if (action === 'save') {
+            cancelMcpOAuthPoll(id);
             const value = (name) => card.querySelector(`[data-mcp-field="${name}"]`)?.value || '';
             const enabled = card.querySelector('[data-mcp-field="enabled"]')?.checked === true;
             const authMode = value('auth_mode');
@@ -2704,6 +2820,9 @@ async function saveModelRow(rowKey) {
     }
 
     async function startMcpOAuth(card, endpoint) {
+        const id = card.dataset.mcpId;
+        if (!id) return;
+        cancelMcpOAuthPoll(id);
         state.isSavingMcp = true;
         setStatus(elements.mcpFeedback, 'Starting OAuth…');
         try {
@@ -2725,7 +2844,8 @@ async function saveModelRow(rowKey) {
             const statusElement = card.querySelector('[data-mcp-oauth-status]');
             if (statusElement) statusElement.textContent = 'OAuth status: pending';
             setStatus(elements.mcpFeedback, popup ? 'Finish authorization in the new tab, or copy the authorization URL into an external browser.' : 'The browser blocked the authorization tab. Copy the authorization URL into an external browser.', popup ? 'success' : 'error');
-            void pollMcpOAuthStatus(card, endpoint, Date.now() + 10 * 60 * 1000);
+            const owner = createOAuthPoll(mcpOAuthPolls, id, 10 * 60 * 1000);
+            void pollMcpOAuthStatus(id, endpoint, owner);
         } catch (error) {
             setStatus(elements.mcpFeedback, error.message, 'error');
         } finally {
@@ -2733,25 +2853,31 @@ async function saveModelRow(rowKey) {
         }
     }
 
-    async function pollMcpOAuthStatus(card, endpoint, deadline) {
-        if (!card.isConnected || Date.now() >= deadline) return;
-        try {
-            const response = await fetch(`${endpoint}/oauth/status`, { cache: 'no-store' });
-            const payload = await safeJson(response);
-            if (response.ok && payload?.connected) {
-                setStatus(elements.mcpFeedback, 'MCP OAuth connected.', 'success');
-                await loadMcpConnections();
+    async function pollMcpOAuthStatus(id, endpoint, owner) {
+        while (ownsOAuthPoll(mcpOAuthPolls, id, owner)) {
+            if (Date.now() >= owner.deadline) {
+                if (finishOAuthPoll(mcpOAuthPolls, id, owner)) {
+                    setStatus(elements.mcpFeedback, 'MCP OAuth authorization expired. Start a new attempt.', 'warning');
+                }
                 return;
             }
-            if (response.ok && payload?.status === 'failed') {
-                setStatus(elements.mcpFeedback, 'MCP OAuth authorization failed. Start a new connection attempt.', 'error');
-                await loadMcpConnections();
-                return;
+            try {
+                const response = await fetch(`${endpoint}/oauth/status`, { cache: 'no-store', signal: owner.controller.signal });
+                const payload = await safeJson(response);
+                if (!ownsOAuthPoll(mcpOAuthPolls, id, owner)) return;
+                if (response.ok && (payload?.connected || payload?.status === 'failed' || payload?.status === 'expired')) {
+                    if (!finishOAuthPoll(mcpOAuthPolls, id, owner)) return;
+                    const connected = payload.connected === true;
+                    setStatus(elements.mcpFeedback, connected ? 'MCP OAuth connected.' : `MCP OAuth authorization ${payload.status}. Start a new attempt.`, connected ? 'success' : 'error');
+                    await loadMcpConnections();
+                    return;
+                }
+            } catch (error) {
+                if (error.name === 'AbortError' || !ownsOAuthPoll(mcpOAuthPolls, id, owner)) return;
+                // A transient status failure should not cancel the browser flow.
             }
-        } catch (_error) {
-            // A transient status failure should not cancel the browser flow.
+            if (!await waitForOAuthPoll(mcpOAuthPolls, id, owner, 2000)) return;
         }
-        window.setTimeout(() => void pollMcpOAuthStatus(card, endpoint, deadline), 2000);
     }
 
     async function testMcpConnection(card, endpoint, button) {
@@ -3712,6 +3838,7 @@ async function saveModelRow(rowKey) {
 
         cacheElements();
         bindEvents();
+        window.addEventListener('pagehide', cancelAllOAuthPolls);
 
         state.initialized = true;
     }
@@ -3719,6 +3846,10 @@ async function saveModelRow(rowKey) {
     function onTabActivated() {
         if (!state.initialized) return;
         refreshAll();
+    }
+
+    function onTabDeactivated() {
+        cancelAllOAuthPolls();
     }
 
     async function onDashboardActivated() {
@@ -4415,6 +4546,7 @@ async function saveModelRow(rowKey) {
     window.ConfigurationPanel = {
         init,
         onTabActivated,
+        onTabDeactivated,
         onDashboardActivated,
         refreshActivityLog,
         onMetadataUpdated: updateImportOcrAvailability,
