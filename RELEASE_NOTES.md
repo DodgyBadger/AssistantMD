@@ -2,44 +2,34 @@
 
 ## v0.8.0
 
-This is a major configuration and credential-storage release. Existing
-installations must create an `.env` file containing an installation encryption
-key before upgrading. Read **Upgrade requirements** below before replacing the
-running container.
+This release adds MCP connections and read-only Gmail tools, while moving
+stored credentials into encrypted storage. Existing installations must create
+an installation encryption key before upgrading.
 
-### Upgrade requirements
+### Before upgrading
 
-- Generate `ASSISTANTMD_SECRETS_KEY` in `.env`, then ensure the Compose service
-  includes `env_file: .env`. The installation instructions provide a
-  Linux/OpenSSL command that generates a suitable value to copy into the file.
+- Follow the [v0.8.0 upgrade guide](docs/setup/upgrading.md#upgrading-to-v080)
+  to create `.env` with `ASSISTANTMD_SECRETS_KEY` and make it available to the
+  AssistantMD container.
 - Back up both `.env` and the existing `system/` directory before upgrading,
-  and keep those backups separate. The key in `.env` is required to decrypt
-  `system/secrets.db`; a database backup alone cannot recover credentials.
-- On first successful startup, AssistantMD imports non-OAuth values from
-  `system/secrets.yaml` into encrypted `system/secrets.db`, verifies the stored
-  values, records the migration, and renames the plaintext file to
-  `system/migration_backups/secrets.yaml.bak` for rollback. This migration is idempotent and does
-  not run again after completion.
-- Existing OAuth state is deliberately not migrated. Reconnect OpenAI and other
-  OAuth accounts after the upgrade.
-- If the key is missing or invalid, AssistantMD still opens for diagnostics but
-  providers, models, connections, and secret mutation remain unavailable. It
-  never falls back to plaintext credential storage.
+  and keep those backups separate. You need both the encrypted credential
+  database and its key to restore stored credentials.
+- AssistantMD imports existing API keys and other non-OAuth secrets on first
+  startup. Reconnect existing OAuth accounts after the upgrade.
 - Reverse-proxy installations should also set `ASSISTANTMD_PUBLIC_URL` to the
-  exact externally routed origin, including `https://`, so OAuth callbacks use
-  a stable registered address.
+  externally routed origin so OAuth callbacks return to the correct address.
 
 ### Connect AssistantMD to more of your tools
 
-- AssistantMD can now use compatible MCP servers, opening up connections to
-  local tools and remote services without requiring each one to be built into
-  the application.
+- AssistantMD can now use compatible MCP servers to connect chats to local
+  tools and remote services.
 - Add, authorize, and test connections from **System → Connections**. Once a
   connection is ready, its tools become available to chat when they are needed.
-- Connections can use OAuth, bearer tokens, custom headers, or no
-  authentication. Headless installations can complete OAuth by copying and
-  pasting the authorization response when an automatic callback is unavailable.
+- Connections support OAuth, bearer tokens, custom headers, or no
+  authentication. Headless installations can complete OAuth manually when an
+  automatic callback is unavailable.
 - You can limit which tools AssistantMD may use from each server.
+- Interrupted connection changes recover safely after AssistantMD restarts.
 
 ### Search and read Gmail from chat
 
@@ -49,36 +39,19 @@ running container.
   move, or delete your mail.
 - Searches include useful attachment details, but AssistantMD does not download
   or process attachment contents yet.
-- The Gmail tools only appear after you configure the connection, so users who
-  do not connect Gmail will see no change to their chats.
+- Gmail tools appear only after you configure the connection.
 
 ### Credentials are now encrypted at rest
 
 - Model-provider keys, connection credentials, and OAuth tokens are now stored
   in an encrypted database rather than a plaintext YAML file.
-- AssistantMD remains single-user in this release. The new storage foundation
-  prepares credentials and connections for future per-user ownership.
 - Losing the installation key requires re-entering stored credentials, so back
   up `.env` if you need to preserve access to them.
 
-### Safer upgrades and connection recovery
-
-- Database migration rollback copies now include committed SQLite WAL data and
-  are integrity-checked before an upgrade changes the live store.
-- Interrupted MCP connection, credential, OAuth, and deletion changes remain
-  unavailable until startup recovery finishes them, preventing partially
-  applied configuration from being used.
-- MCP and OAuth network connections enforce endpoint policy at the socket
-  destination, including when DNS answers change between validation and connect.
-- Changing Google OAuth client identity now requires fresh authorization, and
-  stale browser authorization polling is canceled when connection settings or
-  the active System view change.
-
 ### After upgrading
 
-1. Open the System tab and confirm encrypted secrets report ready and the
-   one-time database migration reports complete.
-2. Confirm model providers still report their imported API keys, then reconnect
+1. Open the System tab and confirm encrypted secrets are ready.
+2. Confirm model providers still have their imported API keys, then reconnect
    any OAuth accounts.
 3. Configure and test MCP or built-in connections under **System →
    Connections** as needed.
