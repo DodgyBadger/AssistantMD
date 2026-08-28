@@ -28,6 +28,7 @@ from .connection import (
     GOOGLE_OAUTH_PENDING_KEY,
     GoogleCapability,
     GoogleConnectionService,
+    GoogleCredentialChangedError,
     GoogleOAuthTokenState,
 )
 
@@ -221,11 +222,20 @@ class GoogleOAuthCoordinator:
                 account_id=account_id,
                 account_email=account_email,
             )
-            self._google.save_token_state(authority, result, connection.connection_id)
+            self._google.save_token_state(
+                authority,
+                result,
+                connection.connection_id,
+                expected_credential=credential,
+            )
             return result
         except OAuthTokenExchangeError as exc:
             raise GoogleOAuthError(
                 "Google rejected OAuth completion. Start authorization again."
+            ) from exc
+        except GoogleCredentialChangedError as exc:
+            raise GoogleOAuthError(
+                "Google OAuth client configuration changed. Start authorization again."
             ) from exc
 
     def _connection_for_pending_state(
@@ -282,11 +292,11 @@ class GoogleOAuthCoordinator:
         self, authority: ExecutionAuthority, connection_id: str
     ) -> GoogleOAuthTokenState:
         """Refresh while the caller holds the principal's serialization lock."""
-        existing = self._google.load_token_state(authority, connection_id)
         connection = self._connections.get_google_connection_for_authority(
             authority, connection_id
         )
         credential = self._google.resolve_client_credential(authority, connection_id)
+        existing = self._google.load_token_state(authority, connection_id)
         if (
             existing is None
             or not existing.refresh_token
@@ -321,7 +331,17 @@ class GoogleOAuthCoordinator:
             account_id=existing.account_id,
             account_email=existing.account_email,
         )
-        self._google.save_token_state(authority, refreshed, connection_id)
+        try:
+            self._google.save_token_state(
+                authority,
+                refreshed,
+                connection_id,
+                expected_credential=credential,
+            )
+        except GoogleCredentialChangedError as exc:
+            raise GoogleOAuthError(
+                "Google OAuth client configuration changed. Reconnect Google."
+            ) from exc
         return refreshed
 
     async def _load_identity(self, access_token: str) -> dict[str, object]:

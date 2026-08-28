@@ -12,7 +12,7 @@ from core.connections import BuiltInConnectionService, GoogleConnection
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
 from core.oauth import EncryptedOAuthStorage
-from core.secrets import EncryptedSecretsService
+from core.secrets import EncryptedSecretsService, SecretGuardMismatchError
 
 GOOGLE_IDENTITY_SCOPES = (
     "openid",
@@ -26,6 +26,10 @@ GOOGLE_OAUTH_PENDING_KEY = "pending-authorization"
 _OAUTH_COLLECTION = "google"
 
 logger = UnifiedLogger(tag="google-connections")
+
+
+class GoogleCredentialChangedError(ValueError):
+    """Raised when an OAuth result no longer matches the active credential."""
 
 
 class GoogleCapability(StrEnum):
@@ -261,24 +265,50 @@ class GoogleConnectionService:
         authority: ExecutionAuthority,
         token_state: GoogleOAuthTokenState,
         connection_id: str | None = None,
+        *,
+        expected_credential: GoogleOAuthClientCredential | None = None,
     ) -> None:
         """Persist a validated connected Google grant under principal authority."""
         connection = self._connection(authority, connection_id)
         if connection is None:
             raise ValueError("Google connection is not configured.")
         credential = self.resolve_client_credential(authority, connection.connection_id)
+        if expected_credential is not None and credential != expected_credential:
+            raise GoogleCredentialChangedError(
+                "Google OAuth client credential changed during authorization."
+            )
         if credential is None:
             raise ValueError("Google OAuth client secret is not configured.")
-        payload = {
+        payload: dict[str, object] = {
             **asdict(token_state),
             "oauth_generation": credential.oauth_generation,
             "credential_id": credential.credential_id,
         }
-        self._storage(authority, connection.connection_id).put_sync(
-            _TOKEN_STATE_KEY,
-            payload,
-            collection=_OAUTH_COLLECTION,
-        )
+        storage = self._storage(authority, connection.connection_id)
+        if expected_credential is None:
+            storage.put_sync(
+                _TOKEN_STATE_KEY,
+                payload,
+                collection=_OAUTH_COLLECTION,
+            )
+            return
+        try:
+            storage.put_sync_if_unchanged(
+                _TOKEN_STATE_KEY,
+                payload,
+                guard_key=_CLIENT_SECRET_KEY,
+                expected_guard_value={
+                    "value": expected_credential.value,
+                    "oauth_generation": expected_credential.oauth_generation,
+                    "credential_id": expected_credential.credential_id,
+                },
+                collection=_OAUTH_COLLECTION,
+                guard_collection=_OAUTH_COLLECTION,
+            )
+        except SecretGuardMismatchError as exc:
+            raise GoogleCredentialChangedError(
+                "Google OAuth client credential changed during authorization."
+            ) from exc
 
     def load_token_state(
         self, authority: ExecutionAuthority, connection_id: str | None = None

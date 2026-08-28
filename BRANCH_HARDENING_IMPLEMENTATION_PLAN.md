@@ -321,6 +321,8 @@ Progress:
 - [x] Stage 4: durable MCP mutation lifecycle.
 - [x] Stage 5: frontend OAuth lifecycle ownership.
 - [x] Stage 6: review and validation handoff.
+- [x] Stage 7: atomic Google OAuth in-flight credential fencing and callback
+  surface cleanup.
 
 ### Stage 1: Authoritative MCP socket boundary
 
@@ -383,6 +385,29 @@ Keep this commit independent from persistence changes.
 4. Review logs and persisted fixtures for secret leakage.
 5. Move to Refactor and Hardening, then Commit and Review Prep.
 6. Request maintainer results from the full validation suite before merge.
+
+### Stage 7: Atomic Google OAuth in-flight credential fencing
+
+1. Extend Google token persistence with an expected credential binding captured
+   before the external OAuth request. In one secrets-store transaction, verify
+   the authenticated client-secret payload still has the expected
+   `oauth_generation` and `credential_id`, then persist the token grant. A
+   changed or missing binding must reject the write without recreating token
+   state cleared by a concurrent client-ID or client-secret mutation.
+2. Carry the captured binding through authorization-code exchange, account
+   identity lookup, and refresh. Do not rebind an external response to whatever
+   credential happens to be current after an `await`.
+3. Add deterministic interleaving assertions for client-secret replacement and
+   client-ID replacement during token exchange, identity lookup, and refresh.
+   Assert that the stale operation fails closed, the replacement credential
+   remains authoritative, and no stale token state becomes loadable.
+4. Remove the connection-ID-specific Google browser callback route. Keep the
+   stable provider callback and manual per-connection completion API; pending
+   cryptographic state remains responsible for resolving browser callbacks to
+   the initiating connection.
+5. Update current-contract API documentation if necessary, run the targeted
+   Google scenarios and production Python quality gate, then request the
+   maintainer-owned `integration/core security` pre-merge profile.
 
 ## Validation-First Targets
 

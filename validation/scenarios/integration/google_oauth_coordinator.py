@@ -247,8 +247,230 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             "A stale Google callback must be rejected before token exchange",
         )
 
+        fenced = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="In-flight Credential",
+                client_id="inflight.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "inflight-secret-a", fenced.connection_id)
+        captured_credential = google.resolve_client_credential(
+            owner, fenced.connection_id
+        )
+        if captured_credential is None:
+            raise AssertionError("Expected the initial in-flight credential")
+        google.set_client_secret(owner, "inflight-secret-b", fenced.connection_id)
+        try:
+            google.save_token_state(
+                owner,
+                GoogleOAuthTokenState(
+                    access_token="stale-inflight-token",
+                    refresh_token="stale-inflight-refresh",
+                    scopes=(GMAIL_READONLY_SCOPE,),
+                    account_id="stale-account",
+                    account_email="stale@example.com",
+                ),
+                fenced.connection_id,
+                expected_credential=captured_credential,
+            )
+        except ValueError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                "A token response must not cross an in-flight credential replacement",
+            )
+        self.soft_assert_equal(
+            google.load_token_state(owner, fenced.connection_id),
+            None,
+            "A rejected in-flight response must not recreate cleared token state",
+        )
+
+        for blocked_step in ("token", "identity"):
+            for mutation_kind in ("secret", "client-id"):
+                await self._assert_completion_race_rejected(
+                    connections=connections,
+                    secrets=secrets,
+                    google=google,
+                    owner=owner,
+                    redirect_uri=started.redirect_uri,
+                    blocked_step=blocked_step,
+                    mutation_kind=mutation_kind,
+                )
+
+        for mutation_kind in ("secret", "client-id"):
+            await self._assert_refresh_race_rejected(
+                connections=connections,
+                secrets=secrets,
+                google=google,
+                owner=owner,
+                mutation_kind=mutation_kind,
+            )
+
         self.assert_no_failures()
         self.teardown_scenario()
+
+    async def _assert_completion_race_rejected(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+        redirect_uri: str,
+        blocked_step: str,
+        mutation_kind: str,
+    ) -> None:
+        raced = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name=f"Raced {blocked_step} {mutation_kind}",
+                client_id=(
+                    f"raced-{blocked_step}-{mutation_kind}"
+                    ".apps.googleusercontent.com"
+                ),
+            ),
+        )
+        google.set_client_secret(owner, "raced-secret-a", raced.connection_id)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        raced_requests: list[httpx.Request] = []
+        raced_coordinator = GoogleOAuthCoordinator(
+            connections=connections,
+            google=google,
+            secrets=secrets,
+            http_client_factory=lambda requests=raced_requests, start=entered, finish=release, step=blocked_step: _blocking_oauth_client(
+                requests,
+                entered=start,
+                release=finish,
+                blocked_step=step,
+            ),
+        )
+        raced_started = raced_coordinator.start(
+            authority=owner,
+            redirect_uri=redirect_uri,
+            capabilities=(GoogleCapability.GMAIL_READ,),
+            connection_id=raced.connection_id,
+        )
+        raced_state = parse_qs(urlparse(raced_started.authorization_url).query)[
+            "state"
+        ][0]
+        completion = asyncio.create_task(
+            raced_coordinator.complete(
+                authority=owner,
+                connection_id=raced.connection_id,
+                code=f"raced-{blocked_step}-code",
+                state=raced_state,
+            )
+        )
+        await entered.wait()
+        if mutation_kind == "secret":
+            google.set_client_secret(owner, "raced-secret-b", raced.connection_id)
+        else:
+            connections.update_google_connection_for_authority(
+                owner,
+                raced.connection_id,
+                GoogleConnectionUpdate(
+                    client_id=(
+                        f"replacement-{blocked_step}.apps.googleusercontent.com"
+                    ),
+                    display_name=raced.display_name,
+                    gmail=raced.gmail,
+                ),
+            )
+        release.set()
+        try:
+            await completion
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                f"{mutation_kind} replacement during {blocked_step} must reject completion",
+            )
+        self.soft_assert_equal(
+            google.load_token_state(owner, raced.connection_id),
+            None,
+            f"{mutation_kind} replacement during {blocked_step} must not restore a token",
+        )
+
+    async def _assert_refresh_race_rejected(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+        mutation_kind: str,
+    ) -> None:
+        refresh_race = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name=f"Raced refresh {mutation_kind}",
+                client_id=f"raced-refresh-{mutation_kind}.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "refresh-secret-a", refresh_race.connection_id)
+        google.save_token_state(
+            owner,
+            GoogleOAuthTokenState(
+                access_token="expired-refresh-access",
+                refresh_token="refresh-token-a",
+                expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+                scopes=(GMAIL_READONLY_SCOPE,),
+                account_id="refresh-account",
+                account_email="refresh@example.com",
+            ),
+            refresh_race.connection_id,
+        )
+        refresh_entered = asyncio.Event()
+        refresh_release = asyncio.Event()
+        refresh_requests: list[httpx.Request] = []
+        refresh_coordinator = GoogleOAuthCoordinator(
+            connections=connections,
+            google=google,
+            secrets=secrets,
+            http_client_factory=lambda: _blocking_oauth_client(
+                refresh_requests,
+                entered=refresh_entered,
+                release=refresh_release,
+                blocked_step="refresh",
+            ),
+        )
+        refresh_task = asyncio.create_task(
+            refresh_coordinator.refresh(owner, refresh_race.connection_id)
+        )
+        await refresh_entered.wait()
+        if mutation_kind == "secret":
+            google.set_client_secret(
+                owner, "refresh-secret-b", refresh_race.connection_id
+            )
+        else:
+            connections.update_google_connection_for_authority(
+                owner,
+                refresh_race.connection_id,
+                GoogleConnectionUpdate(
+                    client_id="replacement-refresh.apps.googleusercontent.com",
+                    display_name=refresh_race.display_name,
+                    gmail=refresh_race.gmail,
+                ),
+            )
+        refresh_release.set()
+        try:
+            await refresh_task
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                f"{mutation_kind} replacement during refresh must reject the stale response",
+            )
+        self.soft_assert_equal(
+            google.load_token_state(owner, refresh_race.connection_id),
+            None,
+            f"{mutation_kind} replacement during refresh must not restore a stale token",
+        )
 
 
 def _oauth_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
@@ -281,6 +503,61 @@ def _oauth_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
             return httpx.Response(
                 200,
                 json={"sub": "owner-account", "email": "owner@example.com"},
+            )
+        return httpx.Response(404)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+
+def _blocking_oauth_client(
+    requests: list[httpx.Request],
+    *,
+    entered: asyncio.Event,
+    release: asyncio.Event,
+    blocked_step: str,
+) -> httpx.AsyncClient:
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        is_refresh = b"grant_type=refresh_token" in request.content
+        should_block = (
+            (blocked_step == "identity" and request.url.path.endswith("/v1/userinfo"))
+            or (
+                blocked_step == "token"
+                and request.url.path.endswith("/token")
+                and not is_refresh
+            )
+            or (blocked_step == "refresh" and is_refresh)
+        )
+        if should_block:
+            entered.set()
+            await release.wait()
+        if request.url.path.endswith("/token"):
+            if is_refresh:
+                return httpx.Response(
+                    200,
+                    json={
+                        "access_token": "raced-refreshed-access-token",
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "raced-initial-access-token",
+                    "refresh_token": "raced-initial-refresh-token",
+                    "token_type": "Bearer",
+                    "expires_in": 3600,
+                    "scope": (
+                        "openid https://www.googleapis.com/auth/userinfo.email "
+                        f"{GMAIL_READONLY_SCOPE}"
+                    ),
+                },
+            )
+        if request.url.path.endswith("/v1/userinfo"):
+            return httpx.Response(
+                200,
+                json={"sub": "raced-account", "email": "raced@example.com"},
             )
         return httpx.Response(404)
 

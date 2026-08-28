@@ -87,11 +87,7 @@ class EncryptedOAuthStorage:
     ) -> None:
         """Write OAuth JSON from synchronous service boundaries."""
         expires_at = time.time() + float(ttl) if ttl is not None else None
-        payload = json.dumps(
-            {"value": dict(value), "expires_at": expires_at},
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        payload = _encode_stored_value(value, expires_at=expires_at)
         target = self._identity(key, collection)
         if self._write_guard is None:
             self._secrets.set_for_authority(
@@ -109,6 +105,32 @@ class EncryptedOAuthStorage:
                 target=target,
                 value=payload,
             )
+
+    def put_sync_if_unchanged(
+        self,
+        key: str,
+        value: Mapping[str, Any],
+        *,
+        guard_key: str,
+        expected_guard_value: Mapping[str, Any],
+        collection: str | None = None,
+        guard_collection: str | None = None,
+    ) -> None:
+        """Write only while another non-expiring OAuth value is unchanged."""
+        target = self._identity(key, collection)
+        guard = self._identity(guard_key, guard_collection)
+        payload = _encode_stored_value(value, expires_at=None)
+        expected_payload = _encode_stored_value(
+            expected_guard_value,
+            expires_at=None,
+        )
+        self._secrets.guarded_set_for_authority(
+            self._authority,
+            guard=guard,
+            expected_guard_value=expected_payload,
+            target=target,
+            value=payload,
+        )
 
     async def delete(self, key: str, *, collection: str | None = None) -> bool:
         return self.delete_sync(key, collection=collection)
@@ -249,6 +271,14 @@ class EncryptedOAuthStorage:
             raise ValueError(
                 "OAuth storage mutation requires one service and authority."
             )
+
+
+def _encode_stored_value(value: Mapping[str, Any], *, expires_at: float | None) -> str:
+    return json.dumps(
+        {"value": dict(value), "expires_at": expires_at},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def _storage_name(key: str, collection: str | None) -> str:

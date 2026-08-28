@@ -1446,30 +1446,6 @@ async def start_google_oauth_by_id_endpoint(
         return create_error_response(exc)
 
 
-@router.get("/system/connections/google/connections/{connection_id}/oauth/callback")
-async def complete_google_oauth_callback_by_id_endpoint(
-    connection_id: str,
-    code: str | None = Query(None),
-    state: str | None = Query(None),
-) -> HTMLResponse:
-    """Complete OAuth for one Google connection from its browser callback."""
-    try:
-        await complete_google_oauth(
-            GoogleOAuthCompleteRequest(redirect_url=None, code=code, state=state),
-            connection_id,
-        )
-        return HTMLResponse(_google_oauth_callback_page(success=True))
-    except Exception as exc:
-        logger.warning(
-            "Google OAuth browser callback failed",
-            data={
-                "event": "google_oauth_callback_failed",
-                "error_type": type(exc).__name__,
-            },
-        )
-        return HTMLResponse(_google_oauth_callback_page(success=False), status_code=400)
-
-
 @router.post(
     "/system/connections/google/connections/{connection_id}/oauth/complete",
     response_model=GoogleConnectionResponse,

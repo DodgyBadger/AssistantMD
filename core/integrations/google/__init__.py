@@ -7,6 +7,7 @@ from .connection import (
     GoogleCapabilityAvailability,
     GoogleConnectionService,
     GoogleConnectionStatus,
+    GoogleCredentialChangedError,
     GoogleOAuthClientCredential,
     GoogleOAuthTokenState,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "GoogleCapabilityAvailability",
     "GoogleConnectionService",
     "GoogleConnectionStatus",
+    "GoogleCredentialChangedError",
     "GoogleOAuthClientCredential",
     "GoogleOAuthTokenState",
     "GoogleOAuthCoordinator",

@@ -139,6 +139,12 @@ refresh, and capability checks reject stale bindings before using credentials
 or contacting Google. Display, default, and Gmail preference changes preserve
 the generation and existing authorization.
 
+OAuth completion and refresh retain the credential binding verified before the
+external request. Token persistence compares that binding with the encrypted
+client-secret record and writes the grant in one secrets-store transaction, so
+an in-flight response cannot recreate token state after a concurrent credential
+replacement.
+
 Internal OAuth state relocation and multi-record cleanup execute as one
 `secrets.db` transaction. Because encrypted record identity participates in
 authenticated encryption, relocation decrypts the source identity, re-encrypts
