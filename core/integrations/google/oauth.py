@@ -29,6 +29,7 @@ from .connection import (
     GoogleCapability,
     GoogleConnectionService,
     GoogleCredentialChangedError,
+    GoogleOAuthStateChangedError,
     GoogleOAuthTokenState,
 )
 
@@ -233,7 +234,7 @@ class GoogleOAuthCoordinator:
             raise GoogleOAuthError(
                 "Google rejected OAuth completion. Start authorization again."
             ) from exc
-        except GoogleCredentialChangedError as exc:
+        except (GoogleCredentialChangedError, GoogleOAuthStateChangedError) as exc:
             raise GoogleOAuthError(
                 "Google OAuth client configuration changed. Start authorization again."
             ) from exc
@@ -337,8 +338,9 @@ class GoogleOAuthCoordinator:
                 refreshed,
                 connection_id,
                 expected_credential=credential,
+                expected_token_state=existing,
             )
-        except GoogleCredentialChangedError as exc:
+        except (GoogleCredentialChangedError, GoogleOAuthStateChangedError) as exc:
             raise GoogleOAuthError(
                 "Google OAuth client configuration changed. Reconnect Google."
             ) from exc

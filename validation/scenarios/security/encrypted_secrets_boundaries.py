@@ -8,6 +8,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -292,6 +293,93 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
             "guarded-token",
             "A guard mismatch must preserve the previously committed target",
         )
+
+        service.set_for_authority(owner, "serialized-fence", "marker", "serialized-v1")
+        guard_selected = threading.Event()
+        release_guard = threading.Event()
+        writer_started = threading.Event()
+        writer_finished = threading.Event()
+        guarded_finished = threading.Event()
+        thread_errors: list[BaseException] = []
+        original_select = service._select_row
+
+        def pause_after_guard_select(
+            conn: sqlite3.Connection,
+            *,
+            owner_principal_id: str,
+            namespace: str,
+            name: str,
+        ) -> sqlite3.Row | None:
+            row = original_select(
+                conn,
+                owner_principal_id=owner_principal_id,
+                namespace=namespace,
+                name=name,
+            )
+            if namespace == "serialized-fence" and name == "marker":
+                guard_selected.set()
+                if not release_guard.wait(timeout=5):
+                    raise TimeoutError("Timed out waiting to release guarded write")
+            return row
+
+        def guarded_writer() -> None:
+            try:
+                service.guarded_set_for_authority(
+                    owner,
+                    guard=SecretIdentity("serialized-fence", "marker"),
+                    expected_guard_value="serialized-v1",
+                    target=SecretIdentity("serialized-fence.state", "token"),
+                    value="serialized-token",
+                )
+            except BaseException as exc:  # noqa: BLE001 - surfaced to scenario
+                thread_errors.append(exc)
+            finally:
+                guarded_finished.set()
+
+        def competing_writer() -> None:
+            writer_started.set()
+            try:
+                service.set_for_authority(
+                    owner, "serialized-fence", "marker", "serialized-v2"
+                )
+            except BaseException as exc:  # noqa: BLE001 - surfaced to scenario
+                thread_errors.append(exc)
+            finally:
+                writer_finished.set()
+
+        with patch.object(service, "_select_row", side_effect=pause_after_guard_select):
+            guarded_thread = threading.Thread(target=guarded_writer)
+            guarded_thread.start()
+            self.soft_assert(
+                guard_selected.wait(timeout=5),
+                "Guarded write should reach the authenticated comparison",
+            )
+            competing_thread = threading.Thread(target=competing_writer)
+            competing_thread.start()
+            self.soft_assert(
+                writer_started.wait(timeout=5),
+                "Competing guard writer should start",
+            )
+            self.soft_assert(
+                not writer_finished.wait(timeout=0.1),
+                "A competing writer must not enter the guarded compare/write window",
+            )
+            release_guard.set()
+            guarded_thread.join(timeout=5)
+            competing_thread.join(timeout=5)
+        self.soft_assert_equal(
+            (
+                guarded_finished.is_set(),
+                writer_finished.is_set(),
+                thread_errors,
+                service.get_for_authority(owner, "serialized-fence.state", "token"),
+                service.get_for_authority(owner, "serialized-fence", "marker"),
+            ),
+            (True, True, [], "serialized-token", "serialized-v2"),
+            "The guarded mutation should serialize before the competing writer",
+        )
+        service.delete_for_authority(owner, "serialized-fence.state", "token")
+        service.delete_for_authority(owner, "serialized-fence", "marker")
 
         service.set_for_authority(owner, "copy-rollback", "source", "copy-value")
         service.set_for_authority(owner, "delete-rollback", "blocked", "keep-value")

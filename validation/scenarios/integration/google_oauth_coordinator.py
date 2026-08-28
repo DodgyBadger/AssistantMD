@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import sys
 import tempfile
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -39,6 +42,7 @@ from core.integrations.google import (  # noqa: E402
     GoogleOAuthError,
     GoogleOAuthTokenState,
 )
+from core.oauth import EncryptedOAuthStorage  # noqa: E402
 from core.secrets import EncryptedSecretsService, SecretKeyring  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -288,7 +292,7 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
         )
 
         for blocked_step in ("token", "identity"):
-            for mutation_kind in ("secret", "client-id"):
+            for mutation_kind in ("secret", "client-id", "disconnect"):
                 await self._assert_completion_race_rejected(
                     connections=connections,
                     secrets=secrets,
@@ -299,7 +303,7 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
                     mutation_kind=mutation_kind,
                 )
 
-        for mutation_kind in ("secret", "client-id"):
+        for mutation_kind in ("secret", "client-id", "disconnect"):
             await self._assert_refresh_race_rejected(
                 connections=connections,
                 secrets=secrets,
@@ -307,6 +311,47 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
                 owner=owner,
                 mutation_kind=mutation_kind,
             )
+
+        await self._assert_reauthorization_wins_refresh(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+        )
+        await self._assert_disconnect_preserves_concurrent_mutation(
+            connections=connections,
+            google=google,
+            owner=owner,
+            mutation_kind="secret",
+        )
+        await self._assert_disconnect_preserves_concurrent_mutation(
+            connections=connections,
+            google=google,
+            owner=owner,
+            mutation_kind="client-id",
+        )
+        await self._assert_delete_wins_concurrent_secret_write(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+        )
+        self._assert_deletion_cleanup_recovers(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+        )
+        self._assert_new_generation_secret_survives_invalidation(
+            connections=connections,
+            google=google,
+            owner=owner,
+        )
+        self._assert_default_deletion_clears_legacy_before_promotion(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+        )
 
         self.assert_no_failures()
         self.teardown_scenario()
@@ -367,7 +412,7 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
         await entered.wait()
         if mutation_kind == "secret":
             google.set_client_secret(owner, "raced-secret-b", raced.connection_id)
-        else:
+        elif mutation_kind == "client-id":
             connections.update_google_connection_for_authority(
                 owner,
                 raced.connection_id,
@@ -379,6 +424,8 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
                     gmail=raced.gmail,
                 ),
             )
+        else:
+            google.clear_token_state(owner, raced.connection_id)
         release.set()
         try:
             await completion
@@ -446,7 +493,7 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             google.set_client_secret(
                 owner, "refresh-secret-b", refresh_race.connection_id
             )
-        else:
+        elif mutation_kind == "client-id":
             connections.update_google_connection_for_authority(
                 owner,
                 refresh_race.connection_id,
@@ -456,6 +503,8 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
                     gmail=refresh_race.gmail,
                 ),
             )
+        else:
+            google.clear_token_state(owner, refresh_race.connection_id)
         refresh_release.set()
         try:
             await refresh_task
@@ -470,6 +519,338 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             google.load_token_state(owner, refresh_race.connection_id),
             None,
             f"{mutation_kind} replacement during refresh must not restore a stale token",
+        )
+
+    async def _assert_reauthorization_wins_refresh(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Refresh versus reauthorization",
+                client_id="refresh-reauth.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(
+            owner, "refresh-reauth-secret", connection.connection_id
+        )
+        initial = GoogleOAuthTokenState(
+            access_token="refresh-reauth-expired",
+            refresh_token="refresh-reauth-old-token",
+            expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+            scopes=(GMAIL_READONLY_SCOPE,),
+            account_id="refresh-reauth-account",
+            account_email="refresh-reauth@example.com",
+        )
+        google.save_token_state(owner, initial, connection.connection_id)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        coordinator = GoogleOAuthCoordinator(
+            connections=connections,
+            google=google,
+            secrets=secrets,
+            http_client_factory=lambda: _blocking_oauth_client(
+                [],
+                entered=entered,
+                release=release,
+                blocked_step="refresh",
+            ),
+        )
+        refresh_task = asyncio.create_task(
+            coordinator.refresh(owner, connection.connection_id)
+        )
+        await entered.wait()
+        newer = GoogleOAuthTokenState(
+            access_token="reauthorized-access",
+            refresh_token="reauthorized-refresh",
+            scopes=(GMAIL_READONLY_SCOPE,),
+            account_id=initial.account_id,
+            account_email=initial.account_email,
+        )
+        google.save_token_state(owner, newer, connection.connection_id)
+        release.set()
+        try:
+            await refresh_task
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(False, "An old refresh must not overwrite reauthorization")
+        self.soft_assert_equal(
+            google.load_token_state(owner, connection.connection_id),
+            newer,
+            "The newer reauthorization grant must remain authoritative",
+        )
+
+    async def _assert_disconnect_preserves_concurrent_mutation(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+        mutation_kind: str,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name=f"Disconnect versus {mutation_kind}",
+                client_id=f"disconnect-{mutation_kind}.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "disconnect-secret-a", connection.connection_id)
+        captured = threading.Event()
+        release = threading.Event()
+        original_resolve = google.resolve_client_credential
+
+        def paused_resolve(
+            authority: ExecutionAuthority, connection_id: str | None = None
+        ):
+            credential = original_resolve(authority, connection_id)
+            if not captured.is_set():
+                captured.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("Timed out waiting to release disconnect")
+            return credential
+
+        with patch.object(
+            google, "resolve_client_credential", side_effect=paused_resolve
+        ):
+            disconnect_task = asyncio.create_task(
+                asyncio.to_thread(
+                    google.clear_token_state, owner, connection.connection_id
+                )
+            )
+            await asyncio.to_thread(captured.wait, 5)
+            if mutation_kind == "secret":
+                google.set_client_secret(
+                    owner, "disconnect-secret-b", connection.connection_id
+                )
+                expected_secret = "disconnect-secret-b"
+            else:
+                updated = connections.update_google_connection_for_authority(
+                    owner,
+                    connection.connection_id,
+                    GoogleConnectionUpdate(
+                        client_id="disconnect-replacement.apps.googleusercontent.com",
+                        display_name=connection.display_name,
+                        gmail=connection.gmail,
+                    ),
+                )
+                google.handle_metadata_update(owner, connection, updated)
+                expected_secret = None
+            release.set()
+            await disconnect_task
+        self.soft_assert_equal(
+            google.resolve_client_secret(owner, connection.connection_id),
+            expected_secret,
+            f"Disconnect must not revert a concurrent {mutation_kind} mutation",
+        )
+
+    async def _assert_delete_wins_concurrent_secret_write(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Delete versus secret write",
+                client_id="delete-secret.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "delete-secret-a", connection.connection_id)
+        captured = threading.Event()
+        release = threading.Event()
+        original_connection = google._connection
+
+        def paused_connection(authority: ExecutionAuthority, connection_id: str | None):
+            resolved = original_connection(authority, connection_id)
+            if not captured.is_set():
+                captured.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("Timed out waiting to release secret write")
+            return resolved
+
+        errors: list[BaseException] = []
+
+        def write_secret() -> None:
+            try:
+                google.set_client_secret(
+                    owner, "delete-secret-b", connection.connection_id
+                )
+            except BaseException as exc:  # noqa: BLE001 - surfaced to scenario
+                errors.append(exc)
+
+        with patch.object(google, "_connection", side_effect=paused_connection):
+            writer = threading.Thread(target=write_secret)
+            writer.start()
+            self.soft_assert(
+                captured.wait(timeout=5),
+                "Concurrent secret write should capture connection metadata",
+            )
+            connections.delete_google_connection_for_authority(
+                owner, connection.connection_id
+            )
+            google.reconcile_connection_deletion(owner, connection.connection_id)
+            release.set()
+            writer.join(timeout=5)
+        self.soft_assert_equal(
+            (
+                writer.is_alive(),
+                errors,
+                secrets.list_metadata_for_authority(
+                    owner, f"oauth.google.{connection.connection_id}"
+                ),
+            ),
+            (False, [], []),
+            "Connection deletion must not leave a concurrently written secret orphan",
+        )
+
+    def _assert_deletion_cleanup_recovers(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Recoverable deletion",
+                client_id="recoverable-delete.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "recoverable-secret", connection.connection_id)
+        connections.delete_google_connection_for_authority(
+            owner, connection.connection_id
+        )
+        with patch.object(
+            secrets,
+            "mutate_for_authority",
+            side_effect=sqlite3.OperationalError("injected cleanup failure"),
+        ):
+            try:
+                google.reconcile_connection_deletion(owner, connection.connection_id)
+            except sqlite3.OperationalError:
+                pass
+            else:
+                self.soft_assert(False, "Injected deletion cleanup should fail")
+        self.soft_assert(
+            connections.has_google_connection_deletion_for_authority(
+                owner, connection.connection_id
+            ),
+            "Failed encrypted cleanup must preserve its durable deletion record",
+        )
+        google.reconcile_connection_deletion(owner, connection.connection_id)
+        self.soft_assert_equal(
+            (
+                connections.has_google_connection_deletion_for_authority(
+                    owner, connection.connection_id
+                ),
+                secrets.list_metadata_for_authority(
+                    owner, f"oauth.google.{connection.connection_id}"
+                ),
+            ),
+            (True, []),
+            "Retry should finish cleanup while retaining the deletion ledger",
+        )
+        secrets.set_for_authority(
+            owner,
+            f"oauth.google.{connection.connection_id}",
+            "post-cleanup-crash-orphan",
+            "orphaned-secret",
+        )
+        google.reconcile_connection_deletions()
+        self.soft_assert_equal(
+            secrets.list_metadata_for_authority(
+                owner, f"oauth.google.{connection.connection_id}"
+            ),
+            [],
+            "Startup reconciliation must purge state recreated after prior cleanup",
+        )
+
+    def _assert_new_generation_secret_survives_invalidation(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        previous = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Concurrent new generation",
+                client_id="generation-a.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "generation-secret-a", previous.connection_id)
+        updated = connections.update_google_connection_for_authority(
+            owner,
+            previous.connection_id,
+            GoogleConnectionUpdate(
+                client_id="generation-b.apps.googleusercontent.com",
+                display_name=previous.display_name,
+                gmail=previous.gmail,
+            ),
+        )
+        google.set_client_secret(owner, "generation-secret-b", updated.connection_id)
+        google.handle_metadata_update(owner, previous, updated)
+        self.soft_assert_equal(
+            google.resolve_client_secret(owner, updated.connection_id),
+            "generation-secret-b",
+            "Old-generation invalidation must preserve a new-generation credential",
+        )
+
+    def _assert_default_deletion_clears_legacy_before_promotion(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+    ) -> None:
+        authority = ExecutionAuthority("legacy-default-delete-owner")
+        default = connections.create_google_connection_for_authority(
+            authority,
+            GoogleConnectionCreate(
+                display_name="Legacy Default",
+                client_id="legacy-default.apps.googleusercontent.com",
+            ),
+        )
+        replacement = connections.create_google_connection_for_authority(
+            authority,
+            GoogleConnectionCreate(
+                display_name="Legacy Replacement",
+                client_id="legacy-replacement.apps.googleusercontent.com",
+            ),
+        )
+        EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=authority,
+            namespace="oauth.google",
+        ).put_sync(
+            "client-secret",
+            {"value": "unbound-legacy-secret"},
+            collection="google",
+        )
+        google.clear_legacy_state(authority)
+        connections.delete_google_connection_for_authority(
+            authority,
+            default.connection_id,
+            replacement_default_id=replacement.connection_id,
+        )
+        google.reconcile_connection_deletion(authority, default.connection_id)
+        self.soft_assert_equal(
+            google.resolve_client_secret(authority, replacement.connection_id),
+            None,
+            "Default promotion must not inherit the deleted connection's legacy secret",
         )
 
 

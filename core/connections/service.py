@@ -287,6 +287,14 @@ class BuiltInConnectionService:
                         """,
                         (authority.principal_id, replacement_connection_id),
                     )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO google_connection_deletions (
+                        owner_principal_id, connection_id
+                    ) VALUES (?, ?)
+                    """,
+                    (authority.principal_id, existing.connection_id),
+                )
                 cursor = conn.execute(
                     """
                     DELETE FROM google_connections
@@ -294,9 +302,47 @@ class BuiltInConnectionService:
                     """,
                     (authority.principal_id, existing.connection_id),
                 )
-                return cursor.rowcount > 0
         finally:
             conn.close()
+        return cursor.rowcount > 0
+
+    def has_google_connection_deletion_for_authority(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> bool:
+        conn = connect_connections(self._system_root)
+        try:
+            row = conn.execute(
+                """
+                SELECT 1 FROM google_connection_deletions
+                WHERE owner_principal_id = ? AND connection_id = ?
+                """,
+                (authority.principal_id, connection_id),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def list_google_connection_deletions(
+        self,
+    ) -> list[tuple[ExecutionAuthority, str]]:
+        conn = connect_connections(self._system_root)
+        try:
+            rows = conn.execute(
+                """
+                SELECT owner_principal_id, connection_id
+                FROM google_connection_deletions
+                ORDER BY created_at, owner_principal_id, connection_id
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            (
+                ExecutionAuthority(str(row["owner_principal_id"])),
+                str(row["connection_id"]),
+            )
+            for row in rows
+        ]
 
     def validate_google_connection_deletion_for_authority(
         self,

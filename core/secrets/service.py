@@ -209,6 +209,7 @@ class EncryptedSecretsService:
         expected_guard_value: str,
         target: SecretIdentity,
         value: str,
+        additional_guards: tuple[tuple[SecretIdentity, str], ...] = (),
     ) -> None:
         """Set a value only while an authenticated encrypted guard matches."""
         prepared_guard = SecretIdentity(
@@ -217,9 +218,23 @@ class EncryptedSecretsService:
         prepared_target = SecretIdentity(
             *_normalize_identity(target.namespace, target.name)
         )
-        if prepared_guard == prepared_target:
-            raise ValueError("Secret guard and target identities must be distinct.")
         if not isinstance(expected_guard_value, str) or not expected_guard_value:
+            raise ValueError("Expected secret guard value must be a non-empty string.")
+        prepared_guards = ((prepared_guard, expected_guard_value),) + tuple(
+            (
+                SecretIdentity(*_normalize_identity(identity.namespace, identity.name)),
+                expected,
+            )
+            for identity, expected in additional_guards
+        )
+        if len({identity for identity, _expected in prepared_guards}) != len(
+            prepared_guards
+        ):
+            raise ValueError("Secret guards must use unique identities.")
+        if any(
+            not isinstance(expected, str) or not expected
+            for _identity, expected in prepared_guards
+        ):
             raise ValueError("Expected secret guard value must be a non-empty string.")
         if not isinstance(value, str) or not value.strip():
             raise ValueError("Secret value must be a non-empty string.")
@@ -232,22 +247,28 @@ class EncryptedSecretsService:
         conn = connect_secrets(self._system_root)
         try:
             with conn:
-                guard_row = self._select_row(
-                    conn,
-                    owner_principal_id=authority.principal_id,
-                    namespace=prepared_guard.namespace,
-                    name=prepared_guard.name,
-                )
-                if guard_row is None:
-                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
-                actual_guard_value = self._decrypt_row(
-                    guard_row,
-                    owner_principal_id=authority.principal_id,
-                    namespace=prepared_guard.namespace,
-                    name=prepared_guard.name,
-                )
-                if not compare_digest(actual_guard_value, expected_guard_value):
-                    raise SecretGuardMismatchError("Encrypted secret guard mismatch.")
+                conn.execute("BEGIN IMMEDIATE")
+                for guard_identity, expected in prepared_guards:
+                    guard_row = self._select_row(
+                        conn,
+                        owner_principal_id=authority.principal_id,
+                        namespace=guard_identity.namespace,
+                        name=guard_identity.name,
+                    )
+                    if guard_row is None:
+                        raise SecretGuardMismatchError(
+                            "Encrypted secret guard mismatch."
+                        )
+                    actual_guard_value = self._decrypt_row(
+                        guard_row,
+                        owner_principal_id=authority.principal_id,
+                        namespace=guard_identity.namespace,
+                        name=guard_identity.name,
+                    )
+                    if not compare_digest(actual_guard_value, expected):
+                        raise SecretGuardMismatchError(
+                            "Encrypted secret guard mismatch."
+                        )
                 self._upsert_encrypted(
                     conn,
                     owner_principal_id=authority.principal_id,
@@ -279,13 +300,12 @@ class EncryptedSecretsService:
         prepared_target = SecretIdentity(
             *_normalize_identity(target.namespace, target.name)
         )
-        if prepared_guard == prepared_target:
-            raise ValueError("Secret guard and target identities must be distinct.")
         if not isinstance(expected_guard_value, str) or not expected_guard_value:
             raise ValueError("Expected secret guard value must be a non-empty string.")
         conn = connect_secrets(self._system_root)
         try:
             with conn:
+                conn.execute("BEGIN IMMEDIATE")
                 guard_row = self._select_row(
                     conn,
                     owner_principal_id=authority.principal_id,
@@ -311,6 +331,88 @@ class EncryptedSecretsService:
                 )
         finally:
             conn.close()
+
+    def replace_and_delete_for_authority(
+        self,
+        authority: ExecutionAuthority,
+        *,
+        target: SecretIdentity,
+        value: str,
+        deletions: tuple[SecretIdentity, ...],
+        expected_value: str | None = None,
+    ) -> int:
+        """Replace one value and delete related identities atomically."""
+        prepared_target = SecretIdentity(
+            *_normalize_identity(target.namespace, target.name)
+        )
+        prepared_deletions = tuple(
+            SecretIdentity(*_normalize_identity(item.namespace, item.name))
+            for item in deletions
+        )
+        if prepared_target in prepared_deletions:
+            raise ValueError("Replacement target cannot also be deleted.")
+        if len(set(prepared_deletions)) != len(prepared_deletions):
+            raise ValueError("Secret deletions must use unique identities.")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Secret value must be a non-empty string.")
+        if expected_value is not None and (
+            not isinstance(expected_value, str) or not expected_value
+        ):
+            raise ValueError("Expected secret value must be a non-empty string.")
+        encrypted = self._keyring.encrypt(
+            value,
+            owner_principal_id=authority.principal_id,
+            namespace=prepared_target.namespace,
+            name=prepared_target.name,
+        )
+        deleted_count = 0
+        conn = connect_secrets(self._system_root)
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if expected_value is not None:
+                    current_row = self._select_row(
+                        conn,
+                        owner_principal_id=authority.principal_id,
+                        namespace=prepared_target.namespace,
+                        name=prepared_target.name,
+                    )
+                    if current_row is None:
+                        raise SecretGuardMismatchError(
+                            "Encrypted secret guard mismatch."
+                        )
+                    current_value = self._decrypt_row(
+                        current_row,
+                        owner_principal_id=authority.principal_id,
+                        namespace=prepared_target.namespace,
+                        name=prepared_target.name,
+                    )
+                    if not compare_digest(current_value, expected_value):
+                        raise SecretGuardMismatchError(
+                            "Encrypted secret guard mismatch."
+                        )
+                self._upsert_encrypted(
+                    conn,
+                    owner_principal_id=authority.principal_id,
+                    namespace=prepared_target.namespace,
+                    name=prepared_target.name,
+                    encrypted=encrypted,
+                )
+                self._verify_value(
+                    conn,
+                    authority=authority,
+                    identity=prepared_target,
+                    expected=value,
+                )
+                for identity in prepared_deletions:
+                    deleted_count += self._delete_identity(
+                        conn,
+                        authority=authority,
+                        identity=identity,
+                    )
+        finally:
+            conn.close()
+        return deleted_count
 
     def list_metadata_for_authority(
         self, authority: ExecutionAuthority, namespace: str | None = None

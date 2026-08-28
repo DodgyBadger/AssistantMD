@@ -259,17 +259,31 @@ def delete_google_connection(
         raise _secrets_locked()
     authority = require_current_execution_authority()
     with _domain_errors():
+        if (
+            connection_id is not None
+            and runtime.built_in_connections.has_google_connection_deletion_for_authority(
+                authority, connection_id
+            )
+        ):
+            service.reconcile_connection_deletion(authority, connection_id)
+            return OperationResult(
+                success=True,
+                message="Google connection removed.",
+                restart_required=False,
+            )
         connection = runtime.built_in_connections.validate_google_connection_deletion_for_authority(
             authority,
             connection_id,
             replacement_default_id=replacement_default_id,
         )
-        service.disconnect_by_connection_id(authority, connection.connection_id)
+        if connection.is_default:
+            service.clear_legacy_state(authority)
         runtime.built_in_connections.delete_google_connection_for_authority(
             authority,
             connection.connection_id,
             replacement_default_id=replacement_default_id,
         )
+        service.reconcile_connection_deletion(authority, connection.connection_id)
     logger.info(
         "Google connection deleted", data={"event": "google_connection_deleted"}
     )

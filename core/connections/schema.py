@@ -25,6 +25,11 @@ CONNECTION_MIGRATIONS = (
         name="google_oauth_generation",
         apply=lambda conn: _add_google_oauth_generation(conn),
     ),
+    SQLiteMigration(
+        version=4,
+        name="durable_google_connection_deletions",
+        apply=lambda conn: _create_google_connection_deletions_table(conn),
+    ),
 )
 
 
@@ -42,6 +47,7 @@ def ensure_connections_schema(
             )
         else:
             _create_current_google_connection_table(conn)
+            _create_google_connection_deletions_table(conn)
         conn.commit()
     finally:
         conn.close()
@@ -133,6 +139,21 @@ def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
         """
         CREATE UNIQUE INDEX IF NOT EXISTS google_connections_one_default
         ON google_connections(owner_principal_id) WHERE is_default = 1
+        """
+    )
+
+
+def _create_google_connection_deletions_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS google_connection_deletions (
+            owner_principal_id TEXT NOT NULL,
+            connection_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (owner_principal_id, connection_id),
+            CHECK (length(owner_principal_id) > 0),
+            CHECK (length(connection_id) > 0)
+        )
         """
     )
 

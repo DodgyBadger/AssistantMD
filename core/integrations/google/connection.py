@@ -12,7 +12,11 @@ from core.connections import BuiltInConnectionService, GoogleConnection
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
 from core.oauth import EncryptedOAuthStorage
-from core.secrets import EncryptedSecretsService, SecretGuardMismatchError
+from core.secrets import (
+    EncryptedSecretsService,
+    SecretGuardMismatchError,
+    SecretNamespaceDeletion,
+)
 
 GOOGLE_IDENTITY_SCOPES = (
     "openid",
@@ -30,6 +34,10 @@ logger = UnifiedLogger(tag="google-connections")
 
 class GoogleCredentialChangedError(ValueError):
     """Raised when an OAuth result no longer matches the active credential."""
+
+
+class GoogleOAuthStateChangedError(ValueError):
+    """Raised when an OAuth persistence source changes before commit."""
 
 
 class GoogleCapability(StrEnum):
@@ -153,30 +161,30 @@ class GoogleConnectionService:
         if not clean_secret:
             raise ValueError("Google OAuth client secret cannot be empty.")
         credential_id = str(uuid4())
-        self._storage(authority, connection.connection_id).put_sync(
+        credential_payload = {
+            "value": clean_secret,
+            "oauth_generation": connection.oauth_generation,
+            "credential_id": credential_id,
+        }
+        self._storage(authority, connection.connection_id).replace_and_delete_sync(
             _CLIENT_SECRET_KEY,
-            {
-                "value": clean_secret,
-                "oauth_generation": connection.oauth_generation,
-                "credential_id": credential_id,
-            },
+            credential_payload,
+            delete_keys=(_TOKEN_STATE_KEY, GOOGLE_OAUTH_PENDING_KEY),
             collection=_OAUTH_COLLECTION,
         )
+        current = self._connection(authority, connection.connection_id)
+        if current is not None and (
+            current.oauth_generation == connection.oauth_generation
+        ):
+            return
         try:
-            self._delete_connection_keys(
-                authority,
-                connection,
-                (_TOKEN_STATE_KEY, GOOGLE_OAUTH_PENDING_KEY),
+            self._storage(authority, connection.connection_id).delete_sync_if_unchanged(
+                _CLIENT_SECRET_KEY,
+                credential_payload,
+                collection=_OAUTH_COLLECTION,
             )
-        except Exception as exc:
-            logger.warning(
-                "Stale Google OAuth state cleanup deferred",
-                data={
-                    "event": "google_oauth_stale_cleanup_deferred",
-                    "connection_id": connection.connection_id,
-                    "error_type": type(exc).__name__,
-                },
-            )
+        except SecretGuardMismatchError:
+            pass
 
     def handle_metadata_update(
         self,
@@ -187,8 +195,25 @@ class GoogleConnectionService:
         """Apply OAuth invalidation after an authoritative metadata update."""
         if previous.oauth_generation == updated.oauth_generation:
             return
+        storage = self._storage(authority, updated.connection_id)
+        stored_credential = storage.get_sync(
+            _CLIENT_SECRET_KEY, collection=_OAUTH_COLLECTION
+        )
         try:
-            self.disconnect(authority, updated.connection_id)
+            credential_is_current = stored_credential is not None and (
+                stored_credential.get("oauth_generation") == updated.oauth_generation
+            )
+            if not credential_is_current:
+                if stored_credential is not None:
+                    storage.delete_sync_if_unchanged(
+                        _CLIENT_SECRET_KEY,
+                        stored_credential,
+                        collection=_OAUTH_COLLECTION,
+                    )
+                storage.delete_many_sync(
+                    (_TOKEN_STATE_KEY, GOOGLE_OAUTH_PENDING_KEY),
+                    collection=_OAUTH_COLLECTION,
+                )
         except Exception as exc:
             logger.warning(
                 "Stale Google OAuth identity cleanup deferred",
@@ -267,6 +292,7 @@ class GoogleConnectionService:
         connection_id: str | None = None,
         *,
         expected_credential: GoogleOAuthClientCredential | None = None,
+        expected_token_state: GoogleOAuthTokenState | None = None,
     ) -> None:
         """Persist a validated connected Google grant under principal authority."""
         connection = self._connection(authority, connection_id)
@@ -279,11 +305,14 @@ class GoogleConnectionService:
             )
         if credential is None:
             raise ValueError("Google OAuth client secret is not configured.")
-        payload: dict[str, object] = {
-            **asdict(token_state),
-            "oauth_generation": credential.oauth_generation,
-            "credential_id": credential.credential_id,
-        }
+        payload = _token_payload(token_state, credential)
+        expected_token_payload: dict[str, object] | None = None
+        if expected_token_state is not None:
+            if expected_credential is None:
+                raise ValueError("Expected token state requires a credential binding.")
+            expected_token_payload = _token_payload(
+                expected_token_state, expected_credential
+            )
         storage = self._storage(authority, connection.connection_id)
         if expected_credential is None:
             storage.put_sync(
@@ -304,10 +333,14 @@ class GoogleConnectionService:
                 },
                 collection=_OAUTH_COLLECTION,
                 guard_collection=_OAUTH_COLLECTION,
+                additional_guard_key=(
+                    _TOKEN_STATE_KEY if expected_token_state is not None else None
+                ),
+                additional_expected_guard_value=(expected_token_payload),
             )
         except SecretGuardMismatchError as exc:
-            raise GoogleCredentialChangedError(
-                "Google OAuth client credential changed during authorization."
+            raise GoogleOAuthStateChangedError(
+                "Google OAuth state changed while an external request was in flight."
             ) from exc
 
     def load_token_state(
@@ -350,10 +383,41 @@ class GoogleConnectionService:
         self, authority: ExecutionAuthority, connection_id: str | None = None
     ) -> None:
         """Remove connected token/account state while preserving client setup."""
-        connection = self._connection(authority, connection_id)
-        if connection is None:
-            return
-        self._delete_connection_keys(authority, connection, (_TOKEN_STATE_KEY,))
+        for _attempt in range(3):
+            connection = self._connection(authority, connection_id)
+            if connection is None:
+                return
+            credential = self.resolve_client_credential(
+                authority, connection.connection_id
+            )
+            if credential is None:
+                self._delete_connection_keys(
+                    authority,
+                    connection,
+                    (_TOKEN_STATE_KEY, GOOGLE_OAUTH_PENDING_KEY),
+                )
+                return
+            current_payload = {
+                "value": credential.value,
+                "oauth_generation": credential.oauth_generation,
+                "credential_id": credential.credential_id,
+            }
+            try:
+                self._storage(
+                    authority, connection.connection_id
+                ).replace_and_delete_sync(
+                    _CLIENT_SECRET_KEY,
+                    {**current_payload, "credential_id": str(uuid4())},
+                    delete_keys=(_TOKEN_STATE_KEY, GOOGLE_OAUTH_PENDING_KEY),
+                    collection=_OAUTH_COLLECTION,
+                    expected_value=current_payload,
+                )
+                return
+            except SecretGuardMismatchError:
+                continue
+        raise GoogleOAuthStateChangedError(
+            "Google OAuth configuration changed repeatedly during disconnect."
+        )
 
     def disconnect(
         self, authority: ExecutionAuthority, connection_id: str | None = None
@@ -371,10 +435,48 @@ class GoogleConnectionService:
         connection = self._connection(authority, connection_id)
         if connection is None:
             return
+        self.delete_connection_state(authority, connection)
+
+    def delete_connection_state(
+        self,
+        authority: ExecutionAuthority,
+        connection: GoogleConnection,
+    ) -> None:
+        """Delete captured connection state even after metadata removal."""
         self._delete_connection_keys(
             authority,
             connection,
             (_TOKEN_STATE_KEY, _CLIENT_SECRET_KEY, GOOGLE_OAUTH_PENDING_KEY),
+        )
+
+    def clear_legacy_state(self, authority: ExecutionAuthority) -> None:
+        """Clear unscoped legacy OAuth state before changing the default."""
+        EncryptedOAuthStorage(
+            secrets=self._secrets,
+            authority=authority,
+            namespace=GOOGLE_OAUTH_NAMESPACE,
+        ).delete_many_sync(
+            (_TOKEN_STATE_KEY, _CLIENT_SECRET_KEY, GOOGLE_OAUTH_PENDING_KEY),
+            collection=_OAUTH_COLLECTION,
+        )
+
+    def reconcile_connection_deletions(self) -> None:
+        """Finish durable encrypted cleanup for deleted connection metadata."""
+        for (
+            authority,
+            connection_id,
+        ) in self._connections.list_google_connection_deletions():
+            self.reconcile_connection_deletion(authority, connection_id)
+
+    def reconcile_connection_deletion(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> None:
+        """Finish one durable Google connection deletion idempotently."""
+        self._secrets.mutate_for_authority(
+            authority,
+            namespace_deletions=(
+                SecretNamespaceDeletion(f"{GOOGLE_OAUTH_NAMESPACE}.{connection_id}"),
+            ),
         )
 
     def status(
@@ -611,3 +713,14 @@ def _payload_matches_credential(
         payload.get("oauth_generation") == credential.oauth_generation
         and payload.get("credential_id") == credential.credential_id
     )
+
+
+def _token_payload(
+    token_state: GoogleOAuthTokenState,
+    credential: GoogleOAuthClientCredential,
+) -> dict[str, object]:
+    return {
+        **asdict(token_state),
+        "oauth_generation": credential.oauth_generation,
+        "credential_id": credential.credential_id,
+    }

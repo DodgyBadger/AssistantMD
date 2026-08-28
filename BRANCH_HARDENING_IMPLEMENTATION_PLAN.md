@@ -323,6 +323,9 @@ Progress:
 - [x] Stage 6: review and validation handoff.
 - [x] Stage 7: atomic Google OAuth in-flight credential fencing and callback
   surface cleanup.
+- [x] Stage 8: storage-level guard serialization and disconnect fencing.
+- [x] Stage 9: Google deletion and grant-revision convergence.
+- [x] Stage 10: durable Google deletion reconciliation and legacy-default fencing.
 
 ### Stage 1: Authoritative MCP socket boundary
 
@@ -408,6 +411,56 @@ Keep this commit independent from persistence changes.
 5. Update current-contract API documentation if necessary, run the targeted
    Google scenarios and production Python quality gate, then request the
    maintainer-owned `integration/core security` pre-merge profile.
+
+### Stage 8: Storage-level serialization and disconnect fencing
+
+1. Begin guarded secret mutations with an explicit SQLite write transaction
+   before reading the encrypted guard, so the guard comparison and target
+   mutation cannot be interleaved by another connection. Apply the same rule to
+   guarded deletes.
+2. Add an atomic OAuth-storage operation that replaces one non-expiring record
+   while deleting related records in the same `secrets.db` transaction.
+3. Make Google disconnect preserve the client-secret value and generation while
+   rotating its internal credential identity and deleting pending/token state
+   atomically. Reuse the operation for client-secret replacement.
+4. Extend deterministic completion and refresh races to disconnect during token
+   exchange, identity lookup, and refresh, plus storage-level concurrency
+   coverage proving a competing guard writer cannot enter the compare/write
+   window.
+5. Repeat adversarial subagent review after targeted scenarios and the complete
+   production Python quality gate pass.
+
+### Stage 9: Google deletion and grant-revision convergence
+
+1. Guard refresh persistence with both the exact credential identity and exact
+   source token payload, so a stale refresh cannot overwrite a newer completed
+   authorization.
+2. Make disconnect credential rotation compare-and-swap the exact credential it
+   observed and retry boundedly when another credential mutation wins.
+3. Delete Google metadata before captured encrypted connection state, and make
+   client-secret writes recheck metadata afterward with exact-value cleanup so
+   a delete-versus-write interleaving cannot leave orphaned credentials.
+4. Add deterministic refresh-versus-reauthorization,
+   disconnect-versus-credential-mutation, and deletion-versus-secret-write
+   scenarios, then repeat the adversarial review loop.
+
+### Stage 10: Durable Google deletion reconciliation
+
+1. Clear the captured default connection's shared legacy OAuth identities before
+   promoting a replacement default, preventing lazy migration across connection
+   identity during deletion.
+2. Record a sanitized permanent Google deletion ledger in `connections.db` in the same
+   transaction that removes metadata and promotes the replacement default.
+3. Purge the deleted connection's exact encrypted namespace independently of
+   live metadata. Retain immutable deleted IDs permanently, reconcile them at
+   startup and on idempotent item-route retries, and remove the ambiguous legacy
+   singleton delete route.
+4. Make client-ID invalidation conditionally remove only the credential bound to
+   the old generation, preserving a concurrently installed credential for the
+   new generation.
+5. Add injected cleanup-failure/retry coverage, default legacy replacement
+   coverage, and client-ID-update-versus-new-secret coverage before another
+   adversarial review round.
 
 ## Validation-First Targets
 

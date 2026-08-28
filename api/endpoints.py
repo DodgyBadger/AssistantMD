@@ -1348,18 +1348,6 @@ async def disconnect_google_oauth_endpoint() -> OperationResult | JSONResponse:
         return create_error_response(exc)
 
 
-@router.delete(
-    "/system/connections/google",
-    response_model=OperationResult,
-)
-async def delete_google_connection_endpoint() -> OperationResult | JSONResponse:
-    """Remove all current-principal Google connection state."""
-    try:
-        return delete_google_connection()
-    except Exception as exc:
-        return create_error_response(exc)
-
-
 @router.get(
     "/system/connections/google/connections",
     response_model=list[GoogleConnectionResponse],

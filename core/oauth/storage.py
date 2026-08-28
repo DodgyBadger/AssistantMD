@@ -115,6 +115,8 @@ class EncryptedOAuthStorage:
         expected_guard_value: Mapping[str, Any],
         collection: str | None = None,
         guard_collection: str | None = None,
+        additional_guard_key: str | None = None,
+        additional_expected_guard_value: Mapping[str, Any] | None = None,
     ) -> None:
         """Write only while another non-expiring OAuth value is unchanged."""
         target = self._identity(key, collection)
@@ -124,12 +126,29 @@ class EncryptedOAuthStorage:
             expected_guard_value,
             expires_at=None,
         )
+        additional_guards: tuple[tuple[SecretIdentity, str], ...] = ()
+        if (additional_guard_key is None) != (additional_expected_guard_value is None):
+            raise ValueError("Additional OAuth guard key and value must be paired.")
+        if (
+            additional_guard_key is not None
+            and additional_expected_guard_value is not None
+        ):
+            additional_guards = (
+                (
+                    self._identity(additional_guard_key, collection),
+                    _encode_stored_value(
+                        additional_expected_guard_value,
+                        expires_at=None,
+                    ),
+                ),
+            )
         self._secrets.guarded_set_for_authority(
             self._authority,
             guard=guard,
             expected_guard_value=expected_payload,
             target=target,
             value=payload,
+            additional_guards=additional_guards,
         )
 
     async def delete(self, key: str, *, collection: str | None = None) -> bool:
@@ -154,6 +173,25 @@ class EncryptedOAuthStorage:
                 target=target,
             )
         return existed is not None
+
+    def delete_sync_if_unchanged(
+        self,
+        key: str,
+        expected_value: Mapping[str, Any],
+        *,
+        collection: str | None = None,
+    ) -> bool:
+        """Delete one OAuth value only if its exact payload is unchanged."""
+        target = self._identity(key, collection)
+        return self._secrets.guarded_delete_for_authority(
+            self._authority,
+            guard=target,
+            expected_guard_value=_encode_stored_value(
+                expected_value,
+                expires_at=None,
+            ),
+            target=target,
+        )
 
     def relocate_sync(
         self,
@@ -195,6 +233,31 @@ class EncryptedOAuthStorage:
             self._authority,
             deletions=identities,
         ).deleted_count
+
+    def replace_and_delete_sync(
+        self,
+        key: str,
+        value: Mapping[str, Any],
+        *,
+        delete_keys: Sequence[str],
+        collection: str | None = None,
+        expected_value: Mapping[str, Any] | None = None,
+    ) -> int:
+        """Replace one non-expiring value and delete related entries atomically."""
+        payload = _encode_stored_value(value, expires_at=None)
+        return self._secrets.replace_and_delete_for_authority(
+            self._authority,
+            target=self._identity(key, collection),
+            value=payload,
+            deletions=tuple(
+                self._identity(delete_key, collection) for delete_key in delete_keys
+            ),
+            expected_value=(
+                _encode_stored_value(expected_value, expires_at=None)
+                if expected_value is not None
+                else None
+            ),
+        )
 
     async def get_many(
         self, keys: Sequence[str], *, collection: str | None = None

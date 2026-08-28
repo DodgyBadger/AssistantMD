@@ -145,6 +145,28 @@ client-secret record and writes the grant in one secrets-store transaction, so
 an in-flight response cannot recreate token state after a concurrent credential
 replacement.
 
+Disconnect preserves the configured client-secret value but atomically rotates
+its internal credential identity while deleting pending and token state. An
+in-flight completion or refresh therefore either settles before disconnect and
+is deleted, or observes the rotated identity and cannot persist afterward.
+The rotation compares the exact credential it observed and retries when another
+credential mutation wins first, so disconnect cannot restore an older client
+secret. Refresh persistence also compares the exact source grant, preventing an
+older refresh response from overwriting a newer completed authorization.
+
+Google connection deletion removes metadata before clearing the captured
+encrypted namespace. A concurrent client-secret writer rechecks the immutable
+connection identity after its write and conditionally removes its exact payload
+when deletion won, preventing orphaned credential material across the separate
+connections and secrets databases.
+The metadata transaction also records a sanitized permanent deletion ledger.
+Startup and idempotent item-route retries reconcile every recorded immutable ID
+by clearing its exact encrypted connection namespace. Retaining the ledger
+closes the crash window in which a writer that captured pre-deletion metadata
+commits immediately before process death. When deleting the default connection,
+shared legacy OAuth identities are cleared before its replacement becomes the
+default, so lazy migration cannot move legacy credentials across identities.
+
 Internal OAuth state relocation and multi-record cleanup execute as one
 `secrets.db` transaction. Because encrypted record identity participates in
 authenticated encryption, relocation decrypts the source identity, re-encrypts

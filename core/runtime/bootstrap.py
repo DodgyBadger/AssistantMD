@@ -182,6 +182,8 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             if secrets_status.ready
             else None
         )
+        if google_connection is not None:
+            google_connection.reconcile_connection_deletions()
         google_oauth = (
             GoogleOAuthCoordinator(
                 connections=built_in_connections,
