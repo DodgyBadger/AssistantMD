@@ -27,6 +27,10 @@ start that workflow asynchronously instead.
 - `tools`: optional. List of tool names the child agent may call. `delegate` and `code_execution` are always excluded regardless of what is passed. Include `file_read` when the child agent needs to inspect files and `file_write` when it needs to mutate them.
 - `options`: optional dictionary. Supported key: `thinking`, which accepts `true`, `false`, or one of `minimal`, `low`, `medium`, `high`, `xhigh`.
 
+Use the model's default thinking mode for most tasks by omitting `options["thinking"]`.
+Before recommending or selecting a non-default mode such as `xhigh`, explain
+why it may help and confirm the choice with the user.
+
 The child does not inherit the parent chat instructions or flight card. When
 providing tools, the caller is responsible for passing the operating guidance
 the child needs through `prompt` or `instructions`. Do not assume the child can
