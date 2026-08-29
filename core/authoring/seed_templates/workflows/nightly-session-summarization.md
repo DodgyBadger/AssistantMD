@@ -50,11 +50,9 @@ for item in sessions:
     # `summarize_session` reads the transcript, extracts durable summary fields,
     # stores the summary, and refreshes the vector index for session search. It
     # is mandatory: a structured tool failure raises and fails this workflow.
-    result = await session_ops(
-        operation="summarize_session",
-        session_id=session_id,
-        summarization_model=SUMMARIZATION_MODEL,
-    )
+    # Keep this awaited call on one source line until Monty accepts multiline
+    # exception frames whose closing line has a smaller column than the opening line.
+    result = await session_ops(operation="summarize_session", session_id=session_id, summarization_model=SUMMARIZATION_MODEL)
     summarized.append(
         {
             "session_id": session_id,
