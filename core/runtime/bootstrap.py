@@ -29,7 +29,6 @@ from core.integrations.google import (
 )
 from core.logger import UnifiedLogger
 from core.mcp import MCPConnectionManager, MCPConnectionService
-from core.mcp.network import insecure_http_allowed_from_environment
 from core.mcp.oauth import MCPOAuthCoordinator
 from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
@@ -138,14 +137,12 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             mcp_connections.reconcile_pending_mutations()
             mcp_manager = MCPConnectionManager(
                 connections=mcp_connections,
-                allow_insecure_http=insecure_http_allowed_from_environment(),
             )
             manager_holder.append(mcp_manager)
             mcp_manager.start()
             mcp_oauth = MCPOAuthCoordinator(
                 connections=mcp_connections,
                 manager=mcp_manager,
-                allow_insecure_http=insecure_http_allowed_from_environment(),
             )
         with use_execution_authority(LOCAL_USER_AUTHORITY):
             refresh_settings_cache()

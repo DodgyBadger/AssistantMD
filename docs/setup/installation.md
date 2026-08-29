@@ -123,15 +123,10 @@ shows the authorization URL for headless use and supports a pasted callback URL
 when automatic completion is unavailable. A configured
 `ASSISTANTMD_PUBLIC_URL` provides the stable callback origin.
 
-Remote MCP endpoints require HTTPS. Local/private HTTP endpoints are intended
-for development only and require:
-
-```env
-ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true
-```
-
-Do not enable that option to connect to public HTTP servers; public plaintext
-MCP endpoints remain rejected.
+Remote MCP endpoints require HTTPS. For a trusted server on a private network,
+including a Docker service reachable by container name, enable **Allow HTTP on
+a private network** on that connection. HTTP traffic and credentials are not
+encrypted in transit. Public plaintext MCP endpoints remain rejected.
 
 When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
 

@@ -124,11 +124,9 @@ class MCPConnectionManager:
         self,
         *,
         connections: MCPConnectionService,
-        allow_insecure_http: bool,
         idle_timeout_seconds: float = MCP_IDLE_TIMEOUT_SECONDS,
     ) -> None:
         self._connections = connections
-        self._allow_insecure_http = allow_insecure_http
         self._idle_timeout_seconds = idle_timeout_seconds
         self._entries: dict[_ConnectionKey, _ManagedConnection] = {}
         self._locks: dict[_ConnectionKey, asyncio.Lock] = {}
@@ -315,7 +313,7 @@ class MCPConnectionManager:
     ) -> _ManagedConnection:
         await validate_mcp_endpoint(
             connection.url,
-            allow_insecure_http=self._allow_insecure_http,
+            allow_private_http=connection.allow_private_http,
         )
         credential = self._connections.resolve_credential(
             authority,
@@ -337,7 +335,7 @@ class MCPConnectionManager:
             connection,
             credential,
             oauth_storage=oauth_storage,
-            allow_insecure_http=self._allow_insecure_http,
+            allow_private_http=connection.allow_private_http,
         )
         transport = (
             StreamableHttpTransport(
@@ -345,7 +343,7 @@ class MCPConnectionManager:
                 headers=headers,
                 auth=auth,
                 httpx_client_factory=_mcp_http_client_factory(
-                    allow_insecure_http=self._allow_insecure_http
+                    allow_private_http=connection.allow_private_http
                 ),
             )
             if connection.transport is MCPTransport.STREAMABLE_HTTP
@@ -354,7 +352,7 @@ class MCPConnectionManager:
                 headers=headers,
                 auth=auth,
                 httpx_client_factory=_mcp_http_client_factory(
-                    allow_insecure_http=self._allow_insecure_http
+                    allow_private_http=connection.allow_private_http
                 ),
             )
         )
@@ -475,7 +473,7 @@ def _build_auth(
     credential: str | None,
     *,
     oauth_storage: EncryptedMCPOAuthStorage | None = None,
-    allow_insecure_http: bool = False,
+    allow_private_http: bool = False,
 ) -> tuple[dict[str, str] | None, str | httpx.Auth | None]:
     if connection.auth_mode is MCPAuthMode.BEARER:
         if credential is None:
@@ -491,20 +489,20 @@ def _build_auth(
         return None, ConnectedMCPOAuth(
             mcp_url=connection.url,
             token_storage=oauth_storage,
-            allow_insecure_http=allow_insecure_http,
+            allow_private_http=allow_private_http,
         )
     return None, None
 
 
 def _mcp_http_client_factory(
-    *, allow_insecure_http: bool
+    *, allow_private_http: bool
 ) -> Callable[..., httpx.AsyncClient]:
     """Create clients that enforce network policy immediately before each request."""
 
     async def validate_request(request: httpx.Request) -> None:
         await validate_mcp_endpoint(
             str(request.url),
-            allow_insecure_http=allow_insecure_http,
+            allow_private_http=allow_private_http,
         )
 
     def create_client(

@@ -25,6 +25,11 @@ MCP_MIGRATIONS = (
         name="durable_connection_mutations",
         apply=lambda conn: _add_connection_mutation_lifecycle(conn),
     ),
+    SQLiteMigration(
+        version=4,
+        name="connection_scoped_private_http",
+        apply=lambda conn: _add_private_http_column(conn),
+    ),
 )
 
 
@@ -83,6 +88,7 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             auth_mode TEXT NOT NULL,
             header_name TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
+            allow_private_http INTEGER NOT NULL DEFAULT 0,
             allowed_tools_json TEXT,
             oauth_client_id TEXT,
             oauth_scopes_json TEXT,
@@ -101,6 +107,7 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             CHECK (transport IN ('streamable_http', 'sse')),
             CHECK (auth_mode IN ('none', 'bearer', 'header', 'oauth')),
             CHECK (enabled IN (0, 1)),
+            CHECK (allow_private_http IN (0, 1)),
             CHECK (config_version > 0),
             CHECK (lifecycle_state IN ('active', 'pending', 'deleting')),
             CHECK (length(oauth_fence_token) = 32)
@@ -174,6 +181,17 @@ def _add_connection_mutation_lifecycle(conn: sqlite3.Connection) -> None:
     _create_mutation_table(conn)
 
 
+def _add_private_http_column(conn: sqlite3.Connection) -> None:
+    if "allow_private_http" not in _connection_columns(conn):
+        conn.execute(
+            """
+            ALTER TABLE mcp_connections
+            ADD COLUMN allow_private_http INTEGER NOT NULL DEFAULT 0
+            CHECK (allow_private_http IN (0, 1))
+            """
+        )
+
+
 def _create_mutation_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -218,6 +236,7 @@ def _assert_current_schema(conn: sqlite3.Connection) -> None:
         "oauth_scopes_json",
         "lifecycle_state",
         "oauth_fence_token",
+        "allow_private_http",
     }
     missing = sorted(required - _connection_columns(conn))
     if missing:

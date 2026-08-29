@@ -96,6 +96,14 @@ class MCPConnectionIsolationScenario(BaseScenario):
                 oauth_scopes=("mail.read", "mail.compose"),
             ),
         )
+        private_http_connection = service.create_connection_for_authority(
+            owner,
+            MCPConnectionCreate(
+                display_name="Docker MCP",
+                url="http://docker-mcp:8080/mcp",
+                allow_private_http=True,
+            ),
+        )
 
         self.soft_assert_equal(
             owner_connection.slug,
@@ -126,6 +134,14 @@ class MCPConnectionIsolationScenario(BaseScenario):
             ("owner-client-id", True, ("mail.read", "mail.compose")),
             "OAuth client metadata should round-trip without exposing its secret",
         )
+        self.soft_assert(
+            private_http_connection.allow_private_http
+            and not owner_connection.allow_private_http,
+            "Private HTTP acknowledgement should persist only on the opted-in connection",
+        )
+        await self._assert_private_http_connection(
+            service, owner, private_http_connection
+        )
         self.soft_assert_equal(
             service.resolve_oauth_client_secret(owner, oauth_connection.connection_id),
             "owner-client-secret",
@@ -154,6 +170,7 @@ class MCPConnectionIsolationScenario(BaseScenario):
                     auth_mode=MCPAuthMode.BEARER,
                     header_name=None,
                     enabled=False,
+                    allow_private_http=False,
                     allowed_tools=("search_messages",),
                 ),
             )
@@ -281,7 +298,6 @@ class MCPConnectionIsolationScenario(BaseScenario):
 
         manager = MCPConnectionManager(
             connections=service,
-            allow_insecure_http=True,
             idle_timeout_seconds=0,
         )
         with (
@@ -350,23 +366,23 @@ class MCPConnectionIsolationScenario(BaseScenario):
             try:
                 await validate_mcp_endpoint(
                     "http://marimo:8080/mcp/server",
-                    allow_insecure_http=False,
+                    allow_private_http=False,
                 )
                 rejected_local_http = False
             except MCPNetworkPolicyError:
                 rejected_local_http = True
             self.soft_assert(
                 rejected_local_http,
-                "Local HTTP MCP should require the explicit development allowance",
+                "Private HTTP MCP should require per-connection acknowledgement",
             )
             allowed = await validate_mcp_endpoint(
                 "http://marimo:8080/mcp/server",
-                allow_insecure_http=True,
+                allow_private_http=True,
             )
             self.soft_assert_equal(
                 allowed.addresses,
                 ("172.18.0.9",),
-                "Explicit development allowance should admit local HTTP MCP",
+                "Per-connection acknowledgement should admit private HTTP MCP",
             )
         with patch(
             "core.mcp.network._resolve_addresses",
@@ -375,25 +391,25 @@ class MCPConnectionIsolationScenario(BaseScenario):
             try:
                 await validate_mcp_endpoint(
                     "http://public.example/mcp",
-                    allow_insecure_http=True,
+                    allow_private_http=True,
                 )
                 rejected_public_http = False
             except MCPNetworkPolicyError:
                 rejected_public_http = True
             self.soft_assert(
                 rejected_public_http,
-                "The development allowance must not permit public HTTP MCP",
+                "Private HTTP acknowledgement must not permit public HTTP MCP",
             )
             secure = await validate_mcp_endpoint(
                 "https://public.example/mcp",
-                allow_insecure_http=False,
+                allow_private_http=False,
             )
             self.soft_assert(
                 secure.secure,
                 "Public MCP connections should require and accept HTTPS",
             )
         request_client = mcp_manager._mcp_http_client_factory(
-            allow_insecure_http=False
+            allow_private_http=False
         )()
         request_hook = request_client.event_hooks["request"][0]
         try:
@@ -487,7 +503,7 @@ class MCPConnectionIsolationScenario(BaseScenario):
         ):
             await validate_mcp_endpoint(
                 "https://public.example/mcp",
-                allow_insecure_http=False,
+                allow_private_http=False,
             )
             try:
                 await rebound_backend.connect_tcp("public.example", 443)
@@ -509,6 +525,24 @@ class MCPConnectionIsolationScenario(BaseScenario):
             unix_socket_rejected,
             "MCP network policy must not admit Unix-domain socket bypasses",
         )
+
+    async def _assert_private_http_connection(
+        self,
+        service: MCPConnectionService,
+        owner: ExecutionAuthority,
+        connection: MCPConnection,
+    ) -> None:
+        manager = MCPConnectionManager(connections=service, idle_timeout_seconds=0)
+        with (
+            patch(
+                "core.mcp.network._resolve_addresses",
+                return_value=("172.18.0.9",),
+            ),
+            patch("core.mcp.manager.Client", return_value=_ManagedTestClient()),
+        ):
+            lease = await manager.acquire(owner, connection)
+            await lease.close()
+        await manager.shutdown()
 
 
 @dataclass(frozen=True)

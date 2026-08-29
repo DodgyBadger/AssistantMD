@@ -128,7 +128,7 @@ class _HeadlessOAuth(OAuth):
         storage: EncryptedMCPOAuthStorage,
         authorization_url: asyncio.Future[str],
         callback: asyncio.Future[tuple[str, str | None]],
-        allow_insecure_http: bool,
+        allow_private_http: bool,
         scopes: tuple[str, ...] | None,
         client_id: str | None,
         client_secret: str | None,
@@ -142,7 +142,7 @@ class _HeadlessOAuth(OAuth):
             token_storage=storage,
             callback_timeout=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS,
             httpx_client_factory=mcp_oauth_http_client_factory(
-                allow_insecure_http=allow_insecure_http
+                allow_private_http=allow_private_http
             ),
             scopes=list(scopes) if scopes is not None else None,
             client_id=client_id,
@@ -232,11 +232,9 @@ class MCPOAuthCoordinator:
         *,
         connections: MCPConnectionService,
         manager: MCPConnectionManager,
-        allow_insecure_http: bool = False,
     ) -> None:
         self._connections = connections
         self._manager = manager
-        self._allow_insecure_http = allow_insecure_http
         self._attempts: dict[tuple[str, str], _Attempt] = {}
         self._lock = asyncio.Lock()
 
@@ -421,7 +419,7 @@ class MCPOAuthCoordinator:
             storage=storage,
             authorization_url=attempt.authorization_url,
             callback=attempt.callback,
-            allow_insecure_http=self._allow_insecure_http,
+            allow_private_http=attempt.connection.allow_private_http,
             scopes=attempt.connection.oauth_scopes,
             client_id=attempt.connection.oauth_client_id,
             client_secret=self._connections.resolve_oauth_client_secret(
@@ -430,7 +428,7 @@ class MCPOAuthCoordinator:
         )
         await _prime_oauth_authorization(auth, attempt.connection.url)
         http_client_factory = mcp_oauth_http_client_factory(
-            allow_insecure_http=self._allow_insecure_http
+            allow_private_http=attempt.connection.allow_private_http
         )
         transport = (
             StreamableHttpTransport(
@@ -489,7 +487,7 @@ class MCPOAuthCoordinator:
             )
         try:
             http_client_factory = mcp_oauth_http_client_factory(
-                allow_insecure_http=self._allow_insecure_http
+                allow_private_http=connection.allow_private_http
             )
             async with http_client_factory(auth=auth) as client:
                 response = await client.post(

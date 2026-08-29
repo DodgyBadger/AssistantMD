@@ -60,6 +60,7 @@ def create_mcp_connection(
                 auth_mode=MCPAuthMode(request.auth_mode),
                 header_name=request.header_name,
                 enabled=request.enabled,
+                allow_private_http=request.allow_private_http,
                 allowed_tools=(
                     tuple(request.allowed_tools)
                     if request.allowed_tools is not None
@@ -101,6 +102,7 @@ def update_mcp_connection(
                 auth_mode=MCPAuthMode(request.auth_mode),
                 header_name=request.header_name,
                 enabled=request.enabled,
+                allow_private_http=request.allow_private_http,
                 allowed_tools=(
                     tuple(request.allowed_tools)
                     if request.allowed_tools is not None
@@ -313,6 +315,7 @@ def _log_change(event: str, connection: MCPConnection) -> None:
             "connection_id": connection.connection_id,
             "slug": connection.slug,
             "enabled": connection.enabled,
+            "allow_private_http": connection.allow_private_http,
             "auth_mode": connection.auth_mode.value,
             "credential_present": connection.credential_present,
             "config_version": connection.config_version,

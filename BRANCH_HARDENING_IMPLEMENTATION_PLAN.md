@@ -46,8 +46,8 @@ responsible for the full validation suite.
   origin, TLS SNI, and certificate verification.
 - A prohibited or mixed public/local resolution set causes rejection before any
   socket attempt. No fallback may resolve the hostname again behind policy.
-- Local/private HTTPS remains allowed. Local/private HTTP requires
-  `ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP`; public HTTP is always rejected.
+- Local/private HTTPS remains allowed. Local/private HTTP requires an explicit
+  acknowledgement on that connection; public HTTP is always rejected.
 - Redirect following, Unix sockets, ambient proxies, and proxy environment
   inheritance remain disabled. Cancellation and standard timeout/error classes
   remain observable.
@@ -326,6 +326,7 @@ Progress:
 - [x] Stage 8: storage-level guard serialization and disconnect fencing.
 - [x] Stage 9: Google deletion and grant-revision convergence.
 - [x] Stage 10: durable Google deletion reconciliation and legacy-default fencing.
+- [x] Stage 11: connection-scoped private HTTP acknowledgement.
 
 ### Stage 1: Authoritative MCP socket boundary
 
@@ -461,6 +462,21 @@ Keep this commit independent from persistence changes.
 5. Add injected cleanup-failure/retry coverage, default legacy replacement
    coverage, and client-ID-update-versus-new-secret coverage before another
    adversarial review round.
+
+### Stage 11: Connection-scoped private HTTP acknowledgement
+
+1. Replace the process-wide insecure-HTTP environment allowance with a disabled-
+   by-default `allow_private_http` setting on each MCP connection.
+2. Require that setting only for HTTP endpoints whose complete runtime DNS result
+   is private; continue rejecting public HTTP, mixed public/private results, and
+   prohibited address classes regardless of the setting.
+3. Carry the setting through MCP client initialization, OAuth discovery and token
+   exchange, durable mutation recovery, API projections, and the Connections UI.
+4. Add migration and deterministic security coverage for Docker-style private
+   service addresses, public HTTP rejection, and per-connection isolation.
+5. Update installation and MCP architecture documentation, run targeted scenarios
+   and the complete production Python quality gate, then request the maintainer-
+   owned pre-merge profile.
 
 ## Validation-First Targets
 

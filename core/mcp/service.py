@@ -140,7 +140,8 @@ class MCPConnectionService:
                     """
                     UPDATE mcp_connections SET
                         display_name = ?, url = ?, transport = ?, auth_mode = ?,
-                        header_name = ?, enabled = ?, allowed_tools_json = ?,
+                        header_name = ?, enabled = ?, allow_private_http = ?,
+                        allowed_tools_json = ?,
                         oauth_client_id = ?, oauth_scopes_json = ?,
                         lifecycle_state = 'pending',
                         oauth_fence_token = COALESCE(?, oauth_fence_token),
@@ -155,6 +156,7 @@ class MCPConnectionService:
                         normalized.auth_mode.value,
                         normalized.header_name,
                         int(normalized.enabled),
+                        int(normalized.allow_private_http),
                         _dump_allowed_tools(normalized.allowed_tools),
                         normalized.oauth_client_id,
                         _dump_allowed_tools(normalized.oauth_scopes),
@@ -412,10 +414,10 @@ class MCPConnectionService:
                     INSERT INTO mcp_connections (
                         connection_id, owner_principal_id, slug, display_name,
                         url, transport, auth_mode, header_name, enabled,
-                        allowed_tools_json
+                        allow_private_http, allowed_tools_json
                         , oauth_client_id, oauth_scopes_json, lifecycle_state,
                         oauth_fence_token
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                     """,
                     (
                         connection_id,
@@ -427,6 +429,7 @@ class MCPConnectionService:
                         normalized.auth_mode.value,
                         normalized.header_name,
                         int(normalized.enabled),
+                        int(normalized.allow_private_http),
                         _dump_allowed_tools(normalized.allowed_tools),
                         normalized.oauth_client_id,
                         _dump_allowed_tools(normalized.oauth_scopes),
@@ -1022,6 +1025,7 @@ class MCPConnectionService:
             auth_mode=MCPAuthMode(str(values["auth_mode"])),
             header_name=str(values["header_name"]) if values["header_name"] else None,
             enabled=bool(values["enabled"]),
+            allow_private_http=bool(values["allow_private_http"]),
             allowed_tools=_load_allowed_tools(values["allowed_tools_json"]),
             credential_present=credential_present,
             oauth_client_id=(
@@ -1056,6 +1060,7 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
             auth_mode=request.auth_mode,
             header_name=request.header_name,
             enabled=request.enabled,
+            allow_private_http=request.allow_private_http,
             allowed_tools=request.allowed_tools,
             oauth_client_id=request.oauth_client_id,
             oauth_scopes=request.oauth_scopes,
@@ -1077,6 +1082,7 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
         auth_mode=update.auth_mode,
         header_name=update.header_name,
         enabled=update.enabled,
+        allow_private_http=update.allow_private_http,
         allowed_tools=update.allowed_tools,
         credential=credential,
         oauth_client_id=update.oauth_client_id,
@@ -1109,6 +1115,7 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
         auth_mode=auth_mode,
         header_name=header_name,
         enabled=bool(request.enabled),
+        allow_private_http=bool(request.allow_private_http),
         allowed_tools=allowed_tools,
         oauth_client_id=oauth_client_id,
         oauth_scopes=oauth_scopes,

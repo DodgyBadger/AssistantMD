@@ -39,8 +39,8 @@ intentional integration rather than an incidental transitive dependency.
   TLS behavior against the supported HTTPCore version.
 - A newly prohibited DNS result blocks the connection even when an earlier
   request-level validation succeeded.
-- Local and private HTTPS remain supported. Local/private HTTP continues to
-  require explicit development policy; public HTTP remains prohibited.
+- Local and private HTTPS remain supported. Local/private HTTP requires an
+  explicit per-connection acknowledgement; public HTTP remains prohibited.
 - Updating the lower-level transport dependency requires focused compatibility
   review.
 

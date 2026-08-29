@@ -29,6 +29,8 @@ an installation encryption key before upgrading.
   authentication. Headless installations can complete OAuth manually when an
   automatic callback is unavailable.
 - You can limit which tools AssistantMD may use from each server.
+- Trusted MCP servers on private networks can opt in to HTTP per connection;
+  public servers still require HTTPS.
 - Interrupted connection changes recover safely after AssistantMD restarts.
 
 ### Search and read Gmail from chat

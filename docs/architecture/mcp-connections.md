@@ -56,9 +56,9 @@ unreachable servers, network-policy rejection, and MCP initialization failure
 without returning credentials or raw transport errors.
 
 Remote endpoints require HTTPS. Plain HTTP is accepted only for local/private
-addresses when `ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP=true`; `scripts/dev run`
-sets that development allowance automatically. Retained and OAuth MCP clients
-repeat URL network-policy checks immediately before every outbound request. A
+addresses when that connection explicitly enables `allow_private_http`.
+Retained and OAuth MCP clients repeat URL network-policy checks immediately
+before every outbound request. A
 socket-level network backend resolves each new connection, rejects the complete
 address set unless it satisfies policy, and gives the operating system only an
 approved numeric address. HTTP origin, `Host`, TLS SNI, and certificate checks

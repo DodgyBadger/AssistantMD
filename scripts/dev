@@ -250,7 +250,6 @@ run_server() {
   cd "${REPO_ROOT}"
   export CONTAINER_DATA_ROOT="${DATA_ROOT}"
   export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
-  export ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP="${ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP:-true}"
   local -a env_file_args=()
   if [ -f "${REPO_ROOT}/.env" ]; then
     env_file_args=(--env-file "${REPO_ROOT}/.env")

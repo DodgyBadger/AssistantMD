@@ -658,7 +658,11 @@
                                 </label>
                             </div>
                             <div class="flex items-center justify-between gap-3">
-                                <label class="text-sm text-txt-primary"><input name="enabled" type="checkbox" checked class="mr-2" />Enabled</label>
+                                <div class="space-y-2">
+                                    <label class="block text-sm text-txt-primary"><input name="enabled" type="checkbox" checked class="mr-2" />Enabled</label>
+                                    <label class="block text-sm text-txt-primary"><input name="allow_private_http" type="checkbox" class="mr-2" />Allow HTTP on a private network</label>
+                                    <p class="text-xs text-txt-secondary">HTTP traffic, including credentials, is not encrypted. Public HTTP addresses are always blocked.</p>
+                                </div>
                                 <div class="flex items-center gap-2">
                                     <button type="button" data-mcp-create-action="cancel" class="ui-icon-button is-danger" data-icon="trash" data-icon-label="Cancel new MCP connection"></button>
                                     <button type="submit" class="ui-icon-button is-primary" data-icon="plus" data-icon-label="Add Connection"></button>

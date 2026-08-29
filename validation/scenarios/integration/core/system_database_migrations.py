@@ -62,7 +62,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            20,
+            21,
             "Store initialization should not apply registered release migrations",
         )
 

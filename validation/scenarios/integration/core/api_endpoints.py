@@ -545,6 +545,7 @@ class ApiEndpointsScenario(BaseScenario):
                 "transport": "streamable_http",
                 "auth_mode": "bearer",
                 "enabled": True,
+                "allow_private_http": True,
                 "allowed_tools": ["search"],
                 "credential": "validation-mcp-token",
             },
@@ -557,6 +558,9 @@ class ApiEndpointsScenario(BaseScenario):
             mcp_payload["credential_present"] is True
         ), "Credential presence is reported"
         assert "credential" not in mcp_payload, "Credential value is write-only"
+        assert (
+            mcp_payload["allow_private_http"] is True
+        ), "Private HTTP acknowledgement is returned without weakening other connections"
 
         mcp_list = self.call_api("/api/system/mcp/connections")
         assert mcp_list.status_code == 200, "MCP connection listing succeeds"
@@ -597,11 +601,13 @@ class ApiEndpointsScenario(BaseScenario):
                 "auth_mode": "bearer",
                 "header_name": None,
                 "enabled": False,
+                "allow_private_http": False,
                 "allowed_tools": None,
             },
         )
         assert mcp_update.status_code == 200, "MCP connection update succeeds"
         assert mcp_update.json()["slug"] == "validation-mcp", "MCP slug stays immutable"
+        assert mcp_update.json()["allow_private_http"] is False
 
         mcp_clear = self.call_api(
             f"/api/system/mcp/connections/{mcp_id}/credential",

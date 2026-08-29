@@ -2607,7 +2607,11 @@ async function saveModelRow(rowKey) {
                         <label class="text-xs text-txt-secondary">Header name<input data-mcp-field="header_name" value="${escapeHtml(connection.header_name || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="X-API-Key" /></label>
                         <label class="text-xs text-txt-secondary">Allowed tools<input data-mcp-field="allowed_tools" value="${escapeHtml(allowedTools)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Blank trusts all tools" /></label>
                     </div>
-                    <label class="text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
+                    <div class="space-y-2">
+                        <label class="block text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
+                        <label class="block text-sm text-txt-primary"><input data-mcp-field="allow_private_http" type="checkbox" ${connection.allow_private_http ? 'checked' : ''} class="mr-2" />Allow HTTP on a private network</label>
+                        <p class="text-xs text-txt-secondary">HTTP traffic, including credentials, is not encrypted. Public HTTP addresses are always blocked.</p>
+                    </div>
                     ${staticAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
                         <div class="flex items-center gap-2"><input data-mcp-field="credential" type="password" ${staticAuth ? '' : 'disabled'} class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="New credential" autocomplete="new-password" /><button type="button" data-mcp-action="credential" ${iconButton('save', 'Save MCP credential', 'is-primary', staticAuth ? '' : 'disabled')}>${iconSvg('save')}</button><button type="button" data-mcp-action="clear-credential" ${iconButton('x', 'Clear MCP credential', 'is-danger', connection.credential_present ? '' : 'disabled')}>${iconSvg('x')}</button></div>
@@ -2717,6 +2721,7 @@ async function saveModelRow(rowKey) {
             auth_mode: String(form.get('auth_mode') || 'none'),
             header_name: String(form.get('auth_mode') || 'none') === 'header' ? (String(form.get('header_name') || '').trim() || null) : null,
             enabled: form.get('enabled') === 'on',
+            allow_private_http: form.get('allow_private_http') === 'on',
             allowed_tools: parseMcpAllowedTools(form.get('allowed_tools')),
             credential: ['bearer', 'header'].includes(String(form.get('auth_mode') || 'none')) ? (String(form.get('credential') || '').trim() || null) : null,
             oauth_client_id: String(form.get('auth_mode') || 'none') === 'oauth' ? (String(form.get('oauth_client_id') || '').trim() || null) : null,
@@ -2790,8 +2795,9 @@ async function saveModelRow(rowKey) {
             cancelMcpOAuthPoll(id);
             const value = (name) => card.querySelector(`[data-mcp-field="${name}"]`)?.value || '';
             const enabled = card.querySelector('[data-mcp-field="enabled"]')?.checked === true;
+            const allowPrivateHttp = card.querySelector('[data-mcp-field="allow_private_http"]')?.checked === true;
             const authMode = value('auth_mode');
-            const payload = { display_name: value('display_name'), url: value('url'), transport: value('transport'), auth_mode: authMode, header_name: authMode === 'header' ? (value('header_name').trim() || null) : null, enabled, allowed_tools: parseMcpAllowedTools(value('allowed_tools')), oauth_client_id: authMode === 'oauth' ? (value('oauth_client_id').trim() || null) : null, oauth_scopes: authMode === 'oauth' ? parseMcpAllowedTools(value('oauth_scopes')) : null };
+            const payload = { display_name: value('display_name'), url: value('url'), transport: value('transport'), auth_mode: authMode, header_name: authMode === 'header' ? (value('header_name').trim() || null) : null, enabled, allow_private_http: allowPrivateHttp, allowed_tools: parseMcpAllowedTools(value('allowed_tools')), oauth_client_id: authMode === 'oauth' ? (value('oauth_client_id').trim() || null) : null, oauth_scopes: authMode === 'oauth' ? parseMcpAllowedTools(value('oauth_scopes')) : null };
             const saved = await mutateMcp(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection saved.');
             const clientSecret = value('oauth_client_secret').trim();
             if (saved && authMode === 'oauth' && clientSecret) {

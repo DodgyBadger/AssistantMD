@@ -1601,6 +1601,7 @@ class MCPConnectionCreateRequest(BaseModel):
     auth_mode: Literal["none", "bearer", "header", "oauth"] = "none"
     header_name: str | None = Field(None, max_length=128)
     enabled: bool = True
+    allow_private_http: bool = False
     allowed_tools: list[str] | None = None
     credential: SecretStr | None = Field(None, max_length=16384)
     oauth_client_id: str | None = Field(None, max_length=2048)
@@ -1619,6 +1620,7 @@ class MCPConnectionUpdateRequest(BaseModel):
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None = Field(None, max_length=128)
     enabled: bool
+    allow_private_http: bool = False
     allowed_tools: list[str] | None = None
     oauth_client_id: str | None = Field(None, max_length=2048)
     oauth_scopes: list[str] | None = None
@@ -1651,6 +1653,7 @@ class MCPConnectionInfo(BaseModel):
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None
     enabled: bool
+    allow_private_http: bool
     allowed_tools: list[str] | None
     credential_present: bool
     oauth_client_id: str | None

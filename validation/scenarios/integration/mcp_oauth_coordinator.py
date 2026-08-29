@@ -109,10 +109,7 @@ class MCPOAuthCoordinatorScenario(BaseScenario):
                 auth_mode=MCPAuthMode.OAUTH,
             ),
         )
-        manager = MCPConnectionManager(
-            connections=service,
-            allow_insecure_http=False,
-        )
+        manager = MCPConnectionManager(connections=service)
         coordinator = _DeterministicCoordinator(
             connections=service,
             manager=manager,

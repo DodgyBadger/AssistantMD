@@ -119,5 +119,5 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 - MCP definitions and OAuth/static credentials are principal-owned. Credentials
   and OAuth state are encrypted in `system/secrets.db`, while sanitized
   connection metadata is stored in `system/mcp.db`. Remote endpoints require
-  HTTPS; the local/private HTTP override is for controlled development networks
-  and never permits public plaintext endpoints.
+  HTTPS. Private-network HTTP requires explicit acknowledgement on each
+  connection and never permits public plaintext endpoints.

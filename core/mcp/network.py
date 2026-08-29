@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import os
 import socket
 import time
 from collections.abc import Iterable
@@ -14,7 +13,12 @@ from urllib.parse import urlsplit
 import httpcore
 import httpx
 
-MCP_INSECURE_HTTP_ENV = "ASSISTANTMD_MCP_ALLOW_INSECURE_HTTP"
+_PRIVATE_MCP_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+)
 
 SocketOption = (
     tuple[int, int, int]
@@ -36,20 +40,10 @@ class MCPResolvedEndpoint:
     secure: bool
 
 
-def insecure_http_allowed_from_environment() -> bool:
-    """Return whether explicit local-development HTTP access is enabled."""
-    return os.getenv(MCP_INSECURE_HTTP_ENV, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 async def validate_mcp_endpoint(
     url: str,
     *,
-    allow_insecure_http: bool,
+    allow_private_http: bool,
 ) -> MCPResolvedEndpoint:
     """Resolve and validate an MCP URL immediately before connecting."""
     parsed = urlsplit(str(url or "").strip())
@@ -64,11 +58,18 @@ async def validate_mcp_endpoint(
 
     addresses = await resolve_mcp_addresses(hostname)
     parsed_addresses = tuple(ipaddress.ip_address(address) for address in addresses)
+    has_private = any(_is_private_mcp_address(address) for address in parsed_addresses)
     has_public = any(address.is_global for address in parsed_addresses)
-    if scheme == "http" and (not allow_insecure_http or has_public):
-        raise MCPNetworkPolicyError(
-            "Plain HTTP MCP connections require the explicit local-development allowance."
-        )
+    if scheme == "http":
+        if has_public or not has_private:
+            raise MCPNetworkPolicyError(
+                "Public HTTP MCP servers are not allowed. Use HTTPS."
+            )
+        if not allow_private_http:
+            raise MCPNetworkPolicyError(
+                "This MCP server uses HTTP on a private network. Enable private-network "
+                "HTTP for this connection, or use HTTPS."
+            )
 
     return MCPResolvedEndpoint(
         hostname=hostname,
@@ -91,7 +92,7 @@ async def resolve_mcp_addresses(hostname: str) -> tuple[str, ...]:
     parsed_addresses = tuple(ipaddress.ip_address(address) for address in addresses)
     if any(_is_forbidden_address(address) for address in parsed_addresses):
         raise MCPNetworkPolicyError("MCP server resolved to a prohibited address.")
-    has_local = any(_is_local_address(address) for address in parsed_addresses)
+    has_local = any(_is_private_mcp_address(address) for address in parsed_addresses)
     has_public = any(address.is_global for address in parsed_addresses)
     if has_local and has_public:
         raise MCPNetworkPolicyError(
@@ -187,8 +188,14 @@ def _resolve_addresses(hostname: str) -> tuple[str, ...]:
     return (str(literal),)
 
 
-def _is_local_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return address.is_private or address.is_loopback
+def _is_private_mcp_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return _is_private_mcp_address(address.ipv4_mapped)
+    return address.is_loopback or any(
+        address in network for network in _PRIVATE_MCP_NETWORKS
+    )
 
 
 def _is_forbidden_address(

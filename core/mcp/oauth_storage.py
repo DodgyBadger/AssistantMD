@@ -50,13 +50,13 @@ class ConnectedMCPOAuth(OAuth):
         *,
         mcp_url: str,
         token_storage: EncryptedMCPOAuthStorage,
-        allow_insecure_http: bool,
+        allow_private_http: bool,
     ) -> None:
         super().__init__(
             mcp_url=mcp_url,
             token_storage=token_storage,
             httpx_client_factory=mcp_oauth_http_client_factory(
-                allow_insecure_http=allow_insecure_http
+                allow_private_http=allow_private_http
             ),
         )
 
@@ -95,13 +95,13 @@ def _oauth_http_client(
     )
 
 
-def mcp_oauth_http_client_factory(*, allow_insecure_http: bool) -> McpHttpClientFactory:
+def mcp_oauth_http_client_factory(*, allow_private_http: bool) -> McpHttpClientFactory:
     """Create clients that validate every MCP/OAuth request immediately before use."""
 
     async def validate_request(request: httpx.Request) -> None:
         await validate_mcp_endpoint(
             str(request.url),
-            allow_insecure_http=allow_insecure_http,
+            allow_private_http=allow_private_http,
         )
 
     def create_client(

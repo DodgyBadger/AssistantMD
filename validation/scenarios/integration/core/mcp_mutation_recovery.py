@@ -247,6 +247,7 @@ class MCPMutationRecoveryScenario(BaseScenario):
                         auth_mode=MCPAuthMode.OAUTH,
                         header_name=None,
                         enabled=True,
+                        allow_private_http=False,
                         allowed_tools=None,
                         oauth_client_id="client-b",
                         oauth_scopes=("read", "write"),

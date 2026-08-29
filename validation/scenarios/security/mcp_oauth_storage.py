@@ -149,7 +149,7 @@ class MCPOAuthStorageScenario(BaseScenario):
         connected_auth = ConnectedMCPOAuth(
             mcp_url="https://mail.example/mcp",
             token_storage=other_store,
-            allow_insecure_http=False,
+            allow_private_http=False,
         )
         try:
             await connected_auth.redirect_handler("https://identity.example/authorize")
@@ -160,7 +160,7 @@ class MCPOAuthStorageScenario(BaseScenario):
             )
         else:
             self.soft_assert(False, "Runtime OAuth must never launch a browser flow")
-        factory = mcp_oauth_http_client_factory(allow_insecure_http=False)
+        factory = mcp_oauth_http_client_factory(allow_private_http=False)
         mock_backend = httpcore.AsyncMockBackend(
             [b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"]
         )

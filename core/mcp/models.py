@@ -34,6 +34,7 @@ class MCPConnection:
     auth_mode: MCPAuthMode
     header_name: str | None
     enabled: bool
+    allow_private_http: bool
     allowed_tools: tuple[str, ...] | None
     credential_present: bool
     config_version: int
@@ -54,6 +55,7 @@ class MCPConnectionCreate:
     auth_mode: MCPAuthMode = MCPAuthMode.NONE
     header_name: str | None = None
     enabled: bool = True
+    allow_private_http: bool = False
     allowed_tools: tuple[str, ...] | None = None
     credential: str | None = None
     oauth_client_id: str | None = None
@@ -71,6 +73,7 @@ class MCPConnectionUpdate:
     auth_mode: MCPAuthMode
     header_name: str | None
     enabled: bool
+    allow_private_http: bool
     allowed_tools: tuple[str, ...] | None
     oauth_client_id: str | None = None
     oauth_scopes: tuple[str, ...] | None = None
