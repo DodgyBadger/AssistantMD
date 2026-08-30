@@ -493,7 +493,7 @@ that point will be resolved during the first validation slice.
   reveals that existing ADRs do not fully settle it.
 
 Validation target: new
-`validation/scenarios/integration/gmail_principal_connection.py` plus the
+`validation/scenarios/integration/core/gmail_principal_connection.py` plus the
 existing MCP OAuth coordinator/storage scenarios.
 
 ### Slice 2: OAuth configuration and connection UI
@@ -544,7 +544,7 @@ content in validation output.
   behavior.
 
 Validation target: new
-`validation/scenarios/integration/gmail_read_tools.py` with a deterministic fake
+`validation/scenarios/integration/core/gmail_read_tools.py` with a deterministic fake
 Google HTTP service. Assert request shape and stable tool artifacts rather than
 LLM prose.
 

@@ -130,11 +130,13 @@ class MCPConnectionManager:
         self._idle_timeout_seconds = idle_timeout_seconds
         self._entries: dict[_ConnectionKey, _ManagedConnection] = {}
         self._locks: dict[_ConnectionKey, asyncio.Lock] = {}
+        self._invalidation_epochs: dict[tuple[str, str], int] = {}
         self._state_lock = asyncio.Lock()
         self._closed = False
         self._loop = asyncio.get_running_loop()
         self._idle_task: asyncio.Task[None] | None = None
         self._invalidation_tasks: set[asyncio.Task[None]] = set()
+        self._connection_tasks: set[asyncio.Task[_ManagedConnection]] = set()
 
     def start(self) -> None:
         """Start bounded idle-client eviction without connecting any server."""
@@ -231,29 +233,98 @@ class MCPConnectionManager:
             lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             async with self._state_lock:
+                target = (authority.principal_id, connection.connection_id)
+                invalidation_epoch = self._invalidation_epochs.get(target, 0)
                 entry = self._entries.get(key)
                 if entry is not None and not entry.invalidated:
-                    entry.active_leases += 1
-                    entry.last_used = time.monotonic()
-                    return self._lease(key, entry)
+                    if self._is_authorized(
+                        authority,
+                        connection,
+                        require_enabled=require_enabled,
+                    ):
+                        entry.active_leases += 1
+                        entry.last_used = time.monotonic()
+                        return self._lease(key, entry)
+                    entry.invalidated = True
+                    if entry.active_leases == 0:
+                        self._entries.pop(key, None)
+                        stale_client = entry.client
+                    else:
+                        stale_client = None
+                else:
+                    stale_client = None
 
-            entry = await self._connect_with_retry(authority, connection)
+            if stale_client is not None:
+                await _close_client(stale_client)
+
+            async with self._state_lock:
+                if self._closed:
+                    raise RuntimeError("MCP connection manager is closed.")
+                connection_task = asyncio.create_task(
+                    self._connect_with_retry(authority, connection)
+                )
+                self._connection_tasks.add(connection_task)
+            try:
+                entry = await connection_task
+            finally:
+                async with self._state_lock:
+                    self._connection_tasks.discard(connection_task)
+            reject_entry = False
             async with self._state_lock:
                 if self._closed:
                     await _close_client(entry.client)
                     raise RuntimeError("MCP connection manager is closed.")
-                existing = self._entries.get(key)
+                if self._invalidation_epochs.get(
+                    target, 0
+                ) != invalidation_epoch or not self._is_authorized(
+                    authority,
+                    connection,
+                    require_enabled=require_enabled,
+                ):
+                    reject_entry = True
+                if reject_entry:
+                    existing = None
+                else:
+                    existing = self._entries.get(key)
                 if existing is not None and not existing.invalidated:
                     await _close_client(entry.client)
                     existing.active_leases += 1
                     existing.last_used = time.monotonic()
                     return self._lease(key, existing)
-                entry.active_leases = 1
-                self._entries[key] = entry
-                return self._lease(key, entry)
+                if not reject_entry:
+                    entry.active_leases = 1
+                    self._entries[key] = entry
+                    return self._lease(key, entry)
+            await _close_client(entry.client)
+            raise RuntimeError("MCP connection configuration changed while connecting.")
+
+    def _is_authorized(
+        self,
+        authority: ExecutionAuthority,
+        connection: MCPConnection,
+        *,
+        require_enabled: bool,
+    ) -> bool:
+        """Confirm a lease candidate still matches active authoritative metadata."""
+        current = self._connections.get_connection_for_authority(
+            authority,
+            connection.connection_id,
+        )
+        return (
+            current is not None
+            and current.config_version == connection.config_version
+            and (current.enabled or not require_enabled)
+        )
 
     def invalidate(self, principal_id: str, connection_id: str) -> None:
         """Mark matching clients stale; active leases finish against their snapshot."""
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is self._loop:
+            self._spawn_invalidation(principal_id, connection_id)
+            return
         self._loop.call_soon_threadsafe(
             self._spawn_invalidation,
             principal_id,
@@ -284,6 +355,12 @@ class MCPConnectionManager:
         if idle_task is not None:
             idle_task.cancel()
             await asyncio.gather(idle_task, return_exceptions=True)
+        async with self._state_lock:
+            connection_tasks = tuple(self._connection_tasks)
+        for task in connection_tasks:
+            task.cancel()
+        if connection_tasks:
+            await asyncio.gather(*connection_tasks, return_exceptions=True)
         invalidation_tasks = tuple(self._invalidation_tasks)
         if invalidation_tasks:
             await asyncio.gather(*invalidation_tasks, return_exceptions=True)
@@ -291,11 +368,14 @@ class MCPConnectionManager:
             entries = list(self._entries.values())
             self._entries.clear()
             self._locks.clear()
+            self._invalidation_epochs.clear()
         await asyncio.gather(*(_close_client(entry.client) for entry in entries))
 
     def _spawn_invalidation(self, principal_id: str, connection_id: str) -> None:
         if self._closed:
             return
+        target = (principal_id, connection_id)
+        self._invalidation_epochs[target] = self._invalidation_epochs.get(target, 0) + 1
         task = asyncio.create_task(self._invalidate(principal_id, connection_id))
         self._invalidation_tasks.add(task)
         task.add_done_callback(self._invalidation_tasks.discard)

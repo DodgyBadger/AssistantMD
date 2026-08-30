@@ -188,9 +188,22 @@ class MCPMutationRecoveryScenario(BaseScenario):
                 self.soft_assert(
                     False, "The secrets-applied failpoint should interrupt the request"
                 )
+        concurrent_notifications: list[tuple[str, str]] = []
         reconcilers = (
-            MCPConnectionService(system_root=str(system_root), secrets=secrets),
-            MCPConnectionService(system_root=str(system_root), secrets=secrets),
+            MCPConnectionService(
+                system_root=str(system_root),
+                secrets=secrets,
+                on_change=lambda principal_id, connection_id: concurrent_notifications.append(
+                    (principal_id, connection_id)
+                ),
+            ),
+            MCPConnectionService(
+                system_root=str(system_root),
+                secrets=secrets,
+                on_change=lambda principal_id, connection_id: concurrent_notifications.append(
+                    (principal_id, connection_id)
+                ),
+            ),
         )
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
@@ -215,6 +228,11 @@ class MCPMutationRecoveryScenario(BaseScenario):
                 (created.config_version + 1, "concurrently-recovered-token"),
                 "Concurrent reconciliation should finalize one version increment",
             )
+        self.soft_assert_equal(
+            len(concurrent_notifications),
+            1,
+            "Concurrent reconcilers must serialize terminal notification",
+        )
 
         with use_execution_authority(owner):
             oauth_connection = recovered.create_connection(
@@ -340,6 +358,55 @@ class MCPMutationRecoveryScenario(BaseScenario):
                 "Finalized replay must not increment the version twice",
             )
 
+        notifications: list[tuple[str, str]] = []
+        notify_attempts = 0
+
+        def fail_first_notification(principal_id: str, connection_id: str) -> None:
+            nonlocal notify_attempts
+            notify_attempts += 1
+            if notify_attempts == 1:
+                raise RuntimeError("injected notification failure")
+            notifications.append((principal_id, connection_id))
+
+        interrupted_notify = MCPConnectionService(
+            system_root=str(system_root),
+            secrets=secrets,
+            on_change=fail_first_notification,
+        )
+        with use_execution_authority(owner):
+            try:
+                interrupted_notify.set_oauth_client_secret(
+                    oauth_connection.connection_id,
+                    "notify-claim-secret",
+                )
+            except RuntimeError:
+                pass
+            else:
+                self.soft_assert(False, "The notification failpoint should interrupt")
+        notify_recovery = MCPConnectionService(
+            system_root=str(system_root),
+            secrets=secrets,
+            on_change=lambda principal_id, connection_id: notifications.append(
+                (principal_id, connection_id)
+            ),
+        )
+        self.soft_assert_equal(
+            (
+                notify_recovery.reconcile_pending_mutations(),
+                notify_attempts,
+                len(notifications),
+            ),
+            (1, 1, 1),
+            "A failed terminal dispatch must retain evidence and notify during recovery",
+        )
+        notify_connection = notify_recovery.get_connection_for_authority(
+            owner, oauth_connection.connection_id
+        )
+        self.soft_assert(
+            notify_connection is not None,
+            "The claimed terminal notification must leave active metadata visible",
+        )
+
         disconnect_storage = recovered_secret.oauth_storage(
             owner, oauth_connection.connection_id
         )
@@ -362,7 +429,14 @@ class MCPMutationRecoveryScenario(BaseScenario):
                     owner, oauth_connection.connection_id
                 ).get("disconnect-token"),
             ),
-            (finalized_version + 1, None),
+            (
+                (
+                    notify_connection.config_version + 1
+                    if notify_connection is not None
+                    else -1
+                ),
+                None,
+            ),
             "OAuth disconnect should clear its namespace and increment once",
         )
 

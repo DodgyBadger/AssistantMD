@@ -731,18 +731,12 @@ class MCPConnectionService:
                     continue
                 if state == "finalized":
                     self._cleanup_pre_intent(authority, operation_id)
-                    self._notify(authority, connection_id)
-                    self._failpoint("after_notify", operation_id)
-                    logger.info(
-                        "MCP connection mutation completed",
-                        data={
-                            "event": "mcp_connection_mutation_completed",
-                            "operation_id": operation_id,
-                            "connection_id": connection_id,
-                            "mutation_kind": str(mutation["mutation_kind"]),
-                        },
+                    self._dispatch_finalized_mutation(
+                        operation_id=operation_id,
+                        authority=authority,
+                        connection_id=connection_id,
+                        mutation_kind=str(mutation["mutation_kind"]),
                     )
-                    self._delete_mutation(operation_id)
                     return
                 raise RuntimeError("Stored MCP mutation state is invalid.")
         except Exception as exc:
@@ -880,6 +874,47 @@ class MCPConnectionService:
         conn = connect_mcp(self._system_root)
         try:
             with conn:
+                conn.execute(
+                    "DELETE FROM mcp_connection_mutations WHERE operation_id = ?",
+                    (operation_id,),
+                )
+        finally:
+            conn.close()
+
+    def _dispatch_finalized_mutation(
+        self,
+        *,
+        operation_id: str,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        mutation_kind: str,
+    ) -> None:
+        """Serialize terminal effects while retaining rollback-safe retry evidence."""
+        conn = connect_mcp(self._system_root)
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT 1 FROM mcp_connection_mutations
+                    WHERE operation_id = ? AND state = 'finalized'
+                    """,
+                    (operation_id,),
+                ).fetchone()
+                if row is None:
+                    return
+                self._notify(authority, connection_id)
+                self._failpoint("after_notify", operation_id)
+                logger.info(
+                    "MCP connection mutation completed",
+                    data={
+                        "event": "mcp_connection_mutation_completed",
+                        "operation_id": operation_id,
+                        "connection_id": connection_id,
+                        "mutation_kind": mutation_kind,
+                    },
+                )
+                self._failpoint("after_terminal_log", operation_id)
                 conn.execute(
                     "DELETE FROM mcp_connection_mutations WHERE operation_id = ?",
                     (operation_id,),

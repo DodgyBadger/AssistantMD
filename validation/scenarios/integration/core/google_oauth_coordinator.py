@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 _direct_run_root: tempfile.TemporaryDirectory[str] | None = None
 if __name__ == "__main__":
@@ -40,6 +40,7 @@ from core.integrations.google import (  # noqa: E402
     GoogleConnectionService,
     GoogleOAuthCoordinator,
     GoogleOAuthError,
+    GoogleOAuthStart,
     GoogleOAuthTokenState,
 )
 from core.oauth import EncryptedOAuthStorage  # noqa: E402
@@ -303,6 +304,14 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
                     mutation_kind=mutation_kind,
                 )
 
+        await self._assert_completion_preserves_newer_pending(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+            redirect_uri=started.redirect_uri,
+        )
+
         for mutation_kind in ("secret", "client-id", "disconnect"):
             await self._assert_refresh_race_rejected(
                 connections=connections,
@@ -346,6 +355,25 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             connections=connections,
             google=google,
             owner=owner,
+        )
+        self._assert_legacy_upgrade_cannot_restore_stale_secret(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+        )
+        self._assert_superseded_metadata_cleanup_preserves_new_generation(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+        )
+        self._assert_oauth_start_rejects_concurrent_changes(
+            connections=connections,
+            secrets=secrets,
+            google=google,
+            owner=owner,
+            redirect_uri=started.redirect_uri,
         )
         self._assert_default_deletion_clears_legacy_before_promotion(
             connections=connections,
@@ -440,6 +468,85 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             google.load_token_state(owner, raced.connection_id),
             None,
             f"{mutation_kind} replacement during {blocked_step} must not restore a token",
+        )
+
+    async def _assert_completion_preserves_newer_pending(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+        redirect_uri: str,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Conditional pending consumption",
+                client_id="conditional-pending.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "conditional-secret", connection.connection_id)
+        coordinator = GoogleOAuthCoordinator(
+            connections=connections,
+            google=google,
+            secrets=secrets,
+        )
+        first = coordinator.start(
+            authority=owner,
+            redirect_uri=redirect_uri,
+            capabilities=(GoogleCapability.GMAIL_READ,),
+            connection_id=connection.connection_id,
+        )
+        first_state = parse_qs(urlparse(first.authorization_url).query)["state"][0]
+        original_delete = EncryptedOAuthStorage.delete_sync_if_unchanged
+        second: list[GoogleOAuthStart] = []
+        superseded = False
+
+        def supersede_before_consume(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> bool:
+            nonlocal superseded
+            if not superseded:
+                superseded = True
+                second.append(
+                    coordinator.start(
+                        authority=owner,
+                        redirect_uri=redirect_uri,
+                        capabilities=(GoogleCapability.GMAIL_READ,),
+                        connection_id=connection.connection_id,
+                    )
+                )
+            return original_delete(target, *args, **kwargs)
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "delete_sync_if_unchanged",
+            supersede_before_consume,
+        ):
+            try:
+                await coordinator.complete(
+                    authority=owner,
+                    code="superseded-code",
+                    state=first_state,
+                    connection_id=connection.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(
+                    False, "Completion must reject a superseded pending state"
+                )
+        stored = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{connection.connection_id}",
+        ).get_sync("pending-authorization", collection="google")
+        second_state = parse_qs(urlparse(second[0].authorization_url).query)["state"][0]
+        self.soft_assert_equal(
+            stored["state"] if stored is not None else None,
+            second_state,
+            "Stale completion must preserve a newer pending authorization",
         )
 
     async def _assert_refresh_race_rejected(
@@ -807,6 +914,504 @@ class GoogleOAuthCoordinatorScenario(BaseScenario):
             google.resolve_client_secret(owner, updated.connection_id),
             "generation-secret-b",
             "Old-generation invalidation must preserve a new-generation credential",
+        )
+
+    def _assert_legacy_upgrade_cannot_restore_stale_secret(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Legacy upgrade race",
+                client_id="legacy-upgrade-race.apps.googleusercontent.com",
+            ),
+        )
+        storage = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{connection.connection_id}",
+        )
+        storage.put_sync(
+            "client-secret", {"value": "legacy-raced-secret"}, collection="google"
+        )
+        original_put = EncryptedOAuthStorage.put_sync_if_unchanged
+        replaced = False
+
+        def replace_before_upgrade(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                google.set_client_secret(
+                    owner, "newer-raced-secret", connection.connection_id
+                )
+            return original_put(target, *args, **kwargs)
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            replace_before_upgrade,
+        ):
+            resolved = google.resolve_client_secret(owner, connection.connection_id)
+        self.soft_assert_equal(
+            resolved,
+            "newer-raced-secret",
+            "Legacy binding CAS must not restore a replaced credential",
+        )
+        post_cas = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Post-CAS legacy upgrade race",
+                client_id="post-cas-legacy-upgrade.apps.googleusercontent.com",
+            ),
+        )
+        post_cas_storage = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{post_cas.connection_id}",
+        )
+        post_cas_storage.put_sync(
+            "client-secret", {"value": "post-cas-secret-a"}, collection="google"
+        )
+        post_cas_replaced = False
+
+        def replace_after_upgrade(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal post_cas_replaced
+            result = original_put(target, *args, **kwargs)
+            if not post_cas_replaced:
+                post_cas_replaced = True
+                google.set_client_secret(
+                    owner, "post-cas-secret-b", post_cas.connection_id
+                )
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            replace_after_upgrade,
+        ):
+            post_cas_resolved = google.resolve_client_secret(
+                owner, post_cas.connection_id
+            )
+        self.soft_assert_equal(
+            post_cas_resolved,
+            "post-cas-secret-b",
+            "Legacy binding must reauthorize after its successful CAS",
+        )
+        deleted = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Deleted legacy upgrade race",
+                client_id="deleted-legacy-upgrade.apps.googleusercontent.com",
+            ),
+        )
+        deleted_storage = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{deleted.connection_id}",
+        )
+        deleted_storage.put_sync(
+            "client-secret", {"value": "deleted-legacy-secret"}, collection="google"
+        )
+        removed = False
+
+        def delete_after_upgrade(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal removed
+            result = original_put(target, *args, **kwargs)
+            if not removed:
+                removed = True
+                connections.delete_google_connection_for_authority(
+                    owner, deleted.connection_id
+                )
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            delete_after_upgrade,
+        ):
+            deleted_result = google.resolve_client_secret(owner, deleted.connection_id)
+        self.soft_assert_equal(
+            (
+                deleted_result,
+                deleted_storage.get_sync("client-secret", collection="google"),
+            ),
+            (None, None),
+            "A deleted connection must conditionally remove its raced legacy upgrade",
+        )
+
+    def _assert_superseded_metadata_cleanup_preserves_new_generation(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+    ) -> None:
+        generation_a = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Superseded metadata cleanup",
+                client_id="superseded-a.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(
+            owner, "superseded-secret-a", generation_a.connection_id
+        )
+        generation_b = connections.update_google_connection_for_authority(
+            owner,
+            generation_a.connection_id,
+            GoogleConnectionUpdate(
+                client_id="superseded-b.apps.googleusercontent.com",
+                display_name=generation_a.display_name,
+                gmail=generation_a.gmail,
+            ),
+        )
+        storage_type = EncryptedOAuthStorage
+        original_get = storage_type.get_sync
+        advanced = False
+
+        def advance_after_snapshot(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> dict[str, object] | None:
+            nonlocal advanced
+            result = original_get(target, *args, **kwargs)
+            if not advanced:
+                advanced = True
+                generation_c = connections.update_google_connection_for_authority(
+                    owner,
+                    generation_a.connection_id,
+                    GoogleConnectionUpdate(
+                        client_id="superseded-c.apps.googleusercontent.com",
+                        display_name=generation_a.display_name,
+                        gmail=generation_a.gmail,
+                    ),
+                )
+                google.set_client_secret(
+                    owner, "superseded-secret-c", generation_c.connection_id
+                )
+                google.save_token_state(
+                    owner,
+                    GoogleOAuthTokenState(
+                        access_token="superseded-access-c",
+                        refresh_token="superseded-refresh-c",
+                        scopes=(GMAIL_READONLY_SCOPE,),
+                        account_id="superseded-account-c",
+                        account_email="superseded-c@example.com",
+                    ),
+                    generation_c.connection_id,
+                )
+                credential_c = google.resolve_client_credential(
+                    owner, generation_c.connection_id
+                )
+                if credential_c is None:
+                    raise AssertionError("Newest test credential was not stored.")
+                EncryptedOAuthStorage(
+                    secrets=secrets,
+                    authority=owner,
+                    namespace=f"oauth.google.{generation_c.connection_id}",
+                ).put_sync(
+                    "pending-authorization",
+                    {
+                        "state": "superseded-state-c",
+                        "oauth_generation": credential_c.oauth_generation,
+                        "credential_id": credential_c.credential_id,
+                    },
+                    collection="google",
+                )
+            return result
+
+        with patch.object(storage_type, "get_sync", advance_after_snapshot):
+            google.handle_metadata_update(owner, generation_a, generation_b)
+        self.soft_assert_equal(
+            (
+                google.resolve_client_secret(owner, generation_a.connection_id),
+                google.load_token_state(owner, generation_a.connection_id).access_token,
+                EncryptedOAuthStorage(
+                    secrets=secrets,
+                    authority=owner,
+                    namespace=f"oauth.google.{generation_a.connection_id}",
+                ).get_sync("pending-authorization", collection="google")["state"],
+            ),
+            ("superseded-secret-c", "superseded-access-c", "superseded-state-c"),
+            "Superseded metadata cleanup must preserve the newest credential",
+        )
+
+    def _assert_oauth_start_rejects_concurrent_changes(
+        self,
+        *,
+        connections: BuiltInConnectionService,
+        secrets: EncryptedSecretsService,
+        google: GoogleConnectionService,
+        owner: ExecutionAuthority,
+        redirect_uri: str,
+    ) -> None:
+        connection = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="OAuth start race",
+                client_id="oauth-start-a.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "oauth-start-secret", connection.connection_id)
+        coordinator = GoogleOAuthCoordinator(
+            connections=connections,
+            google=google,
+            secrets=secrets,
+        )
+        original_put = EncryptedOAuthStorage.put_sync_if_unchanged
+        advanced = False
+
+        def advance_after_pending_write(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal advanced
+            result = original_put(target, *args, **kwargs)
+            if not advanced:
+                advanced = True
+                connections.update_google_connection_for_authority(
+                    owner,
+                    connection.connection_id,
+                    GoogleConnectionUpdate(
+                        client_id="oauth-start-b.apps.googleusercontent.com",
+                        display_name=connection.display_name,
+                        gmail=connection.gmail,
+                    ),
+                )
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            advance_after_pending_write,
+        ):
+            try:
+                coordinator.start(
+                    authority=owner,
+                    redirect_uri=redirect_uri,
+                    capabilities=(GoogleCapability.GMAIL_READ,),
+                    connection_id=connection.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(False, "OAuth start must reject a metadata race")
+        pending = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{connection.connection_id}",
+        ).get_sync("pending-authorization", collection="google")
+        self.soft_assert_equal(
+            pending,
+            None,
+            "Rejected OAuth start must conditionally remove its pending state",
+        )
+        credential_race = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="OAuth start credential race",
+                client_id="oauth-start-credential.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(
+            owner, "oauth-start-old-secret", credential_race.connection_id
+        )
+        replaced = False
+
+        def replace_before_pending_write(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                google.set_client_secret(
+                    owner, "oauth-start-new-secret", credential_race.connection_id
+                )
+            return original_put(target, *args, **kwargs)
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            replace_before_pending_write,
+        ):
+            try:
+                coordinator.start(
+                    authority=owner,
+                    redirect_uri=redirect_uri,
+                    capabilities=(GoogleCapability.GMAIL_READ,),
+                    connection_id=credential_race.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(False, "OAuth start must reject a credential race")
+        credential_pending = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{credential_race.connection_id}",
+        ).get_sync("pending-authorization", collection="google")
+        self.soft_assert_equal(
+            (
+                google.resolve_client_secret(owner, credential_race.connection_id),
+                credential_pending,
+            ),
+            ("oauth-start-new-secret", None),
+            "Credential CAS must reject pending state bound to an old secret",
+        )
+        post_write = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="OAuth start post-write credential race",
+                client_id="oauth-start-post-write.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "post-write-a", post_write.connection_id)
+        replaced_after_write = False
+
+        def replace_after_pending_write(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal replaced_after_write
+            result = original_put(target, *args, **kwargs)
+            if not replaced_after_write:
+                replaced_after_write = True
+                google.set_client_secret(
+                    owner, "post-write-b", post_write.connection_id
+                )
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            replace_after_pending_write,
+        ):
+            try:
+                coordinator.start(
+                    authority=owner,
+                    redirect_uri=redirect_uri,
+                    capabilities=(GoogleCapability.GMAIL_READ,),
+                    connection_id=post_write.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(
+                    False, "OAuth start must reject post-write credential replacement"
+                )
+        self.soft_assert_equal(
+            EncryptedOAuthStorage(
+                secrets=secrets,
+                authority=owner,
+                namespace=f"oauth.google.{post_write.connection_id}",
+            ).get_sync("pending-authorization", collection="google"),
+            None,
+            "Post-write credential replacement must leave no stale pending state",
+        )
+        disconnect_race = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="OAuth start post-write disconnect race",
+                client_id="oauth-start-disconnect.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(
+            owner, "post-write-disconnect", disconnect_race.connection_id
+        )
+        disconnected_after_write = False
+
+        def disconnect_after_pending_write(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal disconnected_after_write
+            result = original_put(target, *args, **kwargs)
+            if not disconnected_after_write:
+                disconnected_after_write = True
+                google.clear_token_state(owner, disconnect_race.connection_id)
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            disconnect_after_pending_write,
+        ):
+            try:
+                coordinator.start(
+                    authority=owner,
+                    redirect_uri=redirect_uri,
+                    capabilities=(GoogleCapability.GMAIL_READ,),
+                    connection_id=disconnect_race.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(False, "OAuth start must reject a raced disconnect")
+
+        competing = connections.create_google_connection_for_authority(
+            owner,
+            GoogleConnectionCreate(
+                display_name="Competing OAuth starts",
+                client_id="competing-oauth-starts.apps.googleusercontent.com",
+            ),
+        )
+        google.set_client_secret(owner, "competing-secret", competing.connection_id)
+        nested_start: list[GoogleOAuthStart] = []
+        launched_competitor = False
+
+        def launch_competing_start(
+            target: EncryptedOAuthStorage, *args: object, **kwargs: object
+        ) -> float | None:
+            nonlocal launched_competitor
+            result = original_put(target, *args, **kwargs)
+            if not launched_competitor:
+                launched_competitor = True
+                nested_start.append(
+                    coordinator.start(
+                        authority=owner,
+                        redirect_uri=redirect_uri,
+                        capabilities=(GoogleCapability.GMAIL_READ,),
+                        connection_id=competing.connection_id,
+                    )
+                )
+            return result
+
+        with patch.object(
+            EncryptedOAuthStorage,
+            "put_sync_if_unchanged",
+            launch_competing_start,
+        ):
+            try:
+                coordinator.start(
+                    authority=owner,
+                    redirect_uri=redirect_uri,
+                    capabilities=(GoogleCapability.GMAIL_READ,),
+                    connection_id=competing.connection_id,
+                )
+            except GoogleOAuthError:
+                pass
+            else:
+                self.soft_assert(False, "A superseded OAuth start must fail")
+        surviving_pending = EncryptedOAuthStorage(
+            secrets=secrets,
+            authority=owner,
+            namespace=f"oauth.google.{competing.connection_id}",
+        ).get_sync("pending-authorization", collection="google")
+        nested_state = parse_qs(urlparse(nested_start[0].authorization_url).query)[
+            "state"
+        ][0]
+        self.soft_assert_equal(
+            surviving_pending["state"] if surviving_pending is not None else None,
+            nested_state,
+            "A superseded start must not delete the newer pending attempt",
         )
 
     def _assert_default_deletion_clears_legacy_before_promotion(

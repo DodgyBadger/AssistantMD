@@ -7,7 +7,7 @@ Validates /api/import/url using a real network fetch target.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from validation.core.base_scenario import BaseScenario
 

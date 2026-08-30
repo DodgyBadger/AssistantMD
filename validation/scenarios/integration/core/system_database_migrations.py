@@ -48,6 +48,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         legacy_backup = system_root / "vault_state.db.backup-legacy"
         legacy_backup.write_bytes(b"legacy migration backup")
 
+        pending_before_store_initialization = get_system_migration_status(system_root)
         ChatStore(str(system_root))
         set_bootstrap_roots(self.artifacts_dir / "data", system_root)
         IngestionService()
@@ -62,7 +63,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         before = get_system_migration_status(system_root)
         self.soft_assert_equal(
             before.pending_count,
-            21,
+            pending_before_store_initialization.pending_count,
             "Store initialization should not apply registered release migrations",
         )
 
@@ -205,6 +206,7 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
             "Second run should not create backups when no migrations are pending",
         )
         self.teardown_scenario()
+        self.assert_no_failures()
 
     @staticmethod
     def _create_legacy_chat_sessions_db(db_path: Path) -> None:

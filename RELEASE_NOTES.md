@@ -645,7 +645,9 @@ Chat sessions are now persisted in SQLite and survive app restarts.
 - Fixed validation artifact consistency so scenario `timeline.md` outcomes now align with CLI pass/fail results (including explicit final outcome markers and teardown on failure paths). (Issue #28)
 
 ### Validation Scenario Refactor
-- Reorganized integration validation into three lanes: root `integration/` for golden-path journeys, `integration/core` for deterministic contracts, and `integration/live` for live smoke scenarios.
+- Organized validation into two lanes: `integration/core` for deterministic CI
+  and merge-gate contracts, and `experiments` for live, external, stress, and
+  diagnostic scenarios.
 - Consolidated overlapping contract coverage into core scenarios (especially `primitives_contract`) and retired redundant overlap cases.
 
 ### Documentation Updates

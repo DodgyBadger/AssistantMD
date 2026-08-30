@@ -327,6 +327,7 @@ Progress:
 - [x] Stage 9: Google deletion and grant-revision convergence.
 - [x] Stage 10: durable Google deletion reconciliation and legacy-default fencing.
 - [x] Stage 11: connection-scoped private HTTP acknowledgement.
+- [x] Stage 12: third-pass adversarial concurrency and startup cleanup review.
 
 ### Stage 1: Authoritative MCP socket boundary
 
@@ -411,7 +412,7 @@ Keep this commit independent from persistence changes.
    the initiating connection.
 5. Update current-contract API documentation if necessary, run the targeted
    Google scenarios and production Python quality gate, then request the
-   maintainer-owned `integration/core security` pre-merge profile.
+   maintainer-owned `integration/core` pre-merge profile.
 
 ### Stage 8: Storage-level serialization and disconnect fencing
 
@@ -478,14 +479,37 @@ Keep this commit independent from persistence changes.
    and the complete production Python quality gate, then request the maintainer-
    owned pre-merge profile.
 
+### Stage 12: Third-pass adversarial concurrency and startup cleanup review
+
+1. Reauthorize MCP clients against authoritative lifecycle, unresolved-mutation,
+   configuration-version, and enabled state immediately before publication;
+   serialize publication with invalidation epochs so an in-flight cold start cannot
+   miss a concurrent mutation notification.
+2. Bound MCP DNS resolution within the connect-timeout budget and atomically claim
+   finalized mutation rows before terminal notification and logging side effects.
+3. Bind legacy Google client-secret upgrades with exact-payload compare-and-swap,
+   authoritative generation/deletion rechecks, and exact conditional cleanup.
+4. Fence Google metadata cleanup and OAuth pending-state creation against concurrent
+   credential, generation, disconnect, and deletion changes.
+5. Clean up lifecycle-bearing services before re-raising configuration validation
+   failures, preserving the public `RuntimeConfigError` contract.
+6. Add deterministic interleaving scenarios for every finding, rerun the production
+   Python quality gate, and request the maintainer-owned pre-merge profile.
+7. Keep finalized MCP mutation evidence recoverable until serialized notification
+   and terminal logging settle; make same-loop invalidation visible before client
+   publication and drain cold-start connection work during shutdown.
+8. Reauthorize legacy Google credential upgrades after compare-and-swap, consume
+   pending OAuth attempts by exact payload and expiry, and retain one exact
+   credential binding from pending validation through token persistence.
+
 ## Validation-First Targets
 
 Add failing deterministic assertions before each implementation stage.
 
 ### MCP network policy
 
-Extend `validation/scenarios/security/mcp_connection_isolation.py` and
-`validation/scenarios/security/mcp_oauth_storage.py`:
+Extend `validation/scenarios/integration/core/mcp_connection_isolation.py` and
+`validation/scenarios/integration/core/mcp_oauth_storage.py`:
 
 - policy approves one IP and the delegate receives that numeric IP;
 - DNS changes between request hook and socket connect, and the socket backend
@@ -511,7 +535,8 @@ Extend encrypted-secret security coverage and Google coordinator scenarios:
 ### Google generation binding
 
 Extend `builtin_connection_configuration.py`,
-`google_oauth_coordinator.py`, `gmail_principal_connection.py`, and the relevant
+`integration/core/google_oauth_coordinator.py`,
+`integration/core/gmail_principal_connection.py`, and the relevant
 API scenario:
 
 - generation begins at 1, changes exactly once for a new client ID, and remains

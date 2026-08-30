@@ -20,7 +20,7 @@ from core.oauth import (
     request_oauth_token,
     validate_redirect_uri,
 )
-from core.secrets import EncryptedSecretsService
+from core.secrets import EncryptedSecretsService, SecretGuardMismatchError
 from core.settings import get_default_api_timeout
 
 from .connection import (
@@ -29,6 +29,7 @@ from .connection import (
     GoogleCapability,
     GoogleConnectionService,
     GoogleCredentialChangedError,
+    GoogleOAuthClientCredential,
     GoogleOAuthStateChangedError,
     GoogleOAuthTokenState,
 )
@@ -54,6 +55,13 @@ class GoogleOAuthStart:
     redirect_uri: str
     expires_at: str
     requested_scopes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _PendingAuthorization:
+    payload: dict[str, object]
+    expires_at: float | None
+    credential: GoogleOAuthClientCredential
 
 
 class GoogleOAuthCoordinator:
@@ -103,23 +111,77 @@ class GoogleOAuthCoordinator:
         requested_scopes = tuple(sorted(requested))
         pkce = OAuthPKCEState.generate()
         expires_at = datetime.now(UTC) + timedelta(seconds=GOOGLE_OAUTH_PENDING_SECONDS)
-        self._storage(authority, connection.connection_id).put_sync(
-            GOOGLE_OAUTH_PENDING_KEY,
-            {
-                "state": pkce.state,
-                "code_verifier": pkce.code_verifier,
-                "redirect_uri": clean_redirect,
-                "requested_scopes": list(requested_scopes),
-                "existing_account_id": (
-                    existing.account_id if existing is not None else None
-                ),
-                "oauth_generation": credential.oauth_generation,
-                "credential_id": credential.credential_id,
-                "expires_at": expires_at.isoformat(),
-            },
-            collection=_OAUTH_COLLECTION,
-            ttl=GOOGLE_OAUTH_PENDING_SECONDS,
-        )
+        pending_payload = {
+            "state": pkce.state,
+            "code_verifier": pkce.code_verifier,
+            "redirect_uri": clean_redirect,
+            "requested_scopes": list(requested_scopes),
+            "existing_account_id": (
+                existing.account_id if existing is not None else None
+            ),
+            "oauth_generation": credential.oauth_generation,
+            "credential_id": credential.credential_id,
+            "expires_at": expires_at.isoformat(),
+        }
+        storage = self._storage(authority, connection.connection_id)
+        try:
+            stored_expires_at = storage.put_sync_if_unchanged(
+                GOOGLE_OAUTH_PENDING_KEY,
+                pending_payload,
+                guard_key="client-secret",
+                expected_guard_value={
+                    "value": credential.value,
+                    "oauth_generation": credential.oauth_generation,
+                    "credential_id": credential.credential_id,
+                },
+                collection=_OAUTH_COLLECTION,
+                guard_collection=_OAUTH_COLLECTION,
+                ttl=GOOGLE_OAUTH_PENDING_SECONDS,
+            )
+        except SecretGuardMismatchError as exc:
+            raise GoogleOAuthError(
+                "Google OAuth client credential changed while authorization started."
+            ) from exc
+        try:
+            storage.put_sync_if_unchanged(
+                GOOGLE_OAUTH_PENDING_KEY,
+                pending_payload,
+                guard_key="client-secret",
+                expected_guard_value={
+                    "value": credential.value,
+                    "oauth_generation": credential.oauth_generation,
+                    "credential_id": credential.credential_id,
+                },
+                collection=_OAUTH_COLLECTION,
+                guard_collection=_OAUTH_COLLECTION,
+                additional_guard_key=GOOGLE_OAUTH_PENDING_KEY,
+                additional_expected_guard_value=pending_payload,
+                additional_expected_guard_expires_at=stored_expires_at,
+                expires_at=stored_expires_at,
+            )
+            current = self._connections.get_google_connection_for_authority(
+                authority, connection.connection_id
+            )
+            if (
+                current is None
+                or current.oauth_generation != connection.oauth_generation
+            ):
+                raise SecretGuardMismatchError(
+                    "Google connection metadata changed during OAuth start."
+                )
+        except SecretGuardMismatchError as exc:
+            try:
+                storage.delete_sync_if_unchanged(
+                    GOOGLE_OAUTH_PENDING_KEY,
+                    pending_payload,
+                    collection=_OAUTH_COLLECTION,
+                    expires_at=stored_expires_at,
+                )
+            except SecretGuardMismatchError:
+                pass
+            raise GoogleOAuthError(
+                "Google connection or authorization state changed while authorization started."
+            ) from exc
         params = {
             "response_type": "code",
             "client_id": connection.client_id,
@@ -160,22 +222,32 @@ class GoogleOAuthCoordinator:
         pending = self._load_pending(authority, connection.connection_id)
         if pending is None:
             raise GoogleOAuthError("No active Google authorization attempt was found.")
-        expected = str(pending["state"])
+        expected = str(pending.payload["state"])
         if not OAuthPKCEState(
             state=expected,
-            code_verifier=str(pending["code_verifier"]),
+            code_verifier=str(pending.payload["code_verifier"]),
             code_challenge="unused",
         ).matches_state(state):
             raise GoogleOAuthError("Google OAuth state did not match.")
-        self._storage(authority, connection.connection_id).delete_sync(
-            GOOGLE_OAUTH_PENDING_KEY, collection=_OAUTH_COLLECTION
-        )
+        try:
+            self._storage(authority, connection.connection_id).delete_sync_if_unchanged(
+                GOOGLE_OAUTH_PENDING_KEY,
+                pending.payload,
+                collection=_OAUTH_COLLECTION,
+                expires_at=pending.expires_at,
+            )
+        except SecretGuardMismatchError as exc:
+            raise GoogleOAuthError(
+                "Google authorization attempt changed. Start authorization again."
+            ) from exc
         try:
             credential = self._google.resolve_client_credential(
                 authority, connection.connection_id
             )
-            if credential is None:
-                raise GoogleOAuthError("Google OAuth client configuration is missing.")
+            if credential != pending.credential:
+                raise GoogleCredentialChangedError(
+                    "Google OAuth client credential changed during authorization."
+                )
             token = await request_oauth_token(
                 token_endpoint=GOOGLE_TOKEN_ENDPOINT,
                 form={
@@ -183,15 +255,15 @@ class GoogleOAuthCoordinator:
                     "code": str(code or ""),
                     "client_id": connection.client_id,
                     "client_secret": credential.value,
-                    "redirect_uri": str(pending["redirect_uri"]),
-                    "code_verifier": str(pending["code_verifier"]),
+                    "redirect_uri": str(pending.payload["redirect_uri"]),
+                    "code_verifier": str(pending.payload["code_verifier"]),
                 },
                 http_client_factory=self._http_client_factory,
             )
             identity = await self._load_identity(token.access_token)
             account_id = _required_identity(identity, "sub")
             account_email = _required_identity(identity, "email")
-            existing_account_id = pending.get("existing_account_id")
+            existing_account_id = pending.payload.get("existing_account_id")
             if existing_account_id and account_id != existing_account_id:
                 raise GoogleOAuthError(
                     "Google authorization returned a different account. "
@@ -207,7 +279,7 @@ class GoogleOAuthCoordinator:
                 raise GoogleOAuthError(
                     "Google did not return an offline refresh token. Start authorization again."
                 )
-            requested_scopes = _string_tuple(pending.get("requested_scopes"))
+            requested_scopes = _string_tuple(pending.payload.get("requested_scopes"))
             scopes = token.scopes or requested_scopes
             expires_at = (
                 datetime.now(UTC) + timedelta(seconds=token.expires_in)
@@ -249,7 +321,7 @@ class GoogleOAuthCoordinator:
             pending = self._load_pending(authority, connection.connection_id)
             if pending is None:
                 continue
-            expected = str(pending.get("state") or "")
+            expected = str(pending.payload.get("state") or "")
             if expected and OAuthPKCEState(
                 state=expected,
                 code_verifier="unused",
@@ -365,23 +437,28 @@ class GoogleOAuthCoordinator:
 
     def _load_pending(
         self, authority: ExecutionAuthority, connection_id: str
-    ) -> dict[str, object] | None:
+    ) -> _PendingAuthorization | None:
         storage = self._storage(authority, connection_id)
-        pending = storage.get_sync(
+        stored = storage.get_sync_with_expiry(
             GOOGLE_OAUTH_PENDING_KEY, collection=_OAUTH_COLLECTION
         )
-        if pending is None:
+        if stored is None:
             return None
+        pending, expires_at = stored
         credential = self._google.resolve_client_credential(authority, connection_id)
         if credential is None or (
             pending.get("oauth_generation") != credential.oauth_generation
             or pending.get("credential_id") != credential.credential_id
         ):
             try:
-                storage.delete_sync(
+                storage.delete_sync_if_unchanged(
                     GOOGLE_OAUTH_PENDING_KEY,
+                    pending,
                     collection=_OAUTH_COLLECTION,
+                    expires_at=expires_at,
                 )
+            except SecretGuardMismatchError:
+                return None
             except Exception as exc:
                 logger.warning(
                     "Stale Google OAuth pending cleanup deferred",
@@ -392,7 +469,11 @@ class GoogleOAuthCoordinator:
                     },
                 )
             return None
-        return pending
+        return _PendingAuthorization(
+            payload=pending,
+            expires_at=expires_at,
+            credential=credential,
+        )
 
     def _require_connection(
         self, authority: ExecutionAuthority, connection_id: str | None

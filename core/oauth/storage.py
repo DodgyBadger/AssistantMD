@@ -54,6 +54,15 @@ class EncryptedOAuthStorage:
         stored = self._load(key, collection=collection)
         return stored.value if stored is not None else None
 
+    def get_sync_with_expiry(
+        self, key: str, *, collection: str | None = None
+    ) -> tuple[dict[str, Any], float | None] | None:
+        """Read an OAuth value with its exact stored expiry for guarded mutation."""
+        stored = self._load(key, collection=collection)
+        if stored is None:
+            return None
+        return stored.value, stored.expires_at
+
     async def ttl(
         self, key: str, *, collection: str | None = None
     ) -> tuple[dict[str, Any] | None, float | None]:
@@ -117,11 +126,17 @@ class EncryptedOAuthStorage:
         guard_collection: str | None = None,
         additional_guard_key: str | None = None,
         additional_expected_guard_value: Mapping[str, Any] | None = None,
-    ) -> None:
-        """Write only while another non-expiring OAuth value is unchanged."""
+        additional_expected_guard_expires_at: float | None = None,
+        ttl: SupportsFloat | None = None,
+        expires_at: float | None = None,
+    ) -> float | None:
+        """Write only while another OAuth value is unchanged."""
+        if ttl is not None and expires_at is not None:
+            raise ValueError("OAuth expiry must use either ttl or expires_at.")
         target = self._identity(key, collection)
         guard = self._identity(guard_key, guard_collection)
-        payload = _encode_stored_value(value, expires_at=None)
+        expires_at = time.time() + float(ttl) if ttl is not None else expires_at
+        payload = _encode_stored_value(value, expires_at=expires_at)
         expected_payload = _encode_stored_value(
             expected_guard_value,
             expires_at=None,
@@ -138,7 +153,7 @@ class EncryptedOAuthStorage:
                     self._identity(additional_guard_key, collection),
                     _encode_stored_value(
                         additional_expected_guard_value,
-                        expires_at=None,
+                        expires_at=additional_expected_guard_expires_at,
                     ),
                 ),
             )
@@ -150,6 +165,7 @@ class EncryptedOAuthStorage:
             value=payload,
             additional_guards=additional_guards,
         )
+        return expires_at
 
     async def delete(self, key: str, *, collection: str | None = None) -> bool:
         return self.delete_sync(key, collection=collection)
@@ -180,6 +196,7 @@ class EncryptedOAuthStorage:
         expected_value: Mapping[str, Any],
         *,
         collection: str | None = None,
+        expires_at: float | None = None,
     ) -> bool:
         """Delete one OAuth value only if its exact payload is unchanged."""
         target = self._identity(key, collection)
@@ -188,7 +205,7 @@ class EncryptedOAuthStorage:
             guard=target,
             expected_guard_value=_encode_stored_value(
                 expected_value,
-                expires_at=None,
+                expires_at=expires_at,
             ),
             target=target,
         )

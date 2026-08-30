@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +13,7 @@ from unittest.mock import patch
 import httpcore
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 _direct_run_root: tempfile.TemporaryDirectory[str] | None = None
 if __name__ == "__main__":
@@ -358,6 +358,101 @@ class MCPConnectionIsolationScenario(BaseScenario):
             f"(close counts: {[client.exit_count for client in clients]})",
         )
 
+        connect_started = asyncio.Event()
+        finish_connect = asyncio.Event()
+        racing_client = _BlockingManagedTestClient(connect_started, finish_connect)
+        racing_manager = MCPConnectionManager(connections=service)
+        with (
+            patch("core.mcp.manager.Client", return_value=racing_client),
+            patch("core.mcp.manager.validate_mcp_endpoint", new=_allow_endpoint),
+        ):
+            current = service.get_connection_for_authority(
+                owner, owner_connection.connection_id
+            )
+            assert current is not None
+            stale_acquire = asyncio.create_task(racing_manager.acquire(owner, current))
+            await connect_started.wait()
+            with use_execution_authority(owner):
+                service.update_connection(
+                    owner_connection.connection_id,
+                    MCPConnectionUpdate(
+                        display_name=f"{current.display_name} updated",
+                        url=current.url,
+                        transport=current.transport,
+                        auth_mode=current.auth_mode,
+                        header_name=current.header_name,
+                        enabled=current.enabled,
+                        allow_private_http=current.allow_private_http,
+                        allowed_tools=current.allowed_tools,
+                        oauth_client_id=current.oauth_client_id,
+                        oauth_scopes=current.oauth_scopes,
+                    ),
+                )
+            finish_connect.set()
+            try:
+                await stale_acquire
+            except RuntimeError:
+                stale_rejected = True
+            else:
+                stale_rejected = False
+            self.soft_assert(
+                stale_rejected and racing_client.exit_count == 1,
+                "A config mutation during cold start must reject and close the stale client",
+            )
+        await racing_manager.shutdown()
+
+        invalidating_manager = MCPConnectionManager(connections=service)
+        invalidating_client = _InvalidatingManagedTestClient(
+            lambda: invalidating_manager.invalidate(
+                owner.principal_id, owner_connection.connection_id
+            )
+        )
+        with (
+            patch("core.mcp.manager.Client", return_value=invalidating_client),
+            patch("core.mcp.manager.validate_mcp_endpoint", new=_allow_endpoint),
+        ):
+            current = service.get_connection_for_authority(
+                owner, owner_connection.connection_id
+            )
+            assert current is not None
+            try:
+                await invalidating_manager.acquire(owner, current)
+            except RuntimeError:
+                catalog_invalidation_rejected = True
+            else:
+                catalog_invalidation_rejected = False
+            self.soft_assert(
+                catalog_invalidation_rejected and invalidating_client.exit_count == 1,
+                "A same-loop tool-list invalidation must precede cold-start publication",
+            )
+        await invalidating_manager.shutdown()
+
+        shutdown_started = asyncio.Event()
+        never_finish = asyncio.Event()
+        shutdown_client = _BlockingManagedTestClient(shutdown_started, never_finish)
+        shutdown_manager = MCPConnectionManager(connections=service)
+        with (
+            patch("core.mcp.manager.Client", return_value=shutdown_client),
+            patch("core.mcp.manager.validate_mcp_endpoint", new=_allow_endpoint),
+        ):
+            current = service.get_connection_for_authority(
+                owner, owner_connection.connection_id
+            )
+            assert current is not None
+            shutdown_acquire = asyncio.create_task(
+                shutdown_manager.acquire(owner, current)
+            )
+            await shutdown_started.wait()
+            await shutdown_manager.shutdown()
+            shutdown_result = await asyncio.gather(
+                shutdown_acquire, return_exceptions=True
+            )
+            self.soft_assert(
+                isinstance(shutdown_result[0], asyncio.CancelledError)
+                and shutdown_client.exit_count == 1,
+                "Shutdown must cancel and close an in-flight cold start before returning",
+            )
+
     async def _assert_network_policy(self) -> None:
         with patch(
             "core.mcp.network._resolve_addresses",
@@ -457,6 +552,31 @@ class MCPConnectionIsolationScenario(BaseScenario):
                 for timeout in delegate.timeouts
             ),
             "Address fallback should share the original connection timeout budget",
+        )
+        dns_delegate = _RecordingNetworkBackend()
+        dns_backend = MCPNetworkBackend(delegate=dns_delegate)
+
+        async def blocked_resolution(_hostname: str) -> tuple[str, ...]:
+            await asyncio.Event().wait()
+            return ("8.8.8.8",)
+
+        with patch(
+            "core.mcp.network.resolve_mcp_addresses",
+            new=blocked_resolution,
+        ):
+            try:
+                await dns_backend.connect_tcp(
+                    "slow-dns.example",
+                    443,
+                    timeout=0.01,
+                )
+            except httpcore.ConnectTimeout:
+                dns_timed_out = True
+            else:
+                dns_timed_out = False
+        self.soft_assert(
+            dns_timed_out and not dns_delegate.hosts,
+            "DNS resolution must consume the socket connection timeout budget",
         )
         self.soft_assert_equal(
             (delegate.local_addresses, delegate.socket_options),
@@ -605,6 +725,32 @@ class _ManagedTestClient:
     async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
         assert max_pages > 0
         return [_TestTool("search_messages")]
+
+
+class _BlockingManagedTestClient(_ManagedTestClient):
+    def __init__(
+        self,
+        connect_started: asyncio.Event,
+        finish_connect: asyncio.Event,
+    ) -> None:
+        super().__init__()
+        self._connect_started = connect_started
+        self._finish_connect = finish_connect
+
+    async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
+        self._connect_started.set()
+        await self._finish_connect.wait()
+        return await super().list_tools(max_pages=max_pages)
+
+
+class _InvalidatingManagedTestClient(_ManagedTestClient):
+    def __init__(self, invalidate: Callable[[], None]) -> None:
+        super().__init__()
+        self._invalidate = invalidate
+
+    async def list_tools(self, *, max_pages: int) -> list[_TestTool]:
+        self._invalidate()
+        return await super().list_tools(max_pages=max_pages)
 
 
 class _RecordingNetworkStream(httpcore.AsyncNetworkStream):

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 _direct_run_root: tempfile.TemporaryDirectory[str] | None = None
 if __name__ == "__main__":
@@ -87,6 +87,7 @@ class MCPChatToolSearchScenario(BaseScenario):
             auth_mode=MCPAuthMode.NONE,
             header_name=None,
             enabled=True,
+            allow_private_http=False,
             allowed_tools=("search_messages",),
             credential_present=False,
             config_version=1,

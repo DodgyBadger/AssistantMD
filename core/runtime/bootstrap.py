@@ -372,13 +372,9 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
 
         return runtime_context
 
-    except RuntimeConfigError:
-        # Re-raise configuration errors without wrapping
-        raise
-
     except Exception as e:
-        # Wrap any other errors in startup error for clear error handling
-        logger.error(f"Runtime bootstrap failed: {e}")
+        if not isinstance(e, RuntimeConfigError):
+            logger.error(f"Runtime bootstrap failed: {e}")
 
         # Attempt cleanup of any partially initialized services
         try:
@@ -391,6 +387,10 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
                 await mcp_manager.shutdown()
         except Exception as cleanup_error:
             logger.error(f"Error during MCP manager cleanup: {cleanup_error}")
+
+        if isinstance(e, RuntimeConfigError):
+            # Configuration errors retain their public type after partial-start cleanup.
+            raise
 
         raise RuntimeStartupError(f"Failed to bootstrap runtime: {e}") from e
 

@@ -115,8 +115,16 @@ class MCPNetworkBackend(httpcore.AsyncNetworkBackend):
         local_address: str | None = None,
         socket_options: Iterable[SocketOption] | None = None,
     ) -> httpcore.AsyncNetworkStream:
-        addresses = await resolve_mcp_addresses(host)
         started_at = time.monotonic()
+        try:
+            addresses = await asyncio.wait_for(
+                resolve_mcp_addresses(host),
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            raise httpcore.ConnectTimeout(
+                "MCP server hostname resolution timed out."
+            ) from exc
         last_error: httpcore.ConnectError | httpcore.ConnectTimeout | None = None
         for address in addresses:
             remaining_timeout = (

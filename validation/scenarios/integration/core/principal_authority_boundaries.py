@@ -4,16 +4,37 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-from core.identity import ExecutionAuthority, get_current_execution_authority
-from core.identity.context import use_execution_authority
-from core.runtime.execution_tasks import ExecutionTaskKind, ExecutionTaskSource
-from core.runtime.state import get_runtime_context
-from core.runtime.task_runner import ExecutionTaskSpec
-from validation.core.base_scenario import BaseScenario
+_direct_run_root: tempfile.TemporaryDirectory[str] | None = None
+if __name__ == "__main__":
+    from core.runtime.paths import set_bootstrap_roots
+
+    _direct_run_root = tempfile.TemporaryDirectory(
+        prefix="assistantmd-principal-authority-"
+    )
+    direct_root = Path(_direct_run_root.name)
+    data_root = direct_root / "data"
+    system_root = direct_root / "system"
+    data_root.mkdir()
+    system_root.mkdir()
+    set_bootstrap_roots(data_root=data_root, system_root=system_root)
+
+from core.identity import (  # noqa: E402
+    ExecutionAuthority,
+    get_current_execution_authority,
+)
+from core.identity.context import use_execution_authority  # noqa: E402
+from core.runtime.execution_tasks import (  # noqa: E402
+    ExecutionTaskKind,
+    ExecutionTaskSource,
+)
+from core.runtime.state import get_runtime_context  # noqa: E402
+from core.runtime.task_runner import ExecutionTaskSpec  # noqa: E402
+from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
 class PrincipalAuthorityBoundariesScenario(BaseScenario):

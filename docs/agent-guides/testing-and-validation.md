@@ -16,25 +16,25 @@
 Organize scenarios by what they exercise, not merely because they guard against
 a regression:
 
-- `integration/core`: deterministic integration and persistence contracts that
-  run without external services;
-- `security`: deterministic authorization, isolation, encryption, injection,
-  and network-boundary contracts;
-- `integration/live`: scenarios that require real external services or
-  credentials;
-- `experiments`: diagnostic probes that are not merge gates.
+- `integration/core`: deterministic integration, persistence, authorization,
+  isolation, encryption, and network-boundary contracts that run without
+  external services; this is the automatic CI and merge-gate profile;
+- `experiments`: live-model, external-service, stress, and diagnostic probes
+  that are not merge gates.
 
-`regression` is not a scenario category. Stable integration and security
-scenarios both become regression protection once retained.
+`regression` and `security` are not scenario categories. Every deterministic
+contract required to protect a merge belongs in `integration/core`. Security
+probes that depend on live models, external content, or diagnostic judgment
+belong in `experiments` unless they can be made deterministic.
 
-The regular pre-merge validation profile is `integration/core` plus `security`.
-Maintainers run it with:
+The regular pre-merge validation profile is `integration/core`. Maintainers and
+CI run it with:
 
 ```bash
-python validation/run_validation.py run integration/core security
+python validation/run_validation.py run integration/core
 ```
 
-Live and experimental scenarios are opt-in and are not part of that profile.
+Experimental scenarios are opt-in and are not part of that profile.
 This profile does not change validation ownership: agents run relevant
 individual scenarios directly and request the maintainer-owned pre-merge result.
 
