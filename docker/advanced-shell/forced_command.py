@@ -25,9 +25,12 @@ def _execution_environment() -> dict[str, str]:
         "HOME": "/home/assistantmd-shell",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": "/home/assistantmd-shell/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "NPM_CONFIG_PREFIX": "/home/assistantmd-shell/.local",
         "SHELL": "/bin/bash",
         "TMPDIR": "/tmp",
+        "UV_TOOL_BIN_DIR": "/home/assistantmd-shell/.local/bin",
+        "UV_TOOL_DIR": "/home/assistantmd-shell/.local/share/uv/tools",
     }
 
 

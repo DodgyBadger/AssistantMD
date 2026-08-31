@@ -96,6 +96,11 @@ run_ssh \
 "test ! -r /run/assistantmd-shell/ssh_host_ed25519_key && "\
 "touch /workspace/write-test"
 
+run_ssh \
+    "set -eu; "\
+"command -v python uv uvx node npm npx bash git curl jq rg tar gzip xz unzip ps >/dev/null; "\
+"python --version; uv --version; node --version; npm --version; jq --version; rg --version | head -n 1"
+
 set +e
 compose exec -T client bash -c \
     'tail -f /dev/null | ssh "$@"' \

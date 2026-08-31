@@ -983,8 +983,13 @@ elsewhere in this document about the experimental implementation.
   stdio, and self-contained browser-server experiments into repeatable checked-in
   probes where they protect a durable contract. Narrative observations remain
   useful design evidence but are not regression coverage.
-- The current Dockerfile is still the feasibility image and does not implement
-  the documented Python/uv, Node/npm, archive, `jq`, and `ripgrep` baseline.
+- The first image-baseline promotion pins multi-architecture Python 3.13
+  slim-bookworm, Node 24.20.0 bookworm-slim, and uv 0.12.5 source images by
+  manifest digest. It installs the selected archive, Unix, `jq`, `ripgrep`, Git,
+  curl, CA, SSH, and process tools, and exposes persistent-home-local npm and uv
+  tool installation paths through the wrapper's minimal environment. The Docker
+  smoke asserts every baseline executable. A maintainer-run Docker build/smoke
+  result is still required before the feasibility label can be removed.
 
 The experiment remains suitable for trusted exploratory use while these items
 are open. It must not be described as a hostile-code sandbox or production
