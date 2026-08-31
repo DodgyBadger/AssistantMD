@@ -7,7 +7,7 @@ VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
 RUNTIME_ROOT="${ASSISTANTMD_DEV_RUNTIME_ROOT:-${REPO_ROOT}}"
 DATA_ROOT="${CONTAINER_DATA_ROOT:-${RUNTIME_ROOT}/data}"
 SYSTEM_ROOT="${CONTAINER_SYSTEM_ROOT:-${RUNTIME_ROOT}/system}"
-DEV_OWNER_TOKEN="assistantmd-development-owner-token-not-for-production"
+DEV_AUTH_SECRET="assistantmd-development-auth-secret-not-for-production"
 
 usage() {
   cat <<'EOF'
@@ -286,12 +286,17 @@ run_server() {
           echo "WARNING: The fixed development owner token is publicly known and does not protect a reachable server." >&2
           ;;
       esac
-      export ASSISTANTMD_AUTH_SECRET="${DEV_OWNER_TOKEN}"
+      export ASSISTANTMD_AUTH_SECRET="${DEV_AUTH_SECRET}"
       unset ASSISTANTMD_AUTH_SECRET_FILE ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS
       ;;
     trusted_proxy)
-      [ -n "${ASSISTANTMD_AUTH_SECRET:-}" ] || [ -n "${ASSISTANTMD_AUTH_SECRET_FILE:-}" ] || \
-        die "trusted_proxy mode requires ASSISTANTMD_AUTH_SECRET or ASSISTANTMD_AUTH_SECRET_FILE."
+      if [ "${auth_mode_option_set}" = true ]; then
+        export ASSISTANTMD_AUTH_SECRET="${DEV_AUTH_SECRET}"
+        unset ASSISTANTMD_AUTH_SECRET_FILE ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS
+      else
+        [ -n "${ASSISTANTMD_AUTH_SECRET:-}" ] || [ -n "${ASSISTANTMD_AUTH_SECRET_FILE:-}" ] || \
+          die "trusted_proxy mode requires ASSISTANTMD_AUTH_SECRET or ASSISTANTMD_AUTH_SECRET_FILE."
+      fi
       ;;
     *)
       die "Unsupported authentication mode '${auth_mode}'."
@@ -300,7 +305,9 @@ run_server() {
   export ASSISTANTMD_AUTH_MODE="${auth_mode}"
   echo "Authentication mode: ${auth_mode}"
   if [ "${auth_mode}" = "owner_token" ]; then
-    echo "Development owner token: ${DEV_OWNER_TOKEN}"
+    echo "Development owner token: ${DEV_AUTH_SECRET}"
+  elif [ "${auth_mode}" = "trusted_proxy" ] && [ "${auth_mode_option_set}" = true ]; then
+    echo "Development proxy assertion: ${DEV_AUTH_SECRET}"
   fi
   local -a env_file_args=()
   if [ -f "${REPO_ROOT}/.env" ]; then
