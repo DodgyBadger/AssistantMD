@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from core.advanced_shell import ExecutionMode
 from core.authentication import AuthenticationMode
 
 #######################################################################
@@ -481,6 +482,21 @@ class ConfigurationStatusInfo(BaseModel):
     )
 
 
+class AdvancedShellStatusInfo(BaseModel):
+    """Sanitized restart-bound advanced-shell deployment configuration."""
+
+    execution_mode: ExecutionMode = Field(
+        ..., description="Effective product execution mode"
+    )
+    host: str = Field(..., description="Configured companion hostname")
+    port: int = Field(..., description="Configured companion SSH port")
+    user: str = Field(..., description="Configured companion SSH user")
+    configuration_state: Literal["inactive", "configured"] = Field(
+        ...,
+        description="Whether advanced-shell deployment coordinates are active",
+    )
+
+
 class StatusResponse(BaseModel):
     """Response model for system status endpoint."""
 
@@ -521,6 +537,9 @@ class StatusResponse(BaseModel):
     authentication_warning: str | None = Field(
         None,
         description="Sanitized operator warning for the effective authentication mode",
+    )
+    advanced_shell: AdvancedShellStatusInfo = Field(
+        ..., description="Sanitized advanced-shell infrastructure status"
     )
 
 

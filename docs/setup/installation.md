@@ -130,6 +130,31 @@ the mode contracts and ingress limits.
 **Verify Installation**
 `docker ps` should show assistantMD running. If you see "restarting", something is wrong. Run `docker logs assistantMD` to check for startup errors.
 
+### Advanced shell infrastructure
+
+Advanced shell configuration is deployment-owned and read when AssistantMD
+starts. Restricted mode is the default. To select advanced mode, add the
+following to `.env` and restart AssistantMD:
+
+```dotenv
+ASSISTANTMD_EXECUTION_MODE=advanced
+```
+
+The supplied companion deployment uses defaults that normally require no
+additional configuration:
+
+```dotenv
+ASSISTANTMD_SHELL_HOST=assistantmd-shell
+ASSISTANTMD_SHELL_PORT=2222
+ASSISTANTMD_SHELL_USER=assistantmd-shell
+```
+
+Set `ASSISTANTMD_SHELL_HOST` when the Compose service name, network alias, or
+resolvable hostname differs. System → Misc reports the effective mode and
+sanitized endpoint after restart. AssistantMD owns its SSH client identity and
+pinned host record at fixed paths under `system/advanced-shell/`; those paths
+are not `.env` settings and must not be mounted into the companion.
+
 Access the web interface at `http://localhost:8000/` (or whichever host IP/port
 you configured in the compose file). Open the **System** tab and configure at
 least one model provider. Changes apply immediately—no container restart

@@ -26,6 +26,7 @@ from api.import_models import (
     ImportUrlRequest,
     ImportUrlResponse,
 )
+from core.advanced_shell import AdvancedShellConfig
 from core.authentication import AuthenticationPolicy
 from core.chat.executor import UploadedImageAttachment
 from core.chat.task_events import ChatTaskEventCursorExpired
@@ -674,9 +675,13 @@ async def get_status(request: Request) -> StatusResponse | JSONResponse:
         authentication_policy = request.app.state.authentication_policy
         if not isinstance(authentication_policy, AuthenticationPolicy):
             raise RuntimeError("Authentication policy is unavailable.")
+        advanced_shell_config = request.app.state.advanced_shell_config
+        if not isinstance(advanced_shell_config, AdvancedShellConfig):
+            raise RuntimeError("Advanced-shell configuration is unavailable.")
         status = await get_system_status(
             scheduler,
             authentication_mode=authentication_policy.mode,
+            advanced_shell_config=advanced_shell_config,
         )
         return status
 

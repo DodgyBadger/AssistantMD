@@ -6,7 +6,11 @@ Selected direction under prototype validation. Slice 1 now has a development
 companion image, hardened OpenSSH configuration, forced-command lifecycle
 wrapper, deterministic local probe, and isolated Docker smoke harness. Local
 checks and the real sibling-container smoke pass. The fixed-destination SSH
-boundary is feasible; product shell/API work has not started.
+boundary is feasible. The first product integration increment now validates the
+restart-bound execution mode and companion coordinates, owns fixed client trust
+paths below `system/advanced-shell/`, exposes a sanitized status projection, and
+renders the read-only System → Misc reporting block. Authenticated readiness,
+shell capability composition, and command execution from chat have not started.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller
@@ -467,14 +471,16 @@ chat-editable runtime inputs. Switching execution mode or coordinates requires
 an application restart; there is no second persisted acknowledgement or live UI
 toggle.
 
-The sanitized status API reports the effective execution mode, companion host,
-port, user, and readiness state without exposing key paths or private-key
-material. System → Misc presents those values in one read-only **Advanced
-Shell** block. Its brief instruction says configuration is managed in `.env`,
-requires a restart, and links to the repository installation instructions. Do
-not render disabled inputs or imply that the values can be unlocked and edited
-in-app. Settings validation and companion preflight distinguish invalid
-configuration, DNS/connectivity failure, and host-key/authentication failure.
+The sanitized status API first reports the effective execution mode, companion
+host, port, user, and whether advanced coordinates are inactive or configured,
+without exposing key paths or private-key material. Authenticated preflight will
+replace that configuration-only state with execution readiness when the shell
+capability is composed. System → Misc presents those values in one read-only
+**Advanced Shell** block. Its brief instruction says configuration is managed in
+`.env`, requires a restart, and links to the repository installation
+instructions. Do not render disabled inputs or imply that the values can be
+unlocked and edited in-app. Settings validation and companion preflight
+distinguish invalid configuration, DNS/connectivity failure, and host-key/authentication failure.
 Deterministic tests prove that a non-default hostname reaches the configured
 adapter and that model/tool input cannot override it. Deployment instructions
 prefer the Compose service name or an explicit network alias over
@@ -1163,12 +1169,11 @@ and protocol work but not for declaring the deployment boundary validated.
 
 ## Next Phase
 
-Slice 1 established feasibility but its smoke/key topology must be reconciled
-with the newer persistent experiment. Before product capability composition,
-fix the verified stdin, output-accounting, detached-process, key-provisioning,
-readiness, and disk-bound defects in the critical audit. Implement and validate
-the default-deny API owner-authentication boundary, including confused-deputy
-prevention, before enabling shell access from chat. Keep stdio MCP transport work
+Continue Slice 2 by reconciling the experimental SSH executor with the typed
+infrastructure configuration and fixed `system/advanced-shell/` identity paths.
+Add authenticated, cached companion preflight with sanitized failure states,
+then compose the shell capability only for advanced interactive primary chats
+and inject the flight-card extension exactly once. Keep stdio MCP transport work
 in Slice 3 after the general shell lifecycle and authority boundaries are
 validated.
 

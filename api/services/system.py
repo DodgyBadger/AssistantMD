@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from core.advanced_shell import AdvancedShellConfig
 from core.authentication import AuthenticationMode
 from core.authoring.template_discovery import (
     list_templates,
@@ -24,9 +25,7 @@ from core.vault_state.service import VaultStateService
 
 from ..exceptions import SystemConfigurationError
 from ..models import (
-    ConfigurationError as APIConfigurationError,
-)
-from ..models import (
+    AdvancedShellStatusInfo,
     ConfigurationIssueInfo,
     ConfigurationStatusInfo,
     SchedulerInfo,
@@ -35,6 +34,9 @@ from ..models import (
     TemplateInfo,
     VaultInfo,
     WorkflowRunInfo,
+)
+from ..models import (
+    ConfigurationError as APIConfigurationError,
 )
 from .shared import (
     get_vault_path as _get_vault_path,
@@ -72,6 +74,19 @@ def set_system_startup_time(startup_time: datetime) -> None:
     """Set the system startup time for status reporting."""
     global _system_startup_time
     _system_startup_time = startup_time
+
+
+def project_advanced_shell_status(
+    config: AdvancedShellConfig,
+) -> AdvancedShellStatusInfo:
+    """Project deployment configuration without identity or trust paths."""
+    return AdvancedShellStatusInfo(
+        execution_mode=config.execution_mode,
+        host=config.host,
+        port=config.port,
+        user=config.user,
+        configuration_state="configured" if config.enabled else "inactive",
+    )
 
 
 def list_context_templates(vault_name: str) -> list[TemplateInfo]:
@@ -347,6 +362,7 @@ async def get_system_status(
     scheduler: Any | None = None,
     *,
     authentication_mode: AuthenticationMode = AuthenticationMode.DISABLED,
+    advanced_shell_config: AdvancedShellConfig | None = None,
 ) -> StatusResponse:
     """
     Collect comprehensive system status information from cached data.
@@ -417,6 +433,7 @@ async def get_system_status(
             default_model=default_model_value,
         )
 
+        shell_config = advanced_shell_config or AdvancedShellConfig.restricted_default()
         status_response = StatusResponse(
             vaults=vaults,
             scheduler=scheduler_info,
@@ -439,6 +456,7 @@ async def get_system_status(
                 if authentication_mode is AuthenticationMode.DISABLED
                 else None
             ),
+            advanced_shell=project_advanced_shell_status(shell_config),
         )
 
         return status_response

@@ -103,6 +103,10 @@ const configElements = {
     statusBanner: document.getElementById('config-status-banner'),
     statusMessages: document.getElementById('config-status-messages'),
     publicUrl: document.getElementById('configured-public-url'),
+    advancedShellExecutionMode: document.getElementById('advanced-shell-execution-mode'),
+    advancedShellConfigurationState: document.getElementById('advanced-shell-configuration-state'),
+    advancedShellEndpoint: document.getElementById('advanced-shell-endpoint'),
+    advancedShellUser: document.getElementById('advanced-shell-user'),
     configTab: document.getElementById('configuration-tab')
 };
 
@@ -1439,6 +1443,23 @@ async function fetchSystemStatus() {
         const publicUrl = state.systemStatus?.system?.public_url || '';
         if (configElements.publicUrl) {
             configElements.publicUrl.value = publicUrl || 'Not configured';
+        }
+        const advancedShell = state.systemStatus?.advanced_shell;
+        if (configElements.advancedShellExecutionMode) {
+            configElements.advancedShellExecutionMode.textContent = advancedShell?.execution_mode || 'Unavailable';
+        }
+        if (configElements.advancedShellConfigurationState) {
+            configElements.advancedShellConfigurationState.textContent = advancedShell?.configuration_state === 'configured'
+                ? 'Configured; readiness not yet checked'
+                : 'Inactive';
+        }
+        if (configElements.advancedShellEndpoint) {
+            configElements.advancedShellEndpoint.textContent = advancedShell
+                ? `${advancedShell.host}:${advancedShell.port}`
+                : 'Unavailable';
+        }
+        if (configElements.advancedShellUser) {
+            configElements.advancedShellUser.textContent = advancedShell?.user || 'Unavailable';
         }
         const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
             ? state.systemStatus.configuration_status.default_model
