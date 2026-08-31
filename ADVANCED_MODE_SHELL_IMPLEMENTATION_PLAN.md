@@ -445,6 +445,24 @@ AssistantMD credential. A server-generated execution ID may cross the transport
 for correlation and containment, but it must be opaque, non-authorizing, and
 bound locally to the owning task/session/principal.
 
+When advanced-mode settings are integrated into AssistantMD, the companion SSH
+hostname must be an explicit infrastructure setting rather than a permanently
+hard-coded container name. The default may match the supplied Compose service
+name, but an operator must be able to select another Compose service name,
+network alias, or resolvable hostname without editing application code. Port,
+SSH user, host-key alias, and deployment-owned key paths belong to the same
+server-owned transport configuration surface where appropriate. These values
+must never be model arguments or chat-editable runtime inputs.
+
+The System UI and sanitized settings API should show the effective companion
+hostname and port for diagnosis without exposing private-key material. Settings
+validation and companion preflight must distinguish invalid configuration,
+DNS/connectivity failure, and host-key/authentication failure. Deterministic
+tests must prove that a non-default hostname reaches the configured adapter and
+that model/tool input cannot override it. Deployment instructions should prefer
+the Compose service name or an explicit network alias over `container_name`,
+because Compose service discovery is the intended reachability contract.
+
 Shell calls and their durable records must carry the locally captured
 `principal_id`, `task_id`, `session_id`, and execution ID where applicable.
 Activity may expose the stable principal ID for diagnostics but must not log an
@@ -1014,6 +1032,8 @@ Development and validation are therefore split by boundary.
 The following contracts can and should be developed in the existing environment:
 
 - advanced-mode settings and API gating;
+- configurable, server-owned companion hostname/port resolution, including a
+  non-default Compose service name or network alias;
 - restricted versus advanced chat capability composition;
 - construction of fixed SSH destination/options with no model-controlled host;
 - command request validation and working-directory normalization;
