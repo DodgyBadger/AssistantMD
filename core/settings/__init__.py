@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.llm.openai_auth import (
@@ -99,6 +99,19 @@ class AppSettings(BaseSettings):
 
     vaults_root_path: Path | None = Field(default=None, alias="VAULTS_ROOT_PATH")
     public_url: str | None = Field(default=None, alias="ASSISTANTMD_PUBLIC_URL")
+    auth_mode: str | None = Field(default=None, alias="ASSISTANTMD_AUTH_MODE")
+    auth_secret_file: Path | None = Field(
+        default=None, alias="ASSISTANTMD_AUTH_SECRET_FILE"
+    )
+    auth_secret: SecretStr | None = Field(default=None, alias="ASSISTANTMD_AUTH_SECRET")
+    auth_proxy_assertion_header: str = Field(
+        default="X-AssistantMD-Proxy-Assertion",
+        alias="ASSISTANTMD_AUTH_PROXY_ASSERTION_HEADER",
+    )
+    auth_trusted_proxy_networks: str | None = Field(
+        default=None,
+        alias="ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS",
+    )
 
     _LLM_SECRET_KEYS = [
         "OPENAI_API_KEY",
@@ -113,6 +126,16 @@ class AppSettings(BaseSettings):
     @classmethod
     def _expand_vault_path(cls, value: Any) -> Path | None:
         """Expand user paths to absolute Path instances."""
+        if value in (None, ""):
+            return None
+        if isinstance(value, Path):
+            return value.expanduser()
+        return Path(value).expanduser()
+
+    @field_validator("auth_secret_file", mode="before")
+    @classmethod
+    def _expand_auth_secret_file(cls, value: Any) -> Path | None:
+        """Expand the optional deployment-owned authentication secret path."""
         if value in (None, ""):
             return None
         if isinstance(value, Path):
