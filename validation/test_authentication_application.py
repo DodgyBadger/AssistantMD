@@ -131,6 +131,34 @@ def test_oversized_owner_exchange_is_rejected_without_echo() -> None:
     assert oversized not in response.text
 
 
+def test_duplicate_owner_token_keys_are_rejected() -> None:
+    client = _client("owner_token", ASSISTANTMD_AUTH_SECRET=_SECRET)
+    body = f'{{"owner_token":"wrong","owner_token":"{_SECRET}"}}'
+
+    response = client.post(
+        "/auth/session",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert _SECRET not in response.text
+
+
+def test_failed_owner_logins_are_rate_limited() -> None:
+    client = _client("owner_token", ASSISTANTMD_AUTH_SECRET=_SECRET)
+
+    failures = [
+        client.post("/auth/session", json={"owner_token": "b" * 32}) for _ in range(10)
+    ]
+    limited = client.post("/auth/session", json={"owner_token": "b" * 32})
+
+    assert all(response.status_code == 401 for response in failures)
+    assert limited.status_code == 429
+    assert limited.json() == {"detail": "Too many authentication failures."}
+    assert limited.headers["retry-after"] == "60"
+
+
 def test_loopback_and_trusted_proxy_reach_ui_without_second_login() -> None:
     loopback = _client("loopback", client_host="127.0.0.1")
     proxy = _client(

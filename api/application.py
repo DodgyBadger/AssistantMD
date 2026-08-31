@@ -10,7 +10,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Lifespan
 
-from core.authentication import AuthenticationMiddleware, AuthenticationPolicy
+from core.authentication import (
+    AuthenticationFailureLimiter,
+    AuthenticationMiddleware,
+    AuthenticationPolicy,
+)
 
 from .authentication import router as authentication_router
 from .endpoints import public_router, register_exception_handlers
@@ -26,6 +30,8 @@ def create_application(
     """Build the production-equivalent route and middleware topology."""
     app = FastAPI(lifespan=lifespan)
     app.state.authentication_policy = authentication_policy
+    failure_limiter = AuthenticationFailureLimiter()
+    app.state.authentication_failure_limiter = failure_limiter
     app.include_router(public_router)
     app.include_router(authentication_router)
     app.include_router(api_router)
@@ -64,5 +70,9 @@ def create_application(
         async def root() -> FileResponse:
             return FileResponse(static_dir / "index.html")
 
-    app.add_middleware(AuthenticationMiddleware, policy=authentication_policy)
+    app.add_middleware(
+        AuthenticationMiddleware,
+        policy=authentication_policy,
+        failure_limiter=failure_limiter,
+    )
     return app

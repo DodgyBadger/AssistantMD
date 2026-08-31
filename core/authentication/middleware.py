@@ -11,11 +11,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .models import AuthenticatedIdentity, AuthenticationMechanism, AuthenticationMode
 from .policy import AuthenticationPolicy
+from .rate_limit import AuthenticationFailureLimiter
 from .session import OwnerSessionCodec, SessionVerificationError, VerifiedOwnerSession
 
 OWNER_SESSION_COOKIE = "assistantmd_owner_session"
 OWNER_CSRF_COOKIE = "assistantmd_csrf"
 CSRF_HEADER = "x-assistantmd-csrf"
+MAXIMUM_REQUEST_HEADER_BYTES = 64 * 1024
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -50,10 +52,12 @@ class AuthenticationMiddleware:
         app: ASGIApp,
         *,
         policy: AuthenticationPolicy,
+        failure_limiter: AuthenticationFailureLimiter | None = None,
         public_routes: Iterable[PublicRoute] = DEFAULT_PUBLIC_ROUTES,
     ) -> None:
         self._app = app
         self._policy = policy
+        self._failure_limiter = failure_limiter or AuthenticationFailureLimiter()
         self._public_routes = frozenset(public_routes)
         self._session_codec = (
             OwnerSessionCodec(policy)
@@ -73,12 +77,30 @@ class AuthenticationMiddleware:
             return
         method = str(scope.get("method") or "GET").upper()
         path = str(scope.get("path") or "")
+        if not _headers_within_limit(scope):
+            await _reject(
+                scope_type,
+                send,
+                status_code=431,
+                detail="Request headers are too large.",
+            )
+            return
         if scope_type == "http" and PublicRoute(method, path) in self._public_routes:
             await self._app(scope, receive, send)
             return
 
+        peer_key = _peer_host(scope) or "unknown"
+        if self._failure_limiter.is_limited(peer_key):
+            await _reject(
+                scope_type,
+                send,
+                status_code=429,
+                detail="Too many authentication failures.",
+            )
+            return
         admission = self._authenticate(scope)
         if admission is None:
+            self._failure_limiter.record_failure(peer_key)
             if (
                 scope_type == "http"
                 and method == "GET"
@@ -92,6 +114,7 @@ class AuthenticationMiddleware:
             )
             return
         identity, owner_session = admission
+        self._failure_limiter.record_success(peer_key)
         if (
             scope_type == "http"
             and method not in _SAFE_METHODS
@@ -132,10 +155,15 @@ class AuthenticationMiddleware:
             )
             return (identity, None) if identity is not None else None
 
-        bearer = _bearer_token(scope)
-        identity = self._policy.authenticate_owner_bearer(bearer)
-        if identity is not None:
-            return identity, None
+        authorization_headers = _header_values(scope, b"authorization")
+        cookie_header = _single_header(scope, b"cookie")
+        has_session_cookie = _cookie_name_count(cookie_header, OWNER_SESSION_COOKIE) > 0
+        if authorization_headers:
+            if len(authorization_headers) != 1 or has_session_cookie:
+                return None
+            bearer = _bearer_token(scope)
+            identity = self._policy.authenticate_owner_bearer(bearer)
+            return (identity, None) if identity is not None else None
         session = self._owner_session(scope)
         if session is None:
             return None
@@ -145,7 +173,10 @@ class AuthenticationMiddleware:
         if self._session_codec is None:
             return None
         cookie_header = _single_header(scope, b"cookie")
-        if cookie_header is None:
+        if (
+            cookie_header is None
+            or _cookie_name_count(cookie_header, OWNER_SESSION_COOKIE) != 1
+        ):
             return None
         try:
             cookies = SimpleCookie()
@@ -185,6 +216,16 @@ def get_authenticated_identity(scope: Scope) -> AuthenticatedIdentity | None:
 
 
 def _single_header(scope: Scope, lower_name: bytes) -> str | None:
+    matches = _header_values(scope, lower_name)
+    if matches is None or len(matches) != 1:
+        return None
+    try:
+        return matches[0].decode("latin-1")
+    except UnicodeDecodeError:
+        return None
+
+
+def _header_values(scope: Scope, lower_name: bytes) -> list[bytes] | None:
     raw_headers = scope.get("headers")
     if not isinstance(raw_headers, list):
         return None
@@ -197,12 +238,18 @@ def _single_header(scope: Scope, lower_name: bytes) -> str | None:
             return None
         if name.lower() == lower_name:
             matches.append(value)
-    if len(matches) != 1:
-        return None
-    try:
-        return matches[0].decode("latin-1")
-    except UnicodeDecodeError:
-        return None
+    return matches
+
+
+def _cookie_name_count(cookie_header: str | None, cookie_name: str) -> int:
+    if cookie_header is None:
+        return 0
+    count = 0
+    for raw_pair in cookie_header.split(";"):
+        name, separator, _ = raw_pair.strip().partition("=")
+        if separator and name == cookie_name:
+            count += 1
+    return count
 
 
 def _bearer_token(scope: Scope) -> str | None:
@@ -234,15 +281,18 @@ async def _reject(
         await send({"type": "websocket.close", "code": 4401, "reason": detail})
         return
     body = json.dumps({"detail": detail}, separators=(",", ":")).encode("utf-8")
+    headers = [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(body)).encode("ascii")),
+        (b"cache-control", b"no-store"),
+    ]
+    if status_code == 429:
+        headers.append((b"retry-after", b"60"))
     await send(
         {
             "type": "http.response.start",
             "status": status_code,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode("ascii")),
-                (b"cache-control", b"no-store"),
-            ],
+            "headers": headers,
         }
     )
     await send({"type": "http.response.body", "body": body})
@@ -262,3 +312,20 @@ async def _redirect_to_login(send: Send) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+def _headers_within_limit(scope: Scope) -> bool:
+    raw_headers = scope.get("headers")
+    if not isinstance(raw_headers, list):
+        return False
+    total = 0
+    for raw_header in raw_headers:
+        if not isinstance(raw_header, tuple) or len(raw_header) != 2:
+            return False
+        name, value = raw_header
+        if not isinstance(name, bytes) or not isinstance(value, bytes):
+            return False
+        total += len(name) + len(value)
+        if total > MAXIMUM_REQUEST_HEADER_BYTES:
+            return False
+    return True

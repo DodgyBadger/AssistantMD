@@ -30,6 +30,21 @@ production Compose example selects loopback explicitly, and validation selects
 disabled mode explicitly. Deployment examples and live manual evidence for all
 modes remain outstanding.
 
+Owner-token live adversarial review found no authentication or CSRF bypass.
+Hardening from that review now rejects duplicate JSON credential keys,
+duplicate security cookies, mixed bearer/session credentials, aggregate headers
+over 64 KiB, and disconnected credential bodies without an unhandled error.
+Failed authentication uses a bounded process-local per-peer sliding window (10
+failures per 60 seconds) and returns `429` with `Retry-After: 60`. Production
+ingress must enforce its own header ceiling because the ASGI server allocates
+headers before application middleware can reject them.
+
+Owner sessions remain intentionally stateless. Logout deterministically expires
+the browser cookies but cannot revoke a previously copied signed cookie; it
+remains valid until its 12-hour expiry or owner-token rotation. Server-side
+session revocation is deferred unless the product later requires stolen-session
+invalidation.
+
 This plan defines a standalone AssistantMD change. Advanced shell access depends
 on this boundary, but authentication is useful independently and must be
 implemented and validated before the shell capability is composed into chat.

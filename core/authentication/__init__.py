@@ -3,6 +3,7 @@
 from .middleware import (
     CSRF_HEADER,
     DEFAULT_PUBLIC_ROUTES,
+    MAXIMUM_REQUEST_HEADER_BYTES,
     OWNER_CSRF_COOKIE,
     OWNER_SESSION_COOKIE,
     AuthenticationMiddleware,
@@ -20,6 +21,7 @@ from .policy import (
     AuthenticationPolicy,
     load_authentication_policy,
 )
+from .rate_limit import AuthenticationFailureLimiter
 from .session import (
     DEFAULT_SESSION_LIFETIME,
     IssuedOwnerSession,
@@ -31,6 +33,7 @@ from .session import (
 __all__ = [
     "AuthenticatedIdentity",
     "AuthenticationConfigurationError",
+    "AuthenticationFailureLimiter",
     "AuthenticationMechanism",
     "AuthenticationMiddleware",
     "AuthenticationMode",
@@ -39,6 +42,7 @@ __all__ = [
     "DEFAULT_PUBLIC_ROUTES",
     "DEFAULT_SESSION_LIFETIME",
     "IssuedOwnerSession",
+    "MAXIMUM_REQUEST_HEADER_BYTES",
     "CSRF_HEADER",
     "OWNER_CSRF_COOKIE",
     "OWNER_SESSION_COOKIE",

@@ -8,10 +8,12 @@ from html import escape
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.requests import ClientDisconnect
 
 from core.authentication import (
     OWNER_CSRF_COOKIE,
     OWNER_SESSION_COOKIE,
+    AuthenticationFailureLimiter,
     AuthenticationMode,
     AuthenticationPolicy,
     OwnerSessionCodec,
@@ -21,6 +23,10 @@ router = APIRouter(prefix="/auth", tags=["AssistantMD authentication"])
 _COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60
 _MAXIMUM_SESSION_EXCHANGE_BYTES = 8192
 _COOKIE_EXPIRY_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+class _DuplicateJSONKey(ValueError):
+    """Raised when a credential request contains ambiguous duplicate keys."""
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -40,9 +46,19 @@ async def create_owner_session(
     policy = _policy(request)
     if policy.mode is not AuthenticationMode.OWNER_TOKEN:
         raise HTTPException(status_code=404, detail="Not found.")
+    limiter = _failure_limiter(request)
+    peer_key = _peer_key(request)
+    if limiter.is_limited(peer_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many authentication failures.",
+            headers={"Retry-After": "60"},
+        )
     supplied_token = await _read_owner_token(request)
     if policy.authenticate_owner_bearer(supplied_token) is None:
+        limiter.record_failure(peer_key)
         raise HTTPException(status_code=401, detail="Authentication failed.")
+    limiter.record_success(peer_key)
     issued = OwnerSessionCodec(policy).issue()
     response = JSONResponse({"authenticated": True})
     secure = _secure_cookie(request)
@@ -118,16 +134,25 @@ async def _read_owner_token(request: Request) -> str:
             status_code=400, detail="Authentication request is invalid."
         )
     body = bytearray()
-    async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > _MAXIMUM_SESSION_EXCHANGE_BYTES:
-            raise HTTPException(
-                status_code=400,
-                detail="Authentication request is invalid.",
-            )
     try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > _MAXIMUM_SESSION_EXCHANGE_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Authentication request is invalid.",
+                )
+    except ClientDisconnect as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Authentication request is invalid.",
+        ) from exc
+    try:
+        payload = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJSONKey) as exc:
         raise HTTPException(
             status_code=400,
             detail="Authentication request is invalid.",
@@ -142,6 +167,26 @@ async def _read_owner_token(request: Request) -> str:
             status_code=400, detail="Authentication request is invalid."
         )
     return owner_token
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJSONKey
+        result[key] = value
+    return result
+
+
+def _failure_limiter(request: Request) -> AuthenticationFailureLimiter:
+    limiter = getattr(request.app.state, "authentication_failure_limiter", None)
+    if not isinstance(limiter, AuthenticationFailureLimiter):
+        raise RuntimeError("Authentication failure limiter is unavailable.")
+    return limiter
+
+
+def _peer_key(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
 
 
 def _login_page() -> str:

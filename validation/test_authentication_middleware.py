@@ -8,6 +8,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from core.authentication import (
     CSRF_HEADER,
+    MAXIMUM_REQUEST_HEADER_BYTES,
     OWNER_SESSION_COOKIE,
     AuthenticationMechanism,
     AuthenticationMiddleware,
@@ -68,6 +69,19 @@ def test_public_health_bypasses_authentication() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"healthy": True}
+
+
+def test_oversized_headers_are_rejected_even_on_public_routes() -> None:
+    app, _ = _app("owner_token", ASSISTANTMD_AUTH_SECRET=_SECRET)
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/health",
+        headers={"X-Oversized": "x" * MAXIMUM_REQUEST_HEADER_BYTES},
+    )
+
+    assert response.status_code == 431
+    assert response.json() == {"detail": "Request headers are too large."}
 
 
 def test_unclassified_routes_are_protected_before_route_resolution() -> None:
@@ -139,6 +153,30 @@ def test_owner_session_requires_csrf_only_for_mutations() -> None:
     }
     assert missing_csrf.status_code == 403
     assert valid_csrf.status_code == 200
+
+
+def test_owner_mode_rejects_duplicate_or_mixed_credentials() -> None:
+    app, policy = _app("owner_token", ASSISTANTMD_AUTH_SECRET=_SECRET)
+    session = OwnerSessionCodec(policy).issue()
+    client = TestClient(app)
+
+    duplicate_cookie = (
+        f"{OWNER_SESSION_COOKIE}=wrong; "
+        f"{OWNER_SESSION_COOKIE}={session.cookie_value}"
+    )
+    mixed = client.get(
+        "/protected",
+        headers={
+            "Authorization": f"Bearer {_SECRET}",
+            "Cookie": f"{OWNER_SESSION_COOKIE}={session.cookie_value}",
+        },
+    )
+
+    assert (
+        client.get("/protected", headers={"Cookie": duplicate_cookie}).status_code
+        == 401
+    )
+    assert mixed.status_code == 401
 
 
 def test_proxy_mode_requires_assertion_and_allowed_immediate_peer() -> None:
