@@ -26,7 +26,10 @@ returned zero, the AssistantMD status API reported authenticated `ready`, and a
 second status call returned the cached ready state. A real advanced primary chat
 then acquired `shell`, executed `printf assistantmd-shell-live-ok` in the
 companion, reported exit code zero and the exact stdout through normal task
-events, and completed the model turn successfully.
+events, and completed the model turn successfully. Application startup now names
+the restricted or advanced execution mode in the operator-visible stream and
+records a structured `application_startup_completed` activity event with
+`execution_mode` and `advanced_shell_enabled`.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller

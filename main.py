@@ -71,7 +71,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Store runtime context in app state for API access
     app.state.runtime = runtime
 
-    logger.info("Application startup complete")
+    execution_mode = advanced_shell_config.execution_mode.value
+    logger.info(
+        f"Application startup complete in {execution_mode} execution mode",
+        data={
+            "event": "application_startup_completed",
+            "status": "ready",
+            "execution_mode": execution_mode,
+            "advanced_shell_enabled": advanced_shell_config.enabled,
+        },
+    )
 
     yield  # App runs here
 
