@@ -23,8 +23,12 @@ Implementation in progress. The first foundation increment is implemented:
 - CSRF enforcement for mutating owner-session requests while owner bearer calls
   remain non-ambient programmatic authentication.
 
-These increments do not yet change live FastAPI routing, expose browser session
-endpoints, or enforce authentication on requests.
+The shared application composition root, browser owner-session exchange, and
+live request enforcement are now implemented. Production requires an explicit
+mode; `scripts/dev run` selects loopback only when bound to loopback, the
+production Compose example selects loopback explicitly, and validation selects
+disabled mode explicitly. Deployment examples and live manual evidence for all
+modes remain outstanding.
 
 This plan defines a standalone AssistantMD change. Advanced shell access depends
 on this boundary, but authentication is useful independently and must be

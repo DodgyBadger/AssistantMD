@@ -19,6 +19,7 @@ services:
     environment:
       - TZ=UTC
       - API_PORT=8000
+      - ASSISTANTMD_AUTH_MODE=loopback  # Use trusted_proxy or owner_token when exposed through ingress
     shm_size: "1gb"
     
     # Standard browser-capable profile: at least 2G available to AssistantMD.

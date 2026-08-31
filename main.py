@@ -1,10 +1,7 @@
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from core.runtime.paths import (
     resolve_bootstrap_data_root,
@@ -17,9 +14,9 @@ _BOOTSTRAP_DATA_ROOT = resolve_bootstrap_data_root()
 _BOOTSTRAP_SYSTEM_ROOT = resolve_bootstrap_system_root()
 set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 
-from api.endpoints import register_exception_handlers  # noqa: E402
-from api.endpoints import router as api_router  # noqa: E402
+from api.application import create_application  # noqa: E402
 from api.services import set_system_startup_time  # noqa: E402
+from core.authentication import load_authentication_policy  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
 from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
 from core.runtime.config import RuntimeConfig  # noqa: E402
@@ -72,38 +69,10 @@ async def lifespan(app: FastAPI):
 ## FastAPI application setup
 #######################################################################
 
-app = FastAPI(lifespan=lifespan)
-
-# Register API routes
-app.include_router(api_router)
-
-# Register API exception handlers
-register_exception_handlers(app)
-
-
-@app.middleware("http")
-async def prevent_runtime_response_caching(request, call_next):
-    """Keep the single-page app and runtime API out of proxy/browser caches."""
-    response = await call_next(request)
-    path = request.url.path
-    if path == "/" or path.startswith("/api/") or path.startswith("/static/"):
-        response.headers["Cache-Control"] = (
-            "no-store, no-cache, must-revalidate, max-age=0"
-        )
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
-
-
-# Mount static files with absolute path
-static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
-
-
-# Serve main UI at root
-@app.get("/")
-async def root():
-    return FileResponse(os.path.join(static_dir, "index.html"))
+app = create_application(
+    authentication_policy=load_authentication_policy(get_app_settings()),
+    lifespan=lifespan,
+)
 
 
 # Set up unified logging with instrumentation

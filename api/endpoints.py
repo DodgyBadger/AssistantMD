@@ -273,6 +273,7 @@ from .services.mcp import (
 from .utils import create_error_response, serialize_exception
 
 # Create API router
+public_router = APIRouter(prefix="/api", tags=["AssistantMD public API"])
 router = APIRouter(
     prefix="/api",
     tags=["AssistantMD API"],
@@ -620,7 +621,7 @@ async def _start_chat_task_request(
 #######################################################################
 
 
-@router.get("/health")
+@public_router.get("/health")
 async def health_check() -> JSONResponse:
     """
     Lightweight health check endpoint for Docker healthcheck and monitoring.

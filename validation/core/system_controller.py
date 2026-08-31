@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import core.authoring.runtime.host as authoring_host_module
-from api.endpoints import register_exception_handlers
-from api.endpoints import router as api_router
+from api.application import create_application
+from core.authentication import load_authentication_policy
 from core.authoring.template_discovery import discover_vaults
 from core.logger import UnifiedLogger
 from core.runtime.bootstrap import bootstrap_runtime
@@ -29,6 +29,7 @@ from core.runtime.paths import set_bootstrap_roots
 from core.runtime.state import clear_runtime_context
 from core.secrets import reset_secrets_bootstrap_status
 from core.secrets.crypto import SECRET_KEY_ENV
+from core.settings import AppSettings
 from core.settings.store import SETTINGS_TEMPLATE, refresh_settings_cache
 
 
@@ -121,9 +122,13 @@ class SystemController:
 
     def _create_api_app(self) -> FastAPI:
         """Construct FastAPI app matching production router for validation."""
-        app = FastAPI()
-        app.include_router(api_router)
-        register_exception_handlers(app)
+        policy = load_authentication_policy(
+            AppSettings(ASSISTANTMD_AUTH_MODE="disabled")
+        )
+        app = create_application(
+            authentication_policy=policy,
+            include_ui=True,
+        )
         app.state.runtime = None
         return app
 

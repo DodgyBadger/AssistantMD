@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
-from typing import Any
+
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .models import AuthenticatedIdentity, AuthenticationMechanism, AuthenticationMode
 from .policy import AuthenticationPolicy
 from .session import OwnerSessionCodec, SessionVerificationError, VerifiedOwnerSession
-
-ASGIScope = dict[str, Any]
-ASGIMessage = dict[str, Any]
-ASGIReceive = Callable[[], Awaitable[ASGIMessage]]
-ASGISend = Callable[[ASGIMessage], Awaitable[None]]
-ASGIApp = Callable[[ASGIScope, ASGIReceive, ASGISend], Awaitable[None]]
 
 OWNER_SESSION_COOKIE = "assistantmd_owner_session"
 OWNER_CSRF_COOKIE = "assistantmd_csrf"
@@ -68,9 +63,9 @@ class AuthenticationMiddleware:
 
     async def __call__(
         self,
-        scope: ASGIScope,
-        receive: ASGIReceive,
-        send: ASGISend,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
     ) -> None:
         scope_type = scope.get("type")
         if scope_type not in {"http", "websocket"}:
@@ -84,6 +79,14 @@ class AuthenticationMiddleware:
 
         admission = self._authenticate(scope)
         if admission is None:
+            if (
+                scope_type == "http"
+                and method == "GET"
+                and path == "/"
+                and self._policy.mode is AuthenticationMode.OWNER_TOKEN
+            ):
+                await _redirect_to_login(send)
+                return
             await _reject(
                 scope_type, send, status_code=401, detail="Authentication required."
             )
@@ -108,7 +111,7 @@ class AuthenticationMiddleware:
         await self._app(scope, receive, send)
 
     def _authenticate(
-        self, scope: ASGIScope
+        self, scope: Scope
     ) -> tuple[AuthenticatedIdentity, VerifiedOwnerSession | None] | None:
         mode = self._policy.mode
         if mode is AuthenticationMode.DISABLED:
@@ -138,7 +141,7 @@ class AuthenticationMiddleware:
             return None
         return session.identity, session
 
-    def _owner_session(self, scope: ASGIScope) -> VerifiedOwnerSession | None:
+    def _owner_session(self, scope: Scope) -> VerifiedOwnerSession | None:
         if self._session_codec is None:
             return None
         cookie_header = _single_header(scope, b"cookie")
@@ -159,7 +162,7 @@ class AuthenticationMiddleware:
 
     def _verify_csrf(
         self,
-        scope: ASGIScope,
+        scope: Scope,
         session: VerifiedOwnerSession,
     ) -> bool:
         if self._session_codec is None:
@@ -172,7 +175,7 @@ class AuthenticationMiddleware:
         return True
 
 
-def get_authenticated_identity(scope: ASGIScope) -> AuthenticatedIdentity | None:
+def get_authenticated_identity(scope: Scope) -> AuthenticatedIdentity | None:
     """Return the identity installed by ingress middleware, if present."""
     state = scope.get("state")
     if not isinstance(state, dict):
@@ -181,7 +184,7 @@ def get_authenticated_identity(scope: ASGIScope) -> AuthenticatedIdentity | None
     return identity if isinstance(identity, AuthenticatedIdentity) else None
 
 
-def _single_header(scope: ASGIScope, lower_name: bytes) -> str | None:
+def _single_header(scope: Scope, lower_name: bytes) -> str | None:
     raw_headers = scope.get("headers")
     if not isinstance(raw_headers, list):
         return None
@@ -202,7 +205,7 @@ def _single_header(scope: ASGIScope, lower_name: bytes) -> str | None:
         return None
 
 
-def _bearer_token(scope: ASGIScope) -> str | None:
+def _bearer_token(scope: Scope) -> str | None:
     authorization = _single_header(scope, b"authorization")
     if authorization is None:
         return None
@@ -212,7 +215,7 @@ def _bearer_token(scope: ASGIScope) -> str | None:
     return token
 
 
-def _peer_host(scope: ASGIScope) -> str | None:
+def _peer_host(scope: Scope) -> str | None:
     client = scope.get("client")
     if not isinstance(client, tuple | list) or not client:
         return None
@@ -222,7 +225,7 @@ def _peer_host(scope: ASGIScope) -> str | None:
 
 async def _reject(
     scope_type: str,
-    send: ASGISend,
+    send: Send,
     *,
     status_code: int,
     detail: str,
@@ -238,6 +241,22 @@ async def _reject(
             "headers": [
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode("ascii")),
+                (b"cache-control", b"no-store"),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _redirect_to_login(send: Send) -> None:
+    body = b""
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 303,
+            "headers": [
+                (b"location", b"/auth/login"),
+                (b"content-length", b"0"),
                 (b"cache-control", b"no-store"),
             ],
         }

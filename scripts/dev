@@ -250,6 +250,16 @@ run_server() {
   cd "${REPO_ROOT}"
   export CONTAINER_DATA_ROOT="${DATA_ROOT}"
   export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
+  if [ -z "${ASSISTANTMD_AUTH_MODE:-}" ]; then
+    case "${address}" in
+      127.0.0.1|::1|localhost)
+        export ASSISTANTMD_AUTH_MODE="loopback"
+        ;;
+      *)
+        die "Set ASSISTANTMD_AUTH_MODE explicitly when development is not bound to loopback."
+        ;;
+    esac
+  fi
   local -a env_file_args=()
   if [ -f "${REPO_ROOT}/.env" ]; then
     env_file_args=(--env-file "${REPO_ROOT}/.env")
