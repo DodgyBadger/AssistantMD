@@ -121,7 +121,10 @@ the mode contracts and ingress limits.
 
 **Optional**
 - Change the host side (the left side) of `127.0.0.1:8000:8000` if you want to expose the UI on a different IP/port (e.g. `192.168.0.1:1234:8000`).
-- Change the `latest` tag in `image: ghcr.io/dodgybadger/assistantmd:latest` to lock a specific release. See the [repository](https://github.com/DodgyBadger/AssistantMD/tags) for all tags.
+- Set `ASSISTANTMD_IMAGE_TAG` in `.env` to lock both AssistantMD and its optional
+  companion to the same release. See the
+  [repository](https://github.com/DodgyBadger/AssistantMD/tags) for available
+  tags.
 
 
 ### Start the System
@@ -133,24 +136,69 @@ the mode contracts and ingress limits.
 ### Advanced shell infrastructure
 
 Advanced shell configuration is deployment-owned and read when AssistantMD
-starts. Restricted mode is the default. To select advanced mode, add the
-following to `.env` and restart AssistantMD:
+starts. Restricted mode is the default. The optional `advanced` Compose profile
+starts a version-matched companion on the private Compose network without
+publishing SSH to the host.
+
+Provision the AssistantMD client identity, pinned host record, and companion
+host identity once from the repository checkout:
+
+```bash
+scripts/provision_advanced_shell.sh
+```
+
+The client identity and pinned trust live under `system/advanced-shell/`. The
+companion host identity lives under `.advanced-shell/companion-keys/` and is not
+mounted into AssistantMD. Back up both locations with the deployment state.
+
+Then add the following to `.env`:
 
 ```dotenv
+COMPOSE_PROFILES=advanced
 ASSISTANTMD_EXECUTION_MODE=advanced
 ```
 
-For the persistent development companion, run the repository setup script from
-a Docker-capable host before restarting AssistantMD:
+Start or recreate the deployment:
+
+```bash
+docker compose up -d
+```
+
+The supplied service defaults normally require no additional endpoint settings:
+
+```dotenv
+ASSISTANTMD_SHELL_HOST=assistantmd-shell
+ASSISTANTMD_SHELL_PORT=2222
+ASSISTANTMD_SHELL_USER=assistantmd-shell
+```
+
+Set these only when an equivalent deployment uses a different service name,
+network alias, port, or user. AssistantMD owns its SSH client identity and
+pinned host record at fixed paths; those paths are not `.env` settings and must
+not be mounted into the companion.
+
+By default, the companion sees only its persistent home and workspace volumes.
+It does not see AssistantMD vaults. Optional bind-mount examples are provided in
+`docker-compose.override.yml.example`. Pre-create every selected host path and
+prefer read-only vault mounts. Never mount AssistantMD's `system/` directory,
+the Docker socket, a home directory, or a host root.
+
+Open System → Infrastructure after startup. Advanced mode is usable when the
+companion reports `ready`.
+
+#### Development from a containerized checkout
+
+For the persistent development companion used by contributors, run:
 
 ```bash
 scripts/start_advanced_shell_development.sh
 ```
 
-The script generates AssistantMD's client identity and pinned host record under
-`system/advanced-shell/`, keeps the companion host identity separately, starts
-the companion, and prints the `.env` values for the selected development
-endpoint.
+That harness builds from the checkout and publishes SSH to host loopback by
+default, which is correct when AssistantMD runs directly on that host. When
+AssistantMD itself runs in a development container, select a host address
+reachable from that container and deliberately publish the development port on
+the required host interfaces, for example:
 
 The development script binds SSH to host loopback by default, which is correct
 when AssistantMD runs directly on that host. When AssistantMD itself runs in a
@@ -165,24 +213,8 @@ scripts/start_advanced_shell_development.sh
 ```
 
 This development publication may expose the SSH port beyond the local host;
-restrict it with the host firewall and do not use it as the production topology.
-The supported production design uses a private Compose network without a
-published companion SSH port.
-
-The supplied companion deployment uses defaults that normally require no
-additional configuration:
-
-```dotenv
-ASSISTANTMD_SHELL_HOST=assistantmd-shell
-ASSISTANTMD_SHELL_PORT=2222
-ASSISTANTMD_SHELL_USER=assistantmd-shell
-```
-
-Set `ASSISTANTMD_SHELL_HOST` when the Compose service name, network alias, or
-resolvable hostname differs. System → Misc reports the effective mode and
-sanitized endpoint after restart. AssistantMD owns its SSH client identity and
-pinned host record at fixed paths under `system/advanced-shell/`; those paths
-are not `.env` settings and must not be mounted into the companion.
+restrict it with the host firewall and do not use it as the supported private
+Compose topology.
 
 Access the web interface at `http://localhost:8000/` (or whichever host IP/port
 you configured in the compose file). Open the **System** tab and configure at

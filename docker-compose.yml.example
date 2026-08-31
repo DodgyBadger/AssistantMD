@@ -3,7 +3,7 @@
 
 services:
   assistant:
-    image: ghcr.io/dodgybadger/assistantmd:latest
+    image: ghcr.io/dodgybadger/assistantmd:${ASSISTANTMD_IMAGE_TAG:-latest}
     container_name: assistantMD
     restart: unless-stopped
     init: true
@@ -39,11 +39,95 @@ services:
     # Security options
     security_opt:
       - no-new-privileges:true
-    
-#   # Health check
-#    healthcheck:
-#      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/api/health"]
-#      interval: 120s
-#      timeout: 10s
-#      retries: 3
-#      start_period: 40s
+
+    # Health check
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/api/health"]
+    #   interval: 120s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 40s
+
+  advanced-shell-key-init:
+    profiles: ["advanced"]
+    image: ghcr.io/dodgybadger/assistantmd-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        cp /source/client_identity.pub /target/assistantmd_shell_client.pub;
+        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
+        chmod 0700 /target;
+        chmod 0644 /target/assistantmd_shell_client.pub;
+        chmod 0600 /target/ssh_host_ed25519_key
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ./system/advanced-shell/client_identity.pub
+        target: /source/client_identity.pub
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.advanced-shell/companion-keys/ssh_host_ed25519_key
+        target: /source/ssh_host_ed25519_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: advanced_shell_runtime_keys
+        target: /target
+
+  assistantmd-shell:
+    profiles: ["advanced"]
+    image: ghcr.io/dodgybadger/assistantmd-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      advanced-shell-key-init:
+        condition: service_completed_successfully
+    networks:
+      default:
+        aliases:
+          - assistantmd-shell
+    volumes:
+      - type: volume
+        source: advanced_shell_runtime_keys
+        target: /run/assistantmd-shell
+        read_only: true
+      - type: volume
+        source: advanced_shell_workspace
+        target: /workspace
+      - type: volume
+        source: advanced_shell_home
+        target: /home/assistantmd-shell
+    read_only: true
+    tmpfs:
+      - /run/sshd:size=1m,mode=0755
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "sshd -t -f /etc/ssh/sshd_config"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  advanced_shell_home:
+  advanced_shell_runtime_keys:
+  advanced_shell_workspace:

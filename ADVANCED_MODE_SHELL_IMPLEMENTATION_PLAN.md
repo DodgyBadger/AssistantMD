@@ -9,7 +9,7 @@ checks and the real sibling-container smoke pass. The fixed-destination SSH
 boundary is feasible. The first product integration increment now validates the
 restart-bound execution mode and companion coordinates, owns fixed client trust
 paths below `system/advanced-shell/`, exposes a sanitized status projection, and
-renders the read-only System → Misc reporting block. Cached authenticated
+renders the read-only System → Infrastructure reporting block. Cached authenticated
 preflight now classifies missing identity/trust, SSH availability, DNS,
 connectivity, host-key mismatch, authentication failure, and readiness without
 returning raw SSH diagnostics. Primary interactive chat now acquires the shell
@@ -135,6 +135,15 @@ entry point. Before the root profile is supported, releases must publish a
 versioned companion image (rather than requiring an end user to build from a
 repository checkout), and the root example must pin an intentional image tag or
 digest consistent with the AssistantMD release.
+
+The root Compose example now implements this contract with an `advanced`
+profile, private-network companion, one-shot restricted key initializer, and
+persistent home/workspace/runtime-key volumes. The release workflow publishes a
+same-tag `assistantmd-shell` image, `.env` selects one image tag for both
+services, and the root provisioning script creates the two-sided SSH identity
+state without starting containers. The override example contains only explicit
+user-selected bind-mount examples. Publication from CI and a clean-host profile
+smoke remain required evidence.
 
 The documented setup flow should be:
 
@@ -988,8 +997,12 @@ elsewhere in this document about the experimental implementation.
   manifest digest. It installs the selected archive, Unix, `jq`, `ripgrep`, Git,
   curl, CA, SSH, and process tools, and exposes persistent-home-local npm and uv
   tool installation paths through the wrapper's minimal environment. The Docker
-  smoke asserts every baseline executable. A maintainer-run Docker build/smoke
-  result is still required before the feasibility label can be removed.
+  smoke asserts every baseline executable. The ARM64 disposable Docker smoke
+  passed the complete tooling, isolation, SSH restriction, exit-status, and
+  detached-process cleanup contract. The release workflow now builds the same
+  Dockerfile for AMD64 and ARM64, publishes it as the version-aligned
+  `assistantmd-shell` GHCR image, and attaches BuildKit SBOM and provenance
+  attestations. CI publication and an AMD64 pull/smoke remain release evidence.
 
 The experiment remains suitable for trusted exploratory use while these items
 are open. It must not be described as a hostile-code sandbox or production

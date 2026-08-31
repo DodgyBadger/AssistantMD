@@ -15,3 +15,19 @@ services:
     # Optional development-only bind mounts (not for regular use)
     # volumes:
     #  - .:/app
+
+  # The advanced profile defaults to isolated named volumes. Uncomment only
+  # the exact host paths the companion should be able to access.
+  # assistantmd-shell:
+  #   volumes:
+  #     - type: bind
+  #       source: /absolute/path/to/exchange
+  #       target: /exchange
+  #       bind:
+  #         create_host_path: false
+  #     - type: bind
+  #       source: /absolute/path/to/one/vault
+  #       target: /vaults/example
+  #       read_only: true
+  #       bind:
+  #         create_host_path: false

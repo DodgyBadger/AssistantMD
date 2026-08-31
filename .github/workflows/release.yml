@@ -66,3 +66,22 @@ jobs:
             -f docker/Dockerfile \
             "${TAG_ARGS[@]}" \
             .
+
+      - name: Build and push advanced shell companion image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}-shell
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          TAG_ARGS=(-t "${IMAGE_NAME}:${IMAGE_TAG}")
+          if [[ "${{ steps.tag_kind.outputs.publish_latest }}" == "true" ]]; then
+            TAG_ARGS+=(-t "${IMAGE_NAME}:latest")
+          fi
+
+          docker buildx build \
+            --push \
+            --platform linux/amd64,linux/arm64 \
+            --sbom=true \
+            --provenance=mode=max \
+            -f docker/advanced-shell/Dockerfile \
+            "${TAG_ARGS[@]}" \
+            .
