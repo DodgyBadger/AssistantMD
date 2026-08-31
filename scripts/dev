@@ -283,7 +283,7 @@ run_server() {
       case "${address}" in
         127.0.0.1|::1|localhost) ;;
         *)
-          die "The fixed development owner token may only be used on a loopback bind."
+          echo "WARNING: The fixed development owner token is publicly known and does not protect a reachable server." >&2
           ;;
       esac
       export ASSISTANTMD_AUTH_SECRET="${DEV_OWNER_TOKEN}"
