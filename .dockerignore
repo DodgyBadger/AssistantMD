@@ -13,6 +13,7 @@ docker/
 !docker/advanced-shell/**
 Dockerfile
 docker-compose.yml
+secrets/
 
 # Runtime data and generated artifacts
 data/

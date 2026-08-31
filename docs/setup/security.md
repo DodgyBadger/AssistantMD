@@ -7,17 +7,42 @@ AssistantMD is designed as a **single-user application** running on your local m
 
 ## Application Exposure
 
-**AssistantMD does not include built-in authentication, access control, or transport encryption.** The deployment model assumes you run the API and UI inside a trusted network.
+AssistantMD requires an explicit ingress-authentication mode:
 
-- **Local usage**: If you run the container on your own machine, the operating system and physical access controls are your security boundary. Anyone who can reach `http://localhost:8000` has full control over the API and chat UI.
-- **Remote access**: If you expose the service beyond your local machine, you must layer security yourself (for example, reverse proxy with TLS and authentication, VPN, or SSH tunnel). Without those controls, every endpoint — including secrets and settings updates — is exposed.
-- **Data in transit**: Requests are plain HTTP by default. Use a reverse proxy or tunnelling solution to terminate TLS if you need encrypted traffic.
+- `loopback` admits only an actual `127.0.0.1` or `::1` socket peer and provides
+  no login. Forwarded headers do not make another peer loopback.
+- `trusted_proxy` requires a secret assertion injected by an authenticating
+  reverse proxy. It reuses the proxy's human login rather than adding another.
+- `owner_token` provides a single-owner token exchange and signed HttpOnly
+  browser session. Use HTTPS for every non-loopback deployment.
+- `disabled` intentionally leaves the complete UI and API open to every
+  routable peer, including companion containers. It is intended for recovery
+  and deliberate testing and is not recommended for network-accessible use.
+
+The selected mode authenticates requests as the current single-user
+`local-user` principal. AssistantMD does not provide user registration,
+password recovery, roles, or transport encryption.
+
+For `trusted_proxy`, the proxy must remove any client-supplied assertion header
+before inserting its own value. Keep the shared assertion outside browser
+responses and outside the companion container. Configure a trusted immediate
+proxy network as defense in depth where the deployment has stable addressing.
+
+For `owner_token`, store the credential in a root-owned or Docker secret file.
+The browser session lasts up to 12 hours. Logout clears browser cookies but does
+not revoke a copied stateless session; rotate the owner token to invalidate all
+outstanding sessions.
+
+Application middleware rejects aggregate request headers over 64 KiB, but the
+HTTP server receives headers before application code runs. Reverse proxies must
+apply an equal or smaller header limit, authentication-failure rate limits, TLS,
+and appropriate request-body limits at ingress.
 
 For reverse-proxy deployments, configure `ASSISTANTMD_PUBLIC_URL` with the
 externally visible HTTPS origin. This lets AssistantMD construct exact OAuth
 callbacks without trusting request host or forwarded headers. It does not
-configure DNS, TLS, authentication, proxy routing, or access control; the proxy
-must still route the callback path and protect the application.
+configure DNS, TLS, authentication, or proxy routing; the proxy must still route
+the callback path and satisfy the configured authentication mode.
 
 Keep these constraints in mind before putting the application on a public interface.
 

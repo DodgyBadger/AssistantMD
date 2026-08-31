@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from core.authentication import AuthenticationMode
 from core.authoring.template_discovery import (
     list_templates,
 )
@@ -342,7 +343,11 @@ def collect_system_health() -> SystemInfo:
         )
 
 
-async def get_system_status(scheduler: Any | None = None) -> StatusResponse:
+async def get_system_status(
+    scheduler: Any | None = None,
+    *,
+    authentication_mode: AuthenticationMode = AuthenticationMode.DISABLED,
+) -> StatusResponse:
     """
     Collect comprehensive system status information from cached data.
 
@@ -427,6 +432,13 @@ async def get_system_status(scheduler: Any | None = None) -> StatusResponse:
             },
             configuration_errors=configuration_errors,
             configuration_status=configuration_status,
+            authentication_mode=authentication_mode,
+            authentication_warning=(
+                "Authentication is disabled. Every network peer that can reach "
+                "AssistantMD has full UI and API access."
+                if authentication_mode is AuthenticationMode.DISABLED
+                else None
+            ),
         )
 
         return status_response

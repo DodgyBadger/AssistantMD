@@ -170,3 +170,6 @@ scripts/advanced_shell_smoke.latest.log
 scripts/advanced_shell_tool_probe.latest.log
 scripts/advanced_shell_development.latest.log
 .advanced-shell/
+
+# Deployment-owned authentication secret files
+/secrets/

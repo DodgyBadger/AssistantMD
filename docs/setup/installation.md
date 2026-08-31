@@ -61,6 +61,47 @@ AssistantMD actually runs on a subdomain. Plain HTTP is accepted only for
 localhost and loopback development addresses. Existing local installations may
 leave this unset; browser callback origins are then inferred where supported.
 
+Choose one ingress-authentication mode in `docker-compose.yml`:
+
+```yaml
+environment:
+  - ASSISTANTMD_AUTH_MODE=loopback
+```
+
+Use `loopback` only when the published port is bound to `127.0.0.1` or `::1`.
+Use `disabled` for deliberately open recovery/testing deployments. The System
+tab displays a persistent warning because every routable peer receives full UI
+and API access.
+
+For built-in owner authentication, generate a high-entropy token into a file
+that is not committed:
+
+```bash
+mkdir -p secrets
+openssl rand -hex 32 > secrets/assistantmd-auth
+chmod 600 secrets/assistantmd-auth
+```
+
+Mount it read-only and select `owner_token`:
+
+```yaml
+services:
+  assistant:
+    environment:
+      - ASSISTANTMD_AUTH_MODE=owner_token
+      - ASSISTANTMD_AUTH_SECRET_FILE=/run/secrets/assistantmd-auth
+    volumes:
+      - ./secrets/assistantmd-auth:/run/secrets/assistantmd-auth:ro
+```
+
+For an existing authenticating reverse proxy, select `trusted_proxy` with the
+same secret-file mount, optionally add
+`ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS`, and have the proxy remove any inbound
+`X-AssistantMD-Proxy-Assertion` header before setting that header to the secret
+value on the upstream request. Do not mount the authentication secret into an
+advanced companion container. See [Security Considerations](security.md) for
+the mode contracts and ingress limits.
+
 ### Open `docker-compose.yml` and update the following:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your

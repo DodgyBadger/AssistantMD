@@ -1300,7 +1300,7 @@ function getConfigurationWarnings() {
     const status = state.systemStatus;
     if (!status || !status.configuration_status) return [];
     const issues = status.configuration_status.issues || [];
-    return issues.filter((issue) => {
+    const warnings = issues.filter((issue) => {
         const severity = (issue.severity || '').toLowerCase();
         if (severity !== 'warning' && severity !== 'error') {
             return false;
@@ -1311,6 +1311,14 @@ function getConfigurationWarnings() {
         }
         return true;
     });
+    if (status.authentication_warning) {
+        warnings.unshift({
+            name: 'authentication:disabled',
+            severity: 'warning',
+            message: status.authentication_warning
+        });
+    }
+    return warnings;
 }
 
 // Fetch metadata from API
@@ -2158,7 +2166,7 @@ function updateStatus(message) {
     } else {
         // Show warnings in banner and highlight tab with background
         configElements.statusBanner.classList.remove('hidden');
-        const noticeHtml = noticeLines.map(line => `<div>• ${line}</div>`).join('');
+        const noticeHtml = noticeLines.map(line => `<div>• ${escapeHtml(line)}</div>`).join('');
         let messageHtml = noticeHtml;
         if (repairNeeded) {
             messageHtml = `

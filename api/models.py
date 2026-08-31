@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from core.authentication import AuthenticationMode
+
 #######################################################################
 ## Request Models
 #######################################################################
@@ -512,6 +514,13 @@ class StatusResponse(BaseModel):
     configuration_status: ConfigurationStatusInfo = Field(
         default_factory=lambda: ConfigurationStatusInfo(default_model=None),
         description="Aggregated configuration health information",
+    )
+    authentication_mode: AuthenticationMode = Field(
+        ..., description="Effective deployment ingress authentication mode"
+    )
+    authentication_warning: str | None = Field(
+        None,
+        description="Sanitized operator warning for the effective authentication mode",
     )
 
 

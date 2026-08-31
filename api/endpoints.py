@@ -26,6 +26,7 @@ from api.import_models import (
     ImportUrlRequest,
     ImportUrlResponse,
 )
+from core.authentication import AuthenticationPolicy
 from core.chat.executor import UploadedImageAttachment
 from core.chat.task_events import ChatTaskEventCursorExpired
 from core.chat.task_execution import (
@@ -651,7 +652,7 @@ async def health_check() -> JSONResponse:
 
 
 @router.get("/status", response_model=StatusResponse)
-async def get_status() -> StatusResponse | JSONResponse:
+async def get_status(request: Request) -> StatusResponse | JSONResponse:
     """
     Get current system status including vault discovery, scheduler status, and system health.
 
@@ -670,7 +671,13 @@ async def get_status() -> StatusResponse | JSONResponse:
             pass  # Runtime context not available - status will show scheduler as stopped
 
         # Get comprehensive system status
-        status = await get_system_status(scheduler)
+        authentication_policy = request.app.state.authentication_policy
+        if not isinstance(authentication_policy, AuthenticationPolicy):
+            raise RuntimeError("Authentication policy is unavailable.")
+        status = await get_system_status(
+            scheduler,
+            authentication_mode=authentication_policy.mode,
+        )
         return status
 
     except Exception as e:
