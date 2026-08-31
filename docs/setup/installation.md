@@ -140,18 +140,7 @@ starts. Restricted mode is the default. The optional `advanced` Compose profile
 starts a version-matched companion on the private Compose network without
 publishing SSH to the host.
 
-Provision the AssistantMD client identity, pinned host record, and companion
-host identity once from the repository checkout:
-
-```bash
-scripts/provision_advanced_shell.sh
-```
-
-The client identity and pinned trust live under `system/advanced-shell/`. The
-companion host identity lives under `.advanced-shell/companion-keys/` and is not
-mounted into AssistantMD. Back up both locations with the deployment state.
-
-Then add the following to `.env`:
+Add the following to `.env`:
 
 ```dotenv
 COMPOSE_PROFILES=advanced
@@ -164,6 +153,13 @@ Start or recreate the deployment:
 docker compose up -d
 ```
 
+On first start, AssistantMD and the companion generate their own SSH identities
+and exchange only public keys through narrowly scoped Docker volumes. The keys
+are disposable deployment state: users do not need to generate, inspect, or
+back them up. Normal container recreation preserves them. Removing all four
+advanced-shell identity/public-key volumes and recreating both services creates
+a new pairing without affecting AssistantMD data or encrypted credentials.
+
 The supplied service defaults normally require no additional endpoint settings:
 
 ```dotenv
@@ -173,9 +169,8 @@ ASSISTANTMD_SHELL_USER=assistantmd-shell
 ```
 
 Set these only when an equivalent deployment uses a different service name,
-network alias, port, or user. AssistantMD owns its SSH client identity and
-pinned host record at fixed paths; those paths are not `.env` settings and must
-not be mounted into the companion.
+network alias, port, or user. Identity paths are fixed internal infrastructure,
+are not `.env` settings, and must not be shared between the two containers.
 
 By default, the companion sees only its persistent home and workspace volumes.
 It does not see AssistantMD vaults. Optional bind-mount examples are provided in

@@ -39,8 +39,16 @@ RUN groupadd --gid "${SHELL_GROUP_ID}" assistantmd-shell \
         --shell /bin/bash \
         assistantmd-shell \
     && passwd --delete assistantmd-shell \
-    && mkdir -p /run/sshd /workspace \
-    && chown assistantmd-shell:assistantmd-shell /workspace
+    && mkdir -p \
+        /run/sshd \
+        /run/assistantmd-shell/host-identity \
+        /run/assistantmd-shell/host-public \
+        /run/assistantmd-shell/client-public \
+        /workspace \
+    && chown assistantmd-shell:assistantmd-shell /workspace \
+    && chmod 1777 \
+        /run/assistantmd-shell/client-public \
+        /run/assistantmd-shell/host-public
 
 COPY docker/advanced-shell/sshd_config /etc/ssh/sshd_config
 COPY docker/advanced-shell/start-sshd.sh /usr/local/bin/start-assistantmd-shell

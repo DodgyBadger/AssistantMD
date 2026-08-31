@@ -1,6 +1,8 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -31,13 +33,15 @@ from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
 logger = UnifiedLogger(tag="main")
 app_settings = get_app_settings()
 advanced_shell_config = load_advanced_shell_config(app_settings)
+_shell_key_root_value = os.environ.get("ASSISTANTMD_SHELL_KEY_ROOT", "").strip()
+_shell_key_root = Path(_shell_key_root_value) if _shell_key_root_value else None
 advanced_shell_preflight = AdvancedShellPreflightService(
-    advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
+    advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT, key_root=_shell_key_root
 )
 advanced_shell_capability = AdvancedShellCapabilityService(
     advanced_shell_config,
     ShellTransportConfig.from_infrastructure(
-        advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
+        advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT, key_root=_shell_key_root
     ),
     advanced_shell_preflight,
 )

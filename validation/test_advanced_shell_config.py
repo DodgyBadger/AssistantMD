@@ -20,6 +20,7 @@ from core.advanced_shell.preflight import (
 from core.chat.instructions import primary_chat_instruction_layers
 from core.constants import ADVANCED_SHELL_FLIGHT_CARD
 from core.identity import ExecutionAuthority
+from core.runtime.paths import set_bootstrap_roots
 from core.settings import AppSettings
 from core.tools.advanced_shell import (
     AdvancedShell,
@@ -27,6 +28,9 @@ from core.tools.advanced_shell import (
     ShellTransportConfig,
 )
 from core.tools.base import ToolRecoveryPolicy, recovery_policy_from_tool_metadata
+
+_TEST_ROOT = Path("/tmp/assistantmd-advanced-shell-tests")
+set_bootstrap_roots(_TEST_ROOT / "data", _TEST_ROOT / "system")
 
 
 def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
@@ -167,6 +171,18 @@ def test_advanced_shell_state_paths_are_fixed_below_system_root() -> None:
     )
     assert transport.private_key_path == paths.client_identity
     assert transport.known_hosts_path == paths.known_hosts
+
+
+def test_container_transport_uses_deployment_owned_key_root() -> None:
+    config = load_advanced_shell_config(AppSettings())
+    key_root = Path("/run/assistantmd-shell/client-identity")
+
+    transport = ShellTransportConfig.from_infrastructure(
+        config, Path("/protected/system"), key_root=key_root
+    )
+
+    assert transport.private_key_path == key_root / "client_identity"
+    assert transport.known_hosts_path == key_root / "known_hosts"
 
 
 def test_status_projection_is_sanitized() -> None:

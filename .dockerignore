@@ -9,6 +9,7 @@ docker/
 !docker/requirements.txt
 !docker/pyproject.toml
 !docker/uv.lock
+!docker/bootstrap-advanced-shell-client.sh
 !docker/advanced-shell/
 !docker/advanced-shell/**
 Dockerfile

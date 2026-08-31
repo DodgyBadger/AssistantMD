@@ -2,24 +2,48 @@
 set -eu
 
 key_root=/run/assistantmd-shell
-public_key_path="${key_root}/assistantmd_shell_client.pub"
-host_key_path="${key_root}/ssh_host_ed25519_key"
+client_public_key_path="${key_root}/client-public/client_identity.pub"
+host_identity_root="${key_root}/host-identity"
+host_public_root="${key_root}/host-public"
+host_key_path="${host_identity_root}/ssh_host_ed25519_key"
+host_public_key_path="${host_public_root}/ssh_host_ed25519_key.pub"
 authorized_keys_path=/run/sshd/authorized_keys
 runtime_host_key_path=/run/sshd/ssh_host_ed25519_key
 
-if [ ! -s "${public_key_path}" ]; then
-    echo "Missing companion client public key: ${public_key_path}" >&2
-    exit 1
-fi
+mkdir -p /run/sshd "${host_identity_root}" "${host_public_root}"
+chmod 0700 "${host_identity_root}"
 
 if [ ! -s "${host_key_path}" ]; then
-    echo "Missing companion SSH host key: ${host_key_path}" >&2
+    ssh-keygen -q -t ed25519 -N '' -f "${host_key_path}"
+elif [ ! -s "${host_key_path}.pub" ]; then
+    ssh-keygen -y -f "${host_key_path}" > "${host_key_path}.pub"
+fi
+chmod 0600 "${host_key_path}"
+chmod 0644 "${host_key_path}.pub"
+
+derived_host_public=$(ssh-keygen -y -f "${host_key_path}")
+stored_host_public=$(sed -n '1p' "${host_key_path}.pub")
+[ "${derived_host_public}" = "${stored_host_public}" ] || {
+    echo "Companion host identity does not match its public key." >&2
+    exit 1
+}
+
+host_public_temp="${host_public_key_path}.tmp.$$"
+printf '%s\n' "${derived_host_public}" > "${host_public_temp}"
+chmod 0644 "${host_public_temp}"
+mv -f "${host_public_temp}" "${host_public_key_path}"
+
+attempts=0
+while [ ! -s "${client_public_key_path}" ] && [ "${attempts}" -lt 60 ]; do
+    attempts=$((attempts + 1))
+    sleep 1
+done
+if [ ! -s "${client_public_key_path}" ]; then
+    echo "Missing AssistantMD client public key: ${client_public_key_path}" >&2
     exit 1
 fi
 
-mkdir -p /run/sshd
-
-public_key=$(sed -n '1p' "${public_key_path}")
+public_key=$(sed -n '1p' "${client_public_key_path}")
 case "${public_key}" in
     ssh-ed25519\ *) ;;
     *)

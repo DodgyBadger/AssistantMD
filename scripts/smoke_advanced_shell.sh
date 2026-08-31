@@ -10,9 +10,6 @@ exec > >(tee -a "${smoke_log}") 2>&1
 echo "advanced-shell smoke log: ${smoke_log}"
 
 smoke_root=$(mktemp -d "${TMPDIR:-/tmp}/assistantmd-shell-smoke.XXXXXX")
-export ADVANCED_SHELL_SMOKE_KEY_ROOT="${smoke_root}/keys"
-mkdir -p "${ADVANCED_SHELL_SMOKE_KEY_ROOT}"
-
 compose() {
     docker compose -f "${compose_file}" "$@"
 }
@@ -41,34 +38,15 @@ fail() {
 
 command -v docker >/dev/null 2>&1 || fail "docker is unavailable"
 docker compose version >/dev/null 2>&1 || fail "docker compose is unavailable"
-command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is unavailable"
-
-ssh-keygen -q -t ed25519 -N '' \
-    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/assistantmd_shell_client"
-ssh-keygen -q -t ed25519 -N '' \
-    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/ssh_host_ed25519_key"
-ssh-keygen -y \
-    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/ssh_host_ed25519_key" \
-    | sed 's#^#[shell]:2222 #' \
-    > "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/known_hosts"
-# The disposable parent created by mktemp is private. Source keys must remain
-# readable through rootless/user-mapped bind mounts; each container copies the
-# private key it uses into tmpfs and restores mode 0600 there.
-chmod 0644 "${ADVANCED_SHELL_SMOKE_KEY_ROOT}"/*
-
 compose up -d --build --wait
-compose exec -T client sh -eu -c '
-    cp /run/assistantmd-shell/assistantmd_shell_client /tmp/client_key
-    chmod 0600 /tmp/client_key
-'
 
 ssh_options=(
     -F /dev/null
-    -i /tmp/client_key
+    -i /run/assistantmd-shell/client-identity/client_identity
     -o BatchMode=yes
     -o IdentitiesOnly=yes
     -o StrictHostKeyChecking=yes
-    -o UserKnownHostsFile=/run/assistantmd-shell/known_hosts
+    -o UserKnownHostsFile=/run/assistantmd-shell/client-identity/known_hosts
     -o ConnectTimeout=5
     -p 2222
 )
@@ -92,8 +70,7 @@ set -e
 
 run_ssh \
     "test ! -e /app/system && test ! -e /run/secrets && "\
-"test ! -e /run/assistantmd-shell/assistantmd_shell_client && "\
-"test ! -r /run/assistantmd-shell/ssh_host_ed25519_key && "\
+"test ! -r /run/assistantmd-shell/host-identity/ssh_host_ed25519_key && "\
 "touch /workspace/write-test"
 
 run_ssh \
@@ -131,15 +108,7 @@ if timeout 2 bash -c '
 fi
 BASH
 
-ssh-keygen -q -t ed25519 -N '' \
-    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client"
-chmod 0644 \
-    "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client" \
-    "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client.pub"
-compose exec -T client sh -eu -c '
-    cp /run/assistantmd-shell/unauthorized_client /tmp/unauthorized_client
-    chmod 0600 /tmp/unauthorized_client
-'
+compose exec -T client ssh-keygen -q -t ed25519 -N '' -f /tmp/unauthorized_client
 set +e
 compose exec -T client ssh \
     -F /dev/null \
@@ -147,7 +116,7 @@ compose exec -T client ssh \
     -o BatchMode=yes \
     -o IdentitiesOnly=yes \
     -o StrictHostKeyChecking=yes \
-    -o UserKnownHostsFile=/run/assistantmd-shell/known_hosts \
+    -o UserKnownHostsFile=/run/assistantmd-shell/client-identity/known_hosts \
     -o ConnectTimeout=5 \
     -p 2222 \
     assistantmd-shell@shell true >/dev/null 2>&1

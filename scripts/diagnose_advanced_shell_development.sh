@@ -11,17 +11,19 @@ else
     state_root="${repository_root}/system/advanced-shell"
 fi
 companion_key_root="${repository_root}/.advanced-shell/companion-keys"
+host_public_root="${repository_root}/.advanced-shell/companion-public"
 diagnostic_log="${repository_root}/scripts/advanced_shell_development.latest.log"
 
-export ADVANCED_SHELL_CLIENT_PUBLIC_KEY="${state_root}/client_identity.pub"
-export ADVANCED_SHELL_COMPANION_HOST_KEY="${companion_key_root}/ssh_host_ed25519_key"
+export ADVANCED_SHELL_CLIENT_PUBLIC_ROOT="${state_root}"
+export ADVANCED_SHELL_COMPANION_KEY_ROOT="${companion_key_root}"
+export ADVANCED_SHELL_HOST_PUBLIC_ROOT="${host_public_root}"
 exec > >(tee "${diagnostic_log}") 2>&1
 
 echo "compose state"
 docker compose -f "${compose_file}" ps --all
 
 echo "container health"
-for service in key-init shell; do
+for service in shell; do
     container_id=$(docker compose -f "${compose_file}" ps -a -q "${service}")
     if [[ -n ${container_id} ]]; then
         echo "${service}:"
@@ -30,7 +32,7 @@ for service in key-init shell; do
 done
 
 echo "service logs"
-docker compose -f "${compose_file}" logs --no-color key-init shell
+docker compose -f "${compose_file}" logs --no-color shell
 
 if [[ -n ${SUDO_UID:-} && -n ${SUDO_GID:-} ]]; then
     chown "${SUDO_UID}:${SUDO_GID}" "${diagnostic_log}" || true

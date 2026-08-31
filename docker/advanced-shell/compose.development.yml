@@ -1,47 +1,12 @@
 name: assistantmd-advanced-shell-dev
 
 services:
-  key-init:
-    build:
-      context: ../..
-      dockerfile: docker/advanced-shell/Dockerfile
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        set -eu;
-        cp /source/client_identity.pub /target/assistantmd_shell_client.pub;
-        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
-        chmod 0700 /target;
-        chmod 0644 /target/assistantmd_shell_client.pub;
-        chmod 0600 /target/ssh_host_ed25519_key
-    restart: "no"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - type: bind
-        source: ${ADVANCED_SHELL_CLIENT_PUBLIC_KEY:?set ADVANCED_SHELL_CLIENT_PUBLIC_KEY}
-        target: /source/client_identity.pub
-        read_only: true
-      - type: bind
-        source: ${ADVANCED_SHELL_COMPANION_HOST_KEY:?set ADVANCED_SHELL_COMPANION_HOST_KEY}
-        target: /source/ssh_host_ed25519_key
-        read_only: true
-      - type: volume
-        source: runtime_keys
-        target: /target
-
   shell:
     build:
       context: ../..
       dockerfile: docker/advanced-shell/Dockerfile
     init: true
     restart: unless-stopped
-    depends_on:
-      key-init:
-        condition: service_completed_successfully
     ports:
       - "${ADVANCED_SHELL_BIND_ADDRESS:-127.0.0.1}:${ADVANCED_SHELL_HOST_PORT:-22222}:2222"
     networks:
@@ -49,10 +14,9 @@ services:
         aliases:
           - assistantmd-shell
     volumes:
-      - type: volume
-        source: runtime_keys
-        target: /run/assistantmd-shell
-        read_only: true
+      - ${ADVANCED_SHELL_COMPANION_KEY_ROOT:?set ADVANCED_SHELL_COMPANION_KEY_ROOT}:/run/assistantmd-shell/host-identity
+      - ${ADVANCED_SHELL_HOST_PUBLIC_ROOT:?set ADVANCED_SHELL_HOST_PUBLIC_ROOT}:/run/assistantmd-shell/host-public
+      - ${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT:?set ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}:/run/assistantmd-shell/client-public:ro
       - type: volume
         source: workspace
         target: /workspace
@@ -83,4 +47,3 @@ services:
 volumes:
   workspace:
   home:
-  runtime_keys:

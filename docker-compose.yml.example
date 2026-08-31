@@ -12,6 +12,9 @@ services:
     volumes:
       - /absolute/path/to/your/vaults:/app/data   # Pre-create path on the left of the colon & ensure owned by your user
       - ./system:/app/system                      # Pre-create path on the left of the colon & ensure owned by your user
+      - advanced_shell_client_identity:/run/assistantmd-shell/client-identity
+      - advanced_shell_client_public:/run/assistantmd-shell/client-public
+      - advanced_shell_host_public:/run/assistantmd-shell/host-public:ro
     env_file:
       - path: .env
         required: false
@@ -19,6 +22,7 @@ services:
     environment:
       - TZ=UTC
       - API_PORT=8000
+      - ASSISTANTMD_SHELL_KEY_ROOT=/run/assistantmd-shell/client-identity
       # The host-loopback port is the boundary for this unprotected local example.
       - ASSISTANTMD_AUTH_MODE=disabled  # Use trusted_proxy or owner_token for authenticated ingress
     shm_size: "1gb"
@@ -48,57 +52,25 @@ services:
     #   retries: 3
     #   start_period: 40s
 
-  advanced-shell-key-init:
-    profiles: ["advanced"]
-    image: ghcr.io/dodgybadger/assistantmd-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        set -eu;
-        cp /source/client_identity.pub /target/assistantmd_shell_client.pub;
-        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
-        chmod 0700 /target;
-        chmod 0644 /target/assistantmd_shell_client.pub;
-        chmod 0600 /target/ssh_host_ed25519_key
-    restart: "no"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - type: bind
-        source: ./system/advanced-shell/client_identity.pub
-        target: /source/client_identity.pub
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./.advanced-shell/companion-keys/ssh_host_ed25519_key
-        target: /source/ssh_host_ed25519_key
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: volume
-        source: advanced_shell_runtime_keys
-        target: /target
-
   assistantmd-shell:
     profiles: ["advanced"]
     image: ghcr.io/dodgybadger/assistantmd-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
     init: true
     restart: unless-stopped
-    depends_on:
-      advanced-shell-key-init:
-        condition: service_completed_successfully
     networks:
       default:
         aliases:
           - assistantmd-shell
     volumes:
       - type: volume
-        source: advanced_shell_runtime_keys
-        target: /run/assistantmd-shell
+        source: advanced_shell_host_identity
+        target: /run/assistantmd-shell/host-identity
+      - type: volume
+        source: advanced_shell_host_public
+        target: /run/assistantmd-shell/host-public
+      - type: volume
+        source: advanced_shell_client_public
+        target: /run/assistantmd-shell/client-public
         read_only: true
       - type: volume
         source: advanced_shell_workspace
@@ -128,6 +100,9 @@ services:
       retries: 6
 
 volumes:
+  advanced_shell_client_identity:
+  advanced_shell_client_public:
   advanced_shell_home:
-  advanced_shell_runtime_keys:
+  advanced_shell_host_identity:
+  advanced_shell_host_public:
   advanced_shell_workspace:

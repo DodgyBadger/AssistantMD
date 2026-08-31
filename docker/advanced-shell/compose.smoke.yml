@@ -1,34 +1,6 @@
 name: assistantmd-advanced-shell-smoke
 
 services:
-  key-init:
-    build:
-      context: ../..
-      dockerfile: docker/advanced-shell/Dockerfile
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        set -eu;
-        cp /source/assistantmd_shell_client.pub /target/assistantmd_shell_client.pub;
-        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
-        chmod 0700 /target;
-        chmod 0644 /target/assistantmd_shell_client.pub;
-        chmod 0600 /target/ssh_host_ed25519_key
-    restart: "no"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - type: bind
-        source: ${ADVANCED_SHELL_SMOKE_KEY_ROOT:?set ADVANCED_SHELL_SMOKE_KEY_ROOT}
-        target: /source
-        read_only: true
-      - type: volume
-        source: runtime_keys
-        target: /target
-
   shell:
     build:
       context: ../..
@@ -37,14 +9,10 @@ services:
     restart: "no"
     networks:
       - private
-    depends_on:
-      key-init:
-        condition: service_completed_successfully
     volumes:
-      - type: volume
-        source: runtime_keys
-        target: /run/assistantmd-shell
-        read_only: true
+      - host_identity:/run/assistantmd-shell/host-identity
+      - host_public:/run/assistantmd-shell/host-public
+      - client_public:/run/assistantmd-shell/client-public:ro
       - type: volume
         source: workspace
         target: /workspace
@@ -77,11 +45,14 @@ services:
     restart: "no"
     networks:
       - private
+    environment:
+      ASSISTANTMD_EXECUTION_MODE: advanced
+      ASSISTANTMD_SHELL_HOST: shell
+      ASSISTANTMD_SHELL_PORT: 2222
     volumes:
-      - type: bind
-        source: ${ADVANCED_SHELL_SMOKE_KEY_ROOT:?set ADVANCED_SHELL_SMOKE_KEY_ROOT}
-        target: /run/assistantmd-shell
-        read_only: true
+      - client_identity:/run/assistantmd-shell/client-identity
+      - client_public:/run/assistantmd-shell/client-public
+      - host_public:/run/assistantmd-shell/host-public:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -89,14 +60,13 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    depends_on:
-      shell:
-        condition: service_healthy
-
 networks:
   private:
     internal: true
 
 volumes:
+  client_identity:
+  client_public:
+  host_identity:
+  host_public:
   workspace:
-  runtime_keys:

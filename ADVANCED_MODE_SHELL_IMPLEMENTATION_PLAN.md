@@ -8,7 +8,8 @@ wrapper, deterministic local probe, and isolated Docker smoke harness. Local
 checks and the real sibling-container smoke pass. The fixed-destination SSH
 boundary is feasible. The first product integration increment now validates the
 restart-bound execution mode and companion coordinates, owns fixed client trust
-paths below `system/advanced-shell/`, exposes a sanitized status projection, and
+paths below `system/advanced-shell/` for direct development and in a dedicated
+identity volume for Compose deployments, exposes a sanitized status projection, and
 renders the read-only System → Infrastructure reporting block. Cached authenticated
 preflight now classifies missing identity/trust, SSH availability, DNS,
 connectivity, host-key mismatch, authentication failure, and readiness without
@@ -36,6 +37,11 @@ byte/count metadata. Command text, stdin, stdout, and stderr are deliberately
 excluded. Normal and deferred primary-chat preparation share one deterministic
 instruction-layer composer, with coverage proving the advanced flight card is
 absent in restricted composition and present exactly once with shell.
+The supported Compose profile now performs automatic two-party SSH enrollment:
+each long-running container owns its private identity and publishes only its
+public key through a one-way volume. The superseded host provisioner and
+one-shot key initializer have been removed from the production, development,
+and smoke topologies.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller
@@ -114,8 +120,8 @@ containers.
 
 The supported companion must be discoverable from the root deployment surface,
 not presented to users as an experimental file under `docker/advanced-shell/`.
-The primary `docker-compose.yml.example` should contain real, validated optional
-companion and key-initializer services under an `advanced` Compose profile,
+The primary `docker-compose.yml.example` should contain a real, validated optional
+companion service under an `advanced` Compose profile,
 together with their named home/workspace/runtime-key volumes. Restricted users
 keep the profile inactive; advanced users enable it explicitly, for example with
 `docker compose --profile advanced up -d`, and set
@@ -136,26 +142,61 @@ versioned companion image (rather than requiring an end user to build from a
 repository checkout), and the root example must pin an intentional image tag or
 digest consistent with the AssistantMD release.
 
-The root Compose example now implements this contract with an `advanced`
-profile, private-network companion, one-shot restricted key initializer, and
-persistent home/workspace/runtime-key volumes. The release workflow publishes a
-same-tag `assistantmd-shell` image, `.env` selects one image tag for both
-services, and the root provisioning script creates the two-sided SSH identity
-state without starting containers. The override example contains only explicit
-user-selected bind-mount examples. Publication from CI and a clean-host profile
-smoke remain required evidence.
+The root Compose example implements this contract with an `advanced` profile,
+private-network companion, and separate persistent identity, public-key, home,
+and workspace volumes. The release workflow publishes a same-tag
+`assistantmd-shell` image, and `.env` selects one image tag for both services.
+The override example contains only explicit user-selected bind-mount examples.
+Publication from CI and a clean-host profile smoke remain required evidence.
 
-The documented setup flow should be:
+The supported flow is automatic two-party bootstrap by the existing
+long-running containers. These SSH identities are disposable deployment
+infrastructure, not user credentials or user data. Neither private key belongs
+in `system/`, `.env`, a host bind, or the user's required backup set.
+
+AssistantMD generates its client keypair in an AssistantMD-only named identity
+volume. The companion generates its host keypair in a companion-only named
+identity volume. Public material crosses through two one-way named volumes:
+AssistantMD writes the client public-key volume and the companion mounts it
+read-only; the companion writes the host public-key volume and AssistantMD
+mounts it read-only. No container receives the other side's private identity,
+and neither public writer shares a writable exchange volume with its consumer.
+AssistantMD derives its runtime `known_hosts` record from the enrolled host
+public key, and the companion derives `authorized_keys` from the enrolled client
+public key before SSH becomes ready.
+
+This removes the normal host script and one-shot initializer without allowing
+either long-running container to read the other side's private identity. The
+bootstrap protocol must use atomic writes, explicit ownership, bounded waits,
+and local private-to-public fingerprint verification. Normal restarts and image
+upgrades retain identities through named volumes. To reset a pairing, the
+operator removes the advanced-shell identity and public-key volumes and
+recreates both services together. Each side then generates a new identity and
+enrolls the public key from its read-only Docker volume. This rotation is safe
+within the chosen boundary because an actor able to replace those Docker
+volumes already has deployment authority. A network peer cannot change the
+enrollment volumes. Resetting all advanced-shell volumes therefore resets the
+companion cleanly without affecting AssistantMD's normal `system/` backup.
+
+An externally provisioned identity mode may also be supported for advanced
+operators. The operator creates both keypairs and supplies each service only its
+own private key plus the other service's public key. Prefer Compose secrets,
+secret-manager file mounts, or fixed deployment-owned files over multiline or
+base64 private-key values in `.env`. Environment-carried private keys are visible
+through container configuration/inspection surfaces, complicate quoting and
+rotation, and would be injected wholesale into AssistantMD by its existing
+`env_file` unless the services used separate explicit mappings. External
+provisioning is therefore an optional override and recovery path, not the
+default cross-platform setup.
+
+The resulting primary setup flow should be:
 
 1. copy the root Compose and `.env` examples;
-2. run one repository-supplied provisioning command that creates the client
-   identity, pinned host trust, and companion host identity in their owned
-   locations without making private keys broadly readable;
-3. optionally declare explicit read-only/read-write bind mounts;
-4. set advanced execution mode and any non-default service coordinates in
+2. optionally declare explicit read-only/read-write bind mounts;
+3. set the advanced Compose profile and execution mode in
    `.env`;
-5. start the `advanced` profile; and
-6. confirm `ready` in System → Infrastructure before opening an advanced chat.
+4. run the same `docker compose up -d` command used by restricted mode; and
+5. confirm `ready` in System → Infrastructure before opening an advanced chat.
 
 The design does not use:
 
@@ -277,17 +318,19 @@ not MCP/provider credentials.
 
 They must:
 
-- be generated or provisioned during advanced deployment setup;
-- keep the AssistantMD client identity and pinned `known_hosts` state at fixed
-  paths under `system/advanced-shell/` so the normal protected system backup
-  captures the client side of the trust relationship;
+- be generated automatically by their owning containers during advanced
+  deployment startup;
+- keep each private identity in a container-exclusive named volume and exchange
+  only public keys through one-way volumes;
+- keep the derived `known_hosts` state beside the AssistantMD client identity;
 - remain outside model context and the companion's general shell environment;
 - authorize only the fixed restricted SSH entrypoint;
 - never permit SSH forwarding or access to another host; and
 - be replaceable without changing AssistantMD MCP connection identities.
 
-The implementation must define a deterministic first-run provisioning flow and
-must fail closed on missing or changed host identity.
+The bootstrap must use atomic writes, bounded waits, and private-to-public key
+verification, and the transport must fail closed on missing or changed host
+identity.
 
 ## Credential Boundary
 
@@ -537,17 +580,18 @@ configuration loaded from `.env`, not persisted application settings:
 The companion hostname must not be permanently hard-coded. An operator may
 select another Compose service name, network alias, or resolvable hostname
 without editing application code. SSH identity and `known_hosts` paths are not
-public configuration knobs: AssistantMD owns predictable paths below
-`system/advanced-shell/`. None of these values are model arguments or
+public configuration knobs: Compose mounts the AssistantMD-owned client
+identity volume at a fixed internal path, while direct development retains its
+protected system-root path. None of these values are model arguments or
 chat-editable runtime inputs. Switching execution mode or coordinates requires
 an application restart; there is no second persisted acknowledgement or live UI
 toggle.
 
 The sanitized status API reports the effective execution mode, companion host,
 port, user, and cached authenticated readiness without exposing key paths,
-private-key material, or raw SSH diagnostics. System → Misc presents those
-values in one read-only
-**Advanced Shell** block. Its brief instruction says configuration is managed in
+private-key material, or raw SSH diagnostics. System → Infrastructure presents
+those values in one read-only block. Its brief instruction says configuration
+is managed in
 `.env`, requires a restart, and links to the repository installation
 instructions. Do not render disabled inputs or imply that the values can be
 unlocked and edited in-app. Settings validation and companion preflight
@@ -938,16 +982,12 @@ elsewhere in this document about the experimental implementation.
   not evidence for the production private-network contract. Setup must warn
   about the exposure, default to loopback, and remove host publication from the
   supported deployment.
-- The disposable smoke still makes generated private keys readable and mounts
-  the complete key directory into its containers. It must adopt the initializer
-  architecture and assert that the shell user cannot read or enumerate private
-  key material before it can validate the current design.
-- The development startup path makes the source host private key mode `0644` to
-  cross a rootless bind-mount mapping. Replace this with a provisioning mechanism
-  that does not require a world-readable host key, even temporarily.
-- Restart does not rerun key initialization. Define atomic client/host identity
-  provisioning, rotation, rollback, compromised-key recovery, and reconciliation
-  between source keys, runtime-key volume, and `known_hosts`.
+- The disposable smoke must validate the new two-party enrollment topology on a
+  Docker-capable host and continue asserting that the shell user cannot read
+  private key material.
+- Pairing reset and compromised-key recovery require removing all four pairing
+  volumes and recreating both services together; live independent rotation is
+  outside the initial contract.
 - The current health check runs only `sshd -t`. Supported readiness must perform
   pinned-host authentication and a harmless forced command, and separately
   report configuration-valid, listening, authenticated, workspace-writable, and
@@ -1027,8 +1067,8 @@ requires a maintainer-run result after its key topology changes:
   detached background children after normal command completion;
 - local probes cover `setsid` cancellation and detached background cleanup, and
   the Docker smoke now attempts a signal-resistant `setsid` escape;
-- the disposable smoke uses the root-only runtime-key initializer and asserts
-  that the shell cannot access client or host private key material; and
+- the disposable smoke asserts that the shell cannot access client or host
+  private key material; and
 - AssistantMD now owns authenticated readiness using its fixed client identity,
   pinned host key, and forced command; the development-only readiness sidecar is
   removed from the reconciled topology.
@@ -1036,8 +1076,7 @@ requires a maintainer-run result after its key topology changes:
 The rebuilt deployment passed all ten tool checks, authenticated readiness, a
 normal-completion detached-background probe, and a signal-resistant `setsid`
 timeout probe with subsequent PID absence. These changes do not resolve disk
-quotas, host-source key mode/rotation,
-supply-chain pinning, API authentication, or the remaining adversarial backlog.
+quotas, live independent key rotation, or the remaining adversarial backlog.
 Subreaper/process-tree cleanup is stronger than process-group cleanup but still
 needs independent review and live Docker evidence before it is treated as the
 final per-execution containment mechanism.
@@ -1068,7 +1107,7 @@ final per-execution containment mechanism.
 
 - Pin and minimize the companion image, produce an SBOM, and add image scanning
   and update/rebuild policy.
-- Finalize first-run SSH identity provisioning and rotation.
+- Validate first-run SSH identity enrollment and full-pair reset.
 - Harden `sshd_config`, `authorized_keys`, host-key verification, mounts,
   capabilities, resource limits, and network exposure.
 - Replace process-group-only cleanup with a complete per-execution containment

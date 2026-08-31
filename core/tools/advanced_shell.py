@@ -94,17 +94,31 @@ class ShellTransportConfig:
 
     @classmethod
     def from_infrastructure(
-        cls, config: AdvancedShellConfig, system_root: Path
+        cls,
+        config: AdvancedShellConfig,
+        system_root: Path,
+        *,
+        key_root: Path | None = None,
     ) -> ShellTransportConfig:
         """Build product transport settings from validated infrastructure state."""
         state_paths = config.state_paths(system_root)
+        private_key_path = (
+            key_root / "client_identity"
+            if key_root is not None
+            else state_paths.client_identity
+        )
+        known_hosts_path = (
+            key_root / "known_hosts"
+            if key_root is not None
+            else state_paths.known_hosts
+        )
         return cls(
             host=config.host,
             port=config.port,
             user=config.user,
             host_key_alias=config.host_key_alias,
-            private_key_path=state_paths.client_identity,
-            known_hosts_path=state_paths.known_hosts,
+            private_key_path=private_key_path,
+            known_hosts_path=known_hosts_path,
         )
 
     @classmethod

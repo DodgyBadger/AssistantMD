@@ -54,6 +54,7 @@ FROM python:3.13-slim as runtime
 RUN apt-get update && apt-get install -y \
     tzdata \
     curl \
+    openssh-client \
     ripgrep \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -128,8 +129,19 @@ COPY --chown=${USER_ID}:${GROUP_ID} . .
 # Copy compiled CSS from css-builder stage
 COPY --from=css-builder --chown=${USER_ID}:${GROUP_ID} /app/static/output.css /app/static/output.css
 
-# Create data directory for vaults (will be mounted) 
-RUN mkdir -p /app/data && chown ${USER_ID}:${GROUP_ID} /app/data
+# Create data and deployment-owned advanced-shell volume mount points.
+RUN mkdir -p \
+        /app/data \
+        /run/assistantmd-shell/client-identity \
+        /run/assistantmd-shell/client-public \
+        /run/assistantmd-shell/host-public \
+    && chown -R ${USER_ID}:${GROUP_ID} /app/data /run/assistantmd-shell
+RUN chmod 1777 \
+    /run/assistantmd-shell/client-public \
+    /run/assistantmd-shell/host-public
+
+COPY --chown=${USER_ID}:${GROUP_ID} docker/bootstrap-advanced-shell-client.sh /usr/local/bin/bootstrap-advanced-shell-client
+RUN chmod 0755 /usr/local/bin/bootstrap-advanced-shell-client
 
 # Avoid writing .pyc files and ensure instant logging
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -141,7 +153,7 @@ EXPOSE ${API_PORT}
 
 # Use system Python with uvicorn module
 USER appuser
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${API_PORT:-8000}"]
+CMD ["sh", "-c", "exec /usr/local/bin/bootstrap-advanced-shell-client python -m uvicorn main:app --host 0.0.0.0 --port ${API_PORT:-8000}"]
 
 #######################################################################
 ## Metadata for better container management

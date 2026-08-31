@@ -58,11 +58,14 @@ class AdvancedShellPreflightService:
         config: AdvancedShellConfig,
         system_root: Path,
         *,
+        key_root: Path | None = None,
         executor_factory: ExecutorFactory = FixedSshShellExecutor,
         cache_seconds: float = DEFAULT_PREFLIGHT_CACHE_SECONDS,
     ) -> None:
         self._config = config
-        self._transport = ShellTransportConfig.from_infrastructure(config, system_root)
+        self._transport = ShellTransportConfig.from_infrastructure(
+            config, system_root, key_root=key_root
+        )
         self._executor_factory = executor_factory
         self._cache_seconds = cache_seconds
         self._lock = asyncio.Lock()
