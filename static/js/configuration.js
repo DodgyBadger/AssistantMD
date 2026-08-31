@@ -2336,7 +2336,7 @@ async function saveModelRow(rowKey) {
     }
 
     function googleDraftRedirectUri() {
-        const publicUrl = document.getElementById('configured-public-url')?.value?.trim();
+        const publicUrl = document.getElementById('configured-public-url')?.textContent?.trim();
         if (!publicUrl || publicUrl === 'Loading…' || publicUrl === 'Not configured') return '';
         try {
             return new URL('/api/system/connections/google/oauth/callback', publicUrl).href;

@@ -104,9 +104,11 @@ const configElements = {
     statusMessages: document.getElementById('config-status-messages'),
     publicUrl: document.getElementById('configured-public-url'),
     advancedShellExecutionMode: document.getElementById('advanced-shell-execution-mode'),
-    advancedShellConfigurationState: document.getElementById('advanced-shell-configuration-state'),
-    advancedShellEndpoint: document.getElementById('advanced-shell-endpoint'),
+    advancedShellHost: document.getElementById('advanced-shell-host'),
+    advancedShellPort: document.getElementById('advanced-shell-port'),
     advancedShellUser: document.getElementById('advanced-shell-user'),
+    advancedShellCoordinates: document.querySelectorAll('[data-advanced-shell-coordinate]'),
+    advancedShellRestrictedNote: document.getElementById('advanced-shell-restricted-note'),
     configTab: document.getElementById('configuration-tab')
 };
 
@@ -1442,25 +1444,27 @@ async function fetchSystemStatus() {
         state.systemStatus = await response.json();
         const publicUrl = state.systemStatus?.system?.public_url || '';
         if (configElements.publicUrl) {
-            configElements.publicUrl.value = publicUrl || 'Not configured';
+            configElements.publicUrl.textContent = publicUrl || 'Not configured';
         }
         const advancedShell = state.systemStatus?.advanced_shell;
+        const advancedMode = advancedShell?.execution_mode === 'advanced';
         if (configElements.advancedShellExecutionMode) {
             configElements.advancedShellExecutionMode.textContent = advancedShell?.execution_mode || 'Unavailable';
         }
-        if (configElements.advancedShellConfigurationState) {
-            configElements.advancedShellConfigurationState.textContent = advancedShell?.configuration_state === 'configured'
-                ? 'Configured; readiness not yet checked'
-                : 'Inactive';
+        if (configElements.advancedShellHost) {
+            configElements.advancedShellHost.textContent = advancedShell?.host || 'Unavailable';
         }
-        if (configElements.advancedShellEndpoint) {
-            configElements.advancedShellEndpoint.textContent = advancedShell
-                ? `${advancedShell.host}:${advancedShell.port}`
-                : 'Unavailable';
+        if (configElements.advancedShellPort) {
+            configElements.advancedShellPort.textContent = advancedShell?.port ?? 'Unavailable';
         }
         if (configElements.advancedShellUser) {
             configElements.advancedShellUser.textContent = advancedShell?.user || 'Unavailable';
         }
+        configElements.advancedShellCoordinates.forEach((element) => {
+            element.classList.toggle('opacity-50', !advancedMode);
+            element.setAttribute('aria-disabled', advancedMode ? 'false' : 'true');
+        });
+        configElements.advancedShellRestrictedNote?.classList.toggle('hidden', advancedMode);
         const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
             ? state.systemStatus.configuration_status.default_model
             : null;
