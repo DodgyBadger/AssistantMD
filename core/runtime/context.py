@@ -12,6 +12,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from core.advanced_shell.capability import AdvancedShellCapabilityService
 from core.authoring.template_discovery import WorkflowLoader
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
@@ -89,6 +90,7 @@ class RuntimeContext:
     mcp_manager: MCPConnectionManager | None
     mcp_oauth: MCPOAuthCoordinator | None
     background_spawner: RuntimeBackgroundSpawner
+    advanced_shell: AdvancedShellCapabilityService | None
     boot_id: int
     started_at: datetime
     last_config_reload: datetime | None = None

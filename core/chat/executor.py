@@ -32,7 +32,7 @@ from core.chat.compaction import (
     maybe_auto_compact_after_turn,
 )
 from core.chat.run_recovery import ChatRunRecoveryCoordinator
-from core.constants import REGULAR_CHAT_INSTRUCTIONS
+from core.constants import ADVANCED_SHELL_FLIGHT_CARD, REGULAR_CHAT_INSTRUCTIONS
 from core.identity import ExecutionAuthority, require_current_execution_authority
 from core.llm.agents import create_agent
 from core.llm.capabilities.factory import build_chat_capabilities
@@ -148,11 +148,12 @@ class PreparedChatExecution:
     mcp_snapshot: MCPReadinessSnapshot | None = None
     mcp_unavailable: tuple[MCPUnavailableConnection, ...] = ()
     has_mcp_tools: bool = False
+    has_advanced_shell: bool = False
 
     @property
     def has_effective_tools(self) -> bool:
         """Return whether this run exposes built-in or MCP tools."""
-        return bool(self.tools) or self.has_mcp_tools
+        return bool(self.tools) or self.has_mcp_tools or self.has_advanced_shell
 
     async def close(self) -> None:
         """Release execution-scoped MCP catalog leases."""
@@ -983,6 +984,9 @@ async def _prepare_chat_execution(
         vault_path=vault_path,
     )
     mcp_chat = await _acquire_chat_mcp_capabilities()
+    advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
+    if advanced_shell_tool is not None:
+        tool_functions.append(advanced_shell_tool)
     capabilities = build_chat_capabilities(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -1010,6 +1014,8 @@ async def _prepare_chat_execution(
         for inst in [base_instructions, tool_instructions]:
             if inst:
                 agent.instructions(inst)
+        if advanced_shell_tool is not None:
+            agent.instructions(lambda: ADVANCED_SHELL_FLIGHT_CARD)
         if mcp_chat is not None and (
             unavailable_note := mcp_unavailable_instruction(mcp_chat.unavailable)
         ):
@@ -1041,6 +1047,7 @@ async def _prepare_chat_execution(
             mcp_snapshot=mcp_chat.snapshot if mcp_chat is not None else None,
             mcp_unavailable=mcp_chat.unavailable if mcp_chat is not None else (),
             has_mcp_tools=mcp_chat.has_tools if mcp_chat is not None else False,
+            has_advanced_shell=advanced_shell_tool is not None,
         )
     except BaseException:
         if mcp_chat is not None:
@@ -1075,6 +1082,9 @@ async def _prepare_deferred_review_resume_execution(
     )
 
     mcp_chat = await _acquire_chat_mcp_capabilities()
+    advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
+    if advanced_shell_tool is not None:
+        tool_functions.append(advanced_shell_tool)
     capabilities = build_chat_capabilities(
         vault_name=vault_name,
         vault_path=vault_path,
@@ -1102,6 +1112,8 @@ async def _prepare_deferred_review_resume_execution(
         for inst in [base_instructions, tool_instructions]:
             if inst:
                 agent.instructions(inst)
+        if advanced_shell_tool is not None:
+            agent.instructions(lambda: ADVANCED_SHELL_FLIGHT_CARD)
         if mcp_chat is not None and (
             unavailable_note := mcp_unavailable_instruction(mcp_chat.unavailable)
         ):
@@ -1124,6 +1136,7 @@ async def _prepare_deferred_review_resume_execution(
             mcp_snapshot=mcp_chat.snapshot if mcp_chat is not None else None,
             mcp_unavailable=mcp_chat.unavailable if mcp_chat is not None else (),
             has_mcp_tools=mcp_chat.has_tools if mcp_chat is not None else False,
+            has_advanced_shell=advanced_shell_tool is not None,
         )
     except BaseException:
         if mcp_chat is not None:
@@ -1142,6 +1155,16 @@ async def _acquire_chat_mcp_capabilities() -> MCPChatCapabilities | None:
         manager=manager,
         authority=require_current_execution_authority(),
     )
+
+
+async def _acquire_primary_chat_advanced_shell_tool() -> Any | None:
+    """Resolve the deployment shell only within an owned primary chat run."""
+    if not has_runtime_context():
+        return None
+    service = get_runtime_context().advanced_shell
+    if service is None:
+        return None
+    return await service.resolve_for_primary_chat(require_current_execution_authority())
 
 
 def _prepare_agent_config(

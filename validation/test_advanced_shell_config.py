@@ -11,13 +11,17 @@ from core.advanced_shell import (
     ExecutionMode,
     load_advanced_shell_config,
 )
+from core.advanced_shell.capability import AdvancedShellCapabilityService
 from core.advanced_shell.preflight import (
     AdvancedShellPreflightService,
     AdvancedShellPreflightSnapshot,
     AdvancedShellReadiness,
 )
+from core.constants import ADVANCED_SHELL_FLIGHT_CARD
+from core.identity import ExecutionAuthority
 from core.settings import AppSettings
 from core.tools.advanced_shell import ShellExecutionResult, ShellTransportConfig
+from core.tools.base import ToolRecoveryPolicy, recovery_policy_from_tool_metadata
 
 
 def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
@@ -29,6 +33,29 @@ def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
     assert config.port == 2222
     assert config.user == "assistantmd-shell"
     assert config.host_key_alias is None
+
+
+def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> None:
+    instruction = ADVANCED_SHELL_FLIGHT_CARD
+
+    for required in (
+        "code_execution",
+        "delegate",
+        "Delegates do not receive shell",
+        "official AssistantMD MCP connection",
+        "inspect the working directory and exact target",
+        "separate persistent companion",
+    ):
+        assert required in instruction
+    for prohibited in (
+        "owner token",
+        "private key",
+        "known_hosts",
+        "ASSISTANTMD_SHELL_HOST",
+    ):
+        assert prohibited not in instruction
+
+    assert Path("docs/tools/shell.md").is_file()
 
 
 def test_advanced_shell_coordinates_are_environment_owned() -> None:
@@ -176,6 +203,87 @@ async def test_successful_preflight_is_authenticated_and_cached(tmp_path: Path) 
     assert first.state is AdvancedShellReadiness.READY
     assert second == first
     assert executor.calls == 1
+
+
+class _FakePreflight:
+    def __init__(self, state: AdvancedShellReadiness) -> None:
+        self.state = state
+        self.calls = 0
+
+    async def status(self) -> AdvancedShellPreflightSnapshot:
+        self.calls += 1
+        return AdvancedShellPreflightSnapshot(self.state, "sanitized")
+
+
+@pytest.mark.asyncio
+async def test_primary_chat_shell_requires_advanced_ready_companion(
+    tmp_path: Path,
+) -> None:
+    config = _advanced_config()
+    preflight = _FakePreflight(AdvancedShellReadiness.READY)
+    service = AdvancedShellCapabilityService(
+        config,
+        ShellTransportConfig.from_infrastructure(config, tmp_path),
+        preflight,
+    )
+
+    tool = await service.resolve_for_primary_chat(ExecutionAuthority("local-user"))
+
+    assert tool is not None
+    assert tool.name == "shell"
+    assert (
+        recovery_policy_from_tool_metadata(tool.metadata)
+        is ToolRecoveryPolicy.MANUAL_REQUIRED
+    )
+    assert preflight.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_primary_chat_shell_is_omitted_when_unavailable(tmp_path: Path) -> None:
+    config = _advanced_config()
+    preflight = _FakePreflight(AdvancedShellReadiness.CONNECTION_FAILURE)
+    service = AdvancedShellCapabilityService(
+        config,
+        ShellTransportConfig.from_infrastructure(config, tmp_path),
+        preflight,
+    )
+
+    tool = await service.resolve_for_primary_chat(ExecutionAuthority("local-user"))
+
+    assert tool is None
+    assert preflight.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_restricted_shell_resolution_skips_preflight(tmp_path: Path) -> None:
+    config = load_advanced_shell_config(AppSettings())
+    preflight = _FakePreflight(AdvancedShellReadiness.READY)
+    service = AdvancedShellCapabilityService(
+        config,
+        ShellTransportConfig.from_infrastructure(config, tmp_path),
+        preflight,
+    )
+
+    tool = await service.resolve_for_primary_chat(ExecutionAuthority("local-user"))
+
+    assert tool is None
+    assert preflight.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_shell_resolution_denies_unmapped_principal(tmp_path: Path) -> None:
+    config = _advanced_config()
+    preflight = _FakePreflight(AdvancedShellReadiness.READY)
+    service = AdvancedShellCapabilityService(
+        config,
+        ShellTransportConfig.from_infrastructure(config, tmp_path),
+        preflight,
+    )
+
+    tool = await service.resolve_for_primary_chat(ExecutionAuthority("system"))
+
+    assert tool is None
+    assert preflight.calls == 0
 
 
 @pytest.mark.asyncio

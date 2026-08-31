@@ -12,11 +12,21 @@ paths below `system/advanced-shell/`, exposes a sanitized status projection, and
 renders the read-only System → Misc reporting block. Cached authenticated
 preflight now classifies missing identity/trust, SSH availability, DNS,
 connectivity, host-key mismatch, authentication failure, and readiness without
-returning raw SSH diagnostics. Shell capability composition and command
-execution from chat have not started. The rebuilt persistent Docker companion
-passes the reconciled topology: a direct pinned-key probe returned zero, the
-AssistantMD status API reported authenticated `ready`, and a second status call
-returned the cached ready state.
+returning raw SSH diagnostics. Primary interactive chat now acquires the shell
+through a runtime-owned, authority-aware capability service only when advanced
+mode is active, the fixed companion is ready, and the task belongs to the
+initial `local-user` tenancy. Other principals fail closed without probing the
+companion. Workflows, schedulers, helpers, and delegates do not use this primary
+chat composition path. Successfully composed shell runs receive one separate
+advanced-shell flight-card layer that distinguishes direct tools,
+`code_execution`, delegates, shell, and official MCP connections, and explains
+the companion filesystem and bounded-execution contract. The rebuilt persistent
+Docker companion passes the reconciled topology: a direct pinned-key probe
+returned zero, the AssistantMD status API reported authenticated `ready`, and a
+second status call returned the cached ready state. A real advanced primary chat
+then acquired `shell`, executed `printf assistantmd-shell-live-ok` in the
+companion, reported exit code zero and the exact stdout through normal task
+events, and completed the model turn successfully.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller
@@ -1174,8 +1184,9 @@ and protocol work but not for declaring the deployment boundary validated.
 
 ## Next Phase
 
-Continue Slice 2 by composing the shell capability only for advanced
-interactive primary chats and injecting the flight-card extension exactly once.
+Continue Slice 2 by adding deterministic composition coverage for the complete
+agent instruction stack, then integrate command activity and cancellation with
+the existing task surface.
 Exercise live connection-failure and host-key-mismatch status transitions during
 the next Docker-backed adversarial pass without mutating the working pinned
 identity. Keep stdio MCP transport work in Slice 3 after the general shell

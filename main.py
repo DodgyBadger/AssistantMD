@@ -18,17 +18,29 @@ set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 from api.application import create_application  # noqa: E402
 from api.services import set_system_startup_time  # noqa: E402
 from core.advanced_shell import load_advanced_shell_config  # noqa: E402
+from core.advanced_shell.capability import AdvancedShellCapabilityService  # noqa: E402
 from core.advanced_shell.preflight import AdvancedShellPreflightService  # noqa: E402
 from core.authentication import load_authentication_policy  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
 from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
 from core.runtime.config import RuntimeConfig  # noqa: E402
 from core.settings import get_app_settings  # noqa: E402
+from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
 
 # Create main logger
 logger = UnifiedLogger(tag="main")
 app_settings = get_app_settings()
 advanced_shell_config = load_advanced_shell_config(app_settings)
+advanced_shell_preflight = AdvancedShellPreflightService(
+    advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
+)
+advanced_shell_capability = AdvancedShellCapabilityService(
+    advanced_shell_config,
+    ShellTransportConfig.from_infrastructure(
+        advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
+    ),
+    advanced_shell_preflight,
+)
 
 
 # Run in development
@@ -54,7 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Bootstrap runtime services
-    runtime = await bootstrap_runtime(config)
+    runtime = await bootstrap_runtime(config, advanced_shell=advanced_shell_capability)
 
     # Store runtime context in app state for API access
     app.state.runtime = runtime
@@ -77,9 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = create_application(
     authentication_policy=load_authentication_policy(app_settings),
     advanced_shell_config=advanced_shell_config,
-    advanced_shell_preflight=AdvancedShellPreflightService(
-        advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
-    ),
+    advanced_shell_preflight=advanced_shell_preflight,
     lifespan=lifespan,
 )
 

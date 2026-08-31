@@ -14,7 +14,12 @@ from pydantic_ai.tools import Tool
 
 from core.advanced_shell.config import AdvancedShellConfig
 
-from .base import BaseTool, ToolRecoveryPolicy
+from .base import (
+    ASSISTANTMD_TOOL_METADATA_KEY,
+    BaseTool,
+    ToolRecoveryPolicy,
+    tool_recovery_metadata,
+)
 
 
 class ShellTransportError(RuntimeError):
@@ -369,6 +374,12 @@ class AdvancedShell(BaseTool):
         del vault_path
         executor = FixedSshShellExecutor(ShellTransportConfig.from_environment())
 
+        return cls.for_executor(executor)
+
+    @classmethod
+    def for_executor(cls, executor: FixedSshShellExecutor) -> Tool:
+        """Build the product tool around deployment-owned transport."""
+
         async def shell(
             *, command: str, stdin: str = "", timeout_seconds: float = 120.0
         ) -> ToolReturn:
@@ -409,6 +420,11 @@ class AdvancedShell(BaseTool):
                 "Execute a noninteractive shell command in AssistantMD's persistent "
                 "companion container. The destination and SSH transport are fixed."
             ),
+            metadata={
+                ASSISTANTMD_TOOL_METADATA_KEY: tool_recovery_metadata(
+                    cls.get_recovery_policy()
+                )
+            },
         )
 
 

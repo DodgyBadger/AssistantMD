@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from core.advanced_shell.capability import AdvancedShellCapabilityService
 from core.authoring.template_discovery import WorkflowLoader, seed_system_templates
 from core.chat.chat_store import ChatStore
 from core.chat.session_access import ChatSessionAccessService
@@ -55,7 +56,11 @@ from .task_runner import ExecutionTaskRunner
 from .workflow_governor import WorkflowGovernor
 
 
-async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
+async def bootstrap_runtime(
+    config: RuntimeConfig,
+    *,
+    advanced_shell: AdvancedShellCapabilityService | None = None,
+) -> RuntimeContext:
     """
     Bootstrap AssistantMD runtime with centralized service initialization.
 
@@ -335,6 +340,7 @@ async def bootstrap_runtime(config: RuntimeConfig) -> RuntimeContext:
             mcp_manager=mcp_manager,
             mcp_oauth=mcp_oauth,
             background_spawner=background_spawner,
+            advanced_shell=advanced_shell,
             boot_id=boot_id,
             started_at=started_at,
             background_tasks=background_tasks,
