@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from html import escape
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -19,6 +20,7 @@ from core.authentication import (
 router = APIRouter(prefix="/auth", tags=["AssistantMD authentication"])
 _COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60
 _MAXIMUM_SESSION_EXCHANGE_BYTES = 8192
+_COOKIE_EXPIRY_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -73,15 +75,21 @@ async def delete_owner_session(request: Request) -> JSONResponse:
     """Clear both browser session cookies after middleware CSRF verification."""
     response = JSONResponse({"authenticated": False})
     secure = _secure_cookie(request)
-    response.delete_cookie(
+    response.set_cookie(
         OWNER_SESSION_COOKIE,
+        "",
+        max_age=0,
+        expires=_COOKIE_EXPIRY_EPOCH,
         path="/",
         secure=secure,
         httponly=True,
         samesite="lax",
     )
-    response.delete_cookie(
+    response.set_cookie(
         OWNER_CSRF_COOKIE,
+        "",
+        max_age=0,
+        expires=_COOKIE_EXPIRY_EPOCH,
         path="/",
         secure=secure,
         httponly=False,
