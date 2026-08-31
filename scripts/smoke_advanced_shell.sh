@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+compose_file="${repository_root}/docker/advanced-shell/compose.smoke.yml"
+smoke_log="${repository_root}/scripts/advanced_shell_smoke.latest.log"
+rm -f -- "${smoke_log}"
+touch "${smoke_log}"
+exec > >(tee -a "${smoke_log}") 2>&1
+echo "advanced-shell smoke log: ${smoke_log}"
+
+smoke_root=$(mktemp -d "${TMPDIR:-/tmp}/assistantmd-shell-smoke.XXXXXX")
+export ADVANCED_SHELL_SMOKE_KEY_ROOT="${smoke_root}/keys"
+mkdir -p "${ADVANCED_SHELL_SMOKE_KEY_ROOT}"
+
+compose() {
+    docker compose -f "${compose_file}" "$@"
+}
+
+cleanup() {
+    local status=$?
+    if [[ ${status} -ne 0 ]]; then
+        echo "advanced-shell smoke container state:" >&2
+        compose ps --all >&2 || true
+        echo "advanced-shell smoke service logs:" >&2
+        compose logs --no-color >&2 || true
+    fi
+    compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+    rm -rf -- "${smoke_root}"
+    if [[ -n ${SUDO_UID:-} && -n ${SUDO_GID:-} ]]; then
+        chown "${SUDO_UID}:${SUDO_GID}" "${smoke_log}" || true
+    fi
+    return "${status}"
+}
+trap cleanup EXIT
+
+fail() {
+    echo "advanced-shell smoke failed: $*" >&2
+    exit 1
+}
+
+command -v docker >/dev/null 2>&1 || fail "docker is unavailable"
+docker compose version >/dev/null 2>&1 || fail "docker compose is unavailable"
+command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is unavailable"
+
+ssh-keygen -q -t ed25519 -N '' \
+    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/assistantmd_shell_client"
+ssh-keygen -q -t ed25519 -N '' \
+    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/ssh_host_ed25519_key"
+ssh-keygen -y \
+    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/ssh_host_ed25519_key" \
+    | sed 's#^#[shell]:2222 #' \
+    > "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/known_hosts"
+# The disposable parent created by mktemp is private. Source keys must remain
+# readable through rootless/user-mapped bind mounts; each container copies the
+# private key it uses into tmpfs and restores mode 0600 there.
+chmod 0644 "${ADVANCED_SHELL_SMOKE_KEY_ROOT}"/*
+
+compose up -d --build --wait
+compose exec -T client sh -eu -c '
+    cp /run/assistantmd-shell/assistantmd_shell_client /tmp/client_key
+    chmod 0600 /tmp/client_key
+'
+
+ssh_options=(
+    -F /dev/null
+    -i /tmp/client_key
+    -o BatchMode=yes
+    -o IdentitiesOnly=yes
+    -o StrictHostKeyChecking=yes
+    -o UserKnownHostsFile=/run/assistantmd-shell/known_hosts
+    -o ConnectTimeout=5
+    -p 2222
+)
+run_ssh() {
+    compose exec -T client bash -c \
+        'tail -f /dev/null | ssh "$@"' \
+        -- "${ssh_options[@]}" assistantmd-shell@shell "$@"
+}
+
+stdout_path="${smoke_root}/stdout"
+stderr_path="${smoke_root}/stderr"
+set +e
+run_ssh \
+    "printf stdout-value; printf stderr-value >&2; exit 7" \
+    >"${stdout_path}" 2>"${stderr_path}"
+command_status=$?
+set -e
+[[ ${command_status} -eq 7 ]] || fail "remote exit status was ${command_status}"
+[[ $(<"${stdout_path}") == "stdout-value" ]] || fail "stdout was not preserved"
+[[ $(<"${stderr_path}") == "stderr-value" ]] || fail "stderr was not preserved"
+
+run_ssh \
+    "test ! -e /app/system && test ! -e /run/secrets && "\
+"test ! -e /run/assistantmd-shell/assistantmd_shell_client && "\
+"test ! -r /run/assistantmd-shell/ssh_host_ed25519_key && "\
+"touch /workspace/write-test"
+
+set +e
+compose exec -T client bash -c \
+    'tail -f /dev/null | ssh "$@"' \
+    -- "${ssh_options[@]}" -tt assistantmd-shell@shell true >/dev/null 2>&1
+pty_status=$?
+set -e
+[[ ${pty_status} -ne 0 ]] || fail "PTY allocation unexpectedly succeeded"
+
+compose exec -T client bash -s -- "${ssh_options[@]}" <<'BASH'
+set -euo pipefail
+tail -f /dev/null | ssh "$@" \
+    -L 127.0.0.1:19999:shell:2222 \
+    assistantmd-shell@shell "sleep 5" >/tmp/forward.out 2>/tmp/forward.err &
+forward_pid=$!
+cleanup_forward() {
+    kill "${forward_pid}" >/dev/null 2>&1 || true
+    wait "${forward_pid}" >/dev/null 2>&1 || true
+}
+trap cleanup_forward EXIT
+sleep 1
+if timeout 2 bash -c '
+    exec 3<>/dev/tcp/127.0.0.1/19999
+    IFS= read -r banner <&3
+    [[ ${banner} == SSH-* ]]
+'; then
+    echo "forwarded channel reached the companion SSH service" >&2
+    exit 1
+fi
+BASH
+
+ssh-keygen -q -t ed25519 -N '' \
+    -f "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client"
+chmod 0644 \
+    "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client" \
+    "${ADVANCED_SHELL_SMOKE_KEY_ROOT}/unauthorized_client.pub"
+compose exec -T client sh -eu -c '
+    cp /run/assistantmd-shell/unauthorized_client /tmp/unauthorized_client
+    chmod 0600 /tmp/unauthorized_client
+'
+set +e
+compose exec -T client ssh \
+    -F /dev/null \
+    -i /tmp/unauthorized_client \
+    -o BatchMode=yes \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile=/run/assistantmd-shell/known_hosts \
+    -o ConnectTimeout=5 \
+    -p 2222 \
+    assistantmd-shell@shell true >/dev/null 2>&1
+unauthorized_status=$?
+set -e
+[[ ${unauthorized_status} -ne 0 ]] || fail "unauthorized SSH key succeeded"
+
+set +e
+compose exec -T client timeout 2 bash -c \
+    'tail -f /dev/null | ssh "$@"' \
+    -- "${ssh_options[@]}" assistantmd-shell@shell \
+    "python -c 'import os, signal, time; child=os.fork(); os.setsid() if child == 0 else None; open(\"/workspace/stubborn.pid\", \"w\").write(str(os.getpid())) if child == 0 else None; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGHUP, signal.SIG_IGN); time.sleep(300)'" \
+    >/dev/null 2>&1
+set -e
+sleep 4
+run_ssh \
+    "pid=\$(cat /workspace/stubborn.pid); ! kill -0 \"\${pid}\" 2>/dev/null"
+
+shell_container_id=$(compose ps -q shell)
+published_ports=$(
+    docker inspect --format \
+        '{{range $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' \
+        "${shell_container_id}"
+)
+[[ -z ${published_ports} ]] || fail "companion SSH port is published"
+
+echo "advanced shell Docker smoke passed"

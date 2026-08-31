@@ -1,0 +1,102 @@
+name: assistantmd-advanced-shell-smoke
+
+services:
+  key-init:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        cp /source/assistantmd_shell_client.pub /target/assistantmd_shell_client.pub;
+        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
+        chmod 0700 /target;
+        chmod 0644 /target/assistantmd_shell_client.pub;
+        chmod 0600 /target/ssh_host_ed25519_key
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${ADVANCED_SHELL_SMOKE_KEY_ROOT:?set ADVANCED_SHELL_SMOKE_KEY_ROOT}
+        target: /source
+        read_only: true
+      - type: volume
+        source: runtime_keys
+        target: /target
+
+  shell:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/Dockerfile
+    init: true
+    restart: "no"
+    networks:
+      - private
+    depends_on:
+      key-init:
+        condition: service_completed_successfully
+    volumes:
+      - type: volume
+        source: runtime_keys
+        target: /run/assistantmd-shell
+        read_only: true
+      - type: volume
+        source: workspace
+        target: /workspace
+    read_only: true
+    tmpfs:
+      - /run/sshd:size=1m,mode=0755
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "sshd -t -f /etc/ssh/sshd_config"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  client:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/smoke-client.Dockerfile
+    init: true
+    restart: "no"
+    networks:
+      - private
+    volumes:
+      - type: bind
+        source: ${ADVANCED_SHELL_SMOKE_KEY_ROOT:?set ADVANCED_SHELL_SMOKE_KEY_ROOT}
+        target: /run/assistantmd-shell
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      shell:
+        condition: service_healthy
+
+networks:
+  private:
+    internal: true
+
+volumes:
+  workspace:
+  runtime_keys:

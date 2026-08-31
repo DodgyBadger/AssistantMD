@@ -1,0 +1,117 @@
+name: assistantmd-advanced-shell-dev
+
+services:
+  key-init:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        cp /source/assistantmd_shell_client.pub /target/assistantmd_shell_client.pub;
+        cp /source/ssh_host_ed25519_key /target/ssh_host_ed25519_key;
+        chmod 0700 /target;
+        chmod 0644 /target/assistantmd_shell_client.pub;
+        chmod 0600 /target/ssh_host_ed25519_key
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${ADVANCED_SHELL_KEY_ROOT:?set ADVANCED_SHELL_KEY_ROOT}
+        target: /source
+        read_only: true
+      - type: volume
+        source: runtime_keys
+        target: /target
+
+  shell:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/Dockerfile
+    init: true
+    restart: unless-stopped
+    depends_on:
+      key-init:
+        condition: service_completed_successfully
+    ports:
+      - "${ADVANCED_SHELL_BIND_ADDRESS:-127.0.0.1}:${ADVANCED_SHELL_HOST_PORT:-22222}:2222"
+    volumes:
+      - type: volume
+        source: runtime_keys
+        target: /run/assistantmd-shell
+        read_only: true
+      - type: volume
+        source: workspace
+        target: /workspace
+      - type: volume
+        source: home
+        target: /home/assistantmd-shell
+    read_only: true
+    tmpfs:
+      - /run/sshd:size=1m,mode=0755
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "sshd -t -f /etc/ssh/sshd_config"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  readiness:
+    build:
+      context: ../..
+      dockerfile: docker/advanced-shell/smoke-client.Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        cp /run/assistantmd-shell/assistantmd_shell_readiness_client /tmp/client_key;
+        chmod 0600 /tmp/client_key;
+        exec tail -f /dev/null
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${ADVANCED_SHELL_KEY_ROOT:?set ADVANCED_SHELL_KEY_ROOT}
+        target: /run/assistantmd-shell
+        read_only: true
+    depends_on:
+      shell:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          sleep 1 | ssh -F /dev/null -T -i /tmp/client_key
+          -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile=/run/assistantmd-shell/known_hosts
+          -o ConnectTimeout=3 -p 2222 assistantmd-shell@shell true
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  workspace:
+  home:
+  runtime_keys:
