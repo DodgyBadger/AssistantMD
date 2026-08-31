@@ -31,8 +31,9 @@ from core.chat.chat_store import ChatStore
 from core.chat.compaction import (
     maybe_auto_compact_after_turn,
 )
+from core.chat.instructions import constant_instruction, primary_chat_instruction_layers
 from core.chat.run_recovery import ChatRunRecoveryCoordinator
-from core.constants import ADVANCED_SHELL_FLIGHT_CARD, REGULAR_CHAT_INSTRUCTIONS
+from core.constants import REGULAR_CHAT_INSTRUCTIONS
 from core.identity import ExecutionAuthority, require_current_execution_authority
 from core.llm.agents import create_agent
 from core.llm.capabilities.factory import build_chat_capabilities
@@ -1011,11 +1012,12 @@ async def _prepare_chat_execution(
             output_type=[str, DeferredToolRequests],
             capabilities=capabilities,
         )
-        for inst in [base_instructions, tool_instructions]:
-            if inst:
-                agent.instructions(inst)
-        if advanced_shell_tool is not None:
-            agent.instructions(lambda: ADVANCED_SHELL_FLIGHT_CARD)
+        for instruction in primary_chat_instruction_layers(
+            base_instructions=base_instructions,
+            tool_instructions=tool_instructions,
+            has_advanced_shell=advanced_shell_tool is not None,
+        ):
+            agent.instructions(constant_instruction(instruction))
         if mcp_chat is not None and (
             unavailable_note := mcp_unavailable_instruction(mcp_chat.unavailable)
         ):
@@ -1109,11 +1111,12 @@ async def _prepare_deferred_review_resume_execution(
             output_type=[str, DeferredToolRequests],
             capabilities=capabilities,
         )
-        for inst in [base_instructions, tool_instructions]:
-            if inst:
-                agent.instructions(inst)
-        if advanced_shell_tool is not None:
-            agent.instructions(lambda: ADVANCED_SHELL_FLIGHT_CARD)
+        for instruction in primary_chat_instruction_layers(
+            base_instructions=base_instructions,
+            tool_instructions=tool_instructions,
+            has_advanced_shell=advanced_shell_tool is not None,
+        ):
+            agent.instructions(constant_instruction(instruction))
         if mcp_chat is not None and (
             unavailable_note := mcp_unavailable_instruction(mcp_chat.unavailable)
         ):

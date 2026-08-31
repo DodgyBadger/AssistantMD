@@ -8,11 +8,14 @@ import signal
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
 from core.advanced_shell.config import AdvancedShellConfig
+from core.logger import UnifiedLogger
+from core.runtime.execution_tasks import get_current_execution_task
 
 from .base import (
     ASSISTANTMD_TOOL_METADATA_KEY,
@@ -20,6 +23,8 @@ from .base import (
     ToolRecoveryPolicy,
     tool_recovery_metadata,
 )
+
+logger = UnifiedLogger(tag="advanced-shell-tool")
 
 
 class ShellTransportError(RuntimeError):
@@ -134,6 +139,20 @@ class ShellExecutionResult:
     exit_code: int | None
     status: str
     output_bytes: int
+
+
+class ShellExecutor(Protocol):
+    """Execution boundary used by the model-facing shell tool."""
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        stdin: str = "",
+        timeout_seconds: float | None = None,
+    ) -> ShellExecutionResult:
+        """Execute one command through deployment-owned transport."""
+        ...
 
 
 class FixedSshShellExecutor:
@@ -377,7 +396,7 @@ class AdvancedShell(BaseTool):
         return cls.for_executor(executor)
 
     @classmethod
-    def for_executor(cls, executor: FixedSshShellExecutor) -> Tool:
+    def for_executor(cls, executor: ShellExecutor) -> Tool:
         """Build the product tool around deployment-owned transport."""
 
         async def shell(
@@ -389,11 +408,52 @@ class AdvancedShell(BaseTool):
             :param stdin: Optional text made available on standard input.
             :param timeout_seconds: Runtime limit, capped by the deployment maximum.
             """
+            started_at = time.monotonic()
+            task = get_current_execution_task()
+            task_data = {
+                "task_id": task.task_id if task is not None else None,
+                "session_id": (
+                    task.metadata.get("session_id") if task is not None else None
+                ),
+                "principal_id": task.principal_id if task is not None else None,
+            }
+            logger.info(
+                "Advanced shell command started",
+                data={
+                    "event": "advanced_shell_command_started",
+                    "status": "running",
+                    **task_data,
+                    "command_chars": len(command),
+                    "stdin_bytes": len(stdin.encode()),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
             try:
                 result = await executor.execute(
                     command, stdin=stdin, timeout_seconds=timeout_seconds
                 )
+            except asyncio.CancelledError:
+                logger.warning(
+                    "Advanced shell command cancelled",
+                    data={
+                        "event": "advanced_shell_command_cancelled",
+                        "status": "cancelled",
+                        **task_data,
+                        "duration_seconds": round(time.monotonic() - started_at, 3),
+                    },
+                )
+                raise
             except (ShellTransportError, ValueError, OSError) as exc:
+                logger.warning(
+                    "Advanced shell command failed",
+                    data={
+                        "event": "advanced_shell_command_failed",
+                        "status": "failed",
+                        **task_data,
+                        "error_type": type(exc).__name__,
+                        "duration_seconds": round(time.monotonic() - started_at, 3),
+                    },
+                )
                 return ToolReturn(
                     return_value=f"shell failed: {exc}",
                     metadata={
@@ -402,6 +462,17 @@ class AdvancedShell(BaseTool):
                         "error_type": type(exc).__name__,
                     },
                 )
+            logger.info(
+                "Advanced shell command completed",
+                data={
+                    "event": "advanced_shell_command_completed",
+                    "status": result.status,
+                    **task_data,
+                    "exit_code": result.exit_code,
+                    "output_bytes": result.output_bytes,
+                    "duration_seconds": round(time.monotonic() - started_at, 3),
+                },
+            )
             rendered = _render_result(result)
             return ToolReturn(
                 return_value=rendered,

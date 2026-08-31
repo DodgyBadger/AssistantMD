@@ -29,7 +29,13 @@ companion, reported exit code zero and the exact stdout through normal task
 events, and completed the model turn successfully. Application startup now names
 the restricted or advanced execution mode in the operator-visible stream and
 records a structured `application_startup_completed` activity event with
-`execution_mode` and `advanced_shell_enabled`.
+`execution_mode` and `advanced_shell_enabled`. Shell calls now emit bounded
+activity lifecycle events for start, completion, failure, and cancellation with
+task/session/principal identity when available, duration, status, exit code, and
+byte/count metadata. Command text, stdin, stdout, and stderr are deliberately
+excluded. Normal and deferred primary-chat preparation share one deterministic
+instruction-layer composer, with coverage proving the advanced flight card is
+absent in restricted composition and present exactly once with shell.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller
@@ -103,6 +109,44 @@ Docker host
 The companion is enabled through an advanced Compose profile or equivalent
 deployment selection. The AssistantMD UI does not create, start, or destroy
 containers.
+
+### Supported repository and Compose presentation
+
+The supported companion must be discoverable from the root deployment surface,
+not presented to users as an experimental file under `docker/advanced-shell/`.
+The primary `docker-compose.yml.example` should contain real, validated optional
+companion and key-initializer services under an `advanced` Compose profile,
+together with their named home/workspace/runtime-key volumes. Restricted users
+keep the profile inactive; advanced users enable it explicitly, for example with
+`docker compose --profile advanced up -d`, and set
+`ASSISTANTMD_EXECUTION_MODE=advanced` in `.env`.
+
+Do not put the supported deployment behind a large commented block in
+`docker-compose.override.yml.example`. That override currently means “build
+AssistantMD from this checkout and align its UID/GID”; advanced mode is an
+optional runtime topology, not a local-build override. Commented YAML is also
+not exercised by Compose validation and tends to drift. The override may include
+small commented examples for user-selected companion bind mounts after the
+profile exists, but it should not own the services themselves.
+
+The current `docker/advanced-shell/compose.development.yml` and
+`compose.smoke.yml` remain contributor harnesses. They are not the production
+entry point. Before the root profile is supported, releases must publish a
+versioned companion image (rather than requiring an end user to build from a
+repository checkout), and the root example must pin an intentional image tag or
+digest consistent with the AssistantMD release.
+
+The documented setup flow should be:
+
+1. copy the root Compose and `.env` examples;
+2. run one repository-supplied provisioning command that creates the client
+   identity, pinned host trust, and companion host identity in their owned
+   locations without making private keys broadly readable;
+3. optionally declare explicit read-only/read-write bind mounts;
+4. set advanced execution mode and any non-default service coordinates in
+   `.env`;
+5. start the `advanced` profile; and
+6. confirm `ready` in System → Infrastructure before opening an advanced chat.
 
 The design does not use:
 
@@ -1158,7 +1202,9 @@ and protocol work but not for declaring the deployment boundary validated.
 - If multiuser support is implemented, whether deployment policy selects
   principal-specific Linux users in one companion or one companion container per
   principal.
-- Companion base image and initially included runtimes.
+- Exact pinned companion base image, Node LTS line, and package versions within
+  the already selected Python/uv, Node/npm, Unix/archive, `jq`, `ripgrep`, Git,
+  curl, CA, and process-inspection baseline.
 - Forced-command request encoding and safe working-directory representation.
 - Whether the first shell tool supports stdin after launch or only command-time
   input.
@@ -1187,9 +1233,12 @@ and protocol work but not for declaring the deployment boundary validated.
 
 ## Next Phase
 
-Continue Slice 2 by adding deterministic composition coverage for the complete
-agent instruction stack, then integrate command activity and cancellation with
-the existing task surface.
+Continue Slice 2 with end-to-end cancellation, timeout, output-limit, and
+failure-event validation through a real chat task. Then promote the feasibility
+image toward the documented Linux tooling baseline
+and add the optional `advanced` profile to the root Compose example using a
+published, version-aligned companion image contract. Keep the development and
+smoke Compose files under `docker/advanced-shell/` as contributor harnesses.
 Exercise live connection-failure and host-key-mismatch status transitions during
 the next Docker-backed adversarial pass without mutating the working pinned
 identity. Keep stdio MCP transport work in Slice 3 after the general shell

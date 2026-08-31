@@ -17,10 +17,15 @@ from core.advanced_shell.preflight import (
     AdvancedShellPreflightSnapshot,
     AdvancedShellReadiness,
 )
+from core.chat.instructions import primary_chat_instruction_layers
 from core.constants import ADVANCED_SHELL_FLIGHT_CARD
 from core.identity import ExecutionAuthority
 from core.settings import AppSettings
-from core.tools.advanced_shell import ShellExecutionResult, ShellTransportConfig
+from core.tools.advanced_shell import (
+    AdvancedShell,
+    ShellExecutionResult,
+    ShellTransportConfig,
+)
 from core.tools.base import ToolRecoveryPolicy, recovery_policy_from_tool_metadata
 
 
@@ -56,6 +61,77 @@ def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> 
         assert prohibited not in instruction
 
     assert Path("docs/tools/shell.md").is_file()
+
+
+def test_primary_chat_instruction_layers_gate_advanced_shell_exactly_once() -> None:
+    restricted = primary_chat_instruction_layers(
+        base_instructions="base",
+        tool_instructions="tools",
+        has_advanced_shell=False,
+    )
+    advanced = primary_chat_instruction_layers(
+        base_instructions="base",
+        tool_instructions="tools",
+        has_advanced_shell=True,
+    )
+
+    assert restricted == ("base", "tools")
+    assert advanced == ("base", "tools", ADVANCED_SHELL_FLIGHT_CARD)
+    assert advanced.count(ADVANCED_SHELL_FLIGHT_CARD) == 1
+
+
+class _RecordingLogger:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def info(self, message: str, *, data: dict[str, Any]) -> None:
+        del message
+        self.events.append(data)
+
+    def warning(self, message: str, *, data: dict[str, Any]) -> None:
+        del message
+        self.events.append(data)
+
+
+@pytest.mark.asyncio
+async def test_shell_activity_is_bounded_and_omits_command_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import core.tools.advanced_shell as shell_module
+
+    class _Executor:
+        async def execute(
+            self,
+            command: str,
+            *,
+            stdin: str = "",
+            timeout_seconds: float | None = None,
+        ) -> ShellExecutionResult:
+            assert command == "sensitive command text"
+            assert stdin == "private input"
+            assert timeout_seconds == 10
+            return ShellExecutionResult("ok", "", 0, "completed", 2)
+
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(shell_module, "logger", recording_logger)
+    tool = AdvancedShell.for_executor(_Executor())
+
+    await tool.function(
+        command="sensitive command text",
+        stdin="private input",
+        timeout_seconds=10,
+    )
+
+    assert [event["event"] for event in recording_logger.events] == [
+        "advanced_shell_command_started",
+        "advanced_shell_command_completed",
+    ]
+    assert recording_logger.events[0]["command_chars"] == 22
+    assert recording_logger.events[0]["stdin_bytes"] == 13
+    assert recording_logger.events[1]["exit_code"] == 0
+    assert recording_logger.events[1]["output_bytes"] == 2
+    assert "sensitive command text" not in str(recording_logger.events)
+    assert "private input" not in str(recording_logger.events)
 
 
 def test_advanced_shell_coordinates_are_environment_owned() -> None:
