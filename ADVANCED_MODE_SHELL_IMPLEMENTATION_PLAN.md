@@ -202,6 +202,9 @@ not MCP/provider credentials.
 They must:
 
 - be generated or provisioned during advanced deployment setup;
+- keep the AssistantMD client identity and pinned `known_hosts` state at fixed
+  paths under `system/advanced-shell/` so the normal protected system backup
+  captures the client side of the trust relationship;
 - remain outside model context and the companion's general shell environment;
 - authorize only the fixed restricted SSH entrypoint;
 - never permit SSH forwarding or access to another host; and
@@ -445,23 +448,38 @@ AssistantMD credential. A server-generated execution ID may cross the transport
 for correlation and containment, but it must be opaque, non-authorizing, and
 bound locally to the owning task/session/principal.
 
-When advanced-mode settings are integrated into AssistantMD, the companion SSH
-hostname must be an explicit infrastructure setting rather than a permanently
-hard-coded container name. The default may match the supplied Compose service
-name, but an operator must be able to select another Compose service name,
-network alias, or resolvable hostname without editing application code. Port,
-SSH user, host-key alias, and deployment-owned key paths belong to the same
-server-owned transport configuration surface where appropriate. These values
-must never be model arguments or chat-editable runtime inputs.
+Advanced mode and its companion coordinates are restart-bound infrastructure
+configuration loaded from `.env`, not persisted application settings:
 
-The System UI and sanitized settings API should show the effective companion
-hostname and port for diagnosis without exposing private-key material. Settings
-validation and companion preflight must distinguish invalid configuration,
-DNS/connectivity failure, and host-key/authentication failure. Deterministic
-tests must prove that a non-default hostname reaches the configured adapter and
-that model/tool input cannot override it. Deployment instructions should prefer
-the Compose service name or an explicit network alias over `container_name`,
-because Compose service discovery is the intended reachability contract.
+- `ASSISTANTMD_EXECUTION_MODE=restricted|advanced`, defaulting to `restricted`;
+- `ASSISTANTMD_SHELL_HOST`, defaulting to the supplied Compose service name;
+- `ASSISTANTMD_SHELL_PORT`, defaulting to `2222`;
+- `ASSISTANTMD_SHELL_USER`, defaulting to the supplied companion account; and
+- optional `ASSISTANTMD_SHELL_HOST_KEY_ALIAS` for unusual forwarding or network
+  alias arrangements, otherwise derived from the effective host and port.
+
+The companion hostname must not be permanently hard-coded. An operator may
+select another Compose service name, network alias, or resolvable hostname
+without editing application code. SSH identity and `known_hosts` paths are not
+public configuration knobs: AssistantMD owns predictable paths below
+`system/advanced-shell/`. None of these values are model arguments or
+chat-editable runtime inputs. Switching execution mode or coordinates requires
+an application restart; there is no second persisted acknowledgement or live UI
+toggle.
+
+The sanitized status API reports the effective execution mode, companion host,
+port, user, and readiness state without exposing key paths or private-key
+material. System → Misc presents those values in one read-only **Advanced
+Shell** block. Its brief instruction says configuration is managed in `.env`,
+requires a restart, and links to the repository installation instructions. Do
+not render disabled inputs or imply that the values can be unlocked and edited
+in-app. Settings validation and companion preflight distinguish invalid
+configuration, DNS/connectivity failure, and host-key/authentication failure.
+Deterministic tests prove that a non-default hostname reaches the configured
+adapter and that model/tool input cannot override it. Deployment instructions
+prefer the Compose service name or an explicit network alias over
+`container_name`, because Compose service discovery is the intended
+reachability contract.
 
 Shell calls and their durable records must carry the locally captured
 `principal_id`, `task_id`, `session_id`, and execution ID where applicable.
@@ -1116,8 +1134,6 @@ and protocol work but not for declaring the deployment boundary validated.
 - If multiuser support is implemented, whether deployment policy selects
   principal-specific Linux users in one companion or one companion container per
   principal.
-- Exact setting name and whether deployment configuration alone or both
-  deployment and persisted System acknowledgement activate advanced mode.
 - Companion base image and initially included runtimes.
 - Forced-command request encoding and safe working-directory representation.
 - Whether the first shell tool supports stdin after launch or only command-time
