@@ -7,6 +7,7 @@ VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
 RUNTIME_ROOT="${ASSISTANTMD_DEV_RUNTIME_ROOT:-${REPO_ROOT}}"
 DATA_ROOT="${CONTAINER_DATA_ROOT:-${RUNTIME_ROOT}/data}"
 SYSTEM_ROOT="${CONTAINER_SYSTEM_ROOT:-${RUNTIME_ROOT}/system}"
+DEV_OWNER_TOKEN="assistantmd-development-owner-token-not-for-production"
 
 usage() {
   cat <<'EOF'
@@ -24,6 +25,7 @@ Run options:
   -p, --port <port>       Listen on this port (default: 8000)
   -a, --address <address> Listen on this address (default: 127.0.0.1)
       --public            Listen on 0.0.0.0; shorthand for --address 0.0.0.0
+      --auth-mode <mode>  Authentication: loopback, disabled, owner_token, or trusted_proxy
   -h, --help              Show run-specific help
   --                       Pass remaining arguments to Uvicorn
 
@@ -33,6 +35,7 @@ Environment:
   CONTAINER_SYSTEM_ROOT        Override the development system-state root
   ASSISTANTMD_DEV_HOST         Development server host (default: 127.0.0.1)
   ASSISTANTMD_DEV_PORT         Development server port (default: 8000)
+  ASSISTANTMD_AUTH_MODE        Default mode when --auth-mode is omitted
 EOF
 }
 
@@ -205,6 +208,8 @@ run_server() {
   local address="${ASSISTANTMD_DEV_HOST:-127.0.0.1}"
   local address_option_set=false
   local port="${ASSISTANTMD_DEV_PORT:-8000}"
+  local auth_mode="${ASSISTANTMD_AUTH_MODE:-}"
+  local auth_mode_option_set=false
   local -a uvicorn_args=()
 
   while [ "$#" -gt 0 ]; do
@@ -228,6 +233,13 @@ run_server() {
         address_option_set=true
         shift
         ;;
+      --auth-mode)
+        [ "$#" -ge 2 ] || die "$1 requires an authentication mode."
+        [ "${auth_mode_option_set}" = false ] || die "Specify --auth-mode only once."
+        auth_mode="$2"
+        auth_mode_option_set=true
+        shift 2
+        ;;
       -h|--help)
         usage
         return
@@ -250,15 +262,45 @@ run_server() {
   cd "${REPO_ROOT}"
   export CONTAINER_DATA_ROOT="${DATA_ROOT}"
   export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
-  if [ -z "${ASSISTANTMD_AUTH_MODE:-}" ]; then
+  if [ -z "${auth_mode}" ]; then
     case "${address}" in
       127.0.0.1|::1|localhost)
-        export ASSISTANTMD_AUTH_MODE="loopback"
+        auth_mode="loopback"
         ;;
       *)
-        die "Set ASSISTANTMD_AUTH_MODE explicitly when development is not bound to loopback."
+        die "Use --auth-mode when development is not bound to loopback."
         ;;
     esac
+  fi
+  case "${auth_mode}" in
+    disabled|loopback)
+      if [ "${auth_mode_option_set}" = true ]; then
+        unset ASSISTANTMD_AUTH_SECRET ASSISTANTMD_AUTH_SECRET_FILE
+        unset ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS
+      fi
+      ;;
+    owner_token)
+      case "${address}" in
+        127.0.0.1|::1|localhost) ;;
+        *)
+          die "The fixed development owner token may only be used on a loopback bind."
+          ;;
+      esac
+      export ASSISTANTMD_AUTH_SECRET="${DEV_OWNER_TOKEN}"
+      unset ASSISTANTMD_AUTH_SECRET_FILE ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS
+      ;;
+    trusted_proxy)
+      [ -n "${ASSISTANTMD_AUTH_SECRET:-}" ] || [ -n "${ASSISTANTMD_AUTH_SECRET_FILE:-}" ] || \
+        die "trusted_proxy mode requires ASSISTANTMD_AUTH_SECRET or ASSISTANTMD_AUTH_SECRET_FILE."
+      ;;
+    *)
+      die "Unsupported authentication mode '${auth_mode}'."
+      ;;
+  esac
+  export ASSISTANTMD_AUTH_MODE="${auth_mode}"
+  echo "Authentication mode: ${auth_mode}"
+  if [ "${auth_mode}" = "owner_token" ]; then
+    echo "Development owner token: ${DEV_OWNER_TOKEN}"
   fi
   local -a env_file_args=()
   if [ -f "${REPO_ROOT}/.env" ]; then
