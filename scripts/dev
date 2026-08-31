@@ -23,8 +23,7 @@ Commands:
 
 Run options:
   -p, --port <port>       Listen on this port (default: 8000)
-  -a, --address <address> Listen on this address (default: 127.0.0.1)
-      --public            Listen on 0.0.0.0; shorthand for --address 0.0.0.0
+  -a, --address <address> Override the authentication mode's listen address
       --auth-mode <mode>  Authentication: loopback, disabled, owner_token, or trusted_proxy
   -h, --help              Show run-specific help
   --                       Pass remaining arguments to Uvicorn
@@ -33,7 +32,7 @@ Environment:
   ASSISTANTMD_DEV_RUNTIME_ROOT  Use an alternate parent for data/ and system/
   CONTAINER_DATA_ROOT          Override the development vault root
   CONTAINER_SYSTEM_ROOT        Override the development system-state root
-  ASSISTANTMD_DEV_HOST         Development server host (default: 127.0.0.1)
+  ASSISTANTMD_DEV_HOST         Override the authentication mode's listen address
   ASSISTANTMD_DEV_PORT         Development server port (default: 8000)
   ASSISTANTMD_AUTH_MODE        Default mode when --auth-mode is omitted
 EOF
@@ -205,7 +204,7 @@ setup_environment() {
 }
 
 run_server() {
-  local address="${ASSISTANTMD_DEV_HOST:-127.0.0.1}"
+  local address="${ASSISTANTMD_DEV_HOST:-}"
   local address_option_set=false
   local port="${ASSISTANTMD_DEV_PORT:-8000}"
   local auth_mode="${ASSISTANTMD_AUTH_MODE:-}"
@@ -221,17 +220,11 @@ run_server() {
         ;;
       -a|--address)
         [ "$#" -ge 2 ] || die "$1 requires an address."
-        [ "${address_option_set}" = false ] || die "Specify only one of --address or --public."
+        [ "${address_option_set}" = false ] || die "Specify --address only once."
         [ -n "$2" ] || die "$1 requires a non-empty address."
         address="$2"
         address_option_set=true
         shift 2
-        ;;
-      --public)
-        [ "${address_option_set}" = false ] || die "Specify only one of --address or --public."
-        address="0.0.0.0"
-        address_option_set=true
-        shift
         ;;
       --auth-mode)
         [ "$#" -ge 2 ] || die "$1 requires an authentication mode."
@@ -263,12 +256,22 @@ run_server() {
   export CONTAINER_DATA_ROOT="${DATA_ROOT}"
   export CONTAINER_SYSTEM_ROOT="${SYSTEM_ROOT}"
   if [ -z "${auth_mode}" ]; then
+    address="${address:-127.0.0.1}"
     case "${address}" in
       127.0.0.1|::1|localhost)
         auth_mode="loopback"
         ;;
       *)
         die "Use --auth-mode when development is not bound to loopback."
+        ;;
+    esac
+  elif [ -z "${address}" ]; then
+    case "${auth_mode}" in
+      loopback)
+        address="127.0.0.1"
+        ;;
+      disabled|owner_token|trusted_proxy)
+        address="0.0.0.0"
         ;;
     esac
   fi

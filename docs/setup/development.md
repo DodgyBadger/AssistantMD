@@ -111,8 +111,8 @@ devcontainer performs this step as part of its post-create setup.
 scripts/dev run
 ```
 
-The server listens on `127.0.0.1:8000` by default. Open
-<http://127.0.0.1:8000/>.
+Without an authentication option, the server uses `loopback` mode and listens
+on `127.0.0.1:8000`. Open <http://127.0.0.1:8000/>.
 
 By default, the command stores development runtime state under the checkout:
 
@@ -126,22 +126,26 @@ These directories are ignored by Git and the container build context. They
 contain local vault data, settings, secrets, logs, and databases. Production
 containers use the separate `/app/data` and `/app/system` mounts.
 
-Override the development address or runtime roots when needed:
+Select another authentication mode when the server must accept connections from
+outside its own network namespace:
 
 ```bash
-scripts/dev run --address 127.0.0.1 --port 8080
-scripts/dev run -a 127.0.0.1 -p 8080
+scripts/dev run --auth-mode trusted_proxy
+scripts/dev run --auth-mode owner_token
+scripts/dev run --auth-mode disabled
 ```
 
-To listen on all network interfaces:
+`loopback` listens on `127.0.0.1` by default. The other explicit modes listen on
+`0.0.0.0`, allowing a reverse proxy or another container to reach the server.
+Authentication and container port mappings determine which requests are
+admitted.
+
+Override the mode's default address or port when needed:
 
 ```bash
-scripts/dev run --public -p 8080
+scripts/dev run --auth-mode trusted_proxy --address 127.0.0.1 --port 8080
+scripts/dev run --auth-mode disabled -a 192.0.2.10 -p 8080
 ```
-
-Binding to `0.0.0.0` exposes the server beyond localhost. AssistantMD does not
-provide built-in authentication or TLS, so only do this on an intentionally
-restricted network.
 
 The equivalent environment variables remain available for persistent shell or
 automation configuration. `ASSISTANTMD_DEV_RUNTIME_ROOT` selects an alternate
