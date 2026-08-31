@@ -26,9 +26,13 @@ Implementation in progress. The first foundation increment is implemented:
 The shared application composition root, browser owner-session exchange, and
 live request enforcement are now implemented. Production requires an explicit
 mode; `scripts/dev run` selects loopback only when bound to loopback, the
-production Compose example selects loopback explicitly, and validation selects
-disabled mode explicitly. Deployment examples and live manual evidence for all
-modes remain outstanding.
+production Compose example now selects disabled mode for its deliberately
+unprotected host-loopback-published local deployment, and validation selects
+disabled mode explicitly. The image continues listening on `0.0.0.0`: a request
+forwarded through a Docker bridge does not have a loopback immediate peer inside
+the container, so application `loopback` mode is not presented as a standard
+bridged-container option. Production configuration does not add a second
+bind-address environment variable.
 
 Owner-token live adversarial review found no authentication or CSRF bypass.
 Hardening from that review now rejects duplicate JSON credential keys,
@@ -408,6 +412,17 @@ must not include submitted values.
   value, keeps the secret out of browser responses, and prevents the companion
   from reading it. Document generation, rotation, recovery, reverse-proxy TLS,
   trusted-peer configuration, and the loopback-only development exception.
+- Keep the production image listening on `0.0.0.0`; container reachability is
+  controlled by Compose networking and published-port bindings rather than an
+  application bind-address environment variable. Do not duplicate the
+  development launcher's `--address` override in production configuration.
+- Remove `loopback` from the bridged-container Compose example because Docker
+  forwarding does not preserve an actual loopback socket peer. Use `disabled`
+  only for an explicitly unprotected, host-loopback-published local example,
+  and provide `owner_token` and `trusted_proxy` as the authenticated production
+  choices. Document that application `loopback` mode is limited to direct
+  process or compatible host-network deployments where AssistantMD observes an
+  actual loopback peer.
 - Document disabled mode for recovery and deliberate testing, including an
   example showing that the UI and API are open to the host, LAN, companion, and
   any other routable peer. Do not describe it as a containment boundary.
@@ -513,7 +528,8 @@ security claim.
 
 ## Next Phase
 
-Proceed to Feature Development with Slice 1. Implement and test the credential,
-session, CSRF, and authenticated-identity primitives before changing production
-routing. Then add the shared application composition root and default-deny
-boundary in Slice 2 so production and validation adopt the behavior together.
+Proceed to Feature Development for the remaining Slice 4 deployment correction:
+update the production Compose example and installation/security documentation,
+then verify the rendered Compose configuration and use a focused bridged-network
+probe to demonstrate why `loopback` is not a valid container default. Maintainers
+retain ownership of the full validation profile.

@@ -65,13 +65,20 @@ Choose one ingress-authentication mode in `docker-compose.yml`:
 
 ```yaml
 environment:
-  - ASSISTANTMD_AUTH_MODE=loopback
+  - ASSISTANTMD_AUTH_MODE=disabled
 ```
 
-Use `loopback` only when the published port is bound to `127.0.0.1` or `::1`.
-Use `disabled` for deliberately open recovery/testing deployments. The System
-tab displays a persistent warning because every routable peer receives full UI
-and API access.
+The default Compose example publishes the port only on host loopback, but
+AssistantMD itself is unprotected in `disabled` mode. Every peer that can route
+to the container receives full UI and API access, and the System tab displays a
+persistent warning. Use this combination only when host access and Docker
+network membership are acceptable security boundaries.
+
+Do not select application `loopback` mode for a normal bridged container.
+Docker-forwarded requests arrive from a bridge peer rather than `127.0.0.1` or
+`::1`, even when the published host port is bound to loopback. `loopback` mode
+is for direct-process or compatible host-network deployments where AssistantMD
+observes the caller as an actual loopback socket peer.
 
 For built-in owner authentication, generate a high-entropy token into a file
 that is not committed:
