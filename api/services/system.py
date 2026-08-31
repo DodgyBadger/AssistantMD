@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from core.advanced_shell import AdvancedShellConfig
+from core.advanced_shell.preflight import AdvancedShellPreflightSnapshot
 from core.authentication import AuthenticationMode
 from core.authoring.template_discovery import (
     list_templates,
@@ -78,6 +79,7 @@ def set_system_startup_time(startup_time: datetime) -> None:
 
 def project_advanced_shell_status(
     config: AdvancedShellConfig,
+    preflight: AdvancedShellPreflightSnapshot,
 ) -> AdvancedShellStatusInfo:
     """Project deployment configuration without identity or trust paths."""
     return AdvancedShellStatusInfo(
@@ -85,7 +87,8 @@ def project_advanced_shell_status(
         host=config.host,
         port=config.port,
         user=config.user,
-        configuration_state="configured" if config.enabled else "inactive",
+        readiness_state=preflight.state,
+        readiness_message=preflight.message,
     )
 
 
@@ -363,6 +366,7 @@ async def get_system_status(
     *,
     authentication_mode: AuthenticationMode = AuthenticationMode.DISABLED,
     advanced_shell_config: AdvancedShellConfig | None = None,
+    advanced_shell_preflight: AdvancedShellPreflightSnapshot,
 ) -> StatusResponse:
     """
     Collect comprehensive system status information from cached data.
@@ -456,7 +460,9 @@ async def get_system_status(
                 if authentication_mode is AuthenticationMode.DISABLED
                 else None
             ),
-            advanced_shell=project_advanced_shell_status(shell_config),
+            advanced_shell=project_advanced_shell_status(
+                shell_config, advanced_shell_preflight
+            ),
         )
 
         return status_response

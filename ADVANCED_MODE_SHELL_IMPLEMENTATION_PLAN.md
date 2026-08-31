@@ -9,8 +9,14 @@ checks and the real sibling-container smoke pass. The fixed-destination SSH
 boundary is feasible. The first product integration increment now validates the
 restart-bound execution mode and companion coordinates, owns fixed client trust
 paths below `system/advanced-shell/`, exposes a sanitized status projection, and
-renders the read-only System → Misc reporting block. Authenticated readiness,
-shell capability composition, and command execution from chat have not started.
+renders the read-only System → Misc reporting block. Cached authenticated
+preflight now classifies missing identity/trust, SSH availability, DNS,
+connectivity, host-key mismatch, authentication failure, and readiness without
+returning raw SSH diagnostics. Shell capability composition and command
+execution from chat have not started. The rebuilt persistent Docker companion
+passes the reconciled topology: a direct pinned-key probe returned zero, the
+AssistantMD status API reported authenticated `ready`, and a second status call
+returned the cached ready state.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, companion-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller
@@ -471,11 +477,10 @@ chat-editable runtime inputs. Switching execution mode or coordinates requires
 an application restart; there is no second persisted acknowledgement or live UI
 toggle.
 
-The sanitized status API first reports the effective execution mode, companion
-host, port, user, and whether advanced coordinates are inactive or configured,
-without exposing key paths or private-key material. Authenticated preflight will
-replace that configuration-only state with execution readiness when the shell
-capability is composed. System → Misc presents those values in one read-only
+The sanitized status API reports the effective execution mode, companion host,
+port, user, and cached authenticated readiness without exposing key paths,
+private-key material, or raw SSH diagnostics. System → Misc presents those
+values in one read-only
 **Advanced Shell** block. Its brief instruction says configuration is managed in
 `.env`, requires a restart, and links to the repository installation
 instructions. Do not render disabled inputs or imply that the values can be
@@ -949,9 +954,9 @@ requires a maintainer-run result after its key topology changes:
   the Docker smoke now attempts a signal-resistant `setsid` escape;
 - the disposable smoke uses the root-only runtime-key initializer and asserts
   that the shell cannot access client or host private key material; and
-- the persistent development deployment includes a trusted readiness client
-  that must authenticate with the pinned host key and execute the forced command
-  before Compose reports readiness.
+- AssistantMD now owns authenticated readiness using its fixed client identity,
+  pinned host key, and forced command; the development-only readiness sidecar is
+  removed from the reconciled topology.
 
 The rebuilt deployment passed all ten tool checks, authenticated readiness, a
 normal-completion detached-background probe, and a signal-resistant `setsid`
@@ -1169,13 +1174,12 @@ and protocol work but not for declaring the deployment boundary validated.
 
 ## Next Phase
 
-Continue Slice 2 by reconciling the experimental SSH executor with the typed
-infrastructure configuration and fixed `system/advanced-shell/` identity paths.
-Add authenticated, cached companion preflight with sanitized failure states,
-then compose the shell capability only for advanced interactive primary chats
-and inject the flight-card extension exactly once. Keep stdio MCP transport work
-in Slice 3 after the general shell lifecycle and authority boundaries are
-validated.
+Continue Slice 2 by composing the shell capability only for advanced
+interactive primary chats and injecting the flight-card extension exactly once.
+Exercise live connection-failure and host-key-mismatch status transitions during
+the next Docker-backed adversarial pass without mutating the working pinned
+identity. Keep stdio MCP transport work in Slice 3 after the general shell
+lifecycle and authority boundaries are validated.
 
 If the SSH probe cannot provide reliable descendant cleanup, fixed-destination
 control, and meaningful separation from AssistantMD secrets without broad

@@ -140,6 +140,35 @@ following to `.env` and restart AssistantMD:
 ASSISTANTMD_EXECUTION_MODE=advanced
 ```
 
+For the persistent development companion, run the repository setup script from
+a Docker-capable host before restarting AssistantMD:
+
+```bash
+scripts/start_advanced_shell_development.sh
+```
+
+The script generates AssistantMD's client identity and pinned host record under
+`system/advanced-shell/`, keeps the companion host identity separately, starts
+the companion, and prints the `.env` values for the selected development
+endpoint.
+
+The development script binds SSH to host loopback by default, which is correct
+when AssistantMD runs directly on that host. When AssistantMD itself runs in a
+development container, select a host address reachable from that container and
+deliberately publish the development port on the required host interfaces, for
+example:
+
+```bash
+ADVANCED_SHELL_BIND_ADDRESS=0.0.0.0 \
+ADVANCED_SHELL_CLIENT_HOST=<docker-host-gateway-address> \
+scripts/start_advanced_shell_development.sh
+```
+
+This development publication may expose the SSH port beyond the local host;
+restrict it with the host firewall and do not use it as the production topology.
+The supported production design uses a private Compose network without a
+published companion SSH port.
+
 The supplied companion deployment uses defaults that normally require no
 additional configuration:
 

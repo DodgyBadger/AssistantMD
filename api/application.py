@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.types import Lifespan
 
 from core.advanced_shell import AdvancedShellConfig
+from core.advanced_shell.preflight import AdvancedShellPreflightService
 from core.authentication import (
     AuthenticationFailureLimiter,
     AuthenticationMiddleware,
@@ -26,14 +27,20 @@ def create_application(
     *,
     authentication_policy: AuthenticationPolicy,
     advanced_shell_config: AdvancedShellConfig | None = None,
+    advanced_shell_preflight: AdvancedShellPreflightService | None = None,
     lifespan: Lifespan[FastAPI] | None = None,
     include_ui: bool = True,
 ) -> FastAPI:
     """Build the production-equivalent route and middleware topology."""
     app = FastAPI(lifespan=lifespan)
     app.state.authentication_policy = authentication_policy
-    app.state.advanced_shell_config = (
+    effective_shell_config = (
         advanced_shell_config or AdvancedShellConfig.restricted_default()
+    )
+    app.state.advanced_shell_config = effective_shell_config
+    app.state.advanced_shell_preflight = (
+        advanced_shell_preflight
+        or AdvancedShellPreflightService(effective_shell_config, Path("/app/system"))
     )
     failure_limiter = AuthenticationFailureLimiter()
     app.state.authentication_failure_limiter = failure_limiter

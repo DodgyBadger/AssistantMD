@@ -109,6 +109,7 @@ const configElements = {
     advancedShellUser: document.getElementById('advanced-shell-user'),
     advancedShellCoordinates: document.querySelectorAll('[data-advanced-shell-coordinate]'),
     advancedShellRestrictedNote: document.getElementById('advanced-shell-restricted-note'),
+    advancedShellReadiness: document.getElementById('advanced-shell-readiness'),
     configTab: document.getElementById('configuration-tab')
 };
 
@@ -1465,6 +1466,9 @@ async function fetchSystemStatus() {
             element.setAttribute('aria-disabled', advancedMode ? 'false' : 'true');
         });
         configElements.advancedShellRestrictedNote?.classList.toggle('hidden', advancedMode);
+        if (configElements.advancedShellReadiness) {
+            configElements.advancedShellReadiness.textContent = advancedShell?.readiness_message || 'Unavailable';
+        }
         const envDefaultModel = state.systemStatus && state.systemStatus.configuration_status
             ? state.systemStatus.configuration_status.default_model
             : null;

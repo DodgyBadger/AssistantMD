@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -17,6 +18,7 @@ set_bootstrap_roots(_BOOTSTRAP_DATA_ROOT, _BOOTSTRAP_SYSTEM_ROOT)
 from api.application import create_application  # noqa: E402
 from api.services import set_system_startup_time  # noqa: E402
 from core.advanced_shell import load_advanced_shell_config  # noqa: E402
+from core.advanced_shell.preflight import AdvancedShellPreflightService  # noqa: E402
 from core.authentication import load_authentication_policy  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
 from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
@@ -26,6 +28,7 @@ from core.settings import get_app_settings  # noqa: E402
 # Create main logger
 logger = UnifiedLogger(tag="main")
 app_settings = get_app_settings()
+advanced_shell_config = load_advanced_shell_config(app_settings)
 
 
 # Run in development
@@ -38,7 +41,7 @@ app_settings = get_app_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
     startup_time = datetime.now()
     set_system_startup_time(startup_time)
@@ -73,7 +76,10 @@ async def lifespan(app: FastAPI):
 
 app = create_application(
     authentication_policy=load_authentication_policy(app_settings),
-    advanced_shell_config=load_advanced_shell_config(app_settings),
+    advanced_shell_config=advanced_shell_config,
+    advanced_shell_preflight=AdvancedShellPreflightService(
+        advanced_shell_config, _BOOTSTRAP_SYSTEM_ROOT
+    ),
     lifespan=lifespan,
 )
 

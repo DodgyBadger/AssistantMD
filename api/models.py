@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from core.advanced_shell import ExecutionMode
+from core.advanced_shell.preflight import AdvancedShellReadiness
 from core.authentication import AuthenticationMode
 
 #######################################################################
@@ -491,9 +492,11 @@ class AdvancedShellStatusInfo(BaseModel):
     host: str = Field(..., description="Configured companion hostname")
     port: int = Field(..., description="Configured companion SSH port")
     user: str = Field(..., description="Configured companion SSH user")
-    configuration_state: Literal["inactive", "configured"] = Field(
-        ...,
-        description="Whether advanced-shell deployment coordinates are active",
+    readiness_state: AdvancedShellReadiness = Field(
+        ..., description="Sanitized authenticated companion readiness state"
+    )
+    readiness_message: str = Field(
+        ..., description="Sanitized operator-facing readiness explanation"
     )
 
 

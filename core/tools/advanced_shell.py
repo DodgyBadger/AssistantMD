@@ -12,6 +12,8 @@ from pathlib import Path
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import Tool
 
+from core.advanced_shell.config import AdvancedShellConfig
+
 from .base import BaseTool, ToolRecoveryPolicy
 
 
@@ -81,10 +83,31 @@ class ShellTransportConfig:
     max_concurrent_commands: int = 8
 
     @classmethod
+    def from_infrastructure(
+        cls, config: AdvancedShellConfig, system_root: Path
+    ) -> ShellTransportConfig:
+        """Build product transport settings from validated infrastructure state."""
+        state_paths = config.state_paths(system_root)
+        return cls(
+            host=config.host,
+            port=config.port,
+            user=config.user,
+            host_key_alias=config.host_key_alias,
+            private_key_path=state_paths.client_identity,
+            known_hosts_path=state_paths.known_hosts,
+        )
+
+    @classmethod
     def from_environment(cls) -> ShellTransportConfig:
         """Load experimental deployment coordinates from the environment."""
         key_root = Path(
             os.environ.get("ASSISTANTMD_SHELL_KEY_ROOT", "/run/assistantmd-shell")
+        )
+        product_identity = key_root / "client_identity"
+        private_key_path = (
+            product_identity
+            if product_identity.is_file()
+            else key_root / "assistantmd_shell_client"
         )
         return cls(
             host=os.environ.get("ASSISTANTMD_SHELL_HOST", "assistantmd-shell"),
@@ -92,7 +115,7 @@ class ShellTransportConfig:
             host_key_alias=(
                 os.environ.get("ASSISTANTMD_SHELL_HOST_KEY_ALIAS", "").strip() or None
             ),
-            private_key_path=key_root / "assistantmd_shell_client",
+            private_key_path=private_key_path,
             known_hosts_path=key_root / "known_hosts",
         )
 

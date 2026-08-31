@@ -27,6 +27,7 @@ from api.import_models import (
     ImportUrlResponse,
 )
 from core.advanced_shell import AdvancedShellConfig
+from core.advanced_shell.preflight import AdvancedShellPreflightService
 from core.authentication import AuthenticationPolicy
 from core.chat.executor import UploadedImageAttachment
 from core.chat.task_events import ChatTaskEventCursorExpired
@@ -678,10 +679,14 @@ async def get_status(request: Request) -> StatusResponse | JSONResponse:
         advanced_shell_config = request.app.state.advanced_shell_config
         if not isinstance(advanced_shell_config, AdvancedShellConfig):
             raise RuntimeError("Advanced-shell configuration is unavailable.")
+        advanced_shell_preflight = request.app.state.advanced_shell_preflight
+        if not isinstance(advanced_shell_preflight, AdvancedShellPreflightService):
+            raise RuntimeError("Advanced-shell preflight is unavailable.")
         status = await get_system_status(
             scheduler,
             authentication_mode=authentication_policy.mode,
             advanced_shell_config=advanced_shell_config,
+            advanced_shell_preflight=await advanced_shell_preflight.status(),
         )
         return status
 
