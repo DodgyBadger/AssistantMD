@@ -424,7 +424,7 @@ produced this non-persisted candidate launch definition:
   "display_name": "LSP code intelligence",
   "executable": "/usr/local/bin/node",
   "args": [
-    "/home/assistantmd-shell/experiments/lsp-mcp-server-86b0598/dist/index.js"
+    "/home/advanced-shell/experiments/lsp-mcp-server-86b0598/dist/index.js"
   ],
   "cwd": "/workspace/lsp-mcp-probe-86b0598",
   "env": {
@@ -511,7 +511,7 @@ arguments and 32 KiB total encoded argument content; at most 16 environment
 entries with uppercase portable names and 4 KiB per value; reserved runtime
 environment names cannot be overridden. Executable, working directory, and
 Roots cannot contain NUL or lexical `..`. Working directory and Roots must be
-under `/workspace` or `/home/assistantmd-shell`. Roots are persisted as paths
+under `/workspace` or `/home/advanced-shell`. Roots are persisted as paths
 and converted to `file://` URIs by the client adapter.
 
 The environment field remains necessary for representative non-secret provider

@@ -11,4 +11,4 @@ else
     state_root="${repository_root}/system/advanced-shell"
 fi
 export ADVANCED_SHELL_CLIENT_PUBLIC_ROOT="${state_root}"
-docker compose -f "${compose_file}" restart shell
+docker compose -f "${compose_file}" restart advanced-shell

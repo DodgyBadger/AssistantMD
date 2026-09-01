@@ -26,6 +26,18 @@ converts migration-5 rows and schema checks from the former value. The former
 term remains only inside that historical migration and conversion logic, plus
 unrelated uses such as content-import companion artifacts.
 
+### Resource naming
+
+Status: complete.
+
+Use `advanced-shell` where the AssistantMD context is already established:
+Compose service/network alias, SSH and Linux user, container home/runtime paths,
+and container-internal executables. Use `assistantmd-advanced-shell` only for
+host-global resources such as image and Compose project names. Keep the
+`ASSISTANTMD_SHELL_*` environment namespace because it already identifies both
+the owning application and the shell subsystem without ambiguity. Development
+containers must be rebuilt after this infrastructure-coordinate change.
+
 ## Status
 
 Selected direction under prototype validation. Slice 1 now has a development
@@ -51,7 +63,7 @@ the advanced shell filesystem and bounded-execution contract. The rebuilt persis
 Docker advanced shell passes the reconciled topology: a direct pinned-key probe
 returned zero, the AssistantMD status API reported authenticated `ready`, and a
 second status call returned the cached ready state. A real advanced primary chat
-then acquired `shell`, executed `printf assistantmd-shell-live-ok` in the
+then acquired `shell`, executed `printf advanced-shell-live-ok` in the
 advanced shell, reported exit code zero and the exact stdout through normal task
 events, and completed the model turn successfully. Application startup now names
 the restricted or advanced execution mode in the operator-visible stream and
@@ -131,7 +143,7 @@ Docker host
     │   ├── system databases
     │   └── encrypted secrets
     │
-    └── assistantmd-shell
+    └── advanced-shell
         ├── OpenSSH server
         ├── shell and selected development runtimes
         ├── persistent execution workspace
@@ -171,7 +183,7 @@ digest consistent with the AssistantMD release.
 The root Compose example implements this contract with an `advanced` profile,
 private-network advanced shell, and separate persistent identity, public-key, home,
 and workspace volumes. The release workflow publishes a same-tag
-`assistantmd-shell` image, and `.env` selects one image tag for both services.
+`assistantmd-advanced-shell` image, and `.env` selects one image tag for both services.
 The override example contains only explicit user-selected bind-mount examples.
 Publication from CI and a clean-host profile smoke remain required evidence.
 
@@ -411,7 +423,7 @@ AssistantMD MCP client
     ↕ local stdin/stdout
 OpenSSH client process
     ↕ private SSH channel
-credential-free MCP server in assistantmd-shell
+credential-free MCP server in advanced-shell
 ```
 
 From the MCP client's perspective, the local SSH process is the stdio transport.
@@ -1067,7 +1079,7 @@ elsewhere in this document about the experimental implementation.
   passed the complete tooling, isolation, SSH restriction, exit-status, and
   detached-process cleanup contract. The release workflow now builds the same
   Dockerfile for AMD64 and ARM64, publishes it as the version-aligned
-  `assistantmd-shell` GHCR image, and attaches BuildKit SBOM and provenance
+  `assistantmd-advanced-shell` GHCR image, and attaches BuildKit SBOM and provenance
   attestations. CI publication and an AMD64 pull/smoke remain release evidence.
 
 The experiment remains suitable for trusted exploratory use while these items
@@ -1194,7 +1206,7 @@ integration scenarios only after the execution and identity contracts stabilize.
 
 The Codeman development environment itself runs inside a container and currently
 has an OpenSSH client but no Docker CLI, Docker socket, or OpenSSH server. It
-cannot create or inspect the sibling `assistantmd-shell` container and must not
+cannot create or inspect the sibling `advanced-shell` container and must not
 be granted a host Docker socket merely to develop this feature.
 
 Development and validation are therefore split by boundary.

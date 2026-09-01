@@ -29,7 +29,7 @@ MAX_ENVIRONMENT_VALUES = 16
 MAX_ENVIRONMENT_VALUE_BYTES = 4096
 ALLOWED_WORKING_ROOTS = (
     Path("/workspace"),
-    Path("/home/assistantmd-shell"),
+    Path("/home/advanced-shell"),
 )
 ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 RESERVED_ENVIRONMENT_NAMES = frozenset(
@@ -50,15 +50,15 @@ RESERVED_ENVIRONMENT_NAMES = frozenset(
 def _execution_environment() -> dict[str, str]:
     """Return the complete, intentionally small command environment."""
     return {
-        "HOME": "/home/assistantmd-shell",
+        "HOME": "/home/advanced-shell",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
-        "PATH": "/home/assistantmd-shell/.local/bin:/usr/local/bin:/usr/bin:/bin",
-        "NPM_CONFIG_PREFIX": "/home/assistantmd-shell/.local",
+        "PATH": "/home/advanced-shell/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "NPM_CONFIG_PREFIX": "/home/advanced-shell/.local",
         "SHELL": "/bin/bash",
         "TMPDIR": "/tmp",
-        "UV_TOOL_BIN_DIR": "/home/assistantmd-shell/.local/bin",
-        "UV_TOOL_DIR": "/home/assistantmd-shell/.local/share/uv/tools",
+        "UV_TOOL_BIN_DIR": "/home/advanced-shell/.local/bin",
+        "UV_TOOL_DIR": "/home/advanced-shell/.local/share/uv/tools",
     }
 
 
@@ -281,7 +281,7 @@ def run_command(command: str) -> int:
     threading.Thread(
         target=_forward_stdin,
         args=(process, channel_closed),
-        name="assistantmd-shell-stdin",
+        name="advanced-shell-stdin",
         daemon=True,
     ).start()
     shutdown_signal: int | None = None

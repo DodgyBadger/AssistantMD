@@ -107,10 +107,10 @@ def main() -> None:
         "UV_TOOL_BIN_DIR",
         "UV_TOOL_DIR",
     }
-    assert environment["PATH"].startswith("/home/assistantmd-shell/.local/bin:")
-    assert environment["NPM_CONFIG_PREFIX"] == "/home/assistantmd-shell/.local"
+    assert environment["PATH"].startswith("/home/advanced-shell/.local/bin:")
+    assert environment["NPM_CONFIG_PREFIX"] == "/home/advanced-shell/.local"
 
-    with tempfile.TemporaryDirectory(prefix="assistantmd-shell-wrapper-") as root:
+    with tempfile.TemporaryDirectory(prefix="advanced-shell-wrapper-") as root:
         workspace = Path(root)
         basic = _wrapper_process(
             workspace,

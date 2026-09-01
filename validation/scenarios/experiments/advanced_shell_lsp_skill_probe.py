@@ -29,7 +29,7 @@ PROVIDER_COMMIT = "86b05985943a7396f88d3868b72556465437bc96"
 PROVIDER_VERSION = "1.1.20"
 SKILL_SHA256 = "1408ed7dc70be64ae0b2399027b59e1ba74ee93a88f29d7e5571e071cbc63632"
 PROVIDER_ENTRYPOINT = (
-    "/home/assistantmd-shell/experiments/lsp-mcp-server-86b0598/dist/index.js"
+    "/home/advanced-shell/experiments/lsp-mcp-server-86b0598/dist/index.js"
 )
 WORKSPACE = "/workspace/lsp-mcp-probe-86b0598"
 SOURCE_FILE = f"{WORKSPACE}/src/index.ts"

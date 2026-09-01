@@ -163,9 +163,9 @@ a new pairing without affecting AssistantMD data or encrypted credentials.
 The supplied service defaults normally require no additional endpoint settings:
 
 ```dotenv
-ASSISTANTMD_SHELL_HOST=assistantmd-shell
+ASSISTANTMD_SHELL_HOST=advanced-shell
 ASSISTANTMD_SHELL_PORT=2222
-ASSISTANTMD_SHELL_USER=assistantmd-shell
+ASSISTANTMD_SHELL_USER=advanced-shell
 ```
 
 Set these only when an equivalent deployment uses a different service name,

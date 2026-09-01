@@ -13,7 +13,7 @@ AuthenticationMethods publickey
 PermitEmptyPasswords no
 UsePAM no
 
-AllowUsers assistantmd-shell
+AllowUsers advanced-shell
 AuthorizedKeysFile /run/sshd/authorized_keys
 StrictModes yes
 

@@ -49,9 +49,9 @@ class AdvancedShellConfig:
         """Return the deterministic default used by isolated application tests."""
         return cls(
             execution_mode=ExecutionMode.RESTRICTED,
-            host="assistantmd-shell",
+            host="advanced-shell",
             port=2222,
-            user="assistantmd-shell",
+            user="advanced-shell",
             host_key_alias=None,
         )
 

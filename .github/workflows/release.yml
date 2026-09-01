@@ -67,9 +67,9 @@ jobs:
             "${TAG_ARGS[@]}" \
             .
 
-      - name: Build and push advanced shell companion image
+      - name: Build and push AssistantMD advanced shell image
         env:
-          IMAGE_NAME: ${{ steps.image.outputs.name }}-shell
+          IMAGE_NAME: ${{ steps.image.outputs.name }}-advanced-shell
           IMAGE_TAG: ${{ github.ref_name }}
         run: |
           TAG_ARGS=(-t "${IMAGE_NAME}:${IMAGE_TAG}")

@@ -15,7 +15,7 @@ MAX_ENVIRONMENT_VALUE_BYTES = 4096
 MAX_ROOTS = 16
 ALLOWED_PATH_ROOTS = (
     PurePosixPath("/workspace"),
-    PurePosixPath("/home/assistantmd-shell"),
+    PurePosixPath("/home/advanced-shell"),
 )
 ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 RESERVED_ENVIRONMENT_NAMES = frozenset(

@@ -21,11 +21,11 @@ docker compose -f "${compose_file}" ps --all
 echo "resolved client public root"
 echo "${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}"
 
-echo "resolved shell mounts"
-docker compose -f "${compose_file}" config | sed -n '/shell:/,/^[^ ]/p' | sed -n '/volumes:/,/^[[:space:]]*[a-z_]*:/p'
+echo "resolved advanced-shell mounts"
+docker compose -f "${compose_file}" config | sed -n '/advanced-shell:/,/^[^ ]/p' | sed -n '/volumes:/,/^[[:space:]]*[a-z_]*:/p'
 
 echo "container health"
-for service in shell; do
+for service in advanced-shell; do
     container_id=$(docker compose -f "${compose_file}" ps -a -q "${service}")
     if [[ -n ${container_id} ]]; then
         echo "${service}:"
@@ -36,7 +36,7 @@ for service in shell; do
 done
 
 echo "service logs"
-docker compose -f "${compose_file}" logs --no-color shell
+docker compose -f "${compose_file}" logs --no-color advanced-shell
 
 if [[ -n ${SUDO_UID:-} && -n ${SUDO_GID:-} ]]; then
     chown "${SUDO_UID}:${SUDO_GID}" "${diagnostic_log}" || true

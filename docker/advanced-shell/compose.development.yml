@@ -1,7 +1,7 @@
 name: assistantmd-advanced-shell-dev
 
 services:
-  shell:
+  advanced-shell:
     build:
       context: ../..
       dockerfile: docker/advanced-shell/Dockerfile
@@ -12,13 +12,13 @@ services:
     networks:
       default:
         aliases:
-          - assistantmd-shell
+          - advanced-shell
     volumes:
-      - host_identity:/run/assistantmd-shell/host-identity
-      - host_public:/run/assistantmd-shell/host-public
+      - host_identity:/run/advanced-shell/host-identity
+      - host_public:/run/advanced-shell/host-public
       - type: bind
         source: ${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT:?set ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}/client_identity.pub
-        target: /run/assistantmd-shell/client-public/client_identity.pub
+        target: /run/advanced-shell/client-public/client_identity.pub
         read_only: true
         bind:
           create_host_path: false
@@ -27,7 +27,7 @@ services:
         target: /workspace
       - type: volume
         source: home
-        target: /home/assistantmd-shell
+        target: /home/advanced-shell
     read_only: true
     tmpfs:
       - /run/sshd:size=1m,mode=0755

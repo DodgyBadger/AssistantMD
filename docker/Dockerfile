@@ -132,13 +132,13 @@ COPY --from=css-builder --chown=${USER_ID}:${GROUP_ID} /app/static/output.css /a
 # Create data and deployment-owned advanced-shell volume mount points.
 RUN mkdir -p \
         /app/data \
-        /run/assistantmd-shell/client-identity \
-        /run/assistantmd-shell/client-public \
-        /run/assistantmd-shell/host-public \
-    && chown -R ${USER_ID}:${GROUP_ID} /app/data /run/assistantmd-shell
+        /run/advanced-shell/client-identity \
+        /run/advanced-shell/client-public \
+        /run/advanced-shell/host-public \
+    && chown -R ${USER_ID}:${GROUP_ID} /app/data /run/advanced-shell
 RUN chmod 1777 \
-    /run/assistantmd-shell/client-public \
-    /run/assistantmd-shell/host-public
+    /run/advanced-shell/client-public \
+    /run/advanced-shell/host-public
 
 COPY --chown=${USER_ID}:${GROUP_ID} docker/bootstrap-advanced-shell-client.sh /usr/local/bin/bootstrap-advanced-shell-client
 RUN chmod 0755 /usr/local/bin/bootstrap-advanced-shell-client

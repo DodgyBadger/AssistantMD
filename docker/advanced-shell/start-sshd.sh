@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-key_root=/run/assistantmd-shell
+key_root=/run/advanced-shell
 client_public_key_path="${key_root}/client-public/client_identity.pub"
 host_identity_root="${key_root}/host-identity"
 host_public_root="${key_root}/host-public"
@@ -53,7 +53,7 @@ case "${public_key}" in
 esac
 
 printf '%s %s\n' \
-    'restrict,command="/usr/local/bin/assistantmd-shell-entry"' \
+    'restrict,command="/usr/local/bin/advanced-shell-entry"' \
     "${public_key}" > "${authorized_keys_path}"
 
 cp "${host_key_path}" "${runtime_host_key_path}"

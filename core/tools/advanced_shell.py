@@ -83,7 +83,7 @@ class ShellTransportConfig:
     private_key_path: Path
     known_hosts_path: Path
     port: int = 2222
-    user: str = "assistantmd-shell"
+    user: str = "advanced-shell"
     host_key_alias: str | None = None
     connect_timeout_seconds: int = 5
     default_timeout_seconds: float = 120.0
@@ -125,16 +125,16 @@ class ShellTransportConfig:
     def from_environment(cls) -> ShellTransportConfig:
         """Load experimental deployment coordinates from the environment."""
         key_root = Path(
-            os.environ.get("ASSISTANTMD_SHELL_KEY_ROOT", "/run/assistantmd-shell")
+            os.environ.get("ASSISTANTMD_SHELL_KEY_ROOT", "/run/advanced-shell")
         )
         product_identity = key_root / "client_identity"
         private_key_path = (
             product_identity
             if product_identity.is_file()
-            else key_root / "assistantmd_shell_client"
+            else key_root / "advanced_shell_client"
         )
         return cls(
-            host=os.environ.get("ASSISTANTMD_SHELL_HOST", "assistantmd-shell"),
+            host=os.environ.get("ASSISTANTMD_SHELL_HOST", "advanced-shell"),
             port=int(os.environ.get("ASSISTANTMD_SHELL_PORT", "2222")),
             host_key_alias=(
                 os.environ.get("ASSISTANTMD_SHELL_HOST_KEY_ALIAS", "").strip() or None

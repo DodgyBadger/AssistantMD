@@ -1,7 +1,7 @@
 name: assistantmd-advanced-shell-smoke
 
 services:
-  shell:
+  advanced-shell:
     build:
       context: ../..
       dockerfile: docker/advanced-shell/Dockerfile
@@ -10,9 +10,9 @@ services:
     networks:
       - private
     volumes:
-      - host_identity:/run/assistantmd-shell/host-identity
-      - host_public:/run/assistantmd-shell/host-public
-      - client_public:/run/assistantmd-shell/client-public:ro
+      - host_identity:/run/advanced-shell/host-identity
+      - host_public:/run/advanced-shell/host-public
+      - client_public:/run/advanced-shell/client-public:ro
       - type: volume
         source: workspace
         target: /workspace
@@ -51,12 +51,12 @@ services:
       - private
     environment:
       ASSISTANTMD_EXECUTION_MODE: advanced
-      ASSISTANTMD_SHELL_HOST: shell
+      ASSISTANTMD_SHELL_HOST: advanced-shell
       ASSISTANTMD_SHELL_PORT: 2222
     volumes:
-      - client_identity:/run/assistantmd-shell/client-identity
-      - client_public:/run/assistantmd-shell/client-public
-      - host_public:/run/assistantmd-shell/host-public:ro
+      - client_identity:/run/advanced-shell/client-identity
+      - client_public:/run/advanced-shell/client-public
+      - host_public:/run/advanced-shell/host-public:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777

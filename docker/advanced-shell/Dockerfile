@@ -30,34 +30,34 @@ RUN apt-get update \
 ARG SHELL_USER_ID=1000
 ARG SHELL_GROUP_ID=1000
 
-RUN groupadd --gid "${SHELL_GROUP_ID}" assistantmd-shell \
+RUN groupadd --gid "${SHELL_GROUP_ID}" advanced-shell \
     && useradd \
         --uid "${SHELL_USER_ID}" \
-        --gid assistantmd-shell \
+        --gid advanced-shell \
         --create-home \
-        --home-dir /home/assistantmd-shell \
+        --home-dir /home/advanced-shell \
         --shell /bin/bash \
-        assistantmd-shell \
-    && passwd --delete assistantmd-shell \
+        advanced-shell \
+    && passwd --delete advanced-shell \
     && mkdir -p \
         /run/sshd \
-        /run/assistantmd-shell/host-identity \
-        /run/assistantmd-shell/host-public \
-        /run/assistantmd-shell/client-public \
+        /run/advanced-shell/host-identity \
+        /run/advanced-shell/host-public \
+        /run/advanced-shell/client-public \
         /workspace \
-    && chown assistantmd-shell:assistantmd-shell /workspace \
+    && chown advanced-shell:advanced-shell /workspace \
     && chmod 1777 \
-        /run/assistantmd-shell/client-public \
-        /run/assistantmd-shell/host-public
+        /run/advanced-shell/client-public \
+        /run/advanced-shell/host-public
 
 COPY docker/advanced-shell/sshd_config /etc/ssh/sshd_config
-COPY docker/advanced-shell/start-sshd.sh /usr/local/bin/start-assistantmd-shell
-COPY docker/advanced-shell/forced_command.py /usr/local/bin/assistantmd-shell-entry
+COPY docker/advanced-shell/start-sshd.sh /usr/local/bin/start-advanced-shell
+COPY docker/advanced-shell/forced_command.py /usr/local/bin/advanced-shell-entry
 
 RUN chmod 0755 \
-        /usr/local/bin/start-assistantmd-shell \
-        /usr/local/bin/assistantmd-shell-entry
+        /usr/local/bin/start-advanced-shell \
+        /usr/local/bin/advanced-shell-entry
 
 EXPOSE 2222
 
-ENTRYPOINT ["/usr/local/bin/start-assistantmd-shell"]
+ENTRYPOINT ["/usr/local/bin/start-advanced-shell"]

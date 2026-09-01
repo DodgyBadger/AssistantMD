@@ -141,14 +141,14 @@ async def run_probe() -> dict[str, Any]:
         await _probe_server(
             config=config,
             name="fetch",
-            executable="/home/assistantmd-shell/.local/bin/mcp-server-fetch",
+            executable="/home/advanced-shell/.local/bin/mcp-server-fetch",
             args=[],
             call=("fetch", {"url": "https://example.com", "max_length": 1000}),
         ),
         await _probe_server(
             config=config,
             name="filesystem_with_roots",
-            executable="/home/assistantmd-shell/.local/bin/mcp-server-filesystem",
+            executable="/home/advanced-shell/.local/bin/mcp-server-filesystem",
             args=[],
             roots=["file:///workspace"],
             call=("list_allowed_directories", {}),
@@ -156,7 +156,7 @@ async def run_probe() -> dict[str, Any]:
         await _probe_server(
             config=config,
             name="everything",
-            executable="/home/assistantmd-shell/.local/bin/mcp-server-everything",
+            executable="/home/advanced-shell/.local/bin/mcp-server-everything",
             args=[],
             call=("echo", {"message": "assistantmd-stdio-probe"}),
         ),

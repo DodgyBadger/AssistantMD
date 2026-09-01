@@ -12,9 +12,9 @@ services:
     volumes:
       - /absolute/path/to/your/vaults:/app/data   # Pre-create path on the left of the colon & ensure owned by your user
       - ./system:/app/system                      # Pre-create path on the left of the colon & ensure owned by your user
-      - advanced_shell_client_identity:/run/assistantmd-shell/client-identity
-      - advanced_shell_client_public:/run/assistantmd-shell/client-public
-      - advanced_shell_host_public:/run/assistantmd-shell/host-public:ro
+      - advanced_shell_client_identity:/run/advanced-shell/client-identity
+      - advanced_shell_client_public:/run/advanced-shell/client-public
+      - advanced_shell_host_public:/run/advanced-shell/host-public:ro
     env_file:
       - path: .env
         required: false
@@ -22,7 +22,7 @@ services:
     environment:
       - TZ=UTC
       - API_PORT=8000
-      - ASSISTANTMD_SHELL_KEY_ROOT=/run/assistantmd-shell/client-identity
+      - ASSISTANTMD_SHELL_KEY_ROOT=/run/advanced-shell/client-identity
       # The host-loopback port is the boundary for this unprotected local example.
       - ASSISTANTMD_AUTH_MODE=disabled  # Use trusted_proxy or owner_token for authenticated ingress
     shm_size: "1gb"
@@ -52,32 +52,32 @@ services:
     #   retries: 3
     #   start_period: 40s
 
-  assistantmd-shell:
+  advanced-shell:
     profiles: ["advanced"]
-    image: ghcr.io/dodgybadger/assistantmd-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
+    image: ghcr.io/dodgybadger/assistantmd-advanced-shell:${ASSISTANTMD_IMAGE_TAG:-latest}
     init: true
     restart: unless-stopped
     networks:
       default:
         aliases:
-          - assistantmd-shell
+          - advanced-shell
     volumes:
       - type: volume
         source: advanced_shell_host_identity
-        target: /run/assistantmd-shell/host-identity
+        target: /run/advanced-shell/host-identity
       - type: volume
         source: advanced_shell_host_public
-        target: /run/assistantmd-shell/host-public
+        target: /run/advanced-shell/host-public
       - type: volume
         source: advanced_shell_client_public
-        target: /run/assistantmd-shell/client-public
+        target: /run/advanced-shell/client-public
         read_only: true
       - type: volume
         source: advanced_shell_workspace
         target: /workspace
       - type: volume
         source: advanced_shell_home
-        target: /home/assistantmd-shell
+        target: /home/advanced-shell
     read_only: true
     tmpfs:
       - /run/sshd:size=1m,mode=0755

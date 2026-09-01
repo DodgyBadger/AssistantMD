@@ -38,9 +38,9 @@ def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
 
     assert config.execution_mode is ExecutionMode.RESTRICTED
     assert not config.enabled
-    assert config.host == "assistantmd-shell"
+    assert config.host == "advanced-shell"
     assert config.port == 2222
-    assert config.user == "assistantmd-shell"
+    assert config.user == "advanced-shell"
     assert config.host_key_alias is None
 
 
@@ -175,7 +175,7 @@ def test_advanced_shell_state_paths_are_fixed_below_system_root() -> None:
 
 def test_container_transport_uses_deployment_owned_key_root() -> None:
     config = load_advanced_shell_config(AppSettings())
-    key_root = Path("/run/assistantmd-shell/client-identity")
+    key_root = Path("/run/advanced-shell/client-identity")
 
     transport = ShellTransportConfig.from_infrastructure(
         config, Path("/protected/system"), key_root=key_root

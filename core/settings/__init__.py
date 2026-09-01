@@ -115,9 +115,9 @@ class AppSettings(BaseSettings):
     execution_mode: str = Field(
         default="restricted", alias="ASSISTANTMD_EXECUTION_MODE"
     )
-    shell_host: str = Field(default="assistantmd-shell", alias="ASSISTANTMD_SHELL_HOST")
+    shell_host: str = Field(default="advanced-shell", alias="ASSISTANTMD_SHELL_HOST")
     shell_port: int = Field(default=2222, alias="ASSISTANTMD_SHELL_PORT")
-    shell_user: str = Field(default="assistantmd-shell", alias="ASSISTANTMD_SHELL_USER")
+    shell_user: str = Field(default="advanced-shell", alias="ASSISTANTMD_SHELL_USER")
     shell_host_key_alias: str | None = Field(
         default=None, alias="ASSISTANTMD_SHELL_HOST_KEY_ALIAS"
     )

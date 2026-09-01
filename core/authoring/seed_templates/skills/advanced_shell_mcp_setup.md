@@ -43,7 +43,7 @@ MCP server. This procedure requires advanced mode and the `shell` tool.
 ```yaml
 name: Example capability
 transport: advanced_shell_stdio
-executable: /home/assistantmd-shell/.local/bin/example-mcp
+executable: /home/advanced-shell/.local/bin/example-mcp
 working_directory: /workspace
 arguments: []
 environment: {}
@@ -55,7 +55,7 @@ enabled: true
 
 Arguments are individual YAML list values, never one shell command. Paths are
 inside the advanced shell and must be below `/workspace` or
-`/home/assistantmd-shell`. Import-block environment values are non-secret
+`/home/advanced-shell`. Import-block environment values are non-secret
 configuration only; AssistantMD does not currently inject encrypted secrets
 into advanced-shell stdio connections.
 

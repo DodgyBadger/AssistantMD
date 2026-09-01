@@ -63,8 +63,8 @@ async def run_probe() -> dict[str, Any]:
     await _call(f"printf %s {marker!r} > /workspace/persistence-probe")
     result = await _call("cat /workspace/persistence-probe")
     assert marker in str(result.return_value)
-    await _call(f"printf %s {marker!r} > /home/assistantmd-shell/persistence-probe")
-    result = await _call("cat /home/assistantmd-shell/persistence-probe")
+    await _call(f"printf %s {marker!r} > /home/advanced-shell/persistence-probe")
+    result = await _call("cat /home/advanced-shell/persistence-probe")
     assert marker in str(result.return_value)
     checks.append("persistent_workspace_and_home")
 
@@ -72,8 +72,8 @@ async def run_probe() -> dict[str, Any]:
         'python -c \'import os; print(os.getenv("ASSISTANTMD_PROBE_SENTINEL", "absent"))\'; '
         "test ! -e /app/system; test ! -e /run/secrets; "
         'test ! -S /var/run/docker.sock; test "$(id -u)" = 1000; '
-        "test ! -r /run/assistantmd-shell/ssh_host_ed25519_key; "
-        "test ! -e /run/assistantmd-shell/assistantmd_shell_client"
+        "test ! -r /run/advanced-shell/ssh_host_ed25519_key; "
+        "test ! -e /run/advanced-shell/advanced_shell_client"
     )
     _assert_status(result, "completed")
     assert "absent" in str(result.return_value)

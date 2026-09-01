@@ -1,14 +1,14 @@
 #!/bin/sh
 set -eu
 
-identity_root=${ASSISTANTMD_SHELL_CLIENT_IDENTITY_ROOT:-/run/assistantmd-shell/client-identity}
-client_public_root=${ASSISTANTMD_SHELL_CLIENT_PUBLIC_ROOT:-/run/assistantmd-shell/client-public}
-host_public_root=${ASSISTANTMD_SHELL_HOST_PUBLIC_ROOT:-/run/assistantmd-shell/host-public}
+identity_root=${ASSISTANTMD_SHELL_CLIENT_IDENTITY_ROOT:-/run/advanced-shell/client-identity}
+client_public_root=${ASSISTANTMD_SHELL_CLIENT_PUBLIC_ROOT:-/run/advanced-shell/client-public}
+host_public_root=${ASSISTANTMD_SHELL_HOST_PUBLIC_ROOT:-/run/advanced-shell/host-public}
 identity_path="${identity_root}/client_identity"
 published_key_path="${client_public_root}/client_identity.pub"
 host_public_key_path="${host_public_root}/ssh_host_ed25519_key.pub"
 known_hosts_path="${identity_root}/known_hosts"
-host=${ASSISTANTMD_SHELL_HOST:-assistantmd-shell}
+host=${ASSISTANTMD_SHELL_HOST:-advanced-shell}
 port=${ASSISTANTMD_SHELL_PORT:-2222}
 alias=${ASSISTANTMD_SHELL_HOST_KEY_ALIAS:-}
 

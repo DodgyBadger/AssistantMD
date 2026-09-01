@@ -9,7 +9,7 @@ touch "${smoke_log}"
 exec > >(tee -a "${smoke_log}") 2>&1
 echo "advanced-shell smoke log: ${smoke_log}"
 
-smoke_root=$(mktemp -d "${TMPDIR:-/tmp}/assistantmd-shell-smoke.XXXXXX")
+smoke_root=$(mktemp -d "${TMPDIR:-/tmp}/advanced-shell-smoke.XXXXXX")
 compose() {
     docker compose -f "${compose_file}" "$@"
 }
@@ -42,18 +42,18 @@ compose up -d --build --wait
 
 ssh_options=(
     -F /dev/null
-    -i /run/assistantmd-shell/client-identity/client_identity
+    -i /run/advanced-shell/client-identity/client_identity
     -o BatchMode=yes
     -o IdentitiesOnly=yes
     -o StrictHostKeyChecking=yes
-    -o UserKnownHostsFile=/run/assistantmd-shell/client-identity/known_hosts
+    -o UserKnownHostsFile=/run/advanced-shell/client-identity/known_hosts
     -o ConnectTimeout=5
     -p 2222
 )
 run_ssh() {
     compose exec -T client bash -c \
         'tail -f /dev/null | ssh "$@"' \
-        -- "${ssh_options[@]}" assistantmd-shell@shell "$@"
+        -- "${ssh_options[@]}" advanced-shell@advanced-shell "$@"
 }
 
 stdout_path="${smoke_root}/stdout"
@@ -70,7 +70,7 @@ set -e
 
 run_ssh \
     "test ! -e /app/system && test ! -e /run/secrets && "\
-"test ! -r /run/assistantmd-shell/host-identity/ssh_host_ed25519_key && "\
+"test ! -r /run/advanced-shell/host-identity/ssh_host_ed25519_key && "\
 "touch /workspace/write-test"
 
 run_ssh \
@@ -81,7 +81,7 @@ run_ssh \
 set +e
 compose exec -T client bash -c \
     'tail -f /dev/null | ssh "$@"' \
-    -- "${ssh_options[@]}" -tt assistantmd-shell@shell true >/dev/null 2>&1
+    -- "${ssh_options[@]}" -tt advanced-shell@advanced-shell true >/dev/null 2>&1
 pty_status=$?
 set -e
 [[ ${pty_status} -ne 0 ]] || fail "PTY allocation unexpectedly succeeded"
@@ -89,8 +89,8 @@ set -e
 compose exec -T client bash -s -- "${ssh_options[@]}" <<'BASH'
 set -euo pipefail
 tail -f /dev/null | ssh "$@" \
-    -L 127.0.0.1:19999:shell:2222 \
-    assistantmd-shell@shell "sleep 5" >/tmp/forward.out 2>/tmp/forward.err &
+    -L 127.0.0.1:19999:advanced-shell:2222 \
+    advanced-shell@advanced-shell "sleep 5" >/tmp/forward.out 2>/tmp/forward.err &
 forward_pid=$!
 cleanup_forward() {
     kill "${forward_pid}" >/dev/null 2>&1 || true
@@ -116,10 +116,10 @@ compose exec -T client ssh \
     -o BatchMode=yes \
     -o IdentitiesOnly=yes \
     -o StrictHostKeyChecking=yes \
-    -o UserKnownHostsFile=/run/assistantmd-shell/client-identity/known_hosts \
+    -o UserKnownHostsFile=/run/advanced-shell/client-identity/known_hosts \
     -o ConnectTimeout=5 \
     -p 2222 \
-    assistantmd-shell@shell true >/dev/null 2>&1
+    advanced-shell@advanced-shell true >/dev/null 2>&1
 unauthorized_status=$?
 set -e
 [[ ${unauthorized_status} -ne 0 ]] || fail "unauthorized SSH key succeeded"
@@ -127,7 +127,7 @@ set -e
 set +e
 compose exec -T client timeout 2 bash -c \
     'tail -f /dev/null | ssh "$@"' \
-    -- "${ssh_options[@]}" assistantmd-shell@shell \
+    -- "${ssh_options[@]}" advanced-shell@advanced-shell \
     "python -c 'import os, signal, time; child=os.fork(); os.setsid() if child == 0 else None; open(\"/workspace/stubborn.pid\", \"w\").write(str(os.getpid())) if child == 0 else None; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGHUP, signal.SIG_IGN); time.sleep(300)'" \
     >/dev/null 2>&1
 set -e
@@ -135,11 +135,11 @@ sleep 4
 run_ssh \
     "pid=\$(cat /workspace/stubborn.pid); ! kill -0 \"\${pid}\" 2>/dev/null"
 
-shell_container_id=$(compose ps -q shell)
+advanced_shell_container_id=$(compose ps -q advanced-shell)
 published_ports=$(
     docker inspect --format \
         '{{range $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' \
-        "${shell_container_id}"
+        "${advanced_shell_container_id}"
 )
 [[ -z ${published_ports} ]] || fail "advanced-shell SSH port is published"
 
