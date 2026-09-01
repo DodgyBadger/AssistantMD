@@ -59,6 +59,15 @@ brief in the installation flow and move protocol/network explanations to the
 security guide. Keep advanced mode as one optional `.env` choice, with specialist
 development and troubleshooting material linked rather than interleaved.
 
+The final happy path has seven steps and ends with the required model-provider
+setup. Remote access, advanced mode, connections, and additional integrations
+follow under **Optional setup**. Relative repository links intentionally render
+against the branch containing the document and therefore resolve against `main`
+after merge. `COMPOSE_PROFILES=advanced` activates the optional service and is
+also the default source for AssistantMD's effective execution mode. An explicit
+`ASSISTANTMD_EXECUTION_MODE` remains a higher-priority override for non-Compose
+and development deployments.
+
 Affected artifacts are `docs/setup/installation.md`, `docs/setup/security.md`,
 `docs/setup/upgrading.md`, `.env.example`, and `docker-compose.yml.example`.
 Validation is Compose configuration parsing, documentation consistency searches,

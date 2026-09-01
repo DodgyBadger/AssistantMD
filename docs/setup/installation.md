@@ -79,37 +79,33 @@ Keep `.env` safe and back it up separately from `system/`. You need both the
 encryption key and `system/secrets.db` to restore stored credentials.
 On Linux, restrict it with `chmod 600 .env`.
 
-## 5. Optional: enable advanced mode
-
-Skip this step to keep AssistantMD in restricted mode.
-
-To give interactive chat access to the advanced shell, add:
-
-```dotenv
-COMPOSE_PROFILES=advanced
-ASSISTANTMD_EXECUTION_MODE=advanced
-```
-
-The supplied profile handles the container and SSH pairing automatically. See
-[Advanced shell](#advanced-shell) for its persistence and security boundaries.
-
-## 6. Start AssistantMD
+## 5. Start AssistantMD
 
 ```bash
 docker compose up -d
 ```
 
-Open <http://127.0.0.1:8000/>. If AssistantMD does not start, inspect its log:
+## 6. Open AssistantMD
+
+Open <http://127.0.0.1:8000/>. If it does not load, inspect the container log:
 
 ```bash
 docker logs assistantMD
 ```
 
-In **System**, add at least one model provider. If advanced mode is enabled,
-open **System → Infrastructure** and confirm that the advanced shell reports
-`ready`.
+## 7. Configure a model provider
 
-## Access from another device
+Open **System → Providers**, choose a provider, and add the requested API key
+or endpoint. AssistantMD is now ready to use.
+
+AssistantMD adds an `AssistantMD/` folder to each mounted vault for skills,
+workflows, imported documents, and exported chats. See
+[How to Build with AssistantMD](../use/build-guide.md) when you are ready to
+customize how it works.
+
+## Optional setup
+
+### Access from another device
 
 AssistantMD does not provide TLS. Remote access should use HTTPS and one of these
 authentication options:
@@ -132,7 +128,21 @@ the same setting but change the mode and configure the proxy to send the secret
 assertion. See [Security Considerations](security.md#application-exposure) for
 the proxy example and detailed mode contracts.
 
-## Advanced shell
+The `loopback` authentication mode is intended for development or other setups
+where AssistantMD runs directly on the host. It is not used by the standard
+Docker Compose installation.
+
+### Enable advanced mode
+
+Add one setting to `.env`:
+
+```dotenv
+COMPOSE_PROFILES=advanced
+```
+
+This starts the optional container and tells AssistantMD to expose the capability.
+Restart with `docker compose up -d`, then confirm **System → Infrastructure**
+reports the advanced shell as `ready`.
 
 Advanced mode provides a constrained, non-root Linux environment for interactive
 chat. Files under `/home/advanced-shell` and `/workspace` survive ordinary
@@ -152,7 +162,7 @@ paste its generated YAML or JSON into **System → Connections**.
 Contributor setup for running AssistantMD and its advanced shell from a checkout
 belongs in the [Development Guide](development.md).
 
-## Configure connections
+### Configure connections
 
 Open **System → Connections** to add Gmail or MCP connections. The UI provides
 the callback URLs and fields required by each connection.
@@ -163,20 +173,7 @@ card. Remote MCP servers begin from **MCP connections**. Follow the prompts in
 the UI, and consult [Security Considerations](security.md) before granting a
 server credentials or broad tool access.
 
-When you run AssistantMD, it adds an `AssistantMD/` folder to each mounted vault:
-
-- `AssistantMD/Skills/` — reusable procedures the agent can follow
-- `AssistantMD/Authoring/` — workflow and context assembly scripts
-- `AssistantMD/Chat_Sessions/` — exported chat transcripts
-- `AssistantMD/Import/` — drop PDFs and images here to import to markdown
-
-The default setup also looks for optional files such as `AssistantMD/soul.md`, `AssistantMD/playbook.md`, and `AssistantMD/user.md`.
-
-See [How to Build with AssistantMD](../use/build-guide.md) for details on how
-these files, skills, workflows, context assembly, and session summaries fit
-together.
-
-## Optional integrations
+### Enable optional integrations
 
 - Web search works without another key. Add a Tavily key under **Secrets** for
   Tavily-backed search, extraction, and crawling.

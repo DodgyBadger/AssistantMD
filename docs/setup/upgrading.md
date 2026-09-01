@@ -24,7 +24,6 @@ upgrading.
 
    ```dotenv
    COMPOSE_PROFILES=advanced
-   ASSISTANTMD_EXECUTION_MODE=advanced
    ```
 
 5. Pull and restart the deployment:

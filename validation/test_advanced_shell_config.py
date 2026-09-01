@@ -44,6 +44,27 @@ def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
     assert config.host_key_alias is None
 
 
+def test_advanced_compose_profile_enables_advanced_execution_by_default() -> None:
+    config = load_advanced_shell_config(
+        AppSettings(COMPOSE_PROFILES="browser, advanced")
+    )
+
+    assert config.execution_mode is ExecutionMode.ADVANCED
+    assert config.enabled
+
+
+def test_explicit_execution_mode_overrides_compose_profile() -> None:
+    config = load_advanced_shell_config(
+        AppSettings(
+            COMPOSE_PROFILES="advanced",
+            ASSISTANTMD_EXECUTION_MODE="restricted",
+        )
+    )
+
+    assert config.execution_mode is ExecutionMode.RESTRICTED
+    assert not config.enabled
+
+
 def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> None:
     instruction = ADVANCED_SHELL_FLIGHT_CARD
 

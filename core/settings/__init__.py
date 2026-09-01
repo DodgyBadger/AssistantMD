@@ -112,9 +112,8 @@ class AppSettings(BaseSettings):
         default=None,
         alias="ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS",
     )
-    execution_mode: str = Field(
-        default="restricted", alias="ASSISTANTMD_EXECUTION_MODE"
-    )
+    execution_mode: str | None = Field(default=None, alias="ASSISTANTMD_EXECUTION_MODE")
+    compose_profiles: str = Field(default="", alias="COMPOSE_PROFILES")
     shell_host: str = Field(default="advanced-shell", alias="ASSISTANTMD_SHELL_HOST")
     shell_port: int = Field(default=2222, alias="ASSISTANTMD_SHELL_PORT")
     shell_user: str = Field(default="advanced-shell", alias="ASSISTANTMD_SHELL_USER")

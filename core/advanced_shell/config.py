@@ -72,8 +72,20 @@ class AdvancedShellConfig:
 
 def load_advanced_shell_config(settings: AppSettings) -> AdvancedShellConfig:
     """Load and validate restart-bound advanced-shell coordinates."""
+    configured_mode = settings.execution_mode
+    if configured_mode is None:
+        active_profiles = {
+            profile.strip()
+            for profile in settings.compose_profiles.split(",")
+            if profile.strip()
+        }
+        configured_mode = (
+            ExecutionMode.ADVANCED
+            if ExecutionMode.ADVANCED.value in active_profiles
+            else ExecutionMode.RESTRICTED
+        )
     try:
-        execution_mode = ExecutionMode(settings.execution_mode.strip())
+        execution_mode = ExecutionMode(configured_mode.strip())
     except ValueError as exc:
         raise AdvancedShellConfigurationError(
             "ASSISTANTMD_EXECUTION_MODE must be restricted or advanced."
