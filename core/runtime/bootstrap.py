@@ -138,10 +138,18 @@ async def bootstrap_runtime(
                 system_root=str(config.system_root),
                 secrets=secrets_service,
                 on_change=invalidate_mcp_connection,
+                companion_stdio_enabled=bool(
+                    advanced_shell is not None and advanced_shell.enabled
+                ),
             )
             mcp_connections.reconcile_pending_mutations()
             mcp_manager = MCPConnectionManager(
                 connections=mcp_connections,
+                companion_stdio=(
+                    advanced_shell.transport_config
+                    if advanced_shell is not None and advanced_shell.enabled
+                    else None
+                ),
             )
             manager_holder.append(mcp_manager)
             mcp_manager.start()

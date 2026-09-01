@@ -11,6 +11,7 @@ class MCPTransport(StrEnum):
 
     STREAMABLE_HTTP = "streamable_http"
     SSE = "sse"
+    COMPANION_STDIO = "companion_stdio"
 
 
 class MCPAuthMode(StrEnum):
@@ -23,13 +24,24 @@ class MCPAuthMode(StrEnum):
 
 
 @dataclass(frozen=True)
+class MCPStdioConfig:
+    """Sanitized structured launch definition inside the fixed companion."""
+
+    executable: str
+    arguments: tuple[str, ...]
+    working_directory: str
+    environment: tuple[tuple[str, str], ...] = ()
+    roots: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class MCPConnection:
     """Sanitized connection definition visible to its owning principal."""
 
     connection_id: str
     slug: str
     display_name: str
-    url: str
+    url: str | None
     transport: MCPTransport
     auth_mode: MCPAuthMode
     header_name: str | None
@@ -43,6 +55,13 @@ class MCPConnection:
     oauth_client_id: str | None = None
     oauth_client_secret_present: bool = False
     oauth_scopes: tuple[str, ...] | None = None
+    stdio: MCPStdioConfig | None = None
+
+    def require_url(self) -> str:
+        """Return the HTTP endpoint or reject a transport-incompatible operation."""
+        if self.url is None:
+            raise ValueError("HTTP MCP connection URL is unavailable.")
+        return self.url
 
 
 @dataclass(frozen=True)
@@ -50,7 +69,7 @@ class MCPConnectionCreate:
     """User-controlled fields accepted when creating a connection."""
 
     display_name: str
-    url: str
+    url: str | None = None
     transport: MCPTransport = MCPTransport.STREAMABLE_HTTP
     auth_mode: MCPAuthMode = MCPAuthMode.NONE
     header_name: str | None = None
@@ -61,6 +80,7 @@ class MCPConnectionCreate:
     oauth_client_id: str | None = None
     oauth_client_secret: str | None = None
     oauth_scopes: tuple[str, ...] | None = None
+    stdio: MCPStdioConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +88,7 @@ class MCPConnectionUpdate:
     """Mutable connection fields; identity and ownership are intentionally absent."""
 
     display_name: str
-    url: str
+    url: str | None
     transport: MCPTransport
     auth_mode: MCPAuthMode
     header_name: str | None
@@ -77,6 +97,7 @@ class MCPConnectionUpdate:
     allowed_tools: tuple[str, ...] | None
     oauth_client_id: str | None = None
     oauth_scopes: tuple[str, ...] | None = None
+    stdio: MCPStdioConfig | None = None
 
 
 @dataclass(frozen=True)

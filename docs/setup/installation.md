@@ -239,11 +239,21 @@ the Google Cloud project. Gmail access is read-only. Google authorization
 requires `ASSISTANTMD_PUBLIC_URL`; the displayed authorization URL can be copied
 to another browser when the new tab cannot be opened automatically.
 
-To add an MCP server, open **System → Connections → MCP connections** and enter
-its Streamable HTTP or SSE endpoint. Configure an exact-name tool allowlist when
-you do not intend to trust every tool exposed by the server, save the
-connection, and use **Test connection** before enabling it for chat. Static
-bearer and custom-header credentials are write-only and encrypted at rest.
+To add an MCP server, open **System → Connections → MCP connections**. Remote
+servers use a Streamable HTTP or SSE endpoint. Advanced mode also supports
+trusted, credential-free stdio servers installed in the companion. Ask chat to
+follow the bundled **Companion MCP Setup** skill, then paste its YAML or JSON
+block into the import box and review the resulting connection before adding and
+testing it. Individual launch fields remain available for expert configuration.
+Configure an exact-name tool allowlist when you do not intend to trust every
+tool exposed by the server. Static bearer and custom-header credentials are
+write-only and encrypted at rest.
+
+Companion stdio registration never installs software. It launches the recorded
+absolute executable through AssistantMD's fixed SSH pairing and can advertise
+explicit `/workspace` or companion-home paths as MCP Roots. Its environment
+field is non-secret. Use HTTP/SSE for any provider requiring credentials managed
+by AssistantMD.
 
 For OAuth servers, save any pre-registered client ID, client secret, or explicit
 scopes required by the server, then choose **Authorize**. Servers advertising

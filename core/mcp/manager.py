@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 from fastmcp import Client
 from fastmcp.client.client import MessageHandler
-from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    SSETransport,
+    StdioTransport,
+    StreamableHttpTransport,
+)
 from mcp.types import Tool, ToolListChangedNotification
 
+from core.advanced_shell.stdio import encode_structured_launch
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
+from core.tools.advanced_shell import ShellTransportConfig, build_fixed_ssh_command
 from core.web.security import sanitize_url_for_log
 
 from .models import (
@@ -125,9 +133,11 @@ class MCPConnectionManager:
         *,
         connections: MCPConnectionService,
         idle_timeout_seconds: float = MCP_IDLE_TIMEOUT_SECONDS,
+        companion_stdio: ShellTransportConfig | None = None,
     ) -> None:
         self._connections = connections
         self._idle_timeout_seconds = idle_timeout_seconds
+        self._companion_stdio = companion_stdio
         self._entries: dict[_ConnectionKey, _ManagedConnection] = {}
         self._locks: dict[_ConnectionKey, asyncio.Lock] = {}
         self._invalidation_epochs: dict[tuple[str, str], int] = {}
@@ -391,8 +401,11 @@ class MCPConnectionManager:
         authority: ExecutionAuthority,
         connection: MCPConnection,
     ) -> _ManagedConnection:
+        if connection.transport is MCPTransport.COMPANION_STDIO:
+            return await self._connect_companion_stdio(authority, connection)
+        url = _require_http_url(connection)
         await validate_mcp_endpoint(
-            connection.url,
+            url,
             allow_private_http=connection.allow_private_http,
         )
         credential = self._connections.resolve_credential(
@@ -406,7 +419,7 @@ class MCPConnectionManager:
         )
         if oauth_storage is not None and not await has_mcp_oauth_tokens(
             storage=oauth_storage,
-            mcp_url=connection.url,
+            mcp_url=url,
         ):
             raise ValueError(
                 "MCP OAuth authorization is required. Connect this server in System."
@@ -419,7 +432,7 @@ class MCPConnectionManager:
         )
         transport = (
             StreamableHttpTransport(
-                connection.url,
+                url,
                 headers=headers,
                 auth=auth,
                 httpx_client_factory=_mcp_http_client_factory(
@@ -428,7 +441,7 @@ class MCPConnectionManager:
             )
             if connection.transport is MCPTransport.STREAMABLE_HTTP
             else SSETransport(
-                connection.url,
+                url,
                 headers=headers,
                 auth=auth,
                 httpx_client_factory=_mcp_http_client_factory(
@@ -460,7 +473,69 @@ class MCPConnectionManager:
                 "event": "mcp_connection_ready",
                 "principal_id": authority.principal_id,
                 "connection_id": connection.connection_id,
-                "url": sanitize_url_for_log(connection.url),
+                "url": sanitize_url_for_log(url),
+                "transport": connection.transport.value,
+                "tool_count": len(tools),
+            },
+        )
+        return _ManagedConnection(
+            connection=connection,
+            client=client,
+            tools=tuple(tools),
+            active_leases=0,
+            last_used=time.monotonic(),
+        )
+
+    async def _connect_companion_stdio(
+        self,
+        authority: ExecutionAuthority,
+        connection: MCPConnection,
+    ) -> _ManagedConnection:
+        config = self._companion_stdio
+        launch = connection.stdio
+        if config is None or launch is None:
+            raise ValueError("Companion stdio requires advanced execution mode.")
+        for path in (config.private_key_path, config.known_hosts_path):
+            if not path.is_file():
+                raise ValueError("Companion SSH identity is unavailable.")
+        command = encode_structured_launch(
+            executable=launch.executable,
+            arguments=launch.arguments,
+            working_directory=launch.working_directory,
+            environment=launch.environment,
+        )
+        ssh_argv = build_fixed_ssh_command(config, command)
+        transport = StdioTransport(
+            command=ssh_argv[0],
+            args=ssh_argv[1:],
+            keep_alive=True,
+            log_file=Path(os.devnull),
+        )
+        client = Client(
+            transport,
+            roots=[Path(root).as_uri() for root in launch.roots],
+            message_handler=_CatalogChangeHandler(
+                lambda: self.invalidate(
+                    authority.principal_id,
+                    connection.connection_id,
+                )
+            ),
+            init_timeout=MCP_INIT_TIMEOUT_SECONDS,
+            timeout=MCP_READ_TIMEOUT_SECONDS,
+        )
+        try:
+            async with asyncio.timeout(MCP_CONNECT_TIMEOUT_SECONDS):
+                await client.__aenter__()
+                tools = await client.list_tools(max_pages=MCP_MAX_TOOL_PAGES)
+        except BaseException:
+            await _close_client(client)
+            raise
+        logger.info(
+            "MCP connection ready",
+            data={
+                "event": "mcp_connection_ready",
+                "principal_id": authority.principal_id,
+                "connection_id": connection.connection_id,
                 "transport": connection.transport.value,
                 "tool_count": len(tools),
             },
@@ -567,11 +642,17 @@ def _build_auth(
         if oauth_storage is None:
             raise ValueError("MCP OAuth storage is unavailable.")
         return None, ConnectedMCPOAuth(
-            mcp_url=connection.url,
+            mcp_url=_require_http_url(connection),
             token_storage=oauth_storage,
             allow_private_http=allow_private_http,
         )
     return None, None
+
+
+def _require_http_url(connection: MCPConnection) -> str:
+    if connection.url is None:
+        raise ValueError("HTTP MCP connection URL is missing.")
+    return connection.url
 
 
 def _mcp_http_client_factory(
@@ -653,7 +734,11 @@ def _unavailable(
         data={
             "event": "mcp_connection_unavailable",
             "connection_id": connection.connection_id,
-            "url": sanitize_url_for_log(connection.url),
+            "url": (
+                sanitize_url_for_log(connection.url)
+                if connection.url is not None
+                else None
+            ),
             "transport": connection.transport.value,
             "status": status,
             "error_type": type(error).__name__,

@@ -252,7 +252,7 @@ class MCPOAuthCoordinator:
         await self._clear_pending(authority, connection)
         adapter = TokenStorageAdapter(
             async_key_value=self._connections.oauth_storage(authority, connection_id),
-            server_url=connection.url,
+            server_url=connection.require_url(),
         )
         await adapter.clear()
         loop = asyncio.get_running_loop()
@@ -379,7 +379,7 @@ class MCPOAuthCoordinator:
             await self._cancel_attempt(key)
         adapter = TokenStorageAdapter(
             async_key_value=self._connections.oauth_storage(authority, connection_id),
-            server_url=connection.url,
+            server_url=connection.require_url(),
         )
         connected = await adapter.get_tokens() is not None
         if not connected:
@@ -414,7 +414,7 @@ class MCPOAuthCoordinator:
             attempt.authority, attempt.connection.connection_id
         )
         auth = _HeadlessOAuth(
-            mcp_url=attempt.connection.url,
+            mcp_url=attempt.connection.require_url(),
             redirect_uri=attempt.redirect_uri,
             storage=storage,
             authorization_url=attempt.authorization_url,
@@ -426,19 +426,19 @@ class MCPOAuthCoordinator:
                 attempt.authority, attempt.connection.connection_id
             ),
         )
-        await _prime_oauth_authorization(auth, attempt.connection.url)
+        await _prime_oauth_authorization(auth, attempt.connection.require_url())
         http_client_factory = mcp_oauth_http_client_factory(
             allow_private_http=attempt.connection.allow_private_http
         )
         transport = (
             StreamableHttpTransport(
-                attempt.connection.url,
+                attempt.connection.require_url(),
                 auth=auth,
                 httpx_client_factory=http_client_factory,
             )
             if attempt.connection.transport is MCPTransport.STREAMABLE_HTTP
             else SSETransport(
-                attempt.connection.url,
+                attempt.connection.require_url(),
                 auth=auth,
                 httpx_client_factory=http_client_factory,
             )
@@ -501,7 +501,7 @@ class MCPOAuthCoordinator:
                 async_key_value=self._connections.oauth_storage(
                     authority, connection.connection_id
                 ),
-                server_url=connection.url,
+                server_url=connection.require_url(),
             )
             await adapter.set_tokens(tokens)
         except (httpx.HTTPError, ValueError) as exc:

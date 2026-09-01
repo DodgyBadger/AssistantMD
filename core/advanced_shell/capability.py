@@ -41,6 +41,16 @@ class AdvancedShellCapabilityService:
         self._executor = FixedSshShellExecutor(transport)
         self._preflight = preflight
 
+    @property
+    def enabled(self) -> bool:
+        """Return whether deployment configuration enables companion execution."""
+        return self._config.enabled
+
+    @property
+    def transport_config(self) -> ShellTransportConfig:
+        """Return fixed deployment coordinates for non-model companion clients."""
+        return self._executor.config
+
     async def resolve_for_primary_chat(
         self, authority: ExecutionAuthority
     ) -> Tool | None:

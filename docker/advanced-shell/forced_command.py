@@ -90,6 +90,7 @@ def _decode_structured_launch(
         or not executable
         or "\x00" in executable
         or not Path(executable).is_absolute()
+        or ".." in Path(executable).parts
     ):
         raise ValueError("Structured stdio executable must be an absolute path.")
     if (

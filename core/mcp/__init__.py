@@ -6,6 +6,7 @@ from .models import (
     MCPConnectionCreate,
     MCPConnectionTestResult,
     MCPConnectionUpdate,
+    MCPStdioConfig,
     MCPTransport,
 )
 from .oauth_storage import ConnectedMCPOAuth, EncryptedMCPOAuthStorage
@@ -22,6 +23,7 @@ __all__ = [
     "MCPMutationUnavailableError",
     "MCPConnectionTestResult",
     "MCPConnectionUpdate",
+    "MCPStdioConfig",
     "MCPReadinessSnapshot",
     "MCPTransport",
     "MCPUnavailableConnection",

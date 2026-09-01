@@ -40,13 +40,13 @@ async def test_mcp_connection_runtime(
         headers, auth = _build_auth(connection, credential)
         transport = (
             StreamableHttpTransport(
-                connection.url,
+                connection.require_url(),
                 headers=headers,
                 auth=auth,
             )
             if connection.transport is MCPTransport.STREAMABLE_HTTP
             else SSETransport(
-                connection.url,
+                connection.require_url(),
                 headers=headers,
                 auth=auth,
             )
@@ -130,7 +130,7 @@ async def test_mcp_connection_runtime(
         data={
             "event": "mcp_connection_test_succeeded",
             "connection_id": connection.connection_id,
-            "url": sanitize_url_for_log(connection.url),
+            "url": sanitize_url_for_log(connection.require_url()),
             "transport": connection.transport.value,
             "tool_count": count,
         },
@@ -187,7 +187,7 @@ def _failed_result(
         data={
             "event": "mcp_connection_test_failed",
             "connection_id": connection.connection_id,
-            "url": sanitize_url_for_log(connection.url),
+            "url": sanitize_url_for_log(connection.require_url()),
             "transport": connection.transport.value,
             "status": status,
             "error_type": error_type,

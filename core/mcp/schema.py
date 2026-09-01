@@ -30,6 +30,11 @@ MCP_MIGRATIONS = (
         name="connection_scoped_private_http",
         apply=lambda conn: _add_private_http_column(conn),
     ),
+    SQLiteMigration(
+        version=5,
+        name="companion_stdio_transport",
+        apply=lambda conn: _add_companion_stdio_transport(conn),
+    ),
 )
 
 
@@ -83,7 +88,7 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             owner_principal_id TEXT NOT NULL,
             slug TEXT NOT NULL,
             display_name TEXT NOT NULL,
-            url TEXT NOT NULL,
+            url TEXT,
             transport TEXT NOT NULL,
             auth_mode TEXT NOT NULL,
             header_name TEXT,
@@ -92,6 +97,11 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             allowed_tools_json TEXT,
             oauth_client_id TEXT,
             oauth_scopes_json TEXT,
+            stdio_executable TEXT,
+            stdio_arguments_json TEXT,
+            stdio_working_directory TEXT,
+            stdio_environment_json TEXT,
+            stdio_roots_json TEXT,
             config_version INTEGER NOT NULL DEFAULT 1,
             lifecycle_state TEXT NOT NULL DEFAULT 'active',
             oauth_fence_token TEXT NOT NULL
@@ -103,14 +113,28 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             CHECK (length(owner_principal_id) > 0),
             CHECK (length(slug) > 0),
             CHECK (length(display_name) > 0),
-            CHECK (length(url) > 0),
-            CHECK (transport IN ('streamable_http', 'sse')),
+            CHECK (url IS NULL OR length(url) > 0),
+            CHECK (transport IN ('streamable_http', 'sse', 'companion_stdio')),
             CHECK (auth_mode IN ('none', 'bearer', 'header', 'oauth')),
             CHECK (enabled IN (0, 1)),
             CHECK (allow_private_http IN (0, 1)),
             CHECK (config_version > 0),
             CHECK (lifecycle_state IN ('active', 'pending', 'deleting')),
-            CHECK (length(oauth_fence_token) = 32)
+            CHECK (length(oauth_fence_token) = 32),
+            CHECK (
+                (transport IN ('streamable_http', 'sse')
+                 AND url IS NOT NULL AND stdio_executable IS NULL)
+                OR
+                (transport = 'companion_stdio' AND url IS NULL
+                 AND auth_mode = 'none' AND header_name IS NULL
+                 AND allow_private_http = 0 AND oauth_client_id IS NULL
+                 AND oauth_scopes_json IS NULL
+                 AND stdio_executable IS NOT NULL
+                 AND stdio_arguments_json IS NOT NULL
+                 AND stdio_working_directory IS NOT NULL
+                 AND stdio_environment_json IS NOT NULL
+                 AND stdio_roots_json IS NOT NULL)
+            )
         )
         """
     )
@@ -192,6 +216,100 @@ def _add_private_http_column(conn: sqlite3.Connection) -> None:
         )
 
 
+def _add_companion_stdio_transport(conn: sqlite3.Connection) -> None:
+    if "stdio_executable" in _connection_columns(conn):
+        return
+    conn.execute("ALTER TABLE mcp_connections RENAME TO mcp_connections_legacy")
+    conn.execute(
+        """
+        CREATE TABLE mcp_connections (
+            connection_id TEXT PRIMARY KEY,
+            owner_principal_id TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            url TEXT,
+            transport TEXT NOT NULL,
+            auth_mode TEXT NOT NULL,
+            header_name TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            allow_private_http INTEGER NOT NULL DEFAULT 0,
+            allowed_tools_json TEXT,
+            oauth_client_id TEXT,
+            oauth_scopes_json TEXT,
+            stdio_executable TEXT,
+            stdio_arguments_json TEXT,
+            stdio_working_directory TEXT,
+            stdio_environment_json TEXT,
+            stdio_roots_json TEXT,
+            config_version INTEGER NOT NULL DEFAULT 1,
+            lifecycle_state TEXT NOT NULL DEFAULT 'active',
+            oauth_fence_token TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(owner_principal_id, slug),
+            CHECK (length(connection_id) > 0),
+            CHECK (length(owner_principal_id) > 0),
+            CHECK (length(slug) > 0),
+            CHECK (length(display_name) > 0),
+            CHECK (url IS NULL OR length(url) > 0),
+            CHECK (transport IN ('streamable_http', 'sse', 'companion_stdio')),
+            CHECK (auth_mode IN ('none', 'bearer', 'header', 'oauth')),
+            CHECK (enabled IN (0, 1)),
+            CHECK (allow_private_http IN (0, 1)),
+            CHECK (config_version > 0),
+            CHECK (lifecycle_state IN ('active', 'pending', 'deleting')),
+            CHECK (length(oauth_fence_token) = 32),
+            CHECK (
+                (transport IN ('streamable_http', 'sse')
+                 AND url IS NOT NULL AND stdio_executable IS NULL)
+                OR
+                (transport = 'companion_stdio' AND url IS NULL
+                 AND auth_mode = 'none' AND header_name IS NULL
+                 AND allow_private_http = 0 AND oauth_client_id IS NULL
+                 AND oauth_scopes_json IS NULL
+                 AND stdio_executable IS NOT NULL
+                 AND stdio_arguments_json IS NOT NULL
+                 AND stdio_working_directory IS NOT NULL
+                 AND stdio_environment_json IS NOT NULL
+                 AND stdio_roots_json IS NOT NULL)
+            )
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO mcp_connections (
+            connection_id, owner_principal_id, slug, display_name, url,
+            transport, auth_mode, header_name, enabled, allow_private_http,
+            allowed_tools_json, oauth_client_id, oauth_scopes_json,
+            config_version, lifecycle_state, oauth_fence_token, created_at,
+            updated_at
+        )
+        SELECT connection_id, owner_principal_id, slug, display_name, url,
+               transport, auth_mode, header_name, enabled, allow_private_http,
+               allowed_tools_json, oauth_client_id, oauth_scopes_json,
+               config_version, lifecycle_state, oauth_fence_token, created_at,
+               updated_at
+        FROM mcp_connections_legacy
+        """
+    )
+    conn.execute("DROP TABLE mcp_connections_legacy")
+    conn.execute(
+        """
+        CREATE INDEX idx_mcp_connections_owner_enabled
+        ON mcp_connections(owner_principal_id, enabled, display_name)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX idx_mcp_connections_owner_lifecycle_enabled
+        ON mcp_connections(
+            owner_principal_id, lifecycle_state, enabled, display_name
+        )
+        """
+    )
+
+
 def _create_mutation_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -237,6 +355,11 @@ def _assert_current_schema(conn: sqlite3.Connection) -> None:
         "lifecycle_state",
         "oauth_fence_token",
         "allow_private_http",
+        "stdio_executable",
+        "stdio_arguments_json",
+        "stdio_working_directory",
+        "stdio_environment_json",
+        "stdio_roots_json",
     }
     missing = sorted(required - _connection_columns(conn))
     if missing:

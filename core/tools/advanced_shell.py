@@ -169,6 +169,41 @@ class ShellExecutor(Protocol):
         ...
 
 
+def build_fixed_ssh_command(config: ShellTransportConfig, command: str) -> list[str]:
+    """Build argv for the one deployment-owned SSH destination."""
+    arguments = [
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-T",
+        "-i",
+        str(config.private_key_path),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={config.known_hosts_path}",
+        "-o",
+        f"ConnectTimeout={config.connect_timeout_seconds}",
+        "-o",
+        "ClearAllForwardings=yes",
+    ]
+    if config.host_key_alias:
+        arguments.extend(("-o", f"HostKeyAlias={config.host_key_alias}"))
+    arguments.extend(
+        (
+            "-p",
+            str(config.port),
+            f"{config.user}@{config.host}",
+            command,
+        )
+    )
+    return arguments
+
+
 class FixedSshShellExecutor:
     """Execute commands through one pinned SSH identity and destination."""
 
@@ -238,7 +273,7 @@ class FixedSshShellExecutor:
         try:
             async with asyncio.timeout(timeout_seconds):
                 process = await asyncio.create_subprocess_exec(
-                    *self._ssh_command(command),
+                    *build_fixed_ssh_command(self.config, command),
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -305,38 +340,8 @@ class FixedSshShellExecutor:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def _ssh_command(self, command: str) -> list[str]:
-        config = self.config
-        arguments = [
-            "ssh",
-            "-F",
-            "/dev/null",
-            "-T",
-            "-i",
-            str(config.private_key_path),
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "IdentitiesOnly=yes",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            f"UserKnownHostsFile={config.known_hosts_path}",
-            "-o",
-            f"ConnectTimeout={config.connect_timeout_seconds}",
-            "-o",
-            "ClearAllForwardings=yes",
-        ]
-        if config.host_key_alias:
-            arguments.extend(("-o", f"HostKeyAlias={config.host_key_alias}"))
-        arguments.extend(
-            (
-                "-p",
-                str(config.port),
-                f"{config.user}@{config.host}",
-                command,
-            )
-        )
-        return arguments
+        """Compatibility shim for experiments; use the public builder."""
+        return build_fixed_ssh_command(self.config, command)
 
     async def _read_stream(
         self,

@@ -10,7 +10,8 @@ Sanitized connection definitions live in `system/mcp.db`. Each connection has:
 
 - an immutable connection ID and immutable model-facing slug;
 - an owner principal recorded in the database but not exposed in the API/UI;
-- a display name, enabled state, Streamable HTTP or SSE transport, and URL;
+- a display name, enabled state, and Streamable HTTP, SSE, or fixed-companion
+  stdio transport;
 - an optional exact-name tool allowlist;
 - an explicit auth mode and, for custom-header auth, a non-secret header name;
 - a monotonically increasing configuration version for runtime invalidation.
@@ -36,11 +37,21 @@ select an owner, and lookup/update/delete operations scope their database query
 by both owner and connection ID so a foreign identifier is indistinguishable
 from an absent one.
 
+Companion stdio connections have no URL or credential fields. They persist an
+absolute executable, literal ordered arguments, working directory, bounded
+non-secret environment, and optional companion-path MCP Roots. Creation,
+updates, testing, and runtime acquisition require advanced execution mode. The
+transport always uses deployment-owned SSH coordinates and a versioned
+structured forced-command envelope; connection metadata cannot select another
+host, user, key, or shell command.
+
 ## Current management surface
 
 The System tab can create, edit, enable, disable, and delete connections; select
-Streamable HTTP or SSE; set an allowlist; and set or clear bearer/custom-header
-credentials. Enabling a connection trusts the tools allowed by its policy:
+HTTP, SSE, or companion stdio; set an allowlist; and set or clear applicable
+bearer/custom-header credentials. Strict YAML/JSON import normalizes companion
+stdio configuration into the ordinary create contract. Enabling a connection
+trusts the tools allowed by its policy:
 AssistantMD does not infer whether remote tools are read-only or mutating.
 
 The runtime owns lazy, principal-scoped MCP clients keyed by connection ID and
@@ -54,6 +65,13 @@ The UI connection test uses this retained manager and lists the effective
 allowed tools. Results distinguish readiness, authentication failure, timeout,
 unreachable servers, network-policy rejection, and MCP initialization failure
 without returning credentials or raw transport errors.
+
+Companion stdio clients are retained by the same manager. MCP framing crosses a
+local OpenSSH process while the provider runs in the companion. Raw SSH/provider
+stderr is discarded. Roots are advertised during initialization. Invalidating,
+evicting, cancelling, or shutting down the client closes SSH; the companion
+forced-command wrapper then owns cleanup of the provider's complete process
+tree. Server instructions, prompts, and resources remain excluded from chat.
 
 Remote endpoints require HTTPS. Plain HTTP is accepted only for local/private
 addresses when that connection explicitly enables `allow_private_http`.

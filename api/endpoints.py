@@ -100,6 +100,7 @@ from .models import (
     GoogleOAuthCompleteRequest,
     GoogleOAuthStartResponse,
     MCPConnectionCreateRequest,
+    MCPConnectionImportRequest,
     MCPConnectionInfo,
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
@@ -267,6 +268,7 @@ from .services.mcp import (
     disconnect_mcp_oauth,
     get_mcp_oauth_status,
     list_mcp_connections,
+    parse_mcp_connection_import,
     set_mcp_credential,
     set_mcp_oauth_client_secret,
     start_mcp_oauth,
@@ -1514,6 +1516,20 @@ async def create_mcp_connection_endpoint(
     """Create a current-user MCP connection."""
     try:
         return create_mcp_connection(request)
+    except Exception as e:
+        return create_error_response(e)
+
+
+@router.post(
+    "/system/mcp/connections/import/parse",
+    response_model=MCPConnectionCreateRequest,
+)
+async def parse_mcp_connection_import_endpoint(
+    request: MCPConnectionImportRequest,
+) -> MCPConnectionCreateRequest | JSONResponse:
+    """Parse strict YAML/JSON into the normal connection create contract."""
+    try:
+        return parse_mcp_connection_import(request)
     except Exception as e:
         return create_error_response(e)
 

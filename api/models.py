@@ -1621,14 +1621,34 @@ class SecretUpdateRequest(BaseModel):
     )
 
 
+class MCPStdioConfigInfo(BaseModel):
+    """Structured credential-free launch definition in the fixed companion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    executable: str = Field(..., min_length=1, max_length=2048)
+    arguments: list[str] = Field(default_factory=list, max_length=64)
+    working_directory: str = Field(..., min_length=1, max_length=2048)
+    environment: dict[str, str] = Field(default_factory=dict)
+    roots: list[str] = Field(default_factory=list, max_length=16)
+
+
+class MCPConnectionImportRequest(BaseModel):
+    """Strict YAML or JSON companion-stdio configuration supplied by a user."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    configuration: str = Field(..., min_length=1, max_length=65536)
+
+
 class MCPConnectionCreateRequest(BaseModel):
     """Create one current-principal MCP connection."""
 
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = Field(..., min_length=1, max_length=120)
-    url: str = Field(..., min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse"] = "streamable_http"
+    url: str | None = Field(None, min_length=1, max_length=2048)
+    transport: Literal["streamable_http", "sse", "companion_stdio"] = "streamable_http"
     auth_mode: Literal["none", "bearer", "header", "oauth"] = "none"
     header_name: str | None = Field(None, max_length=128)
     enabled: bool = True
@@ -1638,6 +1658,7 @@ class MCPConnectionCreateRequest(BaseModel):
     oauth_client_id: str | None = Field(None, max_length=2048)
     oauth_client_secret: SecretStr | None = Field(None, max_length=16384)
     oauth_scopes: list[str] | None = None
+    stdio: MCPStdioConfigInfo | None = None
 
 
 class MCPConnectionUpdateRequest(BaseModel):
@@ -1646,8 +1667,8 @@ class MCPConnectionUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = Field(..., min_length=1, max_length=120)
-    url: str = Field(..., min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse"]
+    url: str | None = Field(None, min_length=1, max_length=2048)
+    transport: Literal["streamable_http", "sse", "companion_stdio"]
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None = Field(None, max_length=128)
     enabled: bool
@@ -1655,6 +1676,7 @@ class MCPConnectionUpdateRequest(BaseModel):
     allowed_tools: list[str] | None = None
     oauth_client_id: str | None = Field(None, max_length=2048)
     oauth_scopes: list[str] | None = None
+    stdio: MCPStdioConfigInfo | None = None
 
 
 class MCPCredentialUpdateRequest(BaseModel):
@@ -1679,8 +1701,8 @@ class MCPConnectionInfo(BaseModel):
     connection_id: str
     slug: str
     display_name: str
-    url: str
-    transport: Literal["streamable_http", "sse"]
+    url: str | None
+    transport: Literal["streamable_http", "sse", "companion_stdio"]
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None
     enabled: bool
@@ -1695,6 +1717,7 @@ class MCPConnectionInfo(BaseModel):
     config_version: int
     created_at: str
     updated_at: str
+    stdio: MCPStdioConfigInfo | None = None
 
 
 class MCPConnectionTestResponse(BaseModel):

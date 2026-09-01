@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Literal
 
+import yaml
+
 from core.identity import require_current_execution_authority
 from core.logger import UnifiedLogger
 from core.mcp import (
@@ -16,6 +18,7 @@ from core.mcp import (
     MCPConnectionService,
     MCPConnectionUpdate,
     MCPMutationUnavailableError,
+    MCPStdioConfig,
     MCPTransport,
 )
 from core.mcp.oauth import (
@@ -28,6 +31,7 @@ from core.runtime.state import get_runtime_context
 from ..exceptions import APIException
 from ..models import (
     MCPConnectionCreateRequest,
+    MCPConnectionImportRequest,
     MCPConnectionInfo,
     MCPConnectionTestResponse,
     MCPConnectionUpdateRequest,
@@ -36,15 +40,86 @@ from ..models import (
     MCPOAuthCompleteRequest,
     MCPOAuthStartResponse,
     MCPOAuthStatusResponse,
+    MCPStdioConfigInfo,
     OperationResult,
 )
 
 logger = UnifiedLogger(tag="mcp-connections")
 
+_IMPORT_FIELDS = {
+    "name",
+    "transport",
+    "executable",
+    "working_directory",
+    "arguments",
+    "environment",
+    "roots",
+    "allowed_tools",
+    "enabled",
+}
+
 
 def list_mcp_connections() -> list[MCPConnectionInfo]:
     """List sanitized connections for request authority."""
     return [_to_info(item) for item in _service().list_connections()]
+
+
+def parse_mcp_connection_import(
+    request: MCPConnectionImportRequest,
+) -> MCPConnectionCreateRequest:
+    """Parse one strict chat-generated companion stdio configuration."""
+    try:
+        payload = yaml.safe_load(request.configuration)
+    except yaml.YAMLError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidMCPConnectionImport",
+            message="MCP configuration is not valid YAML or JSON.",
+        ) from exc
+    if not isinstance(payload, dict) or not all(
+        isinstance(key, str) for key in payload
+    ):
+        raise APIException(
+            status_code=400,
+            error_type="InvalidMCPConnectionImport",
+            message="MCP configuration must be an object.",
+        )
+    unknown = sorted(set(payload) - _IMPORT_FIELDS)
+    if unknown:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidMCPConnectionImport",
+            message=f"Unknown MCP configuration field(s): {', '.join(unknown)}.",
+        )
+    if payload.get("transport") != MCPTransport.COMPANION_STDIO.value:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidMCPConnectionImport",
+            message="Imported configuration must use companion_stdio transport.",
+        )
+    try:
+        return MCPConnectionCreateRequest.model_validate(
+            {
+                "display_name": payload.get("name"),
+                "transport": payload.get("transport"),
+                "enabled": payload.get("enabled", True),
+                "allowed_tools": payload.get("allowed_tools"),
+                "auth_mode": "none",
+                "stdio": {
+                    "executable": payload.get("executable"),
+                    "arguments": payload.get("arguments", []),
+                    "working_directory": payload.get("working_directory"),
+                    "environment": payload.get("environment", {}),
+                    "roots": payload.get("roots", []),
+                },
+            }
+        )
+    except ValueError as exc:
+        raise APIException(
+            status_code=400,
+            error_type="InvalidMCPConnectionImport",
+            message="MCP configuration fields are invalid.",
+        ) from exc
 
 
 def create_mcp_connection(
@@ -82,6 +157,7 @@ def create_mcp_connection(
                     if request.oauth_scopes is not None
                     else None
                 ),
+                stdio=_stdio_domain(request.stdio),
             )
         )
     _log_change("mcp_connection_created", connection)
@@ -114,6 +190,7 @@ def update_mcp_connection(
                     if request.oauth_scopes is not None
                     else None
                 ),
+                stdio=_stdio_domain(request.stdio),
             ),
         )
     _log_change("mcp_connection_updated", connection)
@@ -295,6 +372,14 @@ def _to_info(connection: MCPConnection) -> MCPConnectionInfo:
     )
     oauth_scopes = payload.get("oauth_scopes")
     payload["oauth_scopes"] = list(oauth_scopes) if oauth_scopes is not None else None
+    if connection.stdio is not None:
+        payload["stdio"] = {
+            "executable": connection.stdio.executable,
+            "arguments": list(connection.stdio.arguments),
+            "working_directory": connection.stdio.working_directory,
+            "environment": dict(connection.stdio.environment),
+            "roots": list(connection.stdio.roots),
+        }
     public_origin = get_runtime_context().config.public_origin
     payload["oauth_redirect_uri"] = (
         public_origin.build_url(mcp_oauth_callback_path(connection.connection_id))
@@ -305,6 +390,18 @@ def _to_info(connection: MCPConnection) -> MCPConnectionInfo:
         "configured" if public_origin is not None else "browser_fallback"
     )
     return MCPConnectionInfo.model_validate(payload)
+
+
+def _stdio_domain(value: MCPStdioConfigInfo | None) -> MCPStdioConfig | None:
+    if value is None:
+        return None
+    return MCPStdioConfig(
+        executable=value.executable,
+        arguments=tuple(value.arguments),
+        working_directory=value.working_directory,
+        environment=tuple(value.environment.items()),
+        roots=tuple(value.roots),
+    )
 
 
 def _log_change(event: str, connection: MCPConnection) -> None:

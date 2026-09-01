@@ -11,6 +11,13 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from core.advanced_shell.stdio import (
+    MAX_ROOTS,
+    validate_arguments,
+    validate_companion_path,
+    validate_environment,
+    validate_executable,
+)
 from core.identity import ExecutionAuthority, require_current_execution_authority
 from core.logger import UnifiedLogger
 from core.secrets import (
@@ -26,6 +33,7 @@ from .models import (
     MCPConnection,
     MCPConnectionCreate,
     MCPConnectionUpdate,
+    MCPStdioConfig,
     MCPTransport,
 )
 from .oauth_storage import MCP_OAUTH_FENCE_NAME, EncryptedMCPOAuthStorage
@@ -54,11 +62,13 @@ class MCPConnectionService:
         secrets: EncryptedSecretsService,
         on_change: Callable[[str, str], None] | None = None,
         mutation_failpoint: Callable[[str, str], None] | None = None,
+        companion_stdio_enabled: bool = False,
     ) -> None:
         self._system_root = system_root
         self._secrets = secrets
         self._on_change = on_change
         self._mutation_failpoint = mutation_failpoint
+        self._companion_stdio_enabled = companion_stdio_enabled
         ensure_mcp_schema(system_root)
 
     def list_connections(self) -> list[MCPConnection]:
@@ -88,6 +98,7 @@ class MCPConnectionService:
         self._reconcile_target(authority, clean_id)
         previous = self._require_for_authority(authority, clean_id)
         normalized = _normalize_update(request)
+        self._require_supported_transport(normalized.transport)
         delete_credential = normalized.auth_mode not in {
             MCPAuthMode.BEARER,
             MCPAuthMode.HEADER,
@@ -143,6 +154,9 @@ class MCPConnectionService:
                         header_name = ?, enabled = ?, allow_private_http = ?,
                         allowed_tools_json = ?,
                         oauth_client_id = ?, oauth_scopes_json = ?,
+                        stdio_executable = ?, stdio_arguments_json = ?,
+                        stdio_working_directory = ?, stdio_environment_json = ?,
+                        stdio_roots_json = ?,
                         lifecycle_state = 'pending',
                         oauth_fence_token = COALESCE(?, oauth_fence_token),
                         updated_at = CURRENT_TIMESTAMP
@@ -160,6 +174,15 @@ class MCPConnectionService:
                         _dump_allowed_tools(normalized.allowed_tools),
                         normalized.oauth_client_id,
                         _dump_allowed_tools(normalized.oauth_scopes),
+                        normalized.stdio.executable if normalized.stdio else None,
+                        _dump_stdio_arguments(normalized.stdio),
+                        (
+                            normalized.stdio.working_directory
+                            if normalized.stdio
+                            else None
+                        ),
+                        _dump_stdio_environment(normalized.stdio),
+                        _dump_stdio_roots(normalized.stdio),
                         fence_token,
                         authority.principal_id,
                         clean_id,
@@ -213,7 +236,9 @@ class MCPConnectionService:
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
         self._reconcile_target(authority, clean_id)
-        self._require_for_authority(authority, clean_id)
+        connection = self._require_for_authority(authority, clean_id)
+        if connection.transport is MCPTransport.COMPANION_STDIO:
+            raise ValueError("Companion stdio connections do not use credentials.")
         self._start_simple_mutation(
             authority,
             clean_id,
@@ -375,6 +400,7 @@ class MCPConnectionService:
     ) -> MCPConnection:
         """Trusted creation helper used to prove principal isolation."""
         normalized = _normalize_create(request)
+        self._require_supported_transport(normalized.transport)
         connection_id = str(uuid4())
         operation_id = str(uuid4())
         fence_token = random_secrets.token_hex(16)
@@ -415,9 +441,13 @@ class MCPConnectionService:
                         connection_id, owner_principal_id, slug, display_name,
                         url, transport, auth_mode, header_name, enabled,
                         allow_private_http, allowed_tools_json
-                        , oauth_client_id, oauth_scopes_json, lifecycle_state,
+                        , oauth_client_id, oauth_scopes_json,
+                        stdio_executable, stdio_arguments_json,
+                        stdio_working_directory, stdio_environment_json,
+                        stdio_roots_json, lifecycle_state,
                         oauth_fence_token
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                              'pending', ?)
                     """,
                     (
                         connection_id,
@@ -433,6 +463,15 @@ class MCPConnectionService:
                         _dump_allowed_tools(normalized.allowed_tools),
                         normalized.oauth_client_id,
                         _dump_allowed_tools(normalized.oauth_scopes),
+                        normalized.stdio.executable if normalized.stdio else None,
+                        _dump_stdio_arguments(normalized.stdio),
+                        (
+                            normalized.stdio.working_directory
+                            if normalized.stdio
+                            else None
+                        ),
+                        _dump_stdio_environment(normalized.stdio),
+                        _dump_stdio_roots(normalized.stdio),
                         fence_token,
                     ),
                 )
@@ -446,6 +485,13 @@ class MCPConnectionService:
         self._failpoint("after_intent", operation_id)
         self._finish_new_mutation(operation_id)
         return self._require_for_authority(authority, connection_id)
+
+    def _require_supported_transport(self, transport: MCPTransport) -> None:
+        if (
+            transport is MCPTransport.COMPANION_STDIO
+            and not self._companion_stdio_enabled
+        ):
+            raise ValueError("Companion stdio requires advanced execution mode.")
 
     def resolve_credential(
         self, authority: ExecutionAuthority, connection_id: str
@@ -1055,7 +1101,7 @@ class MCPConnectionService:
             connection_id=connection_id,
             slug=str(values["slug"]),
             display_name=str(values["display_name"]),
-            url=str(values["url"]),
+            url=str(values["url"]) if values["url"] else None,
             transport=MCPTransport(str(values["transport"])),
             auth_mode=MCPAuthMode(str(values["auth_mode"])),
             header_name=str(values["header_name"]) if values["header_name"] else None,
@@ -1071,6 +1117,7 @@ class MCPConnectionService:
             config_version=int(values["config_version"]),
             created_at=str(values["created_at"]),
             updated_at=str(values["updated_at"]),
+            stdio=_load_stdio_config(values),
         )
 
     def _require_for_authority(
@@ -1099,6 +1146,7 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
             allowed_tools=request.allowed_tools,
             oauth_client_id=request.oauth_client_id,
             oauth_scopes=request.oauth_scopes,
+            stdio=request.stdio,
         )
     )
     credential = str(request.credential or "").strip() or None
@@ -1123,6 +1171,7 @@ def _normalize_create(request: MCPConnectionCreate) -> MCPConnectionCreate:
         oauth_client_id=update.oauth_client_id,
         oauth_client_secret=oauth_client_secret,
         oauth_scopes=update.oauth_scopes,
+        stdio=update.stdio,
     )
 
 
@@ -1130,7 +1179,13 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
     display_name = str(request.display_name or "").strip()
     if not display_name or len(display_name) > 120:
         raise ValueError("MCP display name must contain 1 to 120 characters.")
-    url = _sanitize_url(request.url)
+    transport = MCPTransport(request.transport)
+    stdio = _normalize_stdio(request.stdio)
+    url = (
+        None
+        if transport is MCPTransport.COMPANION_STDIO
+        else _sanitize_url(request.url)
+    )
     auth_mode = MCPAuthMode(request.auth_mode)
     header_name = str(request.header_name or "").strip() or None
     if auth_mode is MCPAuthMode.HEADER:
@@ -1143,10 +1198,23 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
     oauth_scopes = _normalize_allowed_tools(request.oauth_scopes)
     if auth_mode is not MCPAuthMode.OAUTH and (oauth_client_id or oauth_scopes):
         raise ValueError("OAuth client settings are valid only for OAuth auth.")
+    if transport is MCPTransport.COMPANION_STDIO:
+        if auth_mode is not MCPAuthMode.NONE or header_name is not None:
+            raise ValueError(
+                "Companion stdio connections do not support authentication."
+            )
+        if request.allow_private_http or oauth_client_id or oauth_scopes:
+            raise ValueError("HTTP and OAuth settings are invalid for companion stdio.")
+        if stdio is None:
+            raise ValueError("Companion stdio launch configuration is required.")
+    elif stdio is not None:
+        raise ValueError(
+            "Companion stdio configuration requires companion_stdio transport."
+        )
     return MCPConnectionUpdate(
         display_name=display_name,
         url=url,
-        transport=MCPTransport(request.transport),
+        transport=transport,
         auth_mode=auth_mode,
         header_name=header_name,
         enabled=bool(request.enabled),
@@ -1154,10 +1222,32 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
         allowed_tools=allowed_tools,
         oauth_client_id=oauth_client_id,
         oauth_scopes=oauth_scopes,
+        stdio=stdio,
     )
 
 
-def _sanitize_url(value: str) -> str:
+def _normalize_stdio(value: MCPStdioConfig | None) -> MCPStdioConfig | None:
+    if value is None:
+        return None
+    arguments = validate_arguments(tuple(str(item) for item in value.arguments))
+    environment = validate_environment(
+        tuple((str(name), str(item)) for name, item in value.environment)
+    )
+    roots = tuple(validate_companion_path(root, label="Root") for root in value.roots)
+    if len(roots) > MAX_ROOTS:
+        raise ValueError("Companion stdio has too many Roots.")
+    return MCPStdioConfig(
+        executable=validate_executable(value.executable),
+        arguments=arguments,
+        working_directory=validate_companion_path(
+            value.working_directory, label="working directory"
+        ),
+        environment=environment,
+        roots=roots,
+    )
+
+
+def _sanitize_url(value: str | None) -> str:
     raw = str(value or "").strip()
     parsed = urlsplit(raw)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -1236,6 +1326,50 @@ def _load_allowed_tools(value: object) -> tuple[str, ...] | None:
     ):
         raise ValueError("Stored MCP allowed-tools policy is invalid.")
     return tuple(payload) or None
+
+
+def _dump_stdio_arguments(value: MCPStdioConfig | None) -> str | None:
+    return json.dumps(list(value.arguments), separators=(",", ":")) if value else None
+
+
+def _dump_stdio_environment(value: MCPStdioConfig | None) -> str | None:
+    return json.dumps(dict(value.environment), separators=(",", ":")) if value else None
+
+
+def _dump_stdio_roots(value: MCPStdioConfig | None) -> str | None:
+    return json.dumps(list(value.roots), separators=(",", ":")) if value else None
+
+
+def _load_json_strings(value: object, *, label: str) -> tuple[str, ...]:
+    payload = json.loads(str(value))
+    if not isinstance(payload, list) or not all(
+        isinstance(item, str) for item in payload
+    ):
+        raise ValueError(f"Stored companion stdio {label} is invalid.")
+    return tuple(payload)
+
+
+def _load_stdio_config(values: dict[str, object]) -> MCPStdioConfig | None:
+    executable = values.get("stdio_executable")
+    if executable is None:
+        return None
+    environment_payload = json.loads(str(values["stdio_environment_json"]))
+    if not isinstance(environment_payload, dict) or not all(
+        isinstance(name, str) and isinstance(value, str)
+        for name, value in environment_payload.items()
+    ):
+        raise ValueError("Stored companion stdio environment is invalid.")
+    return _normalize_stdio(
+        MCPStdioConfig(
+            executable=str(executable),
+            arguments=_load_json_strings(
+                values["stdio_arguments_json"], label="arguments"
+            ),
+            working_directory=str(values["stdio_working_directory"]),
+            environment=tuple(environment_payload.items()),
+            roots=_load_json_strings(values["stdio_roots_json"], label="Roots"),
+        )
+    )
 
 
 def _mutation_payload(
