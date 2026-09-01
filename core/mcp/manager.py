@@ -133,11 +133,11 @@ class MCPConnectionManager:
         *,
         connections: MCPConnectionService,
         idle_timeout_seconds: float = MCP_IDLE_TIMEOUT_SECONDS,
-        companion_stdio: ShellTransportConfig | None = None,
+        advanced_shell_stdio: ShellTransportConfig | None = None,
     ) -> None:
         self._connections = connections
         self._idle_timeout_seconds = idle_timeout_seconds
-        self._companion_stdio = companion_stdio
+        self._advanced_shell_stdio = advanced_shell_stdio
         self._entries: dict[_ConnectionKey, _ManagedConnection] = {}
         self._locks: dict[_ConnectionKey, asyncio.Lock] = {}
         self._invalidation_epochs: dict[tuple[str, str], int] = {}
@@ -401,8 +401,8 @@ class MCPConnectionManager:
         authority: ExecutionAuthority,
         connection: MCPConnection,
     ) -> _ManagedConnection:
-        if connection.transport is MCPTransport.COMPANION_STDIO:
-            return await self._connect_companion_stdio(authority, connection)
+        if connection.transport is MCPTransport.ADVANCED_SHELL_STDIO:
+            return await self._connect_advanced_shell_stdio(authority, connection)
         url = _require_http_url(connection)
         await validate_mcp_endpoint(
             url,
@@ -486,18 +486,18 @@ class MCPConnectionManager:
             last_used=time.monotonic(),
         )
 
-    async def _connect_companion_stdio(
+    async def _connect_advanced_shell_stdio(
         self,
         authority: ExecutionAuthority,
         connection: MCPConnection,
     ) -> _ManagedConnection:
-        config = self._companion_stdio
+        config = self._advanced_shell_stdio
         launch = connection.stdio
         if config is None or launch is None:
-            raise ValueError("Companion stdio requires advanced execution mode.")
+            raise ValueError("Advanced-shell stdio requires advanced execution mode.")
         for path in (config.private_key_path, config.known_hosts_path):
             if not path.is_file():
-                raise ValueError("Companion SSH identity is unavailable.")
+                raise ValueError("Advanced-shell SSH identity is unavailable.")
         command = encode_structured_launch(
             executable=launch.executable,
             arguments=launch.arguments,

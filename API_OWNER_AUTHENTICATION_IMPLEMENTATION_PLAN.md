@@ -149,7 +149,7 @@ testing, and deliberate experimentation:
   downloads, generated documentation, or OAuth callbacks;
 - every network peer that can reach AssistantMD can use the complete exposed
   application surface and resolves to the fixed `local-user` principal;
-- this explicitly includes the advanced companion container, which may call and
+- this explicitly includes the advanced-shell container, which may call and
   control AssistantMD through its API if network routing permits;
 - no endpoint-by-endpoint residual authentication is retained in this mode; and
 - startup and the System UI display a prominent persistent warning, but do not
@@ -169,14 +169,14 @@ application authentication.
   networks are not supported in this mode;
 - the deployment binds the published port to host loopback rather than all host
   interfaces;
-- Docker bridge peers, including the companion, are not loopback and are
+- Docker bridge peers, including the advanced shell, are not loopback and are
   rejected even if they can route to the AssistantMD service; and
 - host-network deployment is unsupported because it can make the peer boundary
   ambiguous.
 
 Loopback mode trusts processes already running on the local host and makes no
 claim against malicious software operating with that host access. It protects
-against remote and companion peers without creating a browser credential.
+against remote and advanced shell peers without creating a browser credential.
 
 **Trusted proxy assertion** is recommended when Caddy, Tinyauth, Authelia,
 Authentik, or another ingress already authenticates the human user:
@@ -190,7 +190,7 @@ Authentik, or another ingress already authenticates the human user:
   password, and is never exposed to the browser;
 - normal UI requests, `fetch`, SSE, uploads, downloads, and browser callbacks
   traverse the authenticated proxy without a second AssistantMD login; and
-- direct requests from the companion, other Compose services, the LAN, or the
+- direct requests from the advanced shell, other Compose services, the LAN, or the
   host fail because they neither traverse the trusted proxy nor possess its
   assertion.
 
@@ -325,7 +325,7 @@ authority must reset after normal responses, streaming completion, disconnects,
 exceptions, and cancellation.
 
 This seam preserves a future multiuser path: another authenticator can resolve
-distinct principals while the existing principal-owned services and companion
+distinct principals while the existing principal-owned services and advanced shell
 tenancy resolver continue to enforce authorization.
 
 ## Token Non-Disclosure Invariants
@@ -340,8 +340,8 @@ are absent from:
 - vaults, caches, task/session snapshots, workflow state, imports, and exports;
 - system settings responses, connection metadata, virtual documents, logs,
   activity events, traces, exception messages, and validation artifacts; and
-- child-process environments, command lines, the companion filesystem,
-  companion environment, shell stdin/stdout/stderr, and mounted volumes.
+- child-process environments, command lines, the advanced shell filesystem,
+  advanced shell environment, shell stdin/stdout/stderr, and mounted volumes.
 
 Secret-bearing request headers must be redacted before observability middleware
 can record them. Authentication errors use fixed, non-reflective messages and
@@ -409,7 +409,7 @@ must not include submitted values.
 - Add both trusted-proxy assertion and owner-token secret-file wiring examples
   to deployment documentation and development startup tooling. Include a Caddy
   example that strips the inbound assertion header before setting the upstream
-  value, keeps the secret out of browser responses, and prevents the companion
+  value, keeps the secret out of browser responses, and prevents the advanced shell
   from reading it. Document generation, rotation, recovery, reverse-proxy TLS,
   trusted-peer configuration, and the loopback-only development exception.
 - Keep the production image listening on `0.0.0.0`; container reachability is
@@ -424,13 +424,13 @@ must not include submitted values.
   process or compatible host-network deployments where AssistantMD observes an
   actual loopback peer.
 - Document disabled mode for recovery and deliberate testing, including an
-  example showing that the UI and API are open to the host, LAN, companion, and
+  example showing that the UI and API are open to the host, LAN, advanced shell, and
   any other routable peer. Do not describe it as a containment boundary.
 - Teach the validation controller and API client to provision a per-run sentinel
   credential and authenticate all protected calls. Keep public health checks
   explicitly unauthenticated.
 - Add route/mount inventory assertions and credential-leak artifact scanning.
-- Add a live companion probe proving that every sensitive AssistantMD surface
+- Add a live advanced shell probe proving that every sensitive AssistantMD surface
   rejects unauthenticated requests while normal browser and bearer paths work.
 - Review response headers, CORS, proxy forwarding, host/origin validation,
   request-size limits, failure throttling, and authenticated redirect behavior.
@@ -452,7 +452,7 @@ artifacts that demonstrate:
   from an untrusted immediate peer when peer restrictions are enabled, and
   ignores spoofed forwarded-source headers;
 - disabled mode admits unauthenticated UI, API, streaming, file, docs, OAuth,
-  and companion-originated requests, displays its warning, and never activates
+  and advanced-shell-originated requests, displays its warning, and never activates
   because another mode is merely misconfigured;
 - loopback mode admits actual IPv4 and IPv6 loopback peers without login while
   rejecting Docker, LAN, malformed, and forwarded-header-spoofed peers;
@@ -468,7 +468,7 @@ artifacts that demonstrate:
 - an authenticated request installs `local-user` authority, while an
   unauthenticated request installs none; and
 - sentinel scanning proves the owner credential never reaches any model,
-  persisted artifact, response, diagnostic, or companion-visible location.
+  persisted artifact, response, diagnostic, or advanced-shell-visible location.
 
 Extend `validation/scenarios/integration/core/api_endpoints.py` so its existing
 full endpoint inventory runs through the authenticated shared client. Extend
@@ -498,11 +498,11 @@ Black, and MyPy for `api` and `core`) plus targeted authentication tests. Run
 - Multiple owner accounts, passwords, password reset, invitations, roles, or an
   identity-provider UI.
 - Multiuser principal provisioning or changing principal-owned persistence.
-- Passing AssistantMD authority into the companion container.
+- Passing AssistantMD authority into the advanced shell container.
 - Using the encrypted connection-secret APIs as a second owner-credential
   store.
 - General CORS enablement or remote browser access over insecure HTTP.
-- Advanced shell tool composition, stdio MCP connections, and companion
+- Advanced shell tool composition, stdio MCP connections, and advanced shell
   provisioning; those remain in the advanced-mode plan.
 
 ## Implementation Decisions to Confirm During Slice 1

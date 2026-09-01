@@ -36,7 +36,7 @@ class AdvancedShellStatePaths:
 
 @dataclass(frozen=True)
 class AdvancedShellConfig:
-    """Sanitizable fixed-destination companion coordinates."""
+    """Sanitizable fixed-destination advanced-shell coordinates."""
 
     execution_mode: ExecutionMode
     host: str
@@ -71,7 +71,7 @@ class AdvancedShellConfig:
 
 
 def load_advanced_shell_config(settings: AppSettings) -> AdvancedShellConfig:
-    """Load and validate restart-bound companion coordinates."""
+    """Load and validate restart-bound advanced-shell coordinates."""
     try:
         execution_mode = ExecutionMode(settings.execution_mode.strip())
     except ValueError as exc:

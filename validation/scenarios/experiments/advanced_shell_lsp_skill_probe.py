@@ -1,4 +1,4 @@
-"""Probe a pinned skill-coupled MCP provider through the companion."""
+"""Probe a pinned skill-coupled MCP provider through the advanced shell."""
 
 from __future__ import annotations
 
@@ -20,11 +20,11 @@ _BOOTSTRAP_ROOT = Path(tempfile.gettempdir()) / "assistantmd-lsp-skill-probe"
 set_bootstrap_roots(_BOOTSTRAP_ROOT / "data", _BOOTSTRAP_ROOT / "system")
 
 from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
-from validation.scenarios.experiments.companion_stdio_mcp_probe import (  # noqa: E402
+from validation.scenarios.experiments.advanced_shell_stdio_mcp_probe import (  # noqa: E402
     _transport,
 )
 
-LOG_PATH = Path("scripts/companion_lsp_skill_probe.latest.log")
+LOG_PATH = Path("scripts/advanced_shell_lsp_skill_probe.latest.log")
 PROVIDER_COMMIT = "86b05985943a7396f88d3868b72556465437bc96"
 PROVIDER_VERSION = "1.1.20"
 SKILL_SHA256 = "1408ed7dc70be64ae0b2399027b59e1ba74ee93a88f29d7e5571e071cbc63632"

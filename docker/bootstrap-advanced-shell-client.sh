@@ -49,7 +49,7 @@ if [ -s "${host_public_key_path}" ]; then
     case "${host_public}" in
         ssh-ed25519\ *) ;;
         *)
-            echo "Companion host key must be one SSH Ed25519 public key." >&2
+            echo "Advanced-shell host key must be one SSH Ed25519 public key." >&2
             exit 1
             ;;
     esac
@@ -65,7 +65,7 @@ if [ -s "${host_public_key_path}" ]; then
     chmod 0644 "${known_hosts_temp}"
     mv -f "${known_hosts_temp}" "${known_hosts_path}"
 else
-    echo "Companion host public key is not available; AssistantMD will report trust as unavailable." >&2
+    echo "Advanced-shell host public key is not available; AssistantMD will report trust as unavailable." >&2
 fi
 
 exec "$@"

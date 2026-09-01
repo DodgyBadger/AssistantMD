@@ -1,4 +1,4 @@
-"""Stress the actual experimental shell tool against a persistent companion."""
+"""Stress the actual experimental shell tool against the persistent advanced shell."""
 
 from __future__ import annotations
 

@@ -33,7 +33,12 @@ MCP_MIGRATIONS = (
     SQLiteMigration(
         version=5,
         name="companion_stdio_transport",
-        apply=lambda conn: _add_companion_stdio_transport(conn),
+        apply=lambda conn: _add_stdio_transport(conn),
+    ),
+    SQLiteMigration(
+        version=6,
+        name="advanced_shell_stdio_transport",
+        apply=lambda conn: _rename_advanced_shell_stdio_transport(conn),
     ),
 )
 
@@ -114,7 +119,7 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             CHECK (length(slug) > 0),
             CHECK (length(display_name) > 0),
             CHECK (url IS NULL OR length(url) > 0),
-            CHECK (transport IN ('streamable_http', 'sse', 'companion_stdio')),
+            CHECK (transport IN ('streamable_http', 'sse', 'advanced_shell_stdio')),
             CHECK (auth_mode IN ('none', 'bearer', 'header', 'oauth')),
             CHECK (enabled IN (0, 1)),
             CHECK (allow_private_http IN (0, 1)),
@@ -125,7 +130,7 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
                 (transport IN ('streamable_http', 'sse')
                  AND url IS NOT NULL AND stdio_executable IS NULL)
                 OR
-                (transport = 'companion_stdio' AND url IS NULL
+                (transport = 'advanced_shell_stdio' AND url IS NULL
                  AND auth_mode = 'none' AND header_name IS NULL
                  AND allow_private_http = 0 AND oauth_client_id IS NULL
                  AND oauth_scopes_json IS NULL
@@ -216,7 +221,7 @@ def _add_private_http_column(conn: sqlite3.Connection) -> None:
         )
 
 
-def _add_companion_stdio_transport(conn: sqlite3.Connection) -> None:
+def _add_stdio_transport(conn: sqlite3.Connection) -> None:
     if "stdio_executable" in _connection_columns(conn):
         return
     conn.execute("ALTER TABLE mcp_connections RENAME TO mcp_connections_legacy")
@@ -308,6 +313,44 @@ def _add_companion_stdio_transport(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _rename_advanced_shell_stdio_transport(conn: sqlite3.Connection) -> None:
+    schema_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mcp_connections'"
+    ).fetchone()
+    schema_sql = str(schema_row[0] or "") if schema_row is not None else ""
+    if "companion_stdio" not in schema_sql:
+        return
+
+    conn.execute("ALTER TABLE mcp_connections RENAME TO mcp_connections_legacy")
+    conn.execute("DROP INDEX IF EXISTS idx_mcp_connections_owner_enabled")
+    conn.execute("DROP INDEX IF EXISTS idx_mcp_connections_owner_lifecycle_enabled")
+    _create_connection_tables(conn)
+    conn.execute(
+        """
+        INSERT INTO mcp_connections (
+            connection_id, owner_principal_id, slug, display_name, url,
+            transport, auth_mode, header_name, enabled, allow_private_http,
+            allowed_tools_json, oauth_client_id, oauth_scopes_json,
+            stdio_executable, stdio_arguments_json, stdio_working_directory,
+            stdio_environment_json, stdio_roots_json, config_version,
+            lifecycle_state, oauth_fence_token, created_at, updated_at
+        )
+        SELECT connection_id, owner_principal_id, slug, display_name, url,
+               CASE transport
+                   WHEN 'companion_stdio' THEN 'advanced_shell_stdio'
+                   ELSE transport
+               END,
+               auth_mode, header_name, enabled, allow_private_http,
+               allowed_tools_json, oauth_client_id, oauth_scopes_json,
+               stdio_executable, stdio_arguments_json, stdio_working_directory,
+               stdio_environment_json, stdio_roots_json, config_version,
+               lifecycle_state, oauth_fence_token, created_at, updated_at
+        FROM mcp_connections_legacy
+        """
+    )
+    conn.execute("DROP TABLE mcp_connections_legacy")
 
 
 def _create_mutation_table(conn: sqlite3.Connection) -> None:

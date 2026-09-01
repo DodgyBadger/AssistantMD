@@ -2,7 +2,7 @@
 
 ## Status
 
-Discovery experiments A through D are complete. The advanced-shell companion,
+Discovery experiments A through D are complete. The advanced shell,
 authenticated SSH transport, structured launch boundary, and representative MCP
 client capability matrix are validated. The smallest persisted stdio connection
 shape is now selected below. Repository research and live testing show that
@@ -14,7 +14,7 @@ operated after startup.
 The initial connector is now implemented across schema migration, domain/API
 models, advanced-mode mutation gates, the retained MCP manager, fixed SSH stdio
 transport, Roots, strict YAML/JSON import, System UI create/edit/test flow, and
-the bundled Companion MCP Setup skill. Deterministic stdio integration coverage
+the bundled Advanced Shell MCP Setup skill. Deterministic stdio integration coverage
 and a live filesystem-server manager probe pass. Maintainer validation and a
 manual browser workflow remain before the slice is considered merge-ready.
 
@@ -25,9 +25,9 @@ real provider call all succeeded. The bundled setup skill is hardened from that
 run to require exact provider version pins, official-SDK probes, explicit
 warning assessment, bounded risk-oriented tool-inventory review,
 version-matched provider-skill provenance, and registered-MCP-first use.
-Companion-local credentials remain a
+Advanced-shell credentials remain a
 possible user-managed escape hatch, but AssistantMD does not currently manage,
-encrypt, back up, or inject them. Any credential stored in the companion is
+encrypt, back up, or inject them. Any credential stored in the advanced shell is
 readable by the chat agent through `shell`, so that choice explicitly grants the
 agent access to the credential.
 
@@ -48,11 +48,11 @@ problem definition and defines the experiments needed before changing the MCP
 database or System UI.
 
 The first implementation increment adds a versioned structured-launch mode to
-the companion forced-command wrapper plus a non-persisted FastMCP probe. A local
+the advanced-shell forced-command wrapper plus a non-persisted FastMCP probe. A local
 adversarial wrapper test proves argv metacharacters remain literal, relative
 executables and non-canonical working directories fail closed, bounded
 non-secret environment is constructed explicitly, and the prior
-descendant-cleanup contract still passes. The rebuilt development companion ran
+descendant-cleanup contract still passes. The rebuilt development advanced shell ran
 fixed installed Python and npm executables through the structured mode, and all
 three representative MCP sessions initialized, listed capabilities, completed
 tool calls, closed, and left no provider processes behind.
@@ -73,14 +73,14 @@ prompt content.
 
 The design must preserve:
 
-- one fixed companion destination rather than per-connection SSH targets;
+- one fixed advanced-shell destination rather than per-connection SSH targets;
 - principal-owned connection identity and immutable model-facing slugs;
 - exact-name allowlisting, frozen catalogs, and deferred tool disclosure;
 - bounded process lifecycle, cancellation, activity, and result shaping;
 - advanced-mode gating at API, test, acquisition, and chat boundaries;
 - the existing rule that MCP server instructions are not automatically injected
   into chat; and
-- the credential-free initial companion contract.
+- the initial advanced-shell credential boundary.
 
 ## Revised Problem Definition
 
@@ -88,7 +88,7 @@ A usable local MCP integration may have three independent artifacts:
 
 1. **Provisioned runtime** — a package, repository checkout, release binary,
    generated files, subordinate services, or language-specific dependencies in
-   the companion.
+   the advanced shell.
 2. **Launch definition** — the executable, ordered arguments, working directory,
    non-secret environment, and any client capabilities needed for one stdio
    session.
@@ -116,7 +116,7 @@ card or accepted from MCP initialization.
 
 ### `mcp-server-fetch`: minimal Python package
 
-Prior live companion testing installed this credential-free package under the
+Prior live advanced-shell testing installed this credential-free package under the
 persistent home, launched it over stdio, initialized it, discovered `fetch`, and
 completed a call without a lingering process.
 
@@ -136,7 +136,7 @@ configuration model.
 The official filesystem server is installed/run with npm, but it requires at
 least one allowed directory. It accepts directories as ordered command
 arguments or requests MCP Roots from a capable client. An empty argument list
-without usable Roots fails initialization. The configured paths are companion
+without usable Roots fails initialization. The configured paths are advanced-shell
 paths and are meaningful only in relation to the deployment's selected mounts.
 
 Implications:
@@ -144,7 +144,7 @@ Implications:
 - arguments can be security authority, not mere process syntax;
 - connection testing needs the same mount and Roots context as real use;
 - AssistantMD must decide whether its first stdio client advertises Roots;
-- UI path selection cannot imply visibility that the companion does not have;
+- UI path selection cannot imply visibility that the advanced shell does not have;
   and
 - arbitrary path arguments are inspectable configuration but cannot be
   validated completely from the AssistantMD filesystem namespace.
@@ -199,7 +199,7 @@ Reference: <https://github.com/ProfessioneIT/lsp-mcp-server/blob/main/README.md>
 This npm stdio server requires one or more absolute skill-directory paths. It
 can return skill metadata and `SKILL.md` content, and offers an initialization
 prompt, but its documented workflow expects the agent itself to read referenced
-files and execute scripts at returned companion paths.
+files and execute scripts at returned advanced-shell paths.
 
 Implications:
 
@@ -207,7 +207,7 @@ Implications:
   disclosure mechanisms;
 - AssistantMD currently excludes MCP server instructions and does not compose
   MCP prompts/resources into chat;
-- a path returned by a companion provider is not readable through AssistantMD's
+- a path returned by an advanced-shell provider is not readable through AssistantMD's
   normal vault file tools;
 - primary advanced chats could follow such a skill through `shell`, while
   delegates and restricted chats could not; and
@@ -220,17 +220,17 @@ Reference: <https://github.com/skills-mcp/skills-mcp>
 
 ### The fixed target remains correct
 
-Every initial stdio process still runs in the one configured companion through
+Every initial stdio process still runs in the one configured advanced shell through
 the authenticated SSH boundary. A connection must not choose another host,
 user, port, key, or SSH option. “Target” in the connection UI should therefore
-mean a launchable artifact inside the companion, not a machine.
+mean a launchable artifact inside the advanced shell, not a machine.
 
 ### Launch and installation need different UX
 
 AssistantMD can validate and retain an MCP launch session, but it cannot infer a
 safe installation procedure from an arbitrary repository. Advanced shell is the
 appropriate installation escape hatch because the user has already opted into
-arbitrary companion execution. The connector should report “executable not
+arbitrary advanced-shell execution. The connector should report “executable not
 found” or another sanitized readiness result, not automatically install missing
 software.
 
@@ -256,7 +256,7 @@ upstream tools such as `lsp_hover`, while AssistantMD deliberately exposes them
 to the model as `<immutable-connection-slug>_lsp_hover`. Copying the upstream
 file verbatim would therefore give the model inaccurate invocation names.
 A reviewed AssistantMD adaptation can safely bind its prose to the immutable
-connection slug, but that is authored vault content, not a path the companion
+connection slug, but that is authored vault content, not a path the advanced shell
 connection should load.
 
 The current default skill catalog reads only `name` and `description` from
@@ -329,9 +329,9 @@ existing free-form mode. The model never creates the encoded envelope directly.
 This is a hypothesis to test, not yet a committed UI contract:
 
 1. The user enables advanced mode and installs/configures a trusted provider in
-   the companion, either personally or by asking an advanced chat to use shell.
-2. The user opens MCP Connections and selects **Companion stdio**.
-3. The form identifies the fixed companion and collects a structured executable,
+   the advanced shell, either personally or by asking an advanced chat to use shell.
+2. The user opens MCP Connections and selects **Advanced-shell stdio**.
+3. The form identifies the advanced shell and collects a structured executable,
    ordered argument list, optional working directory, and a small allowlisted set
    of non-secret environment values.
 4. **Test** launches the exact definition, performs MCP initialization, reports
@@ -358,7 +358,7 @@ working directory, constructed environment, bidirectional framing, normal
 close, invalid-envelope failure, cancellation, and descendant cleanup are
 covered by the local adversarial wrapper probe and live fixed-executable matrix.
 
-Create a temporary, non-persisted companion stdio adapter and run the existing
+Create a temporary, non-persisted advanced-shell stdio adapter and run the existing
 fetch and filesystem servers through it. Prove:
 
 - a versioned structured launch envelope that reaches an argv-based provider
@@ -402,11 +402,11 @@ requires AssistantMD-specific review/adaptation because model tool names are
 connection-prefixed.
 
 Install a pinned `lsp-mcp-server` revision and one lightweight language server
-in the companion against a disposable mounted workspace. Compare tool use with
+in the advanced shell against a disposable mounted workspace. Compare tool use with
 and without its version-matched `SKILL.md`. Determine:
 
 - where a reviewed skill would live in AssistantMD;
-- how it can refer safely to companion paths and shell;
+- how it can refer safely to advanced-shell paths;
 - whether the existing skill discovery surface can express the dependency on
   advanced shell plus a named MCP connection; and
 - what stale/missing skill status is useful without making the connection own
@@ -449,11 +449,11 @@ Evaluate whether this is simpler than any catalog or installer language.
   for the representative launch set once installation is separate?
 - Do environment values belong in `mcp.db`, or should the first version omit
   them entirely to keep the credential boundary unambiguous?
-- Does AssistantMD advertise MCP Roots for companion stdio servers, and if so,
-  how are roots derived from explicit companion mounts rather than host paths?
+- Does AssistantMD advertise MCP Roots for advanced-shell stdio servers, and if so,
+  how are roots derived from explicit advanced-shell mounts rather than host paths?
 - Is the retained-client lifecycle suitable for stateful providers such as a
   browser session, or does the UI need to communicate idle eviction?
-- How should a user select or verify companion paths when AssistantMD cannot
+- How should a user select or verify advanced-shell paths when AssistantMD cannot
   inspect them through normal file tools?
 - Can existing AssistantMD vault skills express “requires advanced shell and
   MCP connection X” without a new skill persistence model?
@@ -469,8 +469,8 @@ slug tombstones. Stdio fields must be sanitized metadata only. No shell string,
 private SSH setting, provider credential, or skill body belongs in the
 connection row.
 
-Executable and working-directory paths must be absolute companion paths or
-resolve under an explicitly defined companion PATH. Arguments must be an array,
+Executable and working-directory paths must be absolute advanced-shell paths or
+resolve under an explicitly defined advanced-shell PATH. Arguments must be an array,
 not one shell-evaluated command. Environment names and values, if supported,
 must be length/count bounded, block transport/runtime-reserved names, and be
 clearly designated non-secret. The SSH client environment remains
@@ -484,20 +484,20 @@ copy instructions into a vault.
 ## Selected Initial Connector Contract
 
 Discovery is sufficient to select the first persisted contract. Add
-`companion_stdio` as a third MCP transport. It always targets the one
-deployment-configured companion through the existing pinned SSH identity; no
+`advanced_shell_stdio` as a third MCP transport. It always targets the one
+deployment-configured advanced shell through the existing pinned SSH identity; no
 connection field may select a host, port, SSH user, key, host-key policy, or
 arbitrary SSH option.
 
 ### Persisted sanitized metadata
 
-A companion stdio connection adds only:
+An advanced-shell stdio connection adds only:
 
-- `executable`: required absolute companion path;
+- `executable`: required absolute advanced-shell path;
 - `arguments`: ordered string array, including empty arguments when meaningful;
-- `working_directory`: required absolute companion path;
+- `working_directory`: required absolute advanced-shell path;
 - `environment`: optional bounded map explicitly described as non-secret; and
-- `roots`: optional ordered companion absolute paths advertised as MCP file
+- `roots`: optional ordered advanced-shell absolute paths advertised as MCP file
   Roots.
 
 The connection retains the existing immutable ID/slug, owner principal,
@@ -506,7 +506,7 @@ mutation lifecycle, and slug tombstone. It has no URL, network-policy toggle,
 auth mode choice, header, credential, OAuth configuration, installer command,
 package/repository identity, skill path/body, or SSH target setting.
 
-The initial bounds match the structured companion protocol: at most 64
+The initial bounds match the structured advanced-shell protocol: at most 64
 arguments and 32 KiB total encoded argument content; at most 16 environment
 entries with uppercase portable names and 4 KiB per value; reserved runtime
 environment names cannot be overridden. Executable, working directory, and
@@ -522,7 +522,7 @@ HTTP/SSE connections under the normal encrypted credential pathways.
 ### Database migration
 
 Add MCP schema migration 5. Rebuild `mcp_connections` transactionally so its
-transport check admits `companion_stdio`, `url` is nullable, and new sanitized
+transport check admits `advanced_shell_stdio`, `url` is nullable, and new sanitized
 launch columns are available (`stdio_executable`, `stdio_arguments_json`,
 `stdio_working_directory`, `stdio_environment_json`, and `stdio_roots_json`).
 The rebuilt table must preserve every row, owner, immutable slug, timestamp,
@@ -532,25 +532,25 @@ relationship, and slug reservation.
 Database checks enforce the transport discriminator:
 
 - HTTP/SSE rows require a non-empty URL and null stdio fields;
-- companion stdio rows require a null URL, `auth_mode = 'none'`, null
+- advanced-shell stdio rows require a null URL, `auth_mode = 'none'`, null
   header/OAuth fields, and `allow_private_http = 0`;
 - launch JSON is decoded and fully validated again in the domain service rather
   than trusted merely because it was persisted.
 
 No secret-store mutation intent is needed for a credential-free stdio create or
 update, but the existing durable metadata lifecycle and runtime invalidation
-still apply. Credential/OAuth mutation methods reject companion stdio IDs.
+still apply. Credential/OAuth mutation methods reject advanced-shell stdio IDs.
 
 ### API contract
 
 Extend the existing collection/item/test routes rather than creating a second
 connection subsystem. Create/update/info payloads use the `transport`
-discriminator. HTTP/SSE use their current URL/auth fields; `companion_stdio`
+discriminator. HTTP/SSE use their current URL/auth fields; `advanced_shell_stdio`
 uses a nested `stdio` object containing the five launch fields above. Wrong-arm
 fields are rejected rather than ignored. Responses remain sanitized and never
 include owner or SSH coordinates.
 
-Create, update, enable, and test requests for companion stdio return a stable client error
+Create, update, enable, and test requests for advanced-shell stdio return a stable client error
 when `ASSISTANTMD_EXECUTION_MODE` is not `advanced`. Listing remains available
 so a deployment switched back to restricted mode can display or delete its
 durable configuration; it cannot edit, launch, or test it. A restricted runtime
@@ -567,7 +567,7 @@ into chat by this slice.
 ### Runtime adapter
 
 Move structured-envelope validation and encoding into a narrow
-`core/advanced_shell` contract module. The companion forced-command decoder
+`core/advanced_shell` contract module. The advanced-shell forced-command decoder
 retains independent fail-closed validation, with deterministic contract tests
 proving the producer and decoder agree on valid and invalid envelopes.
 
@@ -583,19 +583,19 @@ than having MCP call the shell executor's private method. The stdio adapter:
    application logs; readiness failures remain sanitized;
 6. advertises configured Roots and discovers the tool catalog; and
 7. on timeout, cancellation, invalidation, idle eviction, or shutdown closes
-   the SSH process so the companion wrapper reaps the complete provider tree.
+   the SSH process so the advanced-shell wrapper reaps the complete provider tree.
 
 The existing manager key `(principal, connection ID, config version)`, retained
 client, lease count, frozen catalog, exact-name allowlist, list-changed
 invalidation, idle eviction, and model-facing slug prefix remain unchanged.
-One companion container may therefore host processes for multiple principals
+One advanced-shell container may therefore host processes for multiple principals
 today without claiming Linux-user isolation; a future per-principal Linux user
-or per-principal companion strategy can be selected below this fixed-target
+or per-principal advanced-shell strategy can be selected below this fixed-target
 adapter without changing connection ownership or model-facing identity.
 
 ### System UI
 
-The existing MCP add form gains **Companion stdio**. In restricted mode the
+The existing MCP add form gains **Advanced-shell stdio**. In restricted mode the
 choice is visibly disabled with a short instruction to set
 `ASSISTANTMD_EXECUTION_MODE=advanced` and restart. In advanced mode, selecting it
 replaces URL/auth controls with:
@@ -606,7 +606,7 @@ replaces URL/auth controls with:
 - optional non-secret environment name/value rows; and
 - optional MCP Root path rows.
 
-The card states that the target is the deployment's fixed companion and refers
+The card states that the target is the deployment's advanced shell and refers
 users to the advanced-shell setup instructions for installation and mounts. It
 does not expose or duplicate infrastructure coordinates. Credential and OAuth
 controls never render for this transport. Test results show effective tools and
@@ -622,13 +622,13 @@ request, rejects unknown fields, shows a human-readable preview, and offers
 **Test and add**. The individual fields remain an expert fallback. This is one
 API/runtime path, not a second registration mechanism.
 
-A bundled `companion_mcp_setup` vault skill teaches advanced chat to install a
+A bundled `advanced_shell_mcp_setup` vault skill teaches advanced chat to install a
 pinned provider, probe it with an official MCP SDK, review its tool inventory,
 produce the import block, inspect any bundled provider `SKILL.md` as untrusted
 content, and create a reviewed AssistantMD copy when appropriate. Provider
 skills remain separate vault content and are never activated by connection
 creation. Credential-free operation is the supported default; any
-companion-local credential is explicitly user-managed rather than an
+advanced-shell credential is explicitly user-managed rather than an
 AssistantMD secret-store integration.
 
 ### Observability contract
@@ -660,11 +660,11 @@ scenarios for:
 - exact argv/environment/working-directory validation;
 - frozen allowlisted catalogs and deferred disclosure;
 - cancellation, timeout, stderr noise, malformed framing, and process cleanup;
-- companion unavailability without impact on HTTP MCP connections; and
+- advanced-shell unavailability without impact on HTTP MCP connections; and
 - explicit exclusion of server instructions and unreviewed skill content.
 
 The first validation slice extends the MCP persistence/API scenarios with a
-companion stdio row and asserts migration preservation, conditional payload
+advanced-shell stdio row and asserts migration preservation, conditional payload
 validation, restricted-mode mutation/test denial, owner-scoped CRUD, immutable
 slug, configuration-version invalidation, and credential-route rejection. It
 uses a fake transport factory; no Docker or SSH belongs in the automatic core
@@ -678,7 +678,7 @@ and exclusion of instructions/prompts/resources.
 
 The local wrapper probe remains the executable contract for envelope parsing,
 literal argv, environment construction, traversal rejection, EOF cancellation,
-and descendant cleanup. The live companion probes remain opt-in experiments.
+and descendant cleanup. The live advanced-shell probes remain opt-in experiments.
 
 Maintainers own the full integration profile. Agents run the individual new
 scenario and the full Ruff/Black/MyPy production quality gate.
@@ -687,7 +687,7 @@ scenario and the full Ruff/Black/MyPy production quality gate.
 
 1. Run the maintainer-owned `integration/core` validation profile.
 2. Manually import, test-and-add, edit, disable, re-enable, and delete a live
-   companion stdio connection through System in advanced mode.
+   advanced-shell stdio connection through System in advanced mode.
 3. Confirm restricted mode displays existing stdio metadata but blocks create,
    update, test, and runtime acquisition.
 4. Perform cleanup/review and treat reviewed provider-skill import/adaptation as

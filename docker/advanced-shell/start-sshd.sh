@@ -24,7 +24,7 @@ chmod 0644 "${host_key_path}.pub"
 derived_host_public=$(ssh-keygen -y -f "${host_key_path}")
 stored_host_public=$(sed -n '1p' "${host_key_path}.pub")
 [ "${derived_host_public}" = "${stored_host_public}" ] || {
-    echo "Companion host identity does not match its public key." >&2
+    echo "Advanced-shell host identity does not match its public key." >&2
     exit 1
 }
 
@@ -47,7 +47,7 @@ public_key=$(sed -n '1p' "${client_public_key_path}")
 case "${public_key}" in
     ssh-ed25519\ *) ;;
     *)
-        echo "Companion client key must be one SSH Ed25519 public key." >&2
+        echo "Advanced-shell client key must be one SSH Ed25519 public key." >&2
         exit 1
         ;;
 esac

@@ -42,7 +42,7 @@ host_public_key=$(
 } > "${state_root}/known_hosts"
 chmod 0644 "${state_root}/known_hosts"
 
-echo "Persistent advanced-shell companion is running."
+echo "Persistent advanced shell is running."
 echo "Workspace volume: assistantmd-advanced-shell-dev_workspace"
 echo "Home volume: assistantmd-advanced-shell-dev_home"
 echo "AssistantMD shell state: ${state_root}"

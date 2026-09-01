@@ -106,7 +106,7 @@ same secret-file mount, optionally add
 `ASSISTANTMD_AUTH_TRUSTED_PROXY_NETWORKS`, and have the proxy remove any inbound
 `X-AssistantMD-Proxy-Assertion` header before setting that header to the secret
 value on the upstream request. Do not mount the authentication secret into an
-advanced companion container. See [Security Considerations](security.md) for
+advanced-shell container. See [Security Considerations](security.md) for
 the mode contracts and ingress limits.
 
 ### Open `docker-compose.yml` and update the following:
@@ -122,7 +122,7 @@ the mode contracts and ingress limits.
 **Optional**
 - Change the host side (the left side) of `127.0.0.1:8000:8000` if you want to expose the UI on a different IP/port (e.g. `192.168.0.1:1234:8000`).
 - Set `ASSISTANTMD_IMAGE_TAG` in `.env` to lock both AssistantMD and its optional
-  companion to the same release. See the
+  advanced shell to the same release. See the
   [repository](https://github.com/DodgyBadger/AssistantMD/tags) for available
   tags.
 
@@ -137,7 +137,7 @@ the mode contracts and ingress limits.
 
 Advanced shell configuration is deployment-owned and read when AssistantMD
 starts. Restricted mode is the default. The optional `advanced` Compose profile
-starts a version-matched companion on the private Compose network without
+starts a version-matched advanced shell on the private Compose network without
 publishing SSH to the host.
 
 Add the following to `.env`:
@@ -153,7 +153,7 @@ Start or recreate the deployment:
 docker compose up -d
 ```
 
-On first start, AssistantMD and the companion generate their own SSH identities
+On first start, AssistantMD and the advanced shell generate their own SSH identities
 and exchange only public keys through narrowly scoped Docker volumes. The keys
 are disposable deployment state: users do not need to generate, inspect, or
 back them up. Normal container recreation preserves them. Removing all four
@@ -172,18 +172,18 @@ Set these only when an equivalent deployment uses a different service name,
 network alias, port, or user. Identity paths are fixed internal infrastructure,
 are not `.env` settings, and must not be shared between the two containers.
 
-By default, the companion sees only its persistent home and workspace volumes.
+By default, the advanced shell sees only its persistent home and workspace volumes.
 It does not see AssistantMD vaults. Optional bind-mount examples are provided in
 `docker-compose.override.yml.example`. Pre-create every selected host path and
 prefer read-only vault mounts. Never mount AssistantMD's `system/` directory,
 the Docker socket, a home directory, or a host root.
 
 Open System → Infrastructure after startup. Advanced mode is usable when the
-companion reports `ready`.
+advanced shell reports `ready`.
 
 #### Development from a containerized checkout
 
-For the persistent development companion used by contributors, run:
+For the persistent development advanced shell used by contributors, run:
 
 ```bash
 scripts/start_advanced_shell_development.sh
@@ -241,17 +241,17 @@ to another browser when the new tab cannot be opened automatically.
 
 To add an MCP server, open **System → Connections → MCP connections**. Remote
 servers use a Streamable HTTP or SSE endpoint. Advanced mode also supports
-trusted, credential-free stdio servers installed in the companion. Ask chat to
-follow the bundled **Companion MCP Setup** skill, then paste its YAML or JSON
+trusted stdio servers installed in the advanced shell. Ask chat to
+follow the bundled **Advanced Shell MCP Setup** skill, then paste its YAML or JSON
 block into the import box and review the resulting connection before adding and
 testing it. Individual launch fields remain available for expert configuration.
 Configure an exact-name tool allowlist when you do not intend to trust every
 tool exposed by the server. Static bearer and custom-header credentials are
 write-only and encrypted at rest.
 
-Companion stdio registration never installs software. It launches the recorded
+Advanced-shell stdio registration never installs software. It launches the recorded
 absolute executable through AssistantMD's fixed SSH pairing and can advertise
-explicit `/workspace` or companion-home paths as MCP Roots. Its environment
+explicit `/workspace` or advanced-shell-home paths as MCP Roots. Its environment
 field is non-secret. Use HTTP/SSE for any provider requiring credentials managed
 by AssistantMD.
 

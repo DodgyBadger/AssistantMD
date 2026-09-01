@@ -1,4 +1,4 @@
-"""Structured companion stdio launch contract shared by MCP producers."""
+"""Structured advanced-shell stdio launch contract shared by MCP producers."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ RESERVED_ENVIRONMENT_NAMES = frozenset(
 
 
 def validate_executable(value: str) -> str:
-    """Normalize one absolute companion executable path."""
+    """Normalize one absolute advanced-shell executable path."""
     normalized = str(value or "").strip()
     path = PurePosixPath(normalized)
     if (
@@ -43,21 +43,21 @@ def validate_executable(value: str) -> str:
         or ".." in path.parts
         or not path.is_absolute()
     ):
-        raise ValueError("Companion stdio executable must be an absolute path.")
+        raise ValueError("Advanced-shell stdio executable must be an absolute path.")
     return normalized
 
 
 def validate_arguments(values: tuple[str, ...]) -> tuple[str, ...]:
     """Validate bounded literal argv values."""
     if len(values) > MAX_ARGUMENTS or any("\x00" in value for value in values):
-        raise ValueError("Companion stdio arguments are invalid.")
+        raise ValueError("Advanced-shell stdio arguments are invalid.")
     if sum(len(value.encode()) for value in values) > MAX_ARGUMENT_BYTES:
-        raise ValueError("Companion stdio arguments exceed the size limit.")
+        raise ValueError("Advanced-shell stdio arguments exceed the size limit.")
     return values
 
 
-def validate_companion_path(value: str, *, label: str) -> str:
-    """Validate one absolute path below a supported companion root."""
+def validate_advanced_shell_path(value: str, *, label: str) -> str:
+    """Validate one absolute path below a supported advanced-shell root."""
     normalized = str(value or "").strip()
     path = PurePosixPath(normalized)
     if (
@@ -69,7 +69,7 @@ def validate_companion_path(value: str, *, label: str) -> str:
             path == root or path.is_relative_to(root) for root in ALLOWED_PATH_ROOTS
         )
     ):
-        raise ValueError(f"Companion stdio {label} is outside allowed roots.")
+        raise ValueError(f"Advanced-shell stdio {label} is outside allowed roots.")
     return normalized
 
 
@@ -78,7 +78,7 @@ def validate_environment(
 ) -> tuple[tuple[str, str], ...]:
     """Validate and sort a bounded non-secret environment mapping."""
     if len(values) > MAX_ENVIRONMENT_VALUES:
-        raise ValueError("Companion stdio environment has too many entries.")
+        raise ValueError("Advanced-shell stdio environment has too many entries.")
     result: dict[str, str] = {}
     for name, value in values:
         if (
@@ -87,9 +87,9 @@ def validate_environment(
             or "\x00" in value
             or len(value.encode()) > MAX_ENVIRONMENT_VALUE_BYTES
         ):
-            raise ValueError("Companion stdio environment is invalid.")
+            raise ValueError("Advanced-shell stdio environment is invalid.")
         if name in result:
-            raise ValueError("Companion stdio environment names must be unique.")
+            raise ValueError("Advanced-shell stdio environment names must be unique.")
         result[name] = value
     return tuple(sorted(result.items()))
 

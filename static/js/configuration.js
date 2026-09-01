@@ -2582,10 +2582,10 @@ async function saveModelRow(rowKey) {
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
             const statusPayload = await safeJson(statusResponse);
             state.mcpAdvancedMode = statusResponse.ok && statusPayload?.advanced_shell?.execution_mode === 'advanced';
-            const stdioOption = elements.mcpCreateForm?.querySelector('option[value="companion_stdio"]');
+            const stdioOption = elements.mcpCreateForm?.querySelector('option[value="advanced_shell_stdio"]');
             if (stdioOption instanceof HTMLOptionElement) {
                 stdioOption.disabled = !state.mcpAdvancedMode;
-                stdioOption.textContent = state.mcpAdvancedMode ? 'Companion stdio' : 'Companion stdio (requires advanced mode)';
+                stdioOption.textContent = state.mcpAdvancedMode ? 'Advanced-shell stdio' : 'Advanced-shell stdio (requires advanced mode)';
             }
             state.mcpConnections = Array.isArray(payload) ? payload : [];
             renderMcpConnections();
@@ -2605,7 +2605,7 @@ async function saveModelRow(rowKey) {
         }
         elements.mcpConnectionsList.innerHTML = state.mcpConnections.map((connection) => {
             const allowedTools = Array.isArray(connection.allowed_tools) ? connection.allowed_tools.join(', ') : '';
-            const isStdio = connection.transport === 'companion_stdio';
+            const isStdio = connection.transport === 'advanced_shell_stdio';
             const staticAuth = connection.auth_mode === 'bearer' || connection.auth_mode === 'header';
             const oauthAuth = connection.auth_mode === 'oauth';
             const browserCallbackUrl = new URL(`api/system/mcp/connections/${encodeURIComponent(connection.connection_id)}/oauth/callback`, window.location.href).href;
@@ -2619,7 +2619,7 @@ async function saveModelRow(rowKey) {
                     <div class="grid gap-3 md:grid-cols-2">
                         <label class="text-xs text-txt-secondary">Display name<input data-mcp-field="display_name" value="${escapeHtml(connection.display_name)}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                         ${isStdio ? `
-                        <label class="text-xs text-txt-secondary">Companion executable<input data-mcp-field="stdio_executable" value="${escapeHtml(connection.stdio?.executable || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" /></label>
+                        <label class="text-xs text-txt-secondary">Advanced-shell executable<input data-mcp-field="stdio_executable" value="${escapeHtml(connection.stdio?.executable || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" /></label>
                         <label class="text-xs text-txt-secondary">Working directory<input data-mcp-field="stdio_working_directory" value="${escapeHtml(connection.stdio?.working_directory || '')}" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary" /></label>
                         <label class="text-xs text-txt-secondary">Arguments (one per line)<textarea data-mcp-field="stdio_arguments" rows="4" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary">${escapeHtml(Array.isArray(connection.stdio?.arguments) ? connection.stdio.arguments.join('\n') : '')}</textarea></label>
                         <label class="text-xs text-txt-secondary">MCP Roots (one per line)<textarea data-mcp-field="stdio_roots" rows="4" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary">${escapeHtml(Array.isArray(connection.stdio?.roots) ? connection.stdio.roots.join('\n') : '')}</textarea></label>
@@ -2633,7 +2633,7 @@ async function saveModelRow(rowKey) {
                     </div>
                     <div class="space-y-2">
                         <label class="block text-sm text-txt-primary"><input data-mcp-field="enabled" type="checkbox" ${connection.enabled ? 'checked' : ''} class="mr-2" />Enabled</label>
-                        ${isStdio ? '<p class="text-xs text-txt-secondary">Runs through the deployment\'s fixed credential-free companion.</p>' : `<label class="block text-sm text-txt-primary"><input data-mcp-field="allow_private_http" type="checkbox" ${connection.allow_private_http ? 'checked' : ''} class="mr-2" />Allow HTTP on a private network</label><p class="text-xs text-txt-secondary">HTTP traffic, including credentials, is not encrypted. Public HTTP addresses are always blocked.</p>`}
+                        ${isStdio ? '<p class="text-xs text-txt-secondary">Runs through the deployment\'s fixed advanced shell.</p>' : `<label class="block text-sm text-txt-primary"><input data-mcp-field="allow_private_http" type="checkbox" ${connection.allow_private_http ? 'checked' : ''} class="mr-2" />Allow HTTP on a private network</label><p class="text-xs text-txt-secondary">HTTP traffic, including credentials, is not encrypted. Public HTTP addresses are always blocked.</p>`}
                     </div>
                     ${staticAuth ? `<div class="rounded-md border border-border-primary p-3 space-y-2">
                         <div class="text-xs text-txt-secondary">Credential: ${connection.credential_present ? 'stored' : 'not set'}</div>
@@ -2685,10 +2685,10 @@ async function saveModelRow(rowKey) {
     function updateMcpCreateAuthFields() {
         if (!(elements.mcpCreateForm instanceof HTMLFormElement)) return;
         const transport = elements.mcpCreateForm.elements.namedItem('transport')?.value || 'streamable_http';
-        const isStdio = transport === 'companion_stdio';
+        const isStdio = transport === 'advanced_shell_stdio';
         const submitButton = elements.mcpCreateForm.querySelector('button[type="submit"]');
         if (submitButton instanceof HTMLButtonElement) {
-            setIconButtonLabel(submitButton, isStdio ? 'Test and add Companion stdio connection' : 'Add MCP connection');
+            setIconButtonLabel(submitButton, isStdio ? 'Test and add advanced-shell stdio connection' : 'Add MCP connection');
         }
         elements.mcpCreateForm.querySelectorAll('[data-mcp-create-http]').forEach((element) => element.classList.toggle('hidden', isStdio));
         elements.mcpCreateForm.querySelectorAll('[data-mcp-create-stdio]').forEach((element) => element.classList.toggle('hidden', !isStdio));
@@ -2735,7 +2735,7 @@ async function saveModelRow(rowKey) {
         if (!(elements.mcpCreateForm instanceof HTMLFormElement)) return;
         const configuration = elements.mcpCreateForm.elements.namedItem('import_configuration')?.value || '';
         if (!configuration.trim()) {
-            setStatus(elements.mcpFeedback, 'Paste Companion stdio YAML or JSON first.', 'error');
+            setStatus(elements.mcpFeedback, 'Paste advanced-shell stdio YAML or JSON first.', 'error');
             return;
         }
         try {
@@ -2751,7 +2751,7 @@ async function saveModelRow(rowKey) {
                 if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) field.value = value;
             };
             setValue('display_name', payload.display_name || '');
-            setValue('transport', payload.transport || 'companion_stdio');
+            setValue('transport', payload.transport || 'advanced_shell_stdio');
             setValue('allowed_tools', Array.isArray(payload.allowed_tools) ? payload.allowed_tools.join(', ') : '');
             setValue('stdio_executable', payload.stdio?.executable || '');
             setValue('stdio_working_directory', payload.stdio?.working_directory || '/workspace');
@@ -2801,7 +2801,7 @@ async function saveModelRow(rowKey) {
         if (state.isSavingMcp || !(elements.mcpCreateForm instanceof HTMLFormElement)) return;
         const form = new FormData(elements.mcpCreateForm);
         const transport = String(form.get('transport') || 'streamable_http');
-        const isStdio = transport === 'companion_stdio';
+        const isStdio = transport === 'advanced_shell_stdio';
         let stdio = null;
         try {
             if (isStdio) {
@@ -2837,15 +2837,15 @@ async function saveModelRow(rowKey) {
         const saved = await mutateMcp('api/system/mcp/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 'MCP connection added.');
         if (saved && isStdio && saved.connection_id) {
             try {
-                setStatus(elements.mcpFeedback, 'Testing Companion stdio connection…');
+                setStatus(elements.mcpFeedback, 'Testing advanced-shell stdio connection…');
                 const testResponse = await fetch(`api/system/mcp/connections/${encodeURIComponent(saved.connection_id)}/test`, { method: 'POST' });
                 const testResult = await safeJson(testResponse);
                 if (!testResponse.ok || !testResult?.ready) throw new Error(testResult?.message || `HTTP ${testResponse.status}`);
                 if (enableAfterTest) {
                     const { credential: _credential, oauth_client_secret: _oauthClientSecret, ...updatePayload } = payload;
-                    await mutateMcp(`api/system/mcp/connections/${encodeURIComponent(saved.connection_id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...updatePayload, enabled: true }) }, `Companion stdio connection tested and enabled with ${testResult.tool_count} tool(s).`);
+                    await mutateMcp(`api/system/mcp/connections/${encodeURIComponent(saved.connection_id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...updatePayload, enabled: true }) }, `Advanced-shell stdio connection tested and enabled with ${testResult.tool_count} tool(s).`);
                 } else {
-                    setStatus(elements.mcpFeedback, `Companion stdio connection tested successfully with ${testResult.tool_count} tool(s) and remains disabled.`, 'success');
+                    setStatus(elements.mcpFeedback, `Advanced-shell stdio connection tested successfully with ${testResult.tool_count} tool(s) and remains disabled.`, 'success');
                 }
             } catch (error) {
                 setStatus(elements.mcpFeedback, `Connection was saved disabled because its test failed: ${error.message}`, 'error');
@@ -2920,7 +2920,7 @@ async function saveModelRow(rowKey) {
             const allowPrivateHttp = card.querySelector('[data-mcp-field="allow_private_http"]')?.checked === true;
             const authMode = value('auth_mode');
             const transport = value('transport');
-            const isStdio = transport === 'companion_stdio';
+            const isStdio = transport === 'advanced_shell_stdio';
             let stdio = null;
             try {
                 if (isStdio) {

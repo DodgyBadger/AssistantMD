@@ -1,4 +1,4 @@
-"""Deployment-owned configuration for the advanced shell companion."""
+"""Deployment-owned configuration for the advanced shell."""
 
 from .config import (
     AdvancedShellConfig,

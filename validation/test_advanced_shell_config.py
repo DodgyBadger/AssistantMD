@@ -53,7 +53,7 @@ def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> 
         "Delegates do not receive shell",
         "official AssistantMD MCP connection",
         "inspect the working directory and exact target",
-        "separate persistent companion",
+        "separate persistent advanced-shell container",
     ):
         assert required in instruction
     for prohibited in (
@@ -202,7 +202,7 @@ def test_status_projection_is_sanitized() -> None:
         config,
         AdvancedShellPreflightSnapshot(
             state=AdvancedShellReadiness.READY,
-            message="The companion is authenticated and ready.",
+            message="The advanced shell is authenticated and ready.",
         ),
     ).model_dump(mode="json")
 
@@ -212,7 +212,7 @@ def test_status_projection_is_sanitized() -> None:
         "port": 2200,
         "user": "operator",
         "readiness_state": "ready",
-        "readiness_message": "The companion is authenticated and ready.",
+        "readiness_message": "The advanced shell is authenticated and ready.",
     }
     assert "private-alias" not in str(payload)
     assert "system" not in str(payload)
@@ -308,7 +308,7 @@ class _FakePreflight:
 
 
 @pytest.mark.asyncio
-async def test_primary_chat_shell_requires_advanced_ready_companion(
+async def test_primary_chat_shell_requires_advanced_shell_readiness(
     tmp_path: Path,
 ) -> None:
     config = _advanced_config()

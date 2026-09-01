@@ -1,4 +1,4 @@
-"""Cached authenticated readiness checks for the fixed shell companion."""
+"""Cached authenticated readiness checks for the advanced shell."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ logger = UnifiedLogger(tag="advanced-shell")
 
 
 class AdvancedShellReadiness(StrEnum):
-    """Sanitized companion readiness states safe for operator reporting."""
+    """Sanitized advanced-shell readiness states safe for operator reporting."""
 
     INACTIVE = "inactive"
     IDENTITY_MISSING = "identity_missing"
@@ -51,7 +51,7 @@ ExecutorFactory = Callable[[ShellTransportConfig], FixedSshShellExecutor]
 
 
 class AdvancedShellPreflightService:
-    """Authenticate to the fixed companion and cache the sanitized outcome."""
+    """Authenticate to the advanced-shell host and cache the sanitized outcome."""
 
     def __init__(
         self,
@@ -160,14 +160,14 @@ def _classify_result(result: ShellExecutionResult) -> AdvancedShellPreflightSnap
 def _snapshot(state: AdvancedShellReadiness) -> AdvancedShellPreflightSnapshot:
     messages = {
         AdvancedShellReadiness.INACTIVE: "Advanced shell is inactive.",
-        AdvancedShellReadiness.IDENTITY_MISSING: "Companion client identity is missing.",
-        AdvancedShellReadiness.TRUST_MISSING: "Companion host trust is missing.",
+        AdvancedShellReadiness.IDENTITY_MISSING: "Advanced-shell client identity is missing.",
+        AdvancedShellReadiness.TRUST_MISSING: "Advanced-shell host trust is missing.",
         AdvancedShellReadiness.SSH_UNAVAILABLE: "The SSH client is unavailable.",
-        AdvancedShellReadiness.DNS_FAILURE: "The companion hostname cannot be resolved.",
-        AdvancedShellReadiness.CONNECTION_FAILURE: "The companion cannot be reached.",
-        AdvancedShellReadiness.HOST_KEY_MISMATCH: "The companion host identity does not match the pinned identity.",
-        AdvancedShellReadiness.AUTHENTICATION_FAILURE: "The companion rejected AssistantMD authentication.",
-        AdvancedShellReadiness.UNAVAILABLE: "Companion readiness could not be established.",
-        AdvancedShellReadiness.READY: "The companion is authenticated and ready.",
+        AdvancedShellReadiness.DNS_FAILURE: "The advanced-shell hostname cannot be resolved.",
+        AdvancedShellReadiness.CONNECTION_FAILURE: "The advanced shell cannot be reached.",
+        AdvancedShellReadiness.HOST_KEY_MISMATCH: "The advanced-shell host identity does not match the pinned identity.",
+        AdvancedShellReadiness.AUTHENTICATION_FAILURE: "The advanced shell rejected AssistantMD authentication.",
+        AdvancedShellReadiness.UNAVAILABLE: "Advanced-shell readiness could not be established.",
+        AdvancedShellReadiness.READY: "The advanced shell is authenticated and ready.",
     }
     return AdvancedShellPreflightSnapshot(state=state, message=messages[state])

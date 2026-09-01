@@ -22,9 +22,9 @@ Python package dependencies are managed via:
 - `docker/pyproject.toml`
 - `docker/uv.lock`
 
-## Advanced Shell Companion Runtime
+## Advanced Shell Runtime
 
-The optional advanced-shell companion image includes:
+The optional advanced-shell image includes:
 
 - **Python 3.13** — Python Software Foundation License
 - **Node.js 24** — MIT License
@@ -35,7 +35,7 @@ The optional advanced-shell companion image includes:
 
 Exact source-image versions and manifest digests are declared in
 `docker/advanced-shell/Dockerfile`. A generated image SBOM remains the canonical
-full transitive inventory for a released companion image.
+full transitive inventory for a released advanced-shell image.
 
 ## Full Dependency Inventories
 

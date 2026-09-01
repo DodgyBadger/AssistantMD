@@ -18,7 +18,7 @@ AssistantMD requires an explicit ingress-authentication mode:
 - `owner_token` provides a single-owner token exchange and signed HttpOnly
   browser session. Use HTTPS for every non-loopback deployment.
 - `disabled` intentionally leaves the complete UI and API open to every
-  routable peer, including companion containers. It is intended for recovery
+  routable peer, including advanced-shell containers. It is intended for recovery
   and deliberate testing and is not recommended for network-accessible use.
 
 The selected mode authenticates requests as the current single-user
@@ -27,7 +27,7 @@ password recovery, roles, or transport encryption.
 
 For `trusted_proxy`, the proxy must remove any client-supplied assertion header
 before inserting its own value. Keep the shared assertion outside browser
-responses and outside the companion container. Configure a trusted immediate
+responses and outside the advanced-shell container. Configure a trusted immediate
 proxy network as defense in depth where the deployment has stable addressing.
 
 For `owner_token`, store the credential in a root-owned or Docker secret file.

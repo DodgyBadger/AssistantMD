@@ -103,7 +103,7 @@ if timeout 2 bash -c '
     IFS= read -r banner <&3
     [[ ${banner} == SSH-* ]]
 '; then
-    echo "forwarded channel reached the companion SSH service" >&2
+    echo "forwarded channel reached the advanced-shell SSH service" >&2
     exit 1
 fi
 BASH
@@ -141,6 +141,6 @@ published_ports=$(
         '{{range $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' \
         "${shell_container_id}"
 )
-[[ -z ${published_ports} ]] || fail "companion SSH port is published"
+[[ -z ${published_ports} ]] || fail "advanced-shell SSH port is published"
 
 echo "advanced shell Docker smoke passed"

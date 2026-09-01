@@ -13,8 +13,8 @@ from uuid import uuid4
 
 from core.advanced_shell.stdio import (
     MAX_ROOTS,
+    validate_advanced_shell_path,
     validate_arguments,
-    validate_companion_path,
     validate_environment,
     validate_executable,
 )
@@ -62,13 +62,13 @@ class MCPConnectionService:
         secrets: EncryptedSecretsService,
         on_change: Callable[[str, str], None] | None = None,
         mutation_failpoint: Callable[[str, str], None] | None = None,
-        companion_stdio_enabled: bool = False,
+        advanced_shell_stdio_enabled: bool = False,
     ) -> None:
         self._system_root = system_root
         self._secrets = secrets
         self._on_change = on_change
         self._mutation_failpoint = mutation_failpoint
-        self._companion_stdio_enabled = companion_stdio_enabled
+        self._advanced_shell_stdio_enabled = advanced_shell_stdio_enabled
         ensure_mcp_schema(system_root)
 
     def list_connections(self) -> list[MCPConnection]:
@@ -237,8 +237,8 @@ class MCPConnectionService:
         clean_id = _required_id(connection_id)
         self._reconcile_target(authority, clean_id)
         connection = self._require_for_authority(authority, clean_id)
-        if connection.transport is MCPTransport.COMPANION_STDIO:
-            raise ValueError("Companion stdio connections do not use credentials.")
+        if connection.transport is MCPTransport.ADVANCED_SHELL_STDIO:
+            raise ValueError("Advanced-shell stdio connections do not use credentials.")
         self._start_simple_mutation(
             authority,
             clean_id,
@@ -488,10 +488,10 @@ class MCPConnectionService:
 
     def _require_supported_transport(self, transport: MCPTransport) -> None:
         if (
-            transport is MCPTransport.COMPANION_STDIO
-            and not self._companion_stdio_enabled
+            transport is MCPTransport.ADVANCED_SHELL_STDIO
+            and not self._advanced_shell_stdio_enabled
         ):
-            raise ValueError("Companion stdio requires advanced execution mode.")
+            raise ValueError("Advanced-shell stdio requires advanced execution mode.")
 
     def resolve_credential(
         self, authority: ExecutionAuthority, connection_id: str
@@ -1183,7 +1183,7 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
     stdio = _normalize_stdio(request.stdio)
     url = (
         None
-        if transport is MCPTransport.COMPANION_STDIO
+        if transport is MCPTransport.ADVANCED_SHELL_STDIO
         else _sanitize_url(request.url)
     )
     auth_mode = MCPAuthMode(request.auth_mode)
@@ -1198,18 +1198,20 @@ def _normalize_update(request: MCPConnectionUpdate) -> MCPConnectionUpdate:
     oauth_scopes = _normalize_allowed_tools(request.oauth_scopes)
     if auth_mode is not MCPAuthMode.OAUTH and (oauth_client_id or oauth_scopes):
         raise ValueError("OAuth client settings are valid only for OAuth auth.")
-    if transport is MCPTransport.COMPANION_STDIO:
+    if transport is MCPTransport.ADVANCED_SHELL_STDIO:
         if auth_mode is not MCPAuthMode.NONE or header_name is not None:
             raise ValueError(
-                "Companion stdio connections do not support authentication."
+                "Advanced-shell stdio connections do not support authentication."
             )
         if request.allow_private_http or oauth_client_id or oauth_scopes:
-            raise ValueError("HTTP and OAuth settings are invalid for companion stdio.")
+            raise ValueError(
+                "HTTP and OAuth settings are invalid for advanced-shell stdio."
+            )
         if stdio is None:
-            raise ValueError("Companion stdio launch configuration is required.")
+            raise ValueError("Advanced-shell stdio launch configuration is required.")
     elif stdio is not None:
         raise ValueError(
-            "Companion stdio configuration requires companion_stdio transport."
+            "Advanced-shell stdio configuration requires advanced_shell_stdio transport."
         )
     return MCPConnectionUpdate(
         display_name=display_name,
@@ -1233,13 +1235,15 @@ def _normalize_stdio(value: MCPStdioConfig | None) -> MCPStdioConfig | None:
     environment = validate_environment(
         tuple((str(name), str(item)) for name, item in value.environment)
     )
-    roots = tuple(validate_companion_path(root, label="Root") for root in value.roots)
+    roots = tuple(
+        validate_advanced_shell_path(root, label="Root") for root in value.roots
+    )
     if len(roots) > MAX_ROOTS:
-        raise ValueError("Companion stdio has too many Roots.")
+        raise ValueError("Advanced-shell stdio has too many Roots.")
     return MCPStdioConfig(
         executable=validate_executable(value.executable),
         arguments=arguments,
-        working_directory=validate_companion_path(
+        working_directory=validate_advanced_shell_path(
             value.working_directory, label="working directory"
         ),
         environment=environment,
@@ -1345,7 +1349,7 @@ def _load_json_strings(value: object, *, label: str) -> tuple[str, ...]:
     if not isinstance(payload, list) or not all(
         isinstance(item, str) for item in payload
     ):
-        raise ValueError(f"Stored companion stdio {label} is invalid.")
+        raise ValueError(f"Stored advanced-shell stdio {label} is invalid.")
     return tuple(payload)
 
 
@@ -1358,7 +1362,7 @@ def _load_stdio_config(values: dict[str, object]) -> MCPStdioConfig | None:
         isinstance(name, str) and isinstance(value, str)
         for name, value in environment_payload.items()
     ):
-        raise ValueError("Stored companion stdio environment is invalid.")
+        raise ValueError("Stored advanced-shell stdio environment is invalid.")
     return _normalize_stdio(
         MCPStdioConfig(
             executable=str(executable),

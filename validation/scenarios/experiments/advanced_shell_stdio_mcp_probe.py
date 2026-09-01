@@ -1,4 +1,4 @@
-"""Probe structured stdio MCP sessions through the fixed companion SSH target."""
+"""Probe structured stdio MCP sessions through the advanced-shell SSH target."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from core.tools.advanced_shell import (  # noqa: E402
     ShellTransportConfig,
 )
 
-LOG_PATH = Path("scripts/companion_stdio_mcp_probe.latest.log")
+LOG_PATH = Path("scripts/advanced_shell_stdio_mcp_probe.latest.log")
 STRUCTURED_STDIO_PREFIX = "assistantmd-stdio-v1:"
 
 

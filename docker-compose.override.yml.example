@@ -17,7 +17,7 @@ services:
     #  - .:/app
 
   # The advanced profile defaults to isolated named volumes. Uncomment only
-  # the exact host paths the companion should be able to access.
+  # the exact host paths the advanced shell should be able to access.
   # assistantmd-shell:
   #   volumes:
   #     - type: bind

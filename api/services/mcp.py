@@ -67,7 +67,7 @@ def list_mcp_connections() -> list[MCPConnectionInfo]:
 def parse_mcp_connection_import(
     request: MCPConnectionImportRequest,
 ) -> MCPConnectionCreateRequest:
-    """Parse one strict chat-generated companion stdio configuration."""
+    """Parse one strict chat-generated advanced-shell stdio configuration."""
     try:
         payload = yaml.safe_load(request.configuration)
     except yaml.YAMLError as exc:
@@ -91,11 +91,11 @@ def parse_mcp_connection_import(
             error_type="InvalidMCPConnectionImport",
             message=f"Unknown MCP configuration field(s): {', '.join(unknown)}.",
         )
-    if payload.get("transport") != MCPTransport.COMPANION_STDIO.value:
+    if payload.get("transport") != MCPTransport.ADVANCED_SHELL_STDIO.value:
         raise APIException(
             status_code=400,
             error_type="InvalidMCPConnectionImport",
-            message="Imported configuration must use companion_stdio transport.",
+            message="Imported configuration must use advanced_shell_stdio transport.",
         )
     try:
         return MCPConnectionCreateRequest.model_validate(

@@ -11,7 +11,7 @@ class MCPTransport(StrEnum):
 
     STREAMABLE_HTTP = "streamable_http"
     SSE = "sse"
-    COMPANION_STDIO = "companion_stdio"
+    ADVANCED_SHELL_STDIO = "advanced_shell_stdio"
 
 
 class MCPAuthMode(StrEnum):
@@ -25,7 +25,7 @@ class MCPAuthMode(StrEnum):
 
 @dataclass(frozen=True)
 class MCPStdioConfig:
-    """Sanitized structured launch definition inside the fixed companion."""
+    """Sanitized structured launch definition inside the advanced shell."""
 
     executable: str
     arguments: tuple[str, ...]

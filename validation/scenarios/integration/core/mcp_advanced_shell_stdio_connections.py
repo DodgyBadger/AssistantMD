@@ -1,4 +1,4 @@
-"""Contracts for credential-free MCP stdio connections in the companion."""
+"""Contracts for MCP stdio connections in the advanced shell."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
-class MCPCompanionStdioConnectionsScenario(BaseScenario):
+class MCPAdvancedShellStdioConnectionsScenario(BaseScenario):
     """Prove stdio persistence, gating, import, and fixed transport behavior."""
 
     async def test_scenario(self) -> None:
@@ -49,7 +49,7 @@ class MCPCompanionStdioConnectionsScenario(BaseScenario):
         )
         request = MCPConnectionCreate(
             display_name="Filesystem",
-            transport=MCPTransport.COMPANION_STDIO,
+            transport=MCPTransport.ADVANCED_SHELL_STDIO,
             stdio=MCPStdioConfig(
                 executable="/home/assistantmd-shell/.local/bin/mcp-server-filesystem",
                 arguments=(),
@@ -75,13 +75,13 @@ class MCPCompanionStdioConnectionsScenario(BaseScenario):
         service = MCPConnectionService(
             system_root=str(system_root),
             secrets=secrets,
-            companion_stdio_enabled=True,
+            advanced_shell_stdio_enabled=True,
         )
         connection = service.create_connection_for_authority(owner, request)
         self.soft_assert_equal(
             (connection.url, connection.auth_mode.value, connection.stdio),
             (None, "none", request.stdio),
-            "Companion launch metadata should round-trip without an HTTP endpoint",
+            "Advanced-shell launch metadata should round-trip without an HTTP endpoint",
         )
         self.soft_assert(
             b"LOG_LEVEL" in (system_root / "mcp.db").read_bytes()
@@ -94,7 +94,7 @@ class MCPCompanionStdioConnectionsScenario(BaseScenario):
             MCPConnectionImportRequest(
                 configuration="""
 name: Filesystem
-transport: companion_stdio
+transport: advanced_shell_stdio
 executable: /home/assistantmd-shell/.local/bin/mcp-server-filesystem
 working_directory: /workspace
 arguments: []
@@ -113,7 +113,7 @@ enabled: true
             ),
             (
                 "Filesystem",
-                "companion_stdio",
+                "advanced_shell_stdio",
                 "/home/assistantmd-shell/.local/bin/mcp-server-filesystem",
             ),
             "YAML import should normalize into the ordinary create request",
@@ -143,7 +143,7 @@ enabled: true
 
         manager = MCPConnectionManager(
             connections=service,
-            companion_stdio=transport_config,
+            advanced_shell_stdio=transport_config,
             idle_timeout_seconds=0,
         )
         with (
@@ -157,7 +157,7 @@ enabled: true
         self.soft_assert_equal(
             clients[0].roots,
             ["file:///workspace"],
-            "Configured companion paths should become MCP file Roots",
+            "Configured advanced-shell paths should become MCP file Roots",
         )
         command_args = transports[0].kwargs["args"]
         self.soft_assert(
@@ -208,4 +208,4 @@ class _StdioClient:
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(MCPCompanionStdioConnectionsScenario().test_scenario())
+    asyncio.run(MCPAdvancedShellStdioConnectionsScenario().test_scenario())

@@ -489,11 +489,11 @@ class AdvancedShellStatusInfo(BaseModel):
     execution_mode: ExecutionMode = Field(
         ..., description="Effective product execution mode"
     )
-    host: str = Field(..., description="Configured companion hostname")
-    port: int = Field(..., description="Configured companion SSH port")
-    user: str = Field(..., description="Configured companion SSH user")
+    host: str = Field(..., description="Configured advanced-shell hostname")
+    port: int = Field(..., description="Configured advanced-shell SSH port")
+    user: str = Field(..., description="Configured advanced-shell SSH user")
     readiness_state: AdvancedShellReadiness = Field(
-        ..., description="Sanitized authenticated companion readiness state"
+        ..., description="Sanitized authenticated advanced-shell readiness state"
     )
     readiness_message: str = Field(
         ..., description="Sanitized operator-facing readiness explanation"
@@ -1622,7 +1622,7 @@ class SecretUpdateRequest(BaseModel):
 
 
 class MCPStdioConfigInfo(BaseModel):
-    """Structured credential-free launch definition in the fixed companion."""
+    """Structured launch definition in the advanced shell."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1634,7 +1634,7 @@ class MCPStdioConfigInfo(BaseModel):
 
 
 class MCPConnectionImportRequest(BaseModel):
-    """Strict YAML or JSON companion-stdio configuration supplied by a user."""
+    """Strict YAML or JSON advanced-shell stdio configuration supplied by a user."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1648,7 +1648,9 @@ class MCPConnectionCreateRequest(BaseModel):
 
     display_name: str = Field(..., min_length=1, max_length=120)
     url: str | None = Field(None, min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse", "companion_stdio"] = "streamable_http"
+    transport: Literal["streamable_http", "sse", "advanced_shell_stdio"] = (
+        "streamable_http"
+    )
     auth_mode: Literal["none", "bearer", "header", "oauth"] = "none"
     header_name: str | None = Field(None, max_length=128)
     enabled: bool = True
@@ -1668,7 +1670,7 @@ class MCPConnectionUpdateRequest(BaseModel):
 
     display_name: str = Field(..., min_length=1, max_length=120)
     url: str | None = Field(None, min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse", "companion_stdio"]
+    transport: Literal["streamable_http", "sse", "advanced_shell_stdio"]
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None = Field(None, max_length=128)
     enabled: bool
@@ -1702,7 +1704,7 @@ class MCPConnectionInfo(BaseModel):
     slug: str
     display_name: str
     url: str | None
-    transport: Literal["streamable_http", "sse", "companion_stdio"]
+    transport: Literal["streamable_http", "sse", "advanced_shell_stdio"]
     auth_mode: Literal["none", "bearer", "header", "oauth"]
     header_name: str | None
     enabled: bool

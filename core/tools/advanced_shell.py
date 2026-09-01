@@ -1,4 +1,4 @@
-"""Experimental fixed-destination shell tool for the companion container."""
+"""Experimental fixed-destination tool for the advanced-shell container."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ logger = UnifiedLogger(tag="advanced-shell-tool")
 
 
 class ShellTransportError(RuntimeError):
-    """Raised when the fixed companion transport cannot be used safely."""
+    """Raised when the fixed advanced-shell transport cannot be used safely."""
 
 
 class ShellOutputLimitExceeded(ShellTransportError):
@@ -386,7 +386,7 @@ class FixedSshShellExecutor:
         ):
             if not path.is_file():
                 raise ShellTransportError(
-                    f"Companion SSH {label} is unavailable: {path}"
+                    f"Advanced-shell SSH {label} is unavailable: {path}"
                 )
 
     def _bounded_timeout(self, requested: float | None) -> float:
@@ -401,7 +401,7 @@ class FixedSshShellExecutor:
 
 
 class AdvancedShell(BaseTool):
-    """Experimental Pydantic AI tool backed by the companion container."""
+    """Experimental Pydantic AI tool backed by the advanced-shell container."""
 
     @classmethod
     def get_recovery_policy(cls) -> ToolRecoveryPolicy:
@@ -421,9 +421,9 @@ class AdvancedShell(BaseTool):
         async def shell(
             *, command: str, stdin: str = "", timeout_seconds: float = 120.0
         ) -> ToolReturn:
-            """Run a command in the persistent companion container.
+            """Run a command in the persistent advanced shell.
 
-            :param command: Shell command to execute in the companion workspace.
+            :param command: Shell command to execute in the advanced-shell workspace.
             :param stdin: Optional text made available on standard input.
             :param timeout_seconds: Runtime limit, capped by the deployment maximum.
             """
@@ -508,7 +508,7 @@ class AdvancedShell(BaseTool):
             name="shell",
             description=(
                 "Execute a noninteractive shell command in AssistantMD's persistent "
-                "companion container. The destination and SSH transport are fixed."
+                "advanced-shell container. The destination and SSH transport are fixed."
             ),
             metadata={
                 ASSISTANTMD_TOOL_METADATA_KEY: tool_recovery_metadata(

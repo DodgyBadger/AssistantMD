@@ -29,7 +29,7 @@ class AdvancedShellPreflight(Protocol):
 
 
 class AdvancedShellCapabilityService:
-    """Resolve one deployment-owned companion tenancy for an execution principal."""
+    """Resolve one deployment-owned advanced shell for an execution principal."""
 
     def __init__(
         self,
@@ -43,18 +43,18 @@ class AdvancedShellCapabilityService:
 
     @property
     def enabled(self) -> bool:
-        """Return whether deployment configuration enables companion execution."""
+        """Return whether deployment configuration enables advanced-shell execution."""
         return self._config.enabled
 
     @property
     def transport_config(self) -> ShellTransportConfig:
-        """Return fixed deployment coordinates for non-model companion clients."""
+        """Return fixed deployment coordinates for non-model advanced-shell clients."""
         return self._executor.config
 
     async def resolve_for_primary_chat(
         self, authority: ExecutionAuthority
     ) -> Tool | None:
-        """Return the shell tool only when this deployment's companion is ready."""
+        """Return the shell tool only when this deployment's advanced shell is ready."""
         if not self._config.enabled:
             return None
         if authority.principal_id != LOCAL_USER_PRINCIPAL_ID:
