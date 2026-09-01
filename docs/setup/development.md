@@ -111,8 +111,10 @@ devcontainer performs this step as part of its post-create setup.
 scripts/dev run
 ```
 
-Without an authentication option, the server uses `loopback` mode and listens
-on `127.0.0.1:8000`. Open <http://127.0.0.1:8000/>.
+Without an authentication option, `scripts/dev run` launches AssistantMD directly
+as a host process in `loopback` mode and listens on `127.0.0.1:8000`. This is the
+primary use of `loopback`; it is not the mode used by the standard Docker Compose
+installation. Open <http://127.0.0.1:8000/>.
 
 By default, the command stores development runtime state under the checkout:
 
@@ -137,8 +139,7 @@ scripts/dev run --auth-mode disabled
 
 `loopback` listens on `127.0.0.1` by default. The other explicit modes listen on
 `0.0.0.0`, allowing a reverse proxy or another container to reach the server.
-Authentication and container port mappings determine which requests are
-admitted.
+Authentication and host network controls determine which requests are admitted.
 
 Override the mode's default address or port when needed:
 

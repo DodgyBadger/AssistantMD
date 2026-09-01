@@ -128,9 +128,9 @@ the same setting but change the mode and configure the proxy to send the secret
 assertion. See [Security Considerations](security.md#application-exposure) for
 the proxy example and detailed mode contracts.
 
-The `loopback` authentication mode is intended for development or other setups
-where AssistantMD runs directly on the host. It is not used by the standard
-Docker Compose installation.
+The `loopback` authentication mode is for direct development runs such as
+`scripts/dev run`, where AssistantMD is a host process rather than a Docker
+Compose service. It is not applicable to the standard Docker installation.
 
 ### Enable advanced mode
 

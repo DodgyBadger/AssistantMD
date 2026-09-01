@@ -9,10 +9,10 @@ AssistantMD is designed as a **single-user application** running on your local m
 
 AssistantMD requires an explicit ingress-authentication mode:
 
-- `loopback` admits only an actual `127.0.0.1` or `::1` socket peer and provides
-  no login. Forwarded headers do not make another peer loopback. Normal Docker
-  bridge forwarding therefore cannot use this mode, even when the published
-  host port is restricted to loopback.
+- `loopback` is for direct host-process runs, primarily development through
+  `scripts/dev run`. It admits only an actual `127.0.0.1` or `::1` socket peer
+  and provides no login. It is not applicable to the standard Docker Compose
+  installation.
 - `trusted_proxy` requires a secret assertion injected by an authenticating
   reverse proxy. It reuses the proxy's human login rather than adding another.
 - `owner_token` provides a single-owner token exchange and signed HttpOnly
