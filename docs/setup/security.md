@@ -29,37 +29,9 @@ For `trusted_proxy`, the proxy must remove any client-supplied assertion header
 before inserting its own value. Keep the shared assertion outside browser
 responses and outside the advanced-shell container. Configure a trusted immediate
 proxy network as defense in depth where the deployment has stable addressing.
-
-For example, after its authentication handler, Caddy can replace the assertion
-before proxying to AssistantMD:
-
-```caddyfile
-reverse_proxy assistant:8000 {
-    header_up -X-AssistantMD-Proxy-Assertion
-    header_up X-AssistantMD-Proxy-Assertion {$ASSISTANTMD_AUTH_SECRET}
-}
-```
-
-Provide the same high-entropy `ASSISTANTMD_AUTH_SECRET` to AssistantMD and Caddy
-without writing its value into the Caddyfile. Only the authenticating proxy should
-be able to reach the AssistantMD upstream.
-
-The supplied Compose file keeps AssistantMD on the explicit
-`assistantmd_advanced_shell` network so it can reach the advanced shell. If an
-external reverse proxy needs another Docker network, attach AssistantMD to both
-networks; do not replace `assistantmd_advanced_shell`:
-
-```yaml
-services:
-  assistant:
-    networks:
-      - assistantmd_advanced_shell
-      - caddy_default
-
-networks:
-  caddy_default:
-    external: true
-```
+Only the authenticating proxy should be able to reach the AssistantMD upstream.
+The [Installation Guide](installation.md#access-from-another-device) contains the
+copyable proxy and Docker-network configuration.
 
 For `owner_token`, store the credential in the deployment's protected `.env`
 file and do not reuse the installation encryption key. The browser session lasts

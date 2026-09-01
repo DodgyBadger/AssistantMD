@@ -111,11 +111,18 @@ AssistantMD does not provide TLS. Remote access should use HTTPS and one of thes
 authentication options:
 
 - `trusted_proxy` when an existing reverse proxy already authenticates users;
-- `owner_token` for AssistantMD's built-in single-owner login; or
-- `disabled` only for deliberate testing or recovery on a trusted network.
+- `owner_token` when the reverse proxy provides TLS but not authentication.
 
-Set the mode and the browser-visible URL in `.env`. Both authenticated modes also
-need a separate high-entropy secret:
+Generate a second secret for authentication. Do not reuse
+`ASSISTANTMD_SECRETS_KEY`:
+
+```bash
+openssl rand -hex 32
+```
+
+#### Built-in owner login
+
+Add the following to `.env`:
 
 ```dotenv
 ASSISTANTMD_AUTH_MODE=owner_token
@@ -123,10 +130,72 @@ ASSISTANTMD_AUTH_SECRET=PASTE_A_DIFFERENT_RANDOM_SECRET_HERE
 ASSISTANTMD_PUBLIC_URL=https://assistant.example.com
 ```
 
-Generate that second secret with `openssl rand -hex 32`. For `trusted_proxy`, use
-the same setting but change the mode and configure the proxy to send the secret
-assertion. See [Security Considerations](security.md#application-exposure) for
-the proxy example and detailed mode contracts.
+Configure your TLS reverse proxy to forward requests to AssistantMD, then run
+`docker compose up -d`. The first browser visit shows AssistantMD's owner login;
+enter `ASSISTANTMD_AUTH_SECRET` there.
+
+For example, a Caddy process running on the Docker host needs only:
+
+```caddyfile
+assistant.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+#### Existing authenticating proxy
+
+Add the following to `.env`:
+
+```dotenv
+ASSISTANTMD_AUTH_MODE=trusted_proxy
+ASSISTANTMD_AUTH_SECRET=PASTE_A_DIFFERENT_RANDOM_SECRET_HERE
+ASSISTANTMD_PUBLIC_URL=https://assistant.example.com
+```
+
+Give the proxy process the same `ASSISTANTMD_AUTH_SECRET` through its own secure
+environment configuration. Do not give the proxy AssistantMD's complete `.env`.
+After the proxy's authentication handler, replace the assertion header before
+forwarding the request. For Caddy:
+
+```caddyfile
+reverse_proxy assistant:8000 {
+    header_up -X-AssistantMD-Proxy-Assertion
+    header_up X-AssistantMD-Proxy-Assertion {$ASSISTANTMD_AUTH_SECRET}
+}
+```
+
+This upstream assumes Caddy shares a Docker network with AssistantMD. Use
+`127.0.0.1:8000` instead when Caddy runs directly on the Docker host.
+
+Run `docker compose up -d`. AssistantMD now accepts requests carrying the
+proxy-only assertion and does not show a second login.
+
+#### Proxy in another Compose project
+
+For either authentication mode, a containerized proxy must share a network with
+AssistantMD. Attach AssistantMD to the proxy's external network without removing
+its advanced-shell network:
+
+```yaml
+services:
+  assistant:
+    networks:
+      - assistantmd_advanced_shell
+      - caddy_default
+
+networks:
+  assistantmd_advanced_shell:
+  caddy_default:
+    external: true
+```
+
+Run `docker compose up -d` after changing the networks. Use `assistant:8000` as
+the proxy upstream.
+
+For either option, use the exact HTTPS origin shown in the browser for
+`ASSISTANTMD_PUBLIC_URL`. See
+[Security Considerations](security.md#application-exposure) for the mode risks,
+proxy hardening, and deliberately unprotected `disabled` mode.
 
 The `loopback` authentication mode is for direct development runs such as
 `scripts/dev run`, where AssistantMD is a host process rather than a Docker
