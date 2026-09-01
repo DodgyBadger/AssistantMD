@@ -216,8 +216,11 @@ repository checkout), and the root example must pin an intentional image tag or
 digest consistent with the AssistantMD release.
 
 The root Compose example implements this contract with an `advanced` profile,
-private-network advanced shell, and separate persistent identity, public-key, home,
-and workspace volumes. The release workflow publishes a same-tag
+an explicit project-scoped `assistantmd_advanced_shell` network shared only by
+the declared AssistantMD and advanced-shell services, and separate persistent
+identity, public-key, home, and workspace volumes. Additional ingress networks
+must be added alongside this network rather than replacing it. The release
+workflow publishes a same-tag
 `assistantmd-advanced-shell` image, and `.env` selects one image tag for both services.
 The override example contains only explicit user-selected bind-mount examples.
 Publication from CI and a clean-host profile smoke remain required evidence.

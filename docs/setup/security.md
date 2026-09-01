@@ -44,6 +44,23 @@ Provide the same high-entropy `ASSISTANTMD_AUTH_SECRET` to AssistantMD and Caddy
 without writing its value into the Caddyfile. Only the authenticating proxy should
 be able to reach the AssistantMD upstream.
 
+The supplied Compose file keeps AssistantMD on the explicit
+`assistantmd_advanced_shell` network so it can reach the advanced shell. If an
+external reverse proxy needs another Docker network, attach AssistantMD to both
+networks; do not replace `assistantmd_advanced_shell`:
+
+```yaml
+services:
+  assistant:
+    networks:
+      - assistantmd_advanced_shell
+      - caddy_default
+
+networks:
+  caddy_default:
+    external: true
+```
+
 For `owner_token`, store the credential in the deployment's protected `.env`
 file and do not reuse the installation encryption key. The browser session lasts
 up to 12 hours. Logout clears browser cookies but does not revoke a copied

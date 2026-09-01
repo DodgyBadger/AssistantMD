@@ -17,6 +17,8 @@ services:
       - advanced_shell_host_public:/run/advanced-shell/host-public:ro
     env_file:
       - .env
+    networks:
+      - assistantmd_advanced_shell
     shm_size: "1gb"
     
     # Standard browser-capable profile: at least 2G available to AssistantMD.
@@ -50,9 +52,7 @@ services:
     init: true
     restart: unless-stopped
     networks:
-      default:
-        aliases:
-          - advanced-shell
+      - assistantmd_advanced_shell
     volumes:
       - type: volume
         source: advanced_shell_host_identity
@@ -102,3 +102,6 @@ volumes:
   advanced_shell_host_identity:
   advanced_shell_host_public:
   advanced_shell_workspace:
+
+networks:
+  assistantmd_advanced_shell:
