@@ -222,7 +222,8 @@ identity, public-key, home, and workspace volumes. Additional ingress networks
 must be added alongside this network rather than replacing it. The release
 workflow publishes a same-tag
 `assistantmd-advanced-shell` image, and `.env` selects one image tag for both services.
-The override example contains only explicit user-selected bind-mount examples.
+The custom-build override builds both images from the same checkout and contains
+only explicit user-selected bind-mount examples beyond that build wiring.
 Publication from CI and a clean-host profile smoke remain required evidence.
 
 The supported flow is automatic two-party bootstrap by the existing

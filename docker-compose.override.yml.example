@@ -16,18 +16,25 @@ services:
     # volumes:
     #  - .:/app
 
-  # The advanced profile defaults to isolated named volumes. Uncomment only
-  # the exact host paths the advanced shell should be able to access.
-  # advanced-shell:
-  #   volumes:
-  #     - type: bind
-  #       source: /absolute/path/to/exchange
-  #       target: /exchange
-  #       bind:
-  #         create_host_path: false
-  #     - type: bind
-  #       source: /absolute/path/to/one/vault
-  #       target: /vaults/example
-  #       read_only: true
-  #       bind:
-  #         create_host_path: false
+  advanced-shell:
+    build:
+      context: .
+      dockerfile: docker/advanced-shell/Dockerfile
+      args:
+        SHELL_USER_ID: 1000
+        SHELL_GROUP_ID: 1000
+
+    # The advanced profile defaults to isolated named volumes. Uncomment only
+    # the exact host paths the advanced shell should be able to access.
+    # volumes:
+    #   - type: bind
+    #     source: /absolute/path/to/exchange
+    #     target: /exchange
+    #     bind:
+    #       create_host_path: false
+    #   - type: bind
+    #     source: /absolute/path/to/one/vault
+    #     target: /vaults/example
+    #     read_only: true
+    #     bind:
+    #       create_host_path: false

@@ -34,8 +34,10 @@ upgrading.
    docker compose up -d
    ```
 
-   For a repository build, run `git pull` and replace the pull command with
-   `docker compose build`.
+   For a repository build using `docker-compose.override.yml.example`, run
+   `git pull` and replace the pull command with `docker compose build`. The
+   override builds both AssistantMD and the advanced shell from the same
+   checkout when the `advanced` profile is active.
 
 6. Open **System → Infrastructure** and confirm the expected authentication and
    execution modes. Advanced mode is ready when the advanced shell reports
