@@ -48,6 +48,22 @@ contracts. Durable architecture records remain a separate follow-up because
 ingress authentication and the advanced execution boundary may warrant distinct
 ADRs.
 
+### Installation experience
+
+Status: complete.
+
+Present one numbered Docker Compose happy path. Users configure deployment
+choices in `.env`; the Compose file retains only fixed internal wiring that is
+not a user setting. Keep local, reverse-proxy, and built-in owner access choices
+brief in the installation flow and move protocol/network explanations to the
+security guide. Keep advanced mode as one optional `.env` choice, with specialist
+development and troubleshooting material linked rather than interleaved.
+
+Affected artifacts are `docs/setup/installation.md`, `docs/setup/security.md`,
+`docs/setup/upgrading.md`, `.env.example`, and `docker-compose.yml.example`.
+Validation is Compose configuration parsing, documentation consistency searches,
+and the existing production quality gate if Python files remain changed.
+
 ## Status
 
 Selected direction under prototype validation. Slice 1 now has a development

@@ -30,10 +30,24 @@ before inserting its own value. Keep the shared assertion outside browser
 responses and outside the advanced-shell container. Configure a trusted immediate
 proxy network as defense in depth where the deployment has stable addressing.
 
-For `owner_token`, store the credential in a root-owned or Docker secret file.
-The browser session lasts up to 12 hours. Logout clears browser cookies but does
-not revoke a copied stateless session; rotate the owner token to invalidate all
-outstanding sessions.
+For example, after its authentication handler, Caddy can replace the assertion
+before proxying to AssistantMD:
+
+```caddyfile
+reverse_proxy assistant:8000 {
+    header_up -X-AssistantMD-Proxy-Assertion
+    header_up X-AssistantMD-Proxy-Assertion {$ASSISTANTMD_AUTH_SECRET}
+}
+```
+
+Provide the same high-entropy `ASSISTANTMD_AUTH_SECRET` to AssistantMD and Caddy
+without writing its value into the Caddyfile. Only the authenticating proxy should
+be able to reach the AssistantMD upstream.
+
+For `owner_token`, store the credential in the deployment's protected `.env`
+file and do not reuse the installation encryption key. The browser session lasts
+up to 12 hours. Logout clears browser cookies but does not revoke a copied
+stateless session; rotate the owner token to invalidate all outstanding sessions.
 
 Application middleware rejects aggregate request headers over 64 KiB, but the
 HTTP server receives headers before application code runs. Reverse proxies must

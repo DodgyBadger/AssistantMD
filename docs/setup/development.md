@@ -176,6 +176,28 @@ scripts/dev run -p 8080 -- --log-level debug
 runtime paths. Explicit values take precedence over the checkout defaults or
 `ASSISTANTMD_DEV_RUNTIME_ROOT`.
 
+### Run the advanced shell during development
+
+Start the persistent development container from the checkout:
+
+```bash
+scripts/start_advanced_shell_development.sh
+```
+
+When AssistantMD runs directly on the same host, the script's defaults need no
+changes. When AssistantMD runs inside a development container, publish the SSH
+port on an address that container can reach and set the corresponding host:
+
+```bash
+ADVANCED_SHELL_BIND_ADDRESS=0.0.0.0 \
+ADVANCED_SHELL_CLIENT_HOST=<docker-host-gateway-address> \
+scripts/start_advanced_shell_development.sh
+```
+
+Add the values printed by the script to `.env`, then restart AssistantMD. This
+development-only publication can expose SSH beyond the host; restrict it with
+the host firewall.
+
 ## Use the Python environment
 
 Activation is optional. Prefer `uv run` for ad hoc commands because it does not

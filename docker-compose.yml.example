@@ -16,15 +16,7 @@ services:
       - advanced_shell_client_public:/run/advanced-shell/client-public
       - advanced_shell_host_public:/run/advanced-shell/host-public:ro
     env_file:
-      - path: .env
-        required: false
-    # .env also accepts ASSISTANTMD_PUBLIC_URL for reverse-proxy deployments.
-    environment:
-      - TZ=UTC
-      - API_PORT=8000
-      - ASSISTANTMD_SHELL_KEY_ROOT=/run/advanced-shell/client-identity
-      # The host-loopback port is the boundary for this unprotected local example.
-      - ASSISTANTMD_AUTH_MODE=disabled  # Use trusted_proxy or owner_token for authenticated ingress
+      - .env
     shm_size: "1gb"
     
     # Standard browser-capable profile: at least 2G available to AssistantMD.
