@@ -48,6 +48,70 @@ the callback path and satisfy the configured authentication mode.
 
 Keep these constraints in mind before putting the application on a public interface.
 
+## Advanced Shell
+
+Advanced execution mode gives interactive chat a general, noninteractive shell
+inside a separate persistent container. Commands may install and execute software,
+read and write the advanced shell's home and workspace, and use outbound network
+access unless the operator imposes additional network policy. Treat enabling this
+mode as granting the model authority over everything made available to that
+container.
+
+The environment is intentionally constrained: commands run as a non-root user,
+the base filesystem is read-only, tool calls have bounded execution, and the
+container is not a systemd host or supported cron/service platform. Persistent
+home and workspace volumes preserve files, not processes. Services that must run
+continuously or restart autonomously should use a separately reviewed Compose
+service with their own explicit privileges, mounts, network policy, and lifecycle.
+
+Docker is the primary isolation boundary. The supplied service runs with a
+read-only container filesystem, dedicated writable volumes, a PID and memory
+limit, dropped capabilities except those required by OpenSSH, and
+`no-new-privileges`. Preserve those controls. Never mount the Docker socket,
+AssistantMD's `system/` directory, a host home or root directory, or other
+administrative interfaces into the advanced shell.
+
+AssistantMD and the advanced shell generate separate SSH identities and exchange
+only public keys through one-way Docker volumes. AssistantMD pins the resulting
+host identity, and the advanced shell accepts only the enrolled AssistantMD client.
+This authenticates the fixed control channel; it does not make commands, packages,
+MCP servers, or other software executed inside the advanced shell trustworthy.
+
+AssistantMD's encrypted credentials, installation key, owner token, and trusted
+proxy assertion are intentionally absent from the advanced shell. Do not mount or
+copy them into it. In `disabled` authentication mode, every routable peer can use
+the complete AssistantMD API; this includes the advanced-shell container because
+it shares the Compose network. The authenticated modes prevent that access unless
+their credential is separately disclosed.
+
+Every bind mount expands the shell's authority:
+
+- a read-only mount discloses all readable content beneath it;
+- a writable mount also permits creation, modification, and deletion; and
+- mount permissions are a deployment boundary, not an instruction the model can
+  enforce for itself.
+
+Credentials may be stored deliberately in the advanced shell for software that
+needs them, but they are then readable and usable by chat through `shell`. Prefer
+AssistantMD-managed encrypted credentials and normal MCP connections when the
+server supports them. If a credential must live in the advanced shell, scope it
+narrowly and accept that it belongs to the agent-accessible environment. Do not
+paste credentials into chat or command arguments: shell tool calls and results are
+part of chat history even though the separate activity log excludes command text,
+stdin, stdout, and stderr.
+
+Registering a stdio provider as an MCP connection keeps its disclosed tools inside
+AssistantMD's tool allowlist and deferred tool-search path. Chat can instead start
+or communicate with a process directly through `shell`, bypassing those MCP
+discovery and allowlist controls. That escape hatch is inherent to general shell
+access; use it deliberately and prefer a registered connection for ongoing use.
+
+The current single-user deployment exposes one shared advanced shell only to the
+initial `local-user` tenancy. It does not provide per-principal Unix accounts,
+filesystems, processes, credentials, or resource isolation. A future multiuser
+deployment must add an explicit isolation strategy before granting advanced-shell
+access to mutually untrusted principals.
+
 ## Vault File Uploads
 
 Vault Explorer uploads intentionally accept arbitrary file content because

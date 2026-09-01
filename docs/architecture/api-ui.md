@@ -115,7 +115,10 @@ surface used by endpoints and validation.
 - `/api/chat/sessions/{session_id}/compaction-status` and `/api/chat/sessions/{session_id}/compact` expose chat history compaction status and execution.
 - Interactive API docs are available at `/docs` (Swagger UI) and `/openapi.json` (OpenAPI schema).
 - The OpenAPI schema is the source of truth for endpoint shapes.
-- Security: no built-in auth/TLS by default; if deployed remotely, place behind network/auth controls.
+- Security: ingress authentication is selected explicitly as `loopback`,
+  `trusted_proxy`, `owner_token`, or deliberately unprotected `disabled` mode.
+  AssistantMD does not terminate TLS; remote deployments must provide HTTPS at
+  their ingress.
 
 The System Activity viewer submits filters to the server, loads older pages on
 demand, and can export the retained raw history. Superseded searches are

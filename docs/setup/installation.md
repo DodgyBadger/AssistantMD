@@ -2,7 +2,9 @@
 *   [Docker Engine](https://docs.docker.com/engine/install/) (Linux) or [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows, Mac)
 *   An LLM endpoint (cloud API key or local model server)
 
-⚠️  AssistantMD has **no built-in auth or TLS**. Run it on a trusted network and/or add your own security layers. See [security.md](docs/setup/security.md).
+⚠️ AssistantMD does not provide TLS. Choose an ingress-authentication
+mode appropriate for the deployment and use HTTPS for remote access. See
+[Security Considerations](security.md).
 
 ⚠️ It is strongly recommended that you back up your vaults before deploying for the first time, or create a test vault and then migrate the mount path when you have verified that everything works as expected.
 
@@ -109,6 +111,22 @@ value on the upstream request. Do not mount the authentication secret into an
 advanced-shell container. See [Security Considerations](security.md) for
 the mode contracts and ingress limits.
 
+For example, after an authenticating `forward_auth` handler, a Caddy upstream can
+replace the assertion header before proxying to AssistantMD:
+
+```caddyfile
+reverse_proxy assistant:8000 {
+    header_up -X-AssistantMD-Proxy-Assertion
+    header_up X-AssistantMD-Proxy-Assertion {$ASSISTANTMD_AUTH_SECRET}
+}
+```
+
+Provide `ASSISTANTMD_AUTH_SECRET` securely to the Caddy process with the same
+high-entropy value AssistantMD reads from its secret file; do not put the value
+directly in the Caddyfile. The authentication proxy must be the only network peer
+able to reach this upstream. Substitute the actual AssistantMD service name and
+port used by your deployment.
+
 ### Open `docker-compose.yml` and update the following:
 
 - Replace `/absolute/path/to/your/vaults` with the directory that holds your
@@ -178,6 +196,14 @@ It does not see AssistantMD vaults. Optional bind-mount examples are provided in
 prefer read-only vault mounts. Never mount AssistantMD's `system/` directory,
 the Docker socket, a home directory, or a host root.
 
+The advanced shell is a non-root Linux user environment with a read-only base
+filesystem, not a general-purpose server VM. Files installed beneath
+`/home/advanced-shell` or `/workspace` survive ordinary restart, recreation, and
+image upgrades because those paths use named volumes. Running processes and
+contents of `/tmp` do not survive. There is no systemd or supported cron/service
+supervisor. Stdio MCP servers are launched on demand; deploy software requiring an
+always-running managed service as its own Compose service.
+
 Open System → Infrastructure after startup. Advanced mode is usable when the
 advanced shell reports `ready`.
 
@@ -188,12 +214,6 @@ For the persistent development advanced shell used by contributors, run:
 ```bash
 scripts/start_advanced_shell_development.sh
 ```
-
-That harness builds from the checkout and publishes SSH to host loopback by
-default, which is correct when AssistantMD runs directly on that host. When
-AssistantMD itself runs in a development container, select a host address
-reachable from that container and deliberately publish the development port on
-the required host interfaces, for example:
 
 The development script binds SSH to host loopback by default, which is correct
 when AssistantMD runs directly on that host. When AssistantMD itself runs in a

@@ -421,7 +421,7 @@ class AdvancedShell(BaseTool):
         async def shell(
             *, command: str, stdin: str = "", timeout_seconds: float = 120.0
         ) -> ToolReturn:
-            """Run a command in the persistent advanced shell.
+            """Run a command in the constrained advanced-shell Linux environment.
 
             :param command: Shell command to execute in the advanced-shell workspace.
             :param stdin: Optional text made available on standard input.

@@ -18,6 +18,37 @@ an installation encryption key before upgrading.
   startup. Reconnect existing OAuth accounts after the upgrade.
 - Reverse-proxy installations should also set `ASSISTANTMD_PUBLIC_URL` to the
   externally routed origin so OAuth callbacks return to the correct address.
+- Refresh `docker-compose.yml` from the current example while preserving your
+  paths and deployment choices. The optional advanced shell and its pairing
+  volumes are part of the current Compose contract.
+
+### Choose how AssistantMD is reached
+
+- AssistantMD now requires an explicit ingress-authentication mode. Use the
+  built-in single-owner token, trust an authenticating reverse proxy, restrict a
+  direct process to actual loopback peers, or deliberately leave the complete UI
+  and API open in `disabled` recovery/testing mode.
+- Built-in authentication does not provide TLS. Remote deployments still need
+  HTTPS at their ingress.
+- The System tab reports the active authentication mode and warns when the
+  application is unprotected.
+
+### Optional advanced shell access
+
+- Advanced mode adds a general-purpose Linux user environment with persistent
+  home and workspace files for interactive chat in a separately hardened Docker
+  container. It is not a systemd/cron host for continuously running services.
+  Restricted mode remains the default.
+- The supplied `advanced` Compose profile starts a version-matched advanced shell
+  and automatically pairs it with AssistantMD; users do not manage or back up SSH
+  keys.
+- Chat can install and run software in the advanced shell. Only explicitly
+  mounted host content is visible there, and bind mounts should be granted as
+  narrowly as possible.
+- Stdio MCP providers can run in the advanced shell while their registered tools
+  continue through AssistantMD's connection allowlists and deferred tool search.
+- Credentials copied into the advanced shell are readable by chat. Prefer
+  AssistantMD's encrypted connection credentials when possible.
 
 ### Connect AssistantMD to more of your tools
 
@@ -57,6 +88,8 @@ an installation encryption key before upgrading.
    any OAuth accounts.
 3. Configure and test MCP or built-in connections under **System →
    Connections** as needed.
+4. If advanced mode is enabled, confirm **System → Infrastructure** reports the
+   advanced shell as `ready`.
 
 ## v0.7.3
 

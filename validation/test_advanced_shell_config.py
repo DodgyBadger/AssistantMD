@@ -53,7 +53,10 @@ def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> 
         "Delegates do not receive shell",
         "official AssistantMD MCP connection",
         "inspect the working directory and exact target",
-        "separate persistent advanced-shell container",
+        "unprivileged user in a separate constrained Linux container",
+        "Persistence applies to files",
+        "there is no supported systemd or cron/service supervisor",
+        "Continuously running services belong in their own managed Compose service",
     ):
         assert required in instruction
     for prohibited in (

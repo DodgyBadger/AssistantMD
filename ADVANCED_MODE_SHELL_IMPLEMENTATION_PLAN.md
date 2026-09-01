@@ -38,6 +38,16 @@ host-global resources such as image and Compose project names. Keep the
 the owning application and the shell subsystem without ambiguity. Development
 containers must be rebuilt after this infrastructure-coordinate change.
 
+### Documentation and release readiness
+
+Status: complete, except for deliberately deferred ADR work.
+
+The installation, upgrade, security, environment example, API/UI architecture,
+and release-note surfaces describe the current authentication and advanced-shell
+contracts. Durable architecture records remain a separate follow-up because
+ingress authentication and the advanced execution boundary may warrant distinct
+ADRs.
+
 ## Status
 
 Selected direction under prototype validation. Slice 1 now has a development
