@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -17,6 +21,30 @@ TERMINATION_GRACE_SECONDS = 2.0
 POLL_INTERVAL_SECONDS = 0.05
 FORWARDED_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
 PR_SET_CHILD_SUBREAPER = 36
+STRUCTURED_STDIO_PREFIX = "assistantmd-stdio-v1:"
+MAX_ENVELOPE_BYTES = 64 * 1024
+MAX_ARGUMENTS = 64
+MAX_ARGUMENT_BYTES = 32 * 1024
+MAX_ENVIRONMENT_VALUES = 16
+MAX_ENVIRONMENT_VALUE_BYTES = 4096
+ALLOWED_WORKING_ROOTS = (
+    Path("/workspace"),
+    Path("/home/assistantmd-shell"),
+)
+ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+RESERVED_ENVIRONMENT_NAMES = frozenset(
+    {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "NPM_CONFIG_PREFIX",
+        "SHELL",
+        "TMPDIR",
+        "UV_TOOL_BIN_DIR",
+        "UV_TOOL_DIR",
+    }
+)
 
 
 def _execution_environment() -> dict[str, str]:
@@ -32,6 +60,77 @@ def _execution_environment() -> dict[str, str]:
         "UV_TOOL_BIN_DIR": "/home/assistantmd-shell/.local/bin",
         "UV_TOOL_DIR": "/home/assistantmd-shell/.local/share/uv/tools",
     }
+
+
+def _decode_structured_launch(
+    command: str,
+) -> tuple[list[str], Path, dict[str, str]] | None:
+    """Decode one bounded stdio launch without involving a shell parser."""
+    if not command.startswith(STRUCTURED_STDIO_PREFIX):
+        return None
+    encoded = command.removeprefix(STRUCTURED_STDIO_PREFIX)
+    if not encoded or len(encoded) > MAX_ENVELOPE_BYTES * 2:
+        raise ValueError("Structured stdio launch envelope is invalid.")
+    try:
+        raw = base64.b64decode(encoded.encode("ascii"), altchars=b"-_", validate=True)
+        payload = json.loads(raw)
+    except (UnicodeEncodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise ValueError("Structured stdio launch envelope is invalid.") from exc
+    if len(raw) > MAX_ENVELOPE_BYTES or not isinstance(payload, dict):
+        raise ValueError("Structured stdio launch envelope is invalid.")
+    if set(payload) != {"executable", "args", "cwd", "env"}:
+        raise ValueError("Structured stdio launch fields are invalid.")
+
+    executable = payload["executable"]
+    arguments = payload["args"]
+    cwd_value = payload["cwd"]
+    environment_values = payload["env"]
+    if (
+        not isinstance(executable, str)
+        or not executable
+        or "\x00" in executable
+        or not Path(executable).is_absolute()
+    ):
+        raise ValueError("Structured stdio executable must be an absolute path.")
+    if (
+        not isinstance(arguments, list)
+        or len(arguments) > MAX_ARGUMENTS
+        or not all(
+            isinstance(argument, str) and "\x00" not in argument
+            for argument in arguments
+        )
+        or sum(len(argument.encode()) for argument in arguments) > MAX_ARGUMENT_BYTES
+    ):
+        raise ValueError("Structured stdio arguments are invalid.")
+    if not isinstance(cwd_value, str) or not cwd_value:
+        raise ValueError("Structured stdio working directory is invalid.")
+    cwd = Path(cwd_value)
+    if (
+        ".." in cwd.parts
+        or not cwd.is_absolute()
+        or not any(
+            cwd == root or cwd.is_relative_to(root) for root in ALLOWED_WORKING_ROOTS
+        )
+    ):
+        raise ValueError("Structured stdio working directory is outside allowed roots.")
+    if (
+        not isinstance(environment_values, dict)
+        or len(environment_values) > MAX_ENVIRONMENT_VALUES
+    ):
+        raise ValueError("Structured stdio environment is invalid.")
+    environment = _execution_environment()
+    for name, value in environment_values.items():
+        if (
+            not isinstance(name, str)
+            or ENVIRONMENT_NAME_PATTERN.fullmatch(name) is None
+            or name in RESERVED_ENVIRONMENT_NAMES
+            or not isinstance(value, str)
+            or "\x00" in value
+            or len(value.encode()) > MAX_ENVIRONMENT_VALUE_BYTES
+        ):
+            raise ValueError("Structured stdio environment is invalid.")
+        environment[name] = value
+    return [executable, *arguments], cwd, environment
 
 
 def _signal_process_group(process: subprocess.Popen[bytes], signum: int) -> None:
@@ -157,10 +256,21 @@ def run_command(command: str) -> int:
     _enable_child_subreaper()
     wrapper_pid = os.getpid()
 
+    try:
+        structured_launch = _decode_structured_launch(command)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 64
+    argv, cwd, environment = (
+        structured_launch
+        if structured_launch is not None
+        else (["/bin/bash", "-lc", command], WORKSPACE_ROOT, _execution_environment())
+    )
+
     process = subprocess.Popen(
-        ["/bin/bash", "-lc", command],
-        cwd=WORKSPACE_ROOT,
-        env=_execution_environment(),
+        argv,
+        cwd=cwd,
+        env=environment,
         stdin=subprocess.PIPE,
         stdout=sys.stdout.buffer,
         stderr=sys.stderr.buffer,

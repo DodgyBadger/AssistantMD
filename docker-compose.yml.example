@@ -94,7 +94,11 @@ services:
     mem_limit: 512m
     cpus: 1.0
     healthcheck:
-      test: ["CMD-SHELL", "sshd -t -f /etc/ssh/sshd_config"]
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222;
+          IFS= read -r banner <&3; [[ $$banner == SSH-* ]]'
       interval: 10s
       timeout: 3s
       retries: 6

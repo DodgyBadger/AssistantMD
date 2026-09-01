@@ -10,10 +10,5 @@ elif [[ -n ${ASSISTANTMD_DEV_RUNTIME_ROOT:-} ]]; then
 else
     state_root="${repository_root}/system/advanced-shell"
 fi
-companion_key_root="${repository_root}/.advanced-shell/companion-keys"
-host_public_root="${repository_root}/.advanced-shell/companion-public"
-
 export ADVANCED_SHELL_CLIENT_PUBLIC_ROOT="${state_root}"
-export ADVANCED_SHELL_COMPANION_KEY_ROOT="${companion_key_root}"
-export ADVANCED_SHELL_HOST_PUBLIC_ROOT="${host_public_root}"
 docker compose -f "${compose_file}" restart shell

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
+import json
 import os
 import shlex
 import signal
@@ -35,6 +37,7 @@ def _wrapper_process(workspace: Path, command: str) -> subprocess.Popen[str]:
         "module=importlib.util.module_from_spec(spec); "
         "spec.loader.exec_module(module); "
         f"module.WORKSPACE_ROOT=pathlib.Path({str(workspace)!r}); "
+        f"module.ALLOWED_WORKING_ROOTS=(pathlib.Path({str(workspace)!r}),); "
         "raise SystemExit(module.main())"
     )
     environment = dict(os.environ)
@@ -48,6 +51,27 @@ def _wrapper_process(workspace: Path, command: str) -> subprocess.Popen[str]:
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def _structured_command(
+    *,
+    executable: str,
+    args: list[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> str:
+    payload = json.dumps(
+        {
+            "executable": executable,
+            "args": args,
+            "cwd": str(cwd),
+            "env": env or {},
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii")
+    return f"assistantmd-stdio-v1:{encoded}"
 
 
 def _wait_for_file(path: Path, timeout_seconds: float = 5.0) -> None:
@@ -103,6 +127,57 @@ def main() -> None:
         assert basic.returncode == 7
         assert stdout == f"{workspace}\nstdout-value"
         assert stderr == "stderr-value"
+
+        injection_marker = workspace / "must-not-exist"
+        literal_argument = f"$(touch {injection_marker})"
+        structured = _wrapper_process(
+            workspace,
+            _structured_command(
+                executable=sys.executable,
+                args=[
+                    "-c",
+                    "import os,sys; print(sys.argv[1]); print(os.environ['PROBE_MODE'])",
+                    literal_argument,
+                ],
+                cwd=workspace,
+                env={"PROBE_MODE": "structured"},
+            ),
+        )
+        structured.wait(timeout=5)
+        assert structured.stdout is not None
+        assert structured.stderr is not None
+        structured_stdout = structured.stdout.read()
+        structured_stderr = structured.stderr.read()
+        assert structured.stdin is not None
+        structured.stdin.close()
+        assert structured.returncode == 0, structured_stderr
+        assert structured_stdout == f"{literal_argument}\nstructured\n"
+        assert structured_stderr == ""
+        assert not injection_marker.exists()
+
+        invalid_structured = _wrapper_process(
+            workspace,
+            _structured_command(
+                executable="python",
+                args=[],
+                cwd=workspace,
+            ),
+        )
+        _stdout, invalid_stderr = invalid_structured.communicate(timeout=5)
+        assert invalid_structured.returncode == 64
+        assert "absolute path" in invalid_stderr
+
+        traversing_structured = _wrapper_process(
+            workspace,
+            _structured_command(
+                executable=sys.executable,
+                args=[],
+                cwd=workspace / "child" / "..",
+            ),
+        )
+        _stdout, traversing_stderr = traversing_structured.communicate(timeout=5)
+        assert traversing_structured.returncode == 64
+        assert "outside allowed roots" in traversing_stderr
 
         child_pid_path = workspace / "child.pid"
         stubborn_program = (
@@ -164,10 +239,9 @@ def main() -> None:
         )
         _wait_for_file(background_pid_path)
         background_pid = int(background_pid_path.read_text(encoding="utf-8"))
+        background.wait(timeout=8)
         assert background.stdin is not None
         background.stdin.close()
-        background.stdin = None
-        background.communicate(timeout=8)
         assert background.returncode == 0
         _assert_pid_gone(
             background_pid,

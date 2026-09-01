@@ -1094,6 +1094,9 @@ final per-execution containment mechanism.
 
 ### Slice 3: Stdio MCP transport probe
 
+- Complete the representative-server and skill-coupling discovery in
+  `STDIO_MCP_DISCOVERY_AND_IMPLEMENTATION_PLAN.md` before selecting persisted
+  connection fields.
 - Launch one trusted credential-free server through fixed-destination SSH.
 - Gate stdio connection mutation, testing, and acquisition on advanced mode.
 - Extend the retained MCP manager with a stdio client branch while reusing the

@@ -10,17 +10,19 @@ elif [[ -n ${ASSISTANTMD_DEV_RUNTIME_ROOT:-} ]]; then
 else
     state_root="${repository_root}/system/advanced-shell"
 fi
-companion_key_root="${repository_root}/.advanced-shell/companion-keys"
-host_public_root="${repository_root}/.advanced-shell/companion-public"
 diagnostic_log="${repository_root}/scripts/advanced_shell_development.latest.log"
 
 export ADVANCED_SHELL_CLIENT_PUBLIC_ROOT="${state_root}"
-export ADVANCED_SHELL_COMPANION_KEY_ROOT="${companion_key_root}"
-export ADVANCED_SHELL_HOST_PUBLIC_ROOT="${host_public_root}"
 exec > >(tee "${diagnostic_log}") 2>&1
 
 echo "compose state"
 docker compose -f "${compose_file}" ps --all
+
+echo "resolved client public root"
+echo "${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}"
+
+echo "resolved shell mounts"
+docker compose -f "${compose_file}" config | sed -n '/shell:/,/^[^ ]/p' | sed -n '/volumes:/,/^[[:space:]]*[a-z_]*:/p'
 
 echo "container health"
 for service in shell; do
@@ -28,6 +30,8 @@ for service in shell; do
     if [[ -n ${container_id} ]]; then
         echo "${service}:"
         docker inspect --format '{{json .State}}' "${container_id}"
+        echo "${service} mounts:"
+        docker inspect --format '{{json .Mounts}}' "${container_id}"
     fi
 done
 

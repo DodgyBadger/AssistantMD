@@ -14,9 +14,14 @@ services:
         aliases:
           - assistantmd-shell
     volumes:
-      - ${ADVANCED_SHELL_COMPANION_KEY_ROOT:?set ADVANCED_SHELL_COMPANION_KEY_ROOT}:/run/assistantmd-shell/host-identity
-      - ${ADVANCED_SHELL_HOST_PUBLIC_ROOT:?set ADVANCED_SHELL_HOST_PUBLIC_ROOT}:/run/assistantmd-shell/host-public
-      - ${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT:?set ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}:/run/assistantmd-shell/client-public:ro
+      - host_identity:/run/assistantmd-shell/host-identity
+      - host_public:/run/assistantmd-shell/host-public
+      - type: bind
+        source: ${ADVANCED_SHELL_CLIENT_PUBLIC_ROOT:?set ADVANCED_SHELL_CLIENT_PUBLIC_ROOT}/client_identity.pub
+        target: /run/assistantmd-shell/client-public/client_identity.pub
+        read_only: true
+        bind:
+          create_host_path: false
       - type: volume
         source: workspace
         target: /workspace
@@ -39,11 +44,17 @@ services:
     mem_limit: 512m
     cpus: 1.0
     healthcheck:
-      test: ["CMD-SHELL", "sshd -t -f /etc/ssh/sshd_config"]
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222;
+          IFS= read -r banner <&3; [[ $$banner == SSH-* ]]'
       interval: 2s
       timeout: 2s
       retries: 15
 
 volumes:
+  host_identity:
+  host_public:
   workspace:
   home:
