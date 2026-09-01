@@ -95,8 +95,23 @@ docker logs assistantMD
 
 ## 7. Configure a model provider
 
-Open **System → Providers**, choose a provider, and add the requested API key
-or endpoint. AssistantMD is now ready to use.
+Open **System → Model Providers** and configure at least one provider.
+
+For OpenAI, either setup path is valid:
+
+- **API key:** add `OPENAI_API_KEY` under **System → Secrets**. The built-in
+  OpenAI provider uses that secret by default.
+- **OAuth:** enable `openai_oauth_enabled` under **System → Application
+  Settings**. Return to **Model Providers**, edit OpenAI, select **OAuth**, save,
+  and choose **Connect** or **Device Code** in its OAuth panel.
+
+OpenAI OAuth remains labeled experimental because OpenAI does not officially
+support this AssistantMD integration and may change or restrict the flow. It is
+nevertheless a complete and valid way to enable the OpenAI provider during first
+setup. API-key authentication remains available if OAuth is unsuitable.
+
+For another provider, add its requested secret or endpoint from the same System
+page. Once one provider is ready, AssistantMD is ready to use.
 
 AssistantMD adds an `AssistantMD/` folder to each mounted vault for skills,
 workflows, imported documents, and exported chats. See
@@ -236,11 +251,10 @@ belongs in the [Development Guide](development.md).
 Open **System → Connections** to add Gmail or MCP connections. The UI provides
 the callback URLs and fields required by each connection.
 
-For OpenAI, add an API key under **Secrets** or enable the experimental OAuth
-option under **Application Settings**. Gmail setup begins from its connection
-card. Remote MCP servers begin from **MCP connections**. Follow the prompts in
-the UI, and consult [Security Considerations](security.md) before granting a
-server credentials or broad tool access.
+Gmail setup begins from its connection card. Remote MCP servers begin from **MCP
+connections**. Follow the prompts in the UI, and consult
+[Security Considerations](security.md) before providing credentials to a server
+or granting broad tool access.
 
 ### Enable optional integrations
 
