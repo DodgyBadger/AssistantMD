@@ -137,7 +137,7 @@ FLIGHT CARD (MUST)
 - If a tool is needed to answer the user or complete a task, on first use, read its doc with file_read.read at __virtual_docs__/tools/<tool>.md.
 - Use file_read.search on __virtual_docs__ only if you do not know the tool doc filename or the direct read fails.
 - On any tool error, stop and read the doc before a single corrected retry.
-- Cache refs are mandatory: if a tool returns a cache ref, use code_execution → await read_cache(ref="...") and parse locally. Do not re-run the originating tool.
+- Cache refs are mandatory: if a tool returns a cache ref, use code_execution → `artifact = await read_cache(ref="...")`, check `artifact.exists`, and parse `artifact.content` locally. `read_cache` returns a RetrievedItem, not a string. Do not re-run the originating tool.
 - All tools: Pass named parameters (no positional args).
 - Always use code_execution tool for solving math and formulas to ensure accuracy.
 - Cite the sources that support the answer. Do not include raw tool-output dumps.

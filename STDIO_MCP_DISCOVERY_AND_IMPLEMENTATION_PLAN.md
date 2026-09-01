@@ -18,6 +18,31 @@ the bundled Companion MCP Setup skill. Deterministic stdio integration coverage
 and a live filesystem-server manager probe pass. Maintainer validation and a
 manual browser workflow remain before the slice is considered merge-ready.
 
+The first live agent-assisted setup also completed end to end with
+`paper-search-mcp`: installation, compatibility recovery, SDK initialization,
+tool discovery, import, reviewed skill creation, deferred tool search, and a
+real provider call all succeeded. The bundled setup skill is hardened from that
+run to require exact provider version pins, official-SDK probes, explicit
+warning assessment, bounded risk-oriented tool-inventory review,
+version-matched provider-skill provenance, and registered-MCP-first use.
+Companion-local credentials remain a
+possible user-managed escape hatch, but AssistantMD does not currently manage,
+encrypt, back up, or inject them. Any credential stored in the companion is
+readable by the chat agent through `shell`, so that choice explicitly grants the
+agent access to the credential.
+
+The clean second paper-search run validated the hardened workflow without
+repeating connection registration: installation and verification fell from
+roughly six minutes and fourteen shell calls to roughly two minutes and eleven
+shell calls, with no protocol-framing detour or timeout. It pinned
+`paper-search-mcp==0.1.4`, recovered the upstream `mcp<2` packaging constraint,
+used the provider environment's official SDK, fetched the matching tagged
+skill, and produced a registered-MCP-first adaptation. The remaining repeated
+friction was oversized web-result retrieval and verbose inventory output. The
+model-visible cache notice now states that `read_cache` returns a
+`RetrievedItem` and directs use of `artifact.content`; the setup skill now asks
+for compact, risk-oriented inventory summaries rather than every full schema.
+
 This plan deliberately precedes connector implementation. It updates the
 problem definition and defines the experiments needed before changing the MCP
 database or System UI.
@@ -597,11 +622,14 @@ request, rejects unknown fields, shows a human-readable preview, and offers
 **Test and add**. The individual fields remain an expert fallback. This is one
 API/runtime path, not a second registration mechanism.
 
-A bundled `companion_mcp_setup` vault skill teaches advanced chat to install and
-probe a credential-free provider, produce the import block, inspect any bundled
-provider `SKILL.md` as untrusted content, and create a reviewed AssistantMD copy
-when appropriate. Provider skills remain separate vault content and are never
-activated by connection creation.
+A bundled `companion_mcp_setup` vault skill teaches advanced chat to install a
+pinned provider, probe it with an official MCP SDK, review its tool inventory,
+produce the import block, inspect any bundled provider `SKILL.md` as untrusted
+content, and create a reviewed AssistantMD copy when appropriate. Provider
+skills remain separate vault content and are never activated by connection
+creation. Credential-free operation is the supported default; any
+companion-local credential is explicitly user-managed rather than an
+AssistantMD secret-store integration.
 
 ### Observability contract
 
