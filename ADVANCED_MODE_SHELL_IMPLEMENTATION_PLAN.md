@@ -73,6 +73,13 @@ Affected artifacts are `docs/setup/installation.md`, `docs/setup/security.md`,
 Validation is Compose configuration parsing, documentation consistency searches,
 and the existing production quality gate if Python files remain changed.
 
+The development guide also covers one production-shaped branch deployment:
+custom-building both images from a checkout, preserving persistent state,
+retaining the private advanced-shell network alongside an external proxy network,
+checking the merged Compose model, deploying, verifying readiness, and planning
+rollback around possible database migrations. More unusual orchestration remains
+out of scope.
+
 ## Status
 
 Selected direction under prototype validation. Slice 1 now has a development

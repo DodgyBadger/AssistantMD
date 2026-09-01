@@ -199,6 +199,78 @@ Add the values printed by the script to `.env`, then restart AssistantMD. This
 development-only publication can expose SSH beyond the host; restrict it with
 the host firewall.
 
+## Deploy a development branch with Docker Compose
+
+Use this workflow to exercise a branch in a production-shaped deployment rather
+than running AssistantMD through `scripts/dev`. It uses the normal persistent
+vault and system mounts while building images from the checked-out branch.
+
+1. Back up the mounted vaults, `system/`, `.env`, and both Compose files. A branch
+   may run database migrations, so rolling back can require restoring `system/`
+   as well as switching Git branches.
+
+2. Check out and update the branch:
+
+   ```bash
+   git fetch origin
+   git switch <branch-name>
+   git pull --ff-only origin <branch-name>
+   ```
+
+3. Merge the current `docker-compose.yml.example` into your deployment and copy
+   `docker-compose.override.yml.example` to `docker-compose.override.yml`. Restore
+   the real vault path, UID/GID choices, resource limits, and any deliberate bind
+   mounts. The override builds both AssistantMD and the advanced shell from the
+   same checkout.
+
+4. Preserve the existing `ASSISTANTMD_SECRETS_KEY` in `.env`. Configure the
+   authentication and public URL exactly as described under
+   [Access from another device](installation.md#access-from-another-device). Add
+   `COMPOSE_PROFILES=advanced` when testing advanced mode.
+
+5. If a reverse proxy runs in another Compose project, attach `assistant` to
+   both `assistantmd_advanced_shell` and the proxy's external network. Keep
+   `advanced-shell` only on `assistantmd_advanced_shell`.
+
+6. Validate the merged configuration before building:
+
+   ```bash
+   docker compose config --quiet
+   docker compose config --services
+   docker compose config --networks
+   ```
+
+   With advanced mode enabled, both `assistant` and `advanced-shell` must appear.
+   The network list must include `assistantmd_advanced_shell` and any external
+   proxy network you configured. Do not copy or share unfiltered `docker compose
+   config` output because it can contain values loaded from `.env`.
+
+7. Build and deploy. Build both images when advanced mode is enabled:
+
+   ```bash
+   docker compose build --pull --no-cache assistant advanced-shell
+   docker compose up -d --force-recreate
+   docker compose ps
+   ```
+
+   For restricted mode, building only `assistant` is sufficient. Do not use
+   `docker compose down -v`; the `-v` option deletes advanced-shell identities,
+   installed files, and workspace data.
+
+8. Inspect startup logs and **System → Infrastructure**. In advanced mode:
+
+   ```bash
+   docker compose logs --tail=100 assistant advanced-shell
+   ```
+
+   Confirm the intended authentication mode. Advanced mode is usable when its
+   execution mode is `advanced` and the advanced shell reports `ready`.
+   Restricted deployments can inspect `assistant` alone.
+
+For later branch updates, repeat the fetch/pull, build, and `up -d
+--force-recreate` steps. This workflow intentionally stops short of unusual
+orchestrators, remote Docker builders, and custom network-policy systems.
+
 ## Use the Python environment
 
 Activation is optional. Prefer `uv run` for ad hoc commands because it does not
