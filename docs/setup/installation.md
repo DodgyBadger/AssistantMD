@@ -174,7 +174,6 @@ forwarding the request. For Caddy:
 
 ```caddyfile
 reverse_proxy assistant:8000 {
-    header_up -X-AssistantMD-Proxy-Assertion
     header_up X-AssistantMD-Proxy-Assertion {$ASSISTANTMD_AUTH_SECRET}
 }
 ```
