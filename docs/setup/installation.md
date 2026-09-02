@@ -16,39 +16,42 @@ Back up an existing vault before mounting it, or begin with a test vault.
 
 ## 2. Create the deployment folder
 
-Create this layout:
+Clone AssistantMD and create the two persistent folders:
+
+```bash
+git clone https://github.com/DodgyBadger/AssistantMD.git
+cd AssistantMD
+mkdir -p data system
+cp .env.example .env
+```
+
+This creates the normal deployment layout:
 
 ```text
 AssistantMD/
+├── data/
 ├── system/
 ├── .env
 └── docker-compose.yml
 ```
 
-Copy the repository's `.env.example` to `.env` and
-`docker-compose.yml.example` to `docker-compose.yml`. Pre-create `system/` so
-Docker does not create it with the wrong ownership.
-
-```bash
-mkdir -p AssistantMD/system
-cd AssistantMD
-```
-
-The two example files are available at
-[`.env.example`](../../.env.example) and
-[`docker-compose.yml.example`](../../docker-compose.yml.example).
+`docker-compose.yml` is maintained by the repository. Do not edit it; future
+`git pull` operations can then deliver required service, network, and volume
+updates. Put ordinary deployment choices in `.env`. Create an optional
+`docker-compose.override.yml` only for structural customizations described
+later in this guide.
 
 ## 3. Choose your vault folder
 
-In `docker-compose.yml`, replace `/absolute/path/to/your/vaults` with the folder
-that contains your vaults. Change only the left side of this mount:
+Set `ASSISTANTMD_DATA_PATH` in `.env` to the folder containing your vaults:
 
-```yaml
-- /absolute/path/to/your/vaults:/app/data
+```dotenv
+ASSISTANTMD_DATA_PATH=/absolute/path/to/your/vaults
 ```
 
 Each direct subfolder becomes an AssistantMD vault. The examples later in this
-guide show single-vault and multi-vault layouts.
+guide show single-vault and multi-vault layouts. Leave the default `./data` when
+you want the vault folder inside the checkout.
 
 ## 4. Configure `.env`
 
@@ -62,6 +65,8 @@ Put the result in `.env`, choose your timezone, and start with local-only access
 
 ```dotenv
 ASSISTANTMD_SECRETS_KEY=PASTE_GENERATED_KEY_HERE
+ASSISTANTMD_DATA_PATH=/absolute/path/to/your/vaults
+ASSISTANTMD_SYSTEM_PATH=./system
 TZ=UTC
 ASSISTANTMD_AUTH_MODE=disabled
 ```
@@ -187,8 +192,9 @@ proxy-only assertion and does not show a second login.
 #### Proxy in another Compose project
 
 For either authentication mode, a containerized proxy must share a network with
-AssistantMD. Attach AssistantMD to the proxy's external network without removing
-its advanced-shell network:
+AssistantMD. Create `docker-compose.override.yml` with the following structure,
+changing `caddy_default` to the proxy network's name. Preserve the
+advanced-shell network:
 
 ```yaml
 services:
@@ -203,7 +209,7 @@ networks:
     external: true
 ```
 
-Run `docker compose up -d` after changing the networks. Use `assistant:8000` as
+Run `docker compose up -d` after changing the override. Use `assistant:8000` as
 the proxy upstream.
 
 For either option, use the exact HTTPS origin shown in the browser for
@@ -288,7 +294,7 @@ Docker Desktop normally handles this mapping automatically on Windows and macOS.
 /home/user/MyVaults/
 ├── Personal/
 ```
-Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.  
+`.env` reads: `ASSISTANTMD_DATA_PATH=/home/user/MyVaults`.
 AssistantMD will see one vault called `Personal`.
 
 ```
@@ -298,7 +304,7 @@ AssistantMD will see one vault called `Personal`.
 └── Family/
 
 ```
-Docker compose volume mount reads: `/home/user/MyVaults:/app/data`.  
+`.env` reads: `ASSISTANTMD_DATA_PATH=/home/user/MyVaults`.
 AssistantMD will see three vaults called `Personal`, `Work` and `Family`
 
 ## Platform notes

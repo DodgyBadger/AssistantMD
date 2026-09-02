@@ -119,7 +119,7 @@ origin is inferred and explain that reverse-proxy deployments should configure
 ## Installation and Operations
 
 - Add a commented `ASSISTANTMD_PUBLIC_URL` example to `.env.example`.
-- Add the variable to `docker-compose.yml.example` through its existing
+- Add the variable to `docker-compose.yml` through its existing
   `env_file` contract; do not duplicate its value in Compose `environment`.
 - Update installation documentation with local, LAN, and reverse-proxy
   examples. Explain that it is the externally visible AssistantMD origin, not

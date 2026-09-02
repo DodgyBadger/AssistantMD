@@ -1,22 +1,40 @@
-# Optional docker-compose override for custom builds
-# Copy to docker-compose.override.yml and adjust as needed
+# Optional structural customizations for the tracked docker-compose.yml.
+#
+# Copy this file to docker-compose.override.yml only when you need a custom
+# build, non-default runtime UID/GID, extra Docker network, or extra bind mount.
+# Delete sections you do not use. Keep ordinary values such as host paths,
+# ports, image tags, authentication, and execution mode in .env.
 
 services:
   assistant:
+    # Build AssistantMD from this checkout instead of only pulling the image.
     build:
       context: .
       dockerfile: docker/Dockerfile
       args:
-        USER_ID: 1000   # Edit to desired UID (e.g., 0 for root)
-        GROUP_ID: 1000  # Edit to desired GID
-    # Run the container as your chosen user to align file ownership.
-    user: "1000:1000"   # Keep in sync with USER_ID/GROUP_ID above
-    
-    # Optional development-only bind mounts (not for regular use)
+        USER_ID: 1000
+        GROUP_ID: 1000
+
+    # Keep this in sync with USER_ID/GROUP_ID when host ownership requires a
+    # runtime user other than the published image's UID/GID 1000.
+    user: "1000:1000"
+
+    # A reverse proxy in another Compose project needs a shared external
+    # network. Uncomment this complete block and the matching top-level network
+    # declaration below. Preserve assistantmd_advanced_shell.
+    # networks:
+    #   - assistantmd_advanced_shell
+    #   - caddy_default
+
+    # Development-only source mount. Regular deployments should build the image.
     # volumes:
-    #  - .:/app
+    #   - type: bind
+    #     source: .
+    #     target: /app
 
   advanced-shell:
+    # Build the matching advanced-shell image from the same checkout. This
+    # service is still started only when COMPOSE_PROFILES includes `advanced`.
     build:
       context: .
       dockerfile: docker/advanced-shell/Dockerfile
@@ -24,8 +42,8 @@ services:
         SHELL_USER_ID: 1000
         SHELL_GROUP_ID: 1000
 
-    # The advanced profile defaults to isolated named volumes. Uncomment only
-    # the exact host paths the advanced shell should be able to access.
+    # The advanced shell defaults to isolated named volumes. Uncomment only the
+    # exact host paths it should access. Prefer read-only vault mounts.
     # volumes:
     #   - type: bind
     #     source: /absolute/path/to/exchange
@@ -38,3 +56,13 @@ services:
     #     read_only: true
     #     bind:
     #       create_host_path: false
+
+    # Optional resource-limit overrides.
+    # mem_limit: 1g
+    # cpus: 2.0
+
+# Uncomment with the assistant.networks block when joining an existing proxy
+# network. Change both occurrences of caddy_default when yours has another name.
+# networks:
+#   caddy_default:
+#     external: true

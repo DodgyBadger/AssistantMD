@@ -1,5 +1,7 @@
-# Default Docker Compose configuration that pulls the published GHCR image.
-# Copy this file to docker-compose.yml and run: docker compose up -d
+# Supported Docker Compose deployment. Keep this file unmodified so repository
+# updates can safely deliver service, network, and volume changes. Put ordinary
+# deployment values in .env and structural customizations in
+# docker-compose.override.yml.
 
 services:
   assistant:
@@ -8,10 +10,10 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:8000:8000"    # FastAPI - localhost only
+      - "${ASSISTANTMD_BIND_ADDRESS:-127.0.0.1}:${ASSISTANTMD_PORT:-8000}:8000"
     volumes:
-      - /absolute/path/to/your/vaults:/app/data   # Pre-create path on the left of the colon & ensure owned by your user
-      - ./system:/app/system                      # Pre-create path on the left of the colon & ensure owned by your user
+      - ${ASSISTANTMD_DATA_PATH:-./data}:/app/data
+      - ${ASSISTANTMD_SYSTEM_PATH:-./system}:/app/system
       - advanced_shell_client_identity:/run/advanced-shell/client-identity
       - advanced_shell_client_public:/run/advanced-shell/client-public
       - advanced_shell_host_public:/run/advanced-shell/host-public:ro
@@ -43,7 +45,7 @@ services:
 
     # Health check
     # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/api/health"]
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
     #   interval: 120s
     #   timeout: 10s
     #   retries: 3

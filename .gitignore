@@ -98,6 +98,7 @@ celerybeat.pid
 
 # Environments
 .env
+docker-compose.override.yml
 system/secrets.yaml
 .venv
 .runtime/

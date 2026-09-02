@@ -72,7 +72,7 @@ with other active profiles also reject advanced execution without the advanced
 profile; non-Compose development may use the execution-mode setting alone.
 
 Affected artifacts are `docs/setup/installation.md`, `docs/setup/security.md`,
-`docs/setup/upgrading.md`, `.env.example`, and `docker-compose.yml.example`.
+`docs/setup/upgrading.md`, `.env.example`, and `docker-compose.yml`.
 Validation is Compose configuration parsing, documentation consistency searches,
 and the existing production quality gate if Python files remain changed.
 
@@ -82,6 +82,31 @@ retaining the private advanced-shell network alongside an external proxy network
 checking the merged Compose model, deploying, verifying readiness, and planning
 rollback around possible database migrations. More unusual orchestration remains
 out of scope.
+
+### Tracked Compose deployment contract
+
+Status: complete, pending maintainer Docker Compose validation.
+
+Replace the copy-and-customize Compose workflow with a root
+`docker-compose.yml` that is tracked, complete, and not intended for local
+editing. Ordinary deployment values—including persistent data/system host
+paths—belong in `.env`. Structural changes such as branch builds, non-default
+UID/GID ownership, external proxy networks, and additional advanced-shell bind
+mounts belong in an optional ignored `docker-compose.override.yml`, seeded from
+one thoroughly commented example.
+
+The tracked Compose file must retain all required advanced-shell pairing
+volumes and fixed internal paths so `git pull` delivers topology corrections to
+existing checkout-based deployments. The installation guide must present the
+no-override happy path; development documentation must explain when to create an
+override. The v0.8 upgrade guide must include the one-time transition from a
+locally copied Compose file to the tracked file without losing `.env`, vault,
+system, proxy-network, build, or mount choices.
+
+Validation targets are YAML parsing, environment-substitution review for the
+default and advanced profiles, repository-wide stale-reference searches, link
+checks by inspection, and maintainer-owned Docker Compose validation because
+this development container has no Docker daemon.
 
 ## Status
 
@@ -205,7 +230,7 @@ containers.
 
 The supported advanced shell must be discoverable from the root deployment surface,
 not presented to users as an experimental file under `docker/advanced-shell/`.
-The primary `docker-compose.yml.example` should contain a real, validated optional
+The primary `docker-compose.yml` should contain a real, validated optional
 advanced shell service under an `advanced` Compose profile,
 together with their named home/workspace/runtime-key volumes. Restricted users
 keep the profile inactive; advanced users enable it explicitly, for example with

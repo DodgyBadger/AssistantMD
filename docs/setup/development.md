@@ -205,9 +205,9 @@ Use this workflow to exercise a branch in a production-shaped deployment rather
 than running AssistantMD through `scripts/dev`. It uses the normal persistent
 vault and system mounts while building images from the checked-out branch.
 
-1. Back up the mounted vaults, `system/`, `.env`, and both Compose files. A branch
-   may run database migrations, so rolling back can require restoring `system/`
-   as well as switching Git branches.
+1. Back up the mounted vaults, `system/`, `.env`, and any local Compose override.
+   A branch may run database migrations, so rolling back can require restoring
+   `system/` as well as switching Git branches.
 
 2. Check out and update the branch:
 
@@ -217,11 +217,11 @@ vault and system mounts while building images from the checked-out branch.
    git pull --ff-only origin <branch-name>
    ```
 
-3. Merge the current `docker-compose.yml.example` into your deployment and copy
-   `docker-compose.override.yml.example` to `docker-compose.override.yml`. Restore
-   the real vault path, UID/GID choices, resource limits, and any deliberate bind
-   mounts. The override builds both AssistantMD and the advanced shell from the
-   same checkout.
+3. Keep the branch's tracked `docker-compose.yml` unmodified. Copy
+   `docker-compose.override.yml.example` to `docker-compose.override.yml`. The
+   override builds both AssistantMD and the advanced shell from this checkout;
+   set any required UID/GID choices, external networks, resource limits, and
+   deliberate bind mounts there. Put vault and system host paths in `.env`.
 
 4. Preserve the existing `ASSISTANTMD_SECRETS_KEY` in `.env`. Configure the
    authentication and public URL exactly as described under
