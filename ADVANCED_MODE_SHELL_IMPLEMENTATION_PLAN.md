@@ -124,7 +124,9 @@ The supported Compose profile now performs automatic two-party SSH enrollment:
 each long-running container owns its private identity and publishes only its
 public key through a one-way volume. The superseded host provisioner and
 one-shot key initializer have been removed from the production, development,
-and smoke topologies.
+and smoke topologies. The Compose service also fixes the application runtime's
+internal key root to the client-identity volume mount so bootstrap and readiness
+checks consume the same deployment-owned identity without a user-facing setting.
 
 This plan supersedes the abandoned MCP catalog, provider-recipe, sidecar-stack,
 Ansible-provisioning, in-container sandbox, and privileged container-controller

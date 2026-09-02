@@ -17,6 +17,9 @@ services:
       - advanced_shell_host_public:/run/advanced-shell/host-public:ro
     env_file:
       - .env
+    environment:
+      # Fixed container-internal path shared by bootstrap and runtime checks.
+      ASSISTANTMD_SHELL_KEY_ROOT: /run/advanced-shell/client-identity
     networks:
       - assistantmd_advanced_shell
     shm_size: "1gb"
