@@ -12,7 +12,24 @@ host=${ASSISTANTMD_SHELL_HOST:-advanced-shell}
 port=${ASSISTANTMD_SHELL_PORT:-2222}
 alias=${ASSISTANTMD_SHELL_HOST_KEY_ALIAS:-}
 
-if [ "${ASSISTANTMD_EXECUTION_MODE:-restricted}" != advanced ]; then
+execution_mode=${ASSISTANTMD_EXECUTION_MODE:-restricted}
+compose_profiles=$(printf '%s' "${COMPOSE_PROFILES:-}" | tr -d '[:space:]')
+case ",${compose_profiles}," in
+    *,advanced,*)
+        if [ "${execution_mode}" != advanced ]; then
+            echo "COMPOSE_PROFILES includes advanced, so ASSISTANTMD_EXECUTION_MODE must also be advanced." >&2
+            exit 1
+        fi
+        ;;
+    *)
+        if [ -n "${compose_profiles}" ] && [ "${execution_mode}" = advanced ]; then
+            echo "ASSISTANTMD_EXECUTION_MODE is advanced, so COMPOSE_PROFILES must also include advanced for a Compose deployment." >&2
+            exit 1
+        fi
+        ;;
+esac
+
+if [ "${execution_mode}" != advanced ]; then
     exec "$@"
 fi
 

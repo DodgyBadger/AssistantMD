@@ -217,15 +217,16 @@ Compose service. It is not applicable to the standard Docker installation.
 
 ### Enable advanced mode
 
-Add one setting to `.env`:
+Add both settings to `.env`:
 
 ```dotenv
 COMPOSE_PROFILES=advanced
+ASSISTANTMD_EXECUTION_MODE=advanced
 ```
 
-This starts the optional container and tells AssistantMD to expose the capability.
-Restart with `docker compose up -d`, then confirm **System → Infrastructure**
-reports the advanced shell as `ready`.
+The first starts the optional container; the second explicitly authorizes
+AssistantMD to expose the capability. Restart with `docker compose up -d`, then
+confirm **System → Infrastructure** reports the advanced shell as `ready`.
 
 Advanced mode provides a constrained, non-root Linux environment for interactive
 chat. Files under `/home/advanced-shell` and `/workspace` survive ordinary

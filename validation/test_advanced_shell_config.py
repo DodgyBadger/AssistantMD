@@ -1,5 +1,7 @@
 """Deterministic tests for advanced-shell infrastructure configuration."""
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -44,25 +46,133 @@ def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
     assert config.host_key_alias is None
 
 
-def test_advanced_compose_profile_enables_advanced_execution_by_default() -> None:
+def test_advanced_compose_profile_and_execution_mode_enable_shell() -> None:
     config = load_advanced_shell_config(
-        AppSettings(COMPOSE_PROFILES="browser, advanced")
+        AppSettings(
+            COMPOSE_PROFILES="browser, advanced",
+            ASSISTANTMD_EXECUTION_MODE="advanced",
+        )
     )
 
     assert config.execution_mode is ExecutionMode.ADVANCED
     assert config.enabled
 
 
-def test_explicit_execution_mode_overrides_compose_profile() -> None:
-    config = load_advanced_shell_config(
-        AppSettings(
-            COMPOSE_PROFILES="advanced",
-            ASSISTANTMD_EXECUTION_MODE="restricted",
+@pytest.mark.parametrize("execution_mode", [None, "restricted"])
+def test_advanced_compose_profile_requires_explicit_advanced_execution_mode(
+    execution_mode: str | None,
+) -> None:
+    values: dict[str, str] = {"COMPOSE_PROFILES": "advanced"}
+    if execution_mode is not None:
+        values["ASSISTANTMD_EXECUTION_MODE"] = execution_mode
+
+    with pytest.raises(
+        AdvancedShellConfigurationError,
+        match="ASSISTANTMD_EXECUTION_MODE must also be advanced",
+    ):
+        load_advanced_shell_config(AppSettings(**values))
+
+
+def test_compose_deployment_rejects_advanced_mode_without_advanced_profile() -> None:
+    with pytest.raises(
+        AdvancedShellConfigurationError,
+        match="COMPOSE_PROFILES must also include advanced",
+    ):
+        load_advanced_shell_config(
+            AppSettings(
+                COMPOSE_PROFILES="browser",
+                ASSISTANTMD_EXECUTION_MODE="advanced",
+            )
         )
+
+
+def test_client_bootstrap_requires_both_advanced_settings(
+    tmp_path: Path,
+) -> None:
+    identity_root = tmp_path / "client-identity"
+    client_public_root = tmp_path / "client-public"
+    host_public_root = tmp_path / "host-public"
+    host_public_root.mkdir()
+    subprocess.run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-f",
+            str(host_public_root / "ssh_host_ed25519_key"),
+        ],
+        check=True,
+    )
+    environment = {
+        **os.environ,
+        "COMPOSE_PROFILES": "browser, advanced",
+        "ASSISTANTMD_EXECUTION_MODE": "advanced",
+        "ASSISTANTMD_SHELL_CLIENT_IDENTITY_ROOT": str(identity_root),
+        "ASSISTANTMD_SHELL_CLIENT_PUBLIC_ROOT": str(client_public_root),
+        "ASSISTANTMD_SHELL_HOST_PUBLIC_ROOT": str(host_public_root),
+    }
+    subprocess.run(
+        ["sh", "docker/bootstrap-advanced-shell-client.sh", "true"],
+        check=True,
+        env=environment,
     )
 
-    assert config.execution_mode is ExecutionMode.RESTRICTED
-    assert not config.enabled
+    assert (identity_root / "client_identity").is_file()
+    assert (identity_root / "known_hosts").is_file()
+    assert (client_public_root / "client_identity.pub").is_file()
+
+
+@pytest.mark.parametrize("execution_mode", [None, "restricted"])
+def test_client_bootstrap_rejects_advanced_profile_without_advanced_mode(
+    tmp_path: Path, execution_mode: str | None
+) -> None:
+    identity_root = tmp_path / "client-identity"
+    environment = {
+        **os.environ,
+        "COMPOSE_PROFILES": "advanced",
+        "ASSISTANTMD_SHELL_CLIENT_IDENTITY_ROOT": str(identity_root),
+    }
+    if execution_mode is None:
+        environment.pop("ASSISTANTMD_EXECUTION_MODE", None)
+    else:
+        environment["ASSISTANTMD_EXECUTION_MODE"] = execution_mode
+
+    result = subprocess.run(
+        ["sh", "docker/bootstrap-advanced-shell-client.sh", "true"],
+        check=False,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "ASSISTANTMD_EXECUTION_MODE must also be advanced" in result.stderr
+    assert not identity_root.exists()
+
+
+def test_client_bootstrap_rejects_advanced_mode_without_advanced_profile(
+    tmp_path: Path,
+) -> None:
+    identity_root = tmp_path / "client-identity"
+    result = subprocess.run(
+        ["sh", "docker/bootstrap-advanced-shell-client.sh", "true"],
+        check=False,
+        env={
+            **os.environ,
+            "COMPOSE_PROFILES": "browser",
+            "ASSISTANTMD_EXECUTION_MODE": "advanced",
+            "ASSISTANTMD_SHELL_CLIENT_IDENTITY_ROOT": str(identity_root),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "COMPOSE_PROFILES must also include advanced" in result.stderr
+    assert not identity_root.exists()
 
 
 def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> None:

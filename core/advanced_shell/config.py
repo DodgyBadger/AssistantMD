@@ -72,24 +72,34 @@ class AdvancedShellConfig:
 
 def load_advanced_shell_config(settings: AppSettings) -> AdvancedShellConfig:
     """Load and validate restart-bound advanced-shell coordinates."""
-    configured_mode = settings.execution_mode
-    if configured_mode is None:
-        active_profiles = {
-            profile.strip()
-            for profile in settings.compose_profiles.split(",")
-            if profile.strip()
-        }
-        configured_mode = (
-            ExecutionMode.ADVANCED
-            if ExecutionMode.ADVANCED.value in active_profiles
-            else ExecutionMode.RESTRICTED
-        )
+    configured_mode = settings.execution_mode or ExecutionMode.RESTRICTED.value
     try:
         execution_mode = ExecutionMode(configured_mode.strip())
     except ValueError as exc:
         raise AdvancedShellConfigurationError(
             "ASSISTANTMD_EXECUTION_MODE must be restricted or advanced."
         ) from exc
+
+    active_profiles = {
+        profile.strip()
+        for profile in settings.compose_profiles.split(",")
+        if profile.strip()
+    }
+    advanced_profile_active = ExecutionMode.ADVANCED.value in active_profiles
+    if advanced_profile_active and execution_mode is not ExecutionMode.ADVANCED:
+        raise AdvancedShellConfigurationError(
+            "COMPOSE_PROFILES includes advanced, so "
+            "ASSISTANTMD_EXECUTION_MODE must also be advanced."
+        )
+    if (
+        active_profiles
+        and execution_mode is ExecutionMode.ADVANCED
+        and not advanced_profile_active
+    ):
+        raise AdvancedShellConfigurationError(
+            "ASSISTANTMD_EXECUTION_MODE is advanced, so COMPOSE_PROFILES must "
+            "also include advanced for a Compose deployment."
+        )
 
     host = _validate_coordinate("ASSISTANTMD_SHELL_HOST", settings.shell_host)
     user = _validate_coordinate("ASSISTANTMD_SHELL_USER", settings.shell_user)

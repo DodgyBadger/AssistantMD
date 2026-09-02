@@ -226,7 +226,8 @@ vault and system mounts while building images from the checked-out branch.
 4. Preserve the existing `ASSISTANTMD_SECRETS_KEY` in `.env`. Configure the
    authentication and public URL exactly as described under
    [Access from another device](installation.md#access-from-another-device). Add
-   `COMPOSE_PROFILES=advanced` when testing advanced mode.
+   both `COMPOSE_PROFILES=advanced` and
+   `ASSISTANTMD_EXECUTION_MODE=advanced` when testing advanced mode.
 
 5. If a reverse proxy runs in another Compose project, attach `assistant` to
    both `assistantmd_advanced_shell` and the proxy's external network. Keep
