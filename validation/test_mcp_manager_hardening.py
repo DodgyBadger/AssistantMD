@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from types import MethodType, SimpleNamespace
 from typing import cast
 
@@ -11,16 +13,30 @@ import pytest
 from fastmcp import Client
 from mcp.types import Tool
 
-import core.settings as settings
-from core.identity import LOCAL_USER_AUTHORITY, ExecutionAuthority
-from core.mcp import (
+from core.runtime.paths import set_bootstrap_roots
+
+_TEST_ROOT = Path("/tmp/assistantmd-mcp-manager-hardening-tests")
+(_TEST_ROOT / "data").mkdir(parents=True, exist_ok=True)
+(_TEST_ROOT / "system").mkdir(parents=True, exist_ok=True)
+set_bootstrap_roots(_TEST_ROOT / "data", _TEST_ROOT / "system")
+
+import core.mcp.manager as manager_module  # noqa: E402
+import core.settings as settings  # noqa: E402
+from core.advanced_shell.preflight import (  # noqa: E402
+    AdvancedShellPreflightSnapshot,
+    AdvancedShellReadiness,
+)
+from core.identity import LOCAL_USER_AUTHORITY, ExecutionAuthority  # noqa: E402
+from core.mcp import (  # noqa: E402
     MCPAuthMode,
     MCPConnection,
     MCPConnectionLease,
     MCPConnectionManager,
     MCPConnectionService,
+    MCPStdioConfig,
     MCPTransport,
 )
+from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
 
 
 class _ConnectionSource:
@@ -46,6 +62,16 @@ class _ConnectionSource:
             None,
         )
 
+    def resolve_credential(
+        self, authority: ExecutionAuthority, connection_id: str
+    ) -> None:
+        del authority, connection_id
+        return None
+
+    def oauth_storage(self, authority: ExecutionAuthority, connection_id: str) -> None:
+        del authority, connection_id
+        return None
+
 
 def _connection(connection_id: str) -> MCPConnection:
     return MCPConnection(
@@ -64,6 +90,79 @@ def _connection(connection_id: str) -> MCPConnection:
         created_at="2026-09-03T00:00:00Z",
         updated_at="2026-09-03T00:00:00Z",
     )
+
+
+def _stdio_connection(connection_id: str) -> MCPConnection:
+    return replace(
+        _connection(connection_id),
+        url=None,
+        transport=MCPTransport.ADVANCED_SHELL_STDIO,
+        stdio=MCPStdioConfig(
+            executable="node",
+            arguments=("provider.js",),
+            working_directory="/workspace",
+        ),
+    )
+
+
+def _shell_transport(tmp_path: Path) -> ShellTransportConfig:
+    private_key = tmp_path / "client_key"
+    known_hosts = tmp_path / "known_hosts"
+    private_key.touch()
+    known_hosts.touch()
+    return ShellTransportConfig(
+        host="advanced-shell",
+        private_key_path=private_key,
+        known_hosts_path=known_hosts,
+    )
+
+
+async def _ready_shell() -> AdvancedShellPreflightSnapshot:
+    return AdvancedShellPreflightSnapshot(
+        state=AdvancedShellReadiness.READY,
+        message="Ready.",
+    )
+
+
+class _ControlledClient:
+    enter_gates: list[asyncio.Event] = []
+    entered = 0
+    active_enters = 0
+    max_active_enters = 0
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        self.index = len(type(self).enter_gates)
+        type(self).enter_gates.append(asyncio.Event())
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.enter_gates = []
+        cls.entered = 0
+        cls.active_enters = 0
+        cls.max_active_enters = 0
+
+    async def __aenter__(self) -> _ControlledClient:
+        cls = type(self)
+        cls.entered += 1
+        cls.active_enters += 1
+        cls.max_active_enters = max(cls.max_active_enters, cls.active_enters)
+        try:
+            await cls.enter_gates[self.index].wait()
+        finally:
+            cls.active_enters -= 1
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def list_tools(self, **_kwargs: object) -> list[Tool]:
+        return []
+
+
+async def _wait_until(predicate: Callable[[], bool]) -> None:
+    async with asyncio.timeout(1):
+        while not predicate():
+            await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -145,3 +244,123 @@ async def test_manager_rejects_non_authoritative_connection_fields() -> None:
         await manager.acquire(LOCAL_USER_AUTHORITY, forged)
 
     await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_stdio_launch_semaphore_serializes_and_recovers_after_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    first = _stdio_connection("first")
+    second = _stdio_connection("second")
+    third = _stdio_connection("third")
+    source = _ConnectionSource((first, second, third))
+    manager = MCPConnectionManager(
+        connections=cast(MCPConnectionService, source),
+        advanced_shell_stdio=_shell_transport(tmp_path),
+        advanced_shell_readiness=_ready_shell,
+        max_concurrent_stdio_launches=1,
+    )
+    _ControlledClient.reset()
+    monkeypatch.setattr(manager_module, "Client", _ControlledClient)
+
+    first_task = asyncio.create_task(
+        manager._connect_advanced_shell_stdio(LOCAL_USER_AUTHORITY, first)
+    )
+    await _wait_until(lambda: _ControlledClient.entered == 1)
+    second_task = asyncio.create_task(
+        manager._connect_advanced_shell_stdio(LOCAL_USER_AUTHORITY, second)
+    )
+    await asyncio.sleep(0)
+    assert _ControlledClient.entered == 1
+
+    first_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_task
+    await _wait_until(lambda: _ControlledClient.entered == 2)
+    assert _ControlledClient.max_active_enters == 1
+
+    _ControlledClient.enter_gates[1].set()
+    await second_task
+
+    third_task = asyncio.create_task(
+        manager._connect_advanced_shell_stdio(LOCAL_USER_AUTHORITY, third)
+    )
+    await _wait_until(lambda: _ControlledClient.entered == 3)
+    _ControlledClient.enter_gates[2].set()
+    await third_task
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_http_connection_does_not_consume_stdio_launch_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _connection("http")
+    manager = MCPConnectionManager(
+        connections=cast(MCPConnectionService, _ConnectionSource((connection,))),
+        max_concurrent_stdio_launches=1,
+    )
+
+    class _ImmediateClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> _ImmediateClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def list_tools(self, **_kwargs: object) -> list[Tool]:
+            return []
+
+    async def allow_endpoint(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(manager_module, "Client", _ImmediateClient)
+    monkeypatch.setattr(manager_module, "validate_mcp_endpoint", allow_endpoint)
+    await manager._stdio_launch_semaphore.acquire()
+    try:
+        entry = await manager._connect(LOCAL_USER_AUTHORITY, connection)
+    finally:
+        manager._stdio_launch_semaphore.release()
+
+    assert entry.connection is connection
+    await entry.client.__aexit__(None, None, None)
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_client_cleanup_failure_logs_sanitized_connection_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _stdio_connection("cleanup-context")
+    records: list[dict[str, object]] = []
+
+    class _FailingClient:
+        async def __aexit__(self, *_args: object) -> None:
+            raise ValueError("provider stderr must not be logged")
+
+    def capture_warning(
+        _message: str,
+        *,
+        data: dict[str, object],
+        **_fields: object,
+    ) -> None:
+        records.append(data)
+
+    monkeypatch.setattr(manager_module.logger, "warning", capture_warning)
+    await manager_module._close_client(
+        cast(Client, _FailingClient()),
+        connection=connection,
+    )
+
+    assert records == [
+        {
+            "event": "mcp_client_cleanup_failed",
+            "error_type": "ValueError",
+            "connection_id": connection.connection_id,
+            "transport": connection.transport.value,
+        }
+    ]

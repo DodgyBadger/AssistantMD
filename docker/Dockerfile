@@ -1,10 +1,15 @@
+ARG PYTHON_IMAGE="python:3.13-slim-bookworm@sha256:c45a22ea000adfd9cda29364bbe7edd23001ce5cc2ad15857cfbf7766943b9ca"
+ARG NODE_IMAGE="node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e"
+ARG UV_IMAGE="ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1"
+
 # Modern, efficient Dockerfile with proper user permissions
 # Multi-stage build for smaller final image and better security
 
 #######################################################################
 ## Stage 1: Build dependencies with UV
 #######################################################################
-FROM python:3.13-slim as builder
+FROM ${UV_IMAGE} AS uv-runtime
+FROM ${PYTHON_IMAGE} AS builder
 
 # Install system dependencies needed for building Python packages
 RUN apt-get update && apt-get install -y \
@@ -14,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # Install UV - fast Python package manager
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=uv-runtime /uv /usr/local/bin/uv
 
 # Set up UV environment - install directly to system Python (safer for Docker)
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
@@ -33,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #######################################################################
 ## Stage 2: Build Tailwind CSS with Node.js
 #######################################################################
-FROM node:22-slim as css-builder
+FROM ${NODE_IMAGE} AS css-builder
 
 WORKDIR /app
 
@@ -48,7 +53,7 @@ RUN npm ci && \
 #######################################################################
 ## Stage 3: Runtime image - minimal and secure
 #######################################################################
-FROM python:3.13-slim as runtime
+FROM ${PYTHON_IMAGE} AS runtime
 
 # Install runtime system dependencies
 RUN apt-get update && apt-get install -y \

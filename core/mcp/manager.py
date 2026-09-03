@@ -307,7 +307,7 @@ class MCPConnectionManager:
                     stale_client = None
 
             if stale_client is not None:
-                await _close_client(stale_client)
+                await _close_client(stale_client, connection=connection)
 
             async with self._state_lock:
                 if self._closed:
@@ -346,14 +346,14 @@ class MCPConnectionManager:
                             entry.active_leases = 1
                             self._entries[key] = entry
             if manager_closed:
-                await _close_client(entry.client)
+                await _close_client(entry.client, connection=entry.connection)
                 raise RuntimeError("MCP connection manager is closed.")
             if existing_entry is not None:
-                await _close_client(entry.client)
+                await _close_client(entry.client, connection=entry.connection)
                 return self._lease(key, existing_entry)
             if not reject_entry:
                 return self._lease(key, entry)
-            await _close_client(entry.client)
+            await _close_client(entry.client, connection=entry.connection)
             raise RuntimeError("MCP connection configuration changed while connecting.")
 
     def _is_authorized(
@@ -399,7 +399,12 @@ class MCPConnectionManager:
                 if entry.active_leases == 0 and entry.last_used <= cutoff
             ]
             entries = [self._entries.pop(key) for key in keys]
-        await asyncio.gather(*(_close_client(entry.client) for entry in entries))
+        await asyncio.gather(
+            *(
+                _close_client(entry.client, connection=entry.connection)
+                for entry in entries
+            )
+        )
         return len(entries)
 
     async def shutdown(self) -> None:
@@ -427,7 +432,12 @@ class MCPConnectionManager:
             self._entries.clear()
             self._locks.clear()
             self._invalidation_epochs.clear()
-        await asyncio.gather(*(_close_client(entry.client) for entry in entries))
+        await asyncio.gather(
+            *(
+                _close_client(entry.client, connection=entry.connection)
+                for entry in entries
+            )
+        )
 
     def _spawn_invalidation(self, principal_id: str, connection_id: str) -> None:
         if self._closed:
@@ -513,7 +523,7 @@ class MCPConnectionManager:
                 await client.__aenter__()
                 tools = await client.list_tools(max_pages=MCP_MAX_TOOL_PAGES)
         except BaseException:
-            await _close_client(client)
+            await _close_client(client, connection=connection)
             raise
         logger.info(
             "MCP connection ready",
@@ -595,10 +605,10 @@ class MCPConnectionManager:
                         "reason": "launch_queue_timeout",
                     },
                 )
-            await _close_client(client)
+            await _close_client(client, connection=connection)
             raise
         except BaseException:
-            await _close_client(client)
+            await _close_client(client, connection=connection)
             raise
         finally:
             if launch_permit_acquired:
@@ -670,7 +680,7 @@ class MCPConnectionManager:
                 if self._entries.get(key) is entry:
                     self._entries.pop(key, None)
         if close_entry:
-            await _close_client(entry.client)
+            await _close_client(entry.client, connection=entry.connection)
 
     async def _invalidate(self, principal_id: str, connection_id: str) -> None:
         to_close: list[_ManagedConnection] = []
@@ -682,7 +692,12 @@ class MCPConnectionManager:
                 if entry.active_leases == 0:
                     self._entries.pop(key, None)
                     to_close.append(entry)
-        await asyncio.gather(*(_close_client(entry.client) for entry in to_close))
+        await asyncio.gather(
+            *(
+                _close_client(entry.client, connection=entry.connection)
+                for entry in to_close
+            )
+        )
 
 
 def _key(
@@ -770,14 +785,29 @@ class _CatalogChangeHandler(MessageHandler):
         self._invalidate()
 
 
-async def _close_client(client: Client) -> None:
+async def _close_client(
+    client: Client,
+    *,
+    connection: MCPConnection | None = None,
+) -> None:
     try:
         async with asyncio.timeout(MCP_CLOSE_TIMEOUT_SECONDS):
             await client.__aexit__(None, None, None)
-    except (Exception, asyncio.CancelledError):
+    except (Exception, asyncio.CancelledError) as exc:
+        context: dict[str, object] = {
+            "event": "mcp_client_cleanup_failed",
+            "error_type": type(exc).__name__,
+        }
+        if connection is not None:
+            context.update(
+                {
+                    "connection_id": connection.connection_id,
+                    "transport": connection.transport.value,
+                }
+            )
         logger.warning(
             "MCP client cleanup did not complete cleanly",
-            data={"event": "mcp_client_cleanup_failed"},
+            data=context,
         )
 
 

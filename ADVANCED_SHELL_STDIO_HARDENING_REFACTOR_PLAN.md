@@ -7,8 +7,12 @@ defects, authority and canonical-metadata enforcement, managed-launch admission,
 bounded test projection, readiness reporting, deployment identity validation,
 and security-posture warning. No P0 issue was found. Targeted tests, the full
 production Python quality gate, and all 104 deterministic `integration/core`
-scenarios pass. The real two-image Docker smoke and manual System UI review
-remain merge evidence.
+scenarios pass. A second three-way hardening review found no Critical or High
+issues. Its remaining release findings are addressed by digest-pinning the main
+image inputs, publishing and verifying both immutable image tags before stable
+`latest` promotion, adding direct launch-admission behavior tests, and enriching
+sanitized MCP cleanup diagnostics. The real two-image Docker smoke and manual
+System UI review remain merge evidence.
 
 The review originally considered a maximum enabled stdio connection count. That
 restriction is deliberately absent: stored or enabled definitions do not justify
