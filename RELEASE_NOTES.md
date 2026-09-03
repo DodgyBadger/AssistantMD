@@ -2,94 +2,143 @@
 
 ## v0.8.0
 
-This release adds MCP connections and read-only Gmail tools, while moving
-stored credentials into encrypted storage. Existing installations must create
-an installation encryption key before upgrading.
+v0.8.0 makes AssistantMD extensible beyond its built-in tools. It can connect to
+remote MCP services, run local stdio MCP providers in an optional advanced Linux
+environment, and search and read Gmail through a first-class connection. This
+release also adds encrypted credential storage and explicit deployment access
+controls.
 
-### Before upgrading
+### Connect tools and services with MCP
 
-- Follow the [v0.8.0 upgrade guide](docs/setup/upgrading.md#upgrading-to-v080)
-  to create `.env` with `ASSISTANTMD_SECRETS_KEY` and make it available to the
-  AssistantMD container.
-- Back up both `.env` and the existing `system/` directory before upgrading,
-  and keep those backups separate. You need both the encrypted credential
-  database and its key to restore stored credentials.
-- AssistantMD imports existing API keys and other non-OAuth secrets on first
-  startup. Reconnect existing OAuth accounts after the upgrade.
-- Reverse-proxy installations should also set `ASSISTANTMD_PUBLIC_URL` to the
-  externally routed origin so OAuth callbacks return to the correct address.
-- Refresh `docker-compose.yml` from the current example while preserving your
-  paths and deployment choices. The optional advanced shell and its pairing
-  volumes are part of the current Compose contract.
+- Add, authorize, test, enable, and manage MCP connections from **System →
+  Connections**. Compatible Streamable HTTP and SSE servers can expose remote
+  services directly to chat.
+- MCP connections support OAuth, bearer tokens, custom headers, or no
+  authentication. OAuth can finish through the browser callback or a manual flow
+  for headless installations.
+- Each connection has its own tool allowlist. AssistantMD discovers permitted
+  tools, keeps large tool catalogs out of the prompt until needed, and makes them
+  available through normal chat tool search.
+- Multiple connections remain independently named and owned, so the same kind
+  of service can be configured more than once without mixing credentials or
+  tools.
+- Public MCP endpoints require HTTPS. A trusted private-network server can opt
+  in to HTTP on that individual connection.
+- Connection changes and credential updates recover safely if AssistantMD is
+  interrupted or restarted partway through the operation.
 
-### Choose how AssistantMD is reached
+### Run stdio MCP providers and commands in the advanced shell
 
-- AssistantMD now requires an explicit ingress-authentication mode. Use the
-  built-in single-owner token, trust an authenticating reverse proxy, restrict a
-  direct process to actual loopback peers, or deliberately leave the complete UI
-  and API open in `disabled` recovery/testing mode.
-- Built-in authentication does not provide TLS. Remote deployments still need
-  HTTPS at their ingress.
-- The System tab reports the active authentication mode and warns when the
-  application is unprotected.
-
-### Optional advanced shell access
-
-- Advanced mode adds a general-purpose Linux user environment with persistent
-  home and workspace files for interactive chat in a separately hardened Docker
-  container. It is not a systemd/cron host for continuously running services.
-  Restricted mode remains the default.
-- The supplied `advanced` Compose profile starts a version-matched advanced shell
-  and automatically pairs it with AssistantMD; users do not manage or back up SSH
-  keys.
-- Chat can install and run software in the advanced shell. Only explicitly
-  mounted host content is visible there, and bind mounts should be granted as
-  narrowly as possible.
-- Stdio MCP providers can run in the advanced shell while their registered tools
-  continue through AssistantMD's connection allowlists and deferred tool search.
-- Credentials copied into the advanced shell are readable by chat. Prefer
-  AssistantMD's encrypted connection credentials when possible.
-
-### Connect AssistantMD to more of your tools
-
-- AssistantMD can now use compatible MCP servers to connect chats to local
-  tools and remote services.
-- Add, authorize, and test connections from **System → Connections**. Once a
-  connection is ready, its tools become available to chat when they are needed.
-- Connections support OAuth, bearer tokens, custom headers, or no
-  authentication. Headless installations can complete OAuth manually when an
-  automatic callback is unavailable.
-- You can limit which tools AssistantMD may use from each server.
-- Trusted MCP servers on private networks can opt in to HTTP per connection;
-  public servers still require HTTPS.
-- Interrupted connection changes recover safely after AssistantMD restarts.
+- The optional advanced execution mode gives chat a persistent, general-purpose
+  Linux home and workspace in a separate, resource-limited container. Chat can
+  install packages, use CLIs and runtimes, and run bounded foreground commands.
+- The supplied `advanced` Compose profile starts a version-matched companion and
+  pairs it with AssistantMD automatically. Restricted execution remains the
+  default.
+- Local MCP providers that communicate over standard input and output can now be
+  registered alongside network MCP connections. AssistantMD launches them on
+  demand in the advanced shell and applies the same tool discovery, allowlists,
+  budgets, and result handling used for network connections.
+- A bundled **Advanced Shell MCP Setup** skill can help install a provider and
+  produce a connection definition for review in **System → Connections**.
+- Files in the advanced-shell home and workspace survive ordinary container
+  restarts. Processes and temporary files do not; continuously running services
+  still belong in their own managed container.
+- Host files are invisible unless explicitly mounted. Keep mounts narrow and
+  prefer AssistantMD's encrypted connection credentials over credentials stored
+  directly in the shell.
 
 ### Search and read Gmail from chat
 
-- Connect a Google account to let AssistantMD search your Gmail and read
-  relevant messages or complete threads.
+- Connect one or more Google accounts under **System → Connections**, choose a
+  default account, and let chat search mail or read relevant messages and
+  complete threads.
 - Gmail access is read-only in this release: AssistantMD cannot send, modify,
   move, or delete your mail.
-- Searches include useful attachment details, but AssistantMD does not download
-  or process attachment contents yet.
-- Gmail tools appear only after you configure the connection.
+- Search results stay compact until chat requests a specific message or thread.
+  Attachment names, types, sizes, and identifiers are available, but attachment
+  contents are not downloaded or processed yet.
+- Gmail tools appear only when a configured account is ready, and each account's
+  OAuth grant remains separate.
 
-### Credentials are now encrypted at rest
+### Protect connections and application access
 
 - Model-provider keys, connection credentials, and OAuth tokens are now stored
   in an encrypted database rather than a plaintext YAML file.
-- Losing the installation key requires re-entering stored credentials, so back
-  up `.env` if you need to preserve access to them.
+- AssistantMD now requires an explicit ingress-authentication mode. Deployments
+  can use the built-in single-owner token, trust an authenticating reverse proxy,
+  accept only direct loopback peers, or deliberately use unprotected `disabled`
+  mode for recovery and testing.
+- **System → Infrastructure** reports the active authentication and execution
+  posture and warns when the application is exposed without authentication.
+- Built-in authentication does not provide TLS; remotely reachable deployments
+  still need HTTPS at their ingress.
 
-### After upgrading
+### Misc
 
-1. Open the System tab and confirm encrypted secrets are ready.
-2. Confirm model providers still have their imported API keys, then reconnect
-   any OAuth accounts.
-3. Configure and test MCP or built-in connections under **System →
-   Connections** as needed.
-4. If advanced mode is enabled, confirm **System → Infrastructure** reports the
-   advanced shell as `ready`.
+- Consolidated the developer architecture, setup, security, tool, and decision
+  documentation around the current runtime and connection model.
+- Hardened connection cleanup, cancellation, startup recovery, network policy,
+  advanced-shell pairing, and release-image consistency.
+- Updated the supported Compose layout so future topology changes arrive through
+  the tracked base file while deployment-specific paths, mounts, networks, and
+  build choices live in `.env` or `docker-compose.override.yml`.
+
+### Migrating to v0.8.0
+
+1. Back up your vaults, `system/`, `.env`, and current Compose files. Keep the
+   `.env` backup separate: restoring encrypted credentials requires both the
+   credential database and its installation key.
+2. If upgrading a repository checkout with a locally edited Compose file, save
+   it before pulling, then take the new tracked base file:
+
+   ```bash
+   mv docker-compose.yml docker-compose.pre-v0.8.yml
+   git pull --ff-only
+   ```
+
+   Do not copy the old file back over the new `docker-compose.yml`.
+3. Copy `.env.example` to `.env` if needed. Preserve an existing
+   `ASSISTANTMD_SECRETS_KEY`, or generate one by following the
+   [v0.8.0 upgrade guide](docs/setup/upgrading.md#upgrading-to-v080). Move your
+   existing data path, system path, timezone, authentication mode,
+   authentication secret, and public URL into `.env`.
+4. Move structural deployment customizations—custom builds or UID/GID values,
+   proxy networks, extra mounts, and similar changes—into
+   `docker-compose.override.yml`, using the supplied example as a starting
+   point.
+5. To enable the optional advanced shell, add both settings below. Otherwise,
+   leave them unset and continue using restricted mode.
+
+   ```dotenv
+   COMPOSE_PROFILES=advanced
+   ASSISTANTMD_EXECUTION_MODE=advanced
+   ```
+
+6. Validate and restart the deployment:
+
+   ```bash
+   docker compose config --quiet
+   docker compose down
+   docker compose pull
+   docker compose up -d
+   ```
+
+   For a checkout that builds images through the override example, use
+   `docker compose build` instead of `docker compose pull`.
+7. Open **System → Infrastructure** and confirm that encrypted secrets and the
+   intended authentication and execution modes are ready. If advanced mode is
+   enabled, wait for the advanced shell to report `ready`.
+8. Confirm that model-provider API keys were imported, then reconnect existing
+   OAuth accounts. Configure and test Gmail and MCP connections under **System →
+   Connections**.
+
+On first startup, AssistantMD imports legacy non-OAuth secrets into encrypted
+storage and preserves the old file at
+`system/migration_backups/secrets.yaml.bak`. Losing
+`ASSISTANTMD_SECRETS_KEY` requires re-entering stored credentials. Routine
+`docker compose down` preserves advanced-shell pairing and persistent files; do
+not add `-v` unless you intend to delete those Docker volumes.
 
 ## v0.7.3
 
