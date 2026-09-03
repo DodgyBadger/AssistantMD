@@ -250,7 +250,7 @@ chat to follow the bundled **Advanced Shell MCP Setup** skill, then review and
 paste its generated YAML or JSON into **System → Connections**.
 
 Contributor setup for running AssistantMD and its advanced shell from a checkout
-belongs in the [Development Guide](development.md).
+belongs in the [Development Guide](../development/dev-setup.md).
 
 ### Configure connections
 

@@ -620,8 +620,8 @@ Update, as the implementation slices land:
 - `.env.example` and installation guidance for canonical public URL dependency;
 - System configuration documentation for creating a Google OAuth web client and
   registering the displayed redirect URI;
-- `docs/architecture/settings-secrets.md` for the internal Google OAuth namespace;
-- `docs/architecture/llm-tools.md` for the native Gmail tool;
+- `docs/development/architecture.md` for the native connection, capability, and
+  credential boundaries;
 - a Gmail tool document under `docs/tools/`;
 - workflow guidance for owner-scoped Gmail access; and
 - security guidance covering mailbox prompt injection, scopes, revocation, and

@@ -38,6 +38,7 @@ Start with the phase that matches the current request. Open only that guide firs
   Use for final polish: docs alignment, temporary-code removal, invariant checks, and merge-readiness review.
 
 ## Reference Docs
+- [Architecture Overview](docs/development/architecture.md)
 - [Project Structure](docs/agent-guides/project-structure.md)
 - [Coding Standards](docs/agent-guides/coding-standards.md)
 - [Activity Logging](docs/agent-guides/activity-logging.md)

@@ -55,7 +55,8 @@ for full details. Once AssistantMD is running, the chat agent can help you adapt
 ## Documentation
 
 - **[Installation Guide](docs/setup/installation.md)**
-- **[Development Setup](docs/setup/development.md)**
+- **[Architecture Overview](docs/development/architecture.md)**
+- **[Development Setup](docs/development/dev-setup.md)**
 - **[Build Guide](docs/use/build-guide.md)** — start here for the composable building blocks and default setup
 - **[Authoring Reference](docs/use/authoring.md)** — workflow scripts and context assembly scripts
 - **[Importing Content](docs/use/importing-content.md)** — import monitoring, queue controls, and timing configuration

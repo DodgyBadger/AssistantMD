@@ -169,8 +169,8 @@ origin is inferred and explain that reverse-proxy deployments should configure
 
 - Search again for absolute application URL construction and classify each
   consumer as canonical-origin, provider-defined, request-relative, or outbound.
-- Update `docs/architecture/runtime.md` and
-  `docs/architecture/mcp-connections.md` with the resulting current contract.
+- Update `docs/development/architecture.md` only if the resulting contract
+  changes a cross-system boundary or major flow.
 - Review log redaction, proxy-boundary behavior, startup failures, and UI state
   across reloads before the final quality gate.
 

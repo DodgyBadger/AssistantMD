@@ -593,12 +593,8 @@ scenarios:
 - Accept proposed ADR 0041 when Google credential-generation binding lands.
 - Accept ADR 0045 for the restart-safe application-mediated OAuth flow shared
   by MCP and native integrations.
-- Update `docs/architecture/mcp-connections.md` for socket-authoritative address
-  enforcement, active-only mutation lifecycle, and reconciliation.
-- Update `docs/architecture/settings-secrets.md` for atomic internal secret
-  relocation and generation-bound Google OAuth state.
-- Update `docs/architecture/api-ui.md` for current OAuth readiness and polling
-  ownership behavior.
+- Update `docs/development/architecture.md` only for resulting changes to
+  cross-subsystem ownership, trust boundaries, or major execution flows.
 - Keep product docs limited to the current resulting contract; do not include
   migration tutorials or comparisons with the old behavior.
 
