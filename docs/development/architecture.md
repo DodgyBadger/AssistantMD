@@ -204,18 +204,26 @@ small durable coordination ledger, not a second workflow or task system.
 
 ## Where new work belongs
 
-| Change | Primary integration point |
-| --- | --- |
-| Model provider or model configuration | `core/llm/`, provider settings, and secrets service |
-| General built-in tool | `core/tools/` plus shared tool binding and tool documentation |
-| Native authenticated service | `core/integrations/`, principal-owned connections, thin tool/API adapters |
-| MCP transport or lifecycle behavior | `core/mcp/` and shared capability composition |
-| Authoring capability | `core/authoring/` host boundary and the user-facing authoring reference |
-| Scheduled behavior | workflow owner, governor, durable run history, then `core/scheduling/` |
-| Imported source type | ingestion source adapter producing the existing raw-document contract |
-| Vault mutation | vault-state mutation/activity boundary, never a direct write shortcut |
-| API or UI behavior | thin `api/` orchestration over a core service, then `static/` presentation |
-| Persistent subsystem state | subsystem-owned managed database with migration and recovery coverage |
+Most features have one domain owner and several integration surfaces. Put policy
+and business behavior in the owning domain; keep model tools, APIs, UI code, and
+schedulers as adapters over that behavior.
+
+| Change | Domain owner | Integration surfaces |
+| --- | --- | --- |
+| Model provider or model configuration | `core/llm/` | Provider settings, secrets, model status, and agent construction |
+| Model-facing built-in tool | Service for the domain being exposed | Thin `core/tools/` adapter, capability composition, and tool documentation |
+| Native authenticated service | `core/integrations/<provider>/` | `core/connections/`, `core/oauth/`, secrets, and thin tool/API/UI adapters |
+| MCP transport or lifecycle behavior | `core/mcp/` | Shared OAuth, connection UI, runtime ownership, and capability composition |
+| Tool selection or capability policy | `core/llm/capabilities/`; settings-backed binding currently lives in `core/authoring/shared/` | Chat, Monty, delegates, workflows, settings, and connection readiness |
+| Authoring capability | `core/authoring/` host boundary | Monty runtime, tool binding, workflow governor, and user-facing authoring reference |
+| Workflow semantics | `core/authoring/` and `core/runtime/workflow_governor.py` | Durable run history, execution tasks, and scheduling |
+| Scheduling mechanics | `core/scheduling/` | Workflow ownership, governor admission, task execution, and run history |
+| Imported source type | `core/ingestion/sources/` | Existing raw-document, extraction-strategy, job, and vault-mutation contracts |
+| Vault mutation | `core/vault_state/` | Domain service requesting the change, activity, revisions, snapshots, and UI/API adapters |
+| Ingress authentication | `core/authentication/` | FastAPI application boundary, browser session endpoints, and deployment settings |
+| Advanced execution | `core/advanced_shell/` | Shell tool, stdio MCP adapter, SSH wrapper, Docker image, and Compose topology |
+| Persistent subsystem state | Subsystem that owns the records | `core/database.py`, subsystem schema migration, recovery, and validation |
+| API or UI presentation | Core service for the represented domain | Thin `api/` orchestration followed by `static/` presentation |
 
 When a change alters ownership, authority, trust, persistence, or a major
 cross-subsystem flow, update this overview and add or amend an ADR. Ordinary
