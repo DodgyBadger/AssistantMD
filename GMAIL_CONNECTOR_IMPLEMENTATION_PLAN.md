@@ -18,6 +18,10 @@ Completed Slice 1:
 Optional mailbox mutation slices remain unapproved and require a separate
 planning and review effort.
 
+ADR 0037 records the native connection boundary, ADR 0041 records
+generation-bound Google credential mutations, and ADR 0045 records the shared
+restart-safe application-owned OAuth flow.
+
 ## Objective
 
 Add a first-class Google connection with an initial Gmail integration backed by

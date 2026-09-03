@@ -591,6 +591,8 @@ scenarios:
 - Accept proposed ADR 0039 when the socket-authoritative MCP transport lands.
 - Accept proposed ADR 0040 when the MCP cross-database mutation saga lands.
 - Accept proposed ADR 0041 when Google credential-generation binding lands.
+- Accept ADR 0045 for the restart-safe application-mediated OAuth flow shared
+  by MCP and native integrations.
 - Update `docs/architecture/mcp-connections.md` for socket-authoritative address
   enforcement, active-only mutation lifecycle, and reconciliation.
 - Update `docs/architecture/settings-secrets.md` for atomic internal secret

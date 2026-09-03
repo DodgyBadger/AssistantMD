@@ -103,7 +103,9 @@ within one AssistantMD installation, not multi-tenant infrastructure.
 
 Relevant decisions: ADR 0001 (runtime composition root), ADR 0007
 (settings/tool binding), ADR 0008 (context-efficient disclosure), and ADR 0028
-(explicit execution principals).
+(explicit execution principals). ADR 0035 records the resulting MCP connection
+and tool-consumption model; ADR 0045 records the restart-safe application-owned
+OAuth flow shared with native integrations.
 
 ## Planning-Time Deep Inspection Findings
 

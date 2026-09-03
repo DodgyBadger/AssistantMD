@@ -1,4 +1,4 @@
-# 0041 - Bind Google OAuth State To Credential Generations
+# 0041 - Bind Google OAuth State And Mutations To Credential Generations
 
 ## Status
 
@@ -41,6 +41,21 @@ Keep generation and credential identities internal. APIs and activity logs
 expose sanitized readiness transitions, not binding values or stale account
 data.
 
+Capture the exact generation, credential identity, and source grant before an
+external token exchange, account lookup, or refresh. Persist the resulting
+state only if those guards are still authoritative after the external wait. A
+late response cannot attach itself to the currently configured credential or
+overwrite a newer completed authorization merely because the connection ID is
+unchanged.
+
+Disconnect preserves configured client credentials while atomically rotating
+their internal credential identity and deleting pending and granted state.
+Connection deletion records a permanent sanitized deletion entry in
+`connections.db` before independently purging the connection's encrypted
+namespace. Reconcile incomplete purges after restart and never reuse a deleted
+connection identity. The deletion entry, generation, and credential bindings
+are authoritative; physical stale-record cleanup is defense in depth.
+
 ## Consequences
 
 - Changing security-sensitive credential identity differs intentionally from
@@ -48,6 +63,12 @@ data.
 - Returning from client ID `B` to `A` cannot revive grants from an earlier `A`
   generation.
 - OAuth persistence and readiness checks must carry and verify both bindings.
+- Completion and refresh responses that race with credential replacement,
+  disconnect, reauthorization, or deletion fail closed.
+- Disconnect can invalidate active grants without deleting reusable OAuth client
+  configuration.
+- Connection deletion converges across `connections.db` and `secrets.db` after
+  interruption without permitting the deleted identity to become usable again.
 - Conservative legacy handling may require users to reconnect rather than
   preserving an unverifiable grant.
 - Physical stale-record cleanup remains useful for hygiene but is not part of
@@ -55,7 +76,8 @@ data.
 
 ## Evidence
 
-- Implementation plan: `BRANCH_HARDENING_IMPLEMENTATION_PLAN.md`, Stage 3
+- Implementation plan: `BRANCH_HARDENING_IMPLEMENTATION_PLAN.md`, Stages 3 and
+  7–10
 - Current implementation boundaries: `core/integrations/google/connection.py`
   and `core/integrations/google/oauth.py`
 - Related decisions: ADR 0028, ADR 0034, ADR 0037, and ADR 0038
