@@ -46,8 +46,12 @@ services:
         SHELL_USER_ID: 1000
         SHELL_GROUP_ID: 1000
 
-    # The advanced shell defaults to isolated named volumes. Uncomment only the
-    # exact host paths it should access. Prefer read-only vault mounts.
+    # The advanced shell defaults to isolated named volumes. For direct file
+    # exchange, first create AssistantMD/shell-exchange (or choose another
+    # existing folder) inside one vault, then mount only that exact folder at
+    # /exchange. create_host_path stays false so Docker cannot silently create a
+    # root-owned, unwritable source directory. Prefer read-only mounts for any
+    # additional vault content.
     # volumes:
     #   - type: bind
     #     source: /absolute/path/to/exchange

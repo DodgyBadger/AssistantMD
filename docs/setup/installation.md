@@ -223,7 +223,34 @@ Compose service. It is not applicable to the standard Docker installation.
 
 ### Enable advanced mode
 
-Add both settings to `.env`:
+Advanced mode provides a constrained, non-root Linux environment for interactive
+chat. Files under `/home/advanced-shell` and `/workspace` survive ordinary
+container restarts and upgrades. Processes and `/tmp` do not, and the container
+does not provide systemd or a supported cron/service supervisor.
+
+The advanced shell cannot see your vaults unless you explicitly add a mount. For
+maximum capability, give it one narrow read-write exchange folder rather than an
+entire writable vault. You can precreate `AssistantMD/shell-exchange` inside a
+vault, or select another existing folder in that vault, then bind only that exact
+host path to `/exchange` through `docker-compose.override.yml`. AssistantMD sees
+the same files through its normal vault mount, so neither side needs a separate
+copy or Docker-managed exchange volume.
+
+Docker creates a missing bind-mount source as `root`, which can make it unusable
+by both application users. Create the exchange folder before starting the
+advanced profile and retain `bind.create_host_path: false` from the override
+example. On a first installation, the vault's `AssistantMD/` folder does not yet
+exist. Either select an existing vault folder for the initial exchange, or start
+once in restricted mode, let AssistantMD create its vault folders, create
+`AssistantMD/shell-exchange`, and then enable advanced mode.
+
+Examples are available in `docker-compose.override.yml.example`. Prefer
+read-only mounts for any additional vault content. Never mount AssistantMD's
+`system/` folder, the Docker socket, a host home folder, or the host root. See
+[Security Considerations](security.md#advanced-shell) before adding access or
+credentials.
+
+After preparing any exchange mount, add both settings to `.env`:
 
 ```dotenv
 COMPOSE_PROFILES=advanced
@@ -231,19 +258,8 @@ ASSISTANTMD_EXECUTION_MODE=advanced
 ```
 
 The first starts the optional container; the second explicitly authorizes
-AssistantMD to expose the capability. Restart with `docker compose up -d`, then
+AssistantMD to expose the capability. Start with `docker compose up -d`, then
 confirm **System → Infrastructure** reports the advanced shell as `ready`.
-
-Advanced mode provides a constrained, non-root Linux environment for interactive
-chat. Files under `/home/advanced-shell` and `/workspace` survive ordinary
-container restarts and upgrades. Processes and `/tmp` do not, and the container
-does not provide systemd or a supported cron/service supervisor.
-
-The advanced shell cannot see your vaults unless you explicitly add a mount.
-Examples are available in `docker-compose.override.yml.example`; prefer read-only
-mounts. Never mount AssistantMD's `system/` folder, the Docker socket, a host home
-folder, or the host root. See [Security Considerations](security.md#advanced-shell)
-before adding access or credentials.
 
 Stdio MCP servers installed there are launched when AssistantMD needs them. Ask
 chat to follow the bundled **Advanced Shell MCP Setup** skill, then review and
