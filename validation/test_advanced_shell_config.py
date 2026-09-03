@@ -208,12 +208,13 @@ def test_advanced_shell_flight_card_defines_tool_selection_without_secrets() -> 
     instruction = ADVANCED_SHELL_FLIGHT_CARD
 
     for required in (
-        "code_execution",
-        "delegate",
+        "base tool-selection rules still apply",
         "Delegates do not receive shell",
         "official AssistantMD MCP connection",
         "inspect the working directory and exact target",
         "unprivileged user in a separate constrained Linux container",
+        "/exchange/<vault-name>",
+        "Inspect /exchange before relying on it",
         "Persistence applies to files",
         "there is no supported systemd or cron/service supervisor",
         "Continuously running services belong in their own managed Compose service",
