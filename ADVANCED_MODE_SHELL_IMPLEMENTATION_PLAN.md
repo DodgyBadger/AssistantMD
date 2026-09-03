@@ -40,13 +40,14 @@ containers must be rebuilt after this infrastructure-coordinate change.
 
 ### Documentation and release readiness
 
-Status: complete, except for deliberately deferred ADR work.
+Status: complete.
 
 The installation, upgrade, security, environment example, API/UI architecture,
 and release-note surfaces describe the current authentication and advanced-shell
-contracts. Durable architecture records remain a separate follow-up because
-ingress authentication and the advanced execution boundary may warrant distinct
-ADRs.
+contracts. ADR 0042 records the shared advanced-shell boundary for stdio MCP and
+general advanced execution. ADR 0043 records the deployment-authenticated ingress
+boundary that prevents network reachability from conferring application
+authority. ADR 0044 records automatic container-owned SSH trust bootstrap.
 
 ### Installation experience
 
