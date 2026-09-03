@@ -209,8 +209,10 @@ networks:
     external: true
 ```
 
-Run `docker compose up -d` after changing the override. Use `assistant:8000` as
-the proxy upstream.
+Run `docker compose config` after changing the override and verify that the
+rendered `assistant` service retains `assistantmd_advanced_shell`, joins the
+proxy network, and has the intended published-port configuration. Then run
+`docker compose up -d`. Use `assistant:8000` as the proxy upstream.
 
 For either option, use the exact HTTPS origin shown in the browser for
 `ASSISTANTMD_PUBLIC_URL`. See
@@ -258,8 +260,11 @@ ASSISTANTMD_EXECUTION_MODE=advanced
 ```
 
 The first starts the optional container; the second explicitly authorizes
-AssistantMD to expose the capability. Start with `docker compose up -d`, then
-confirm **System → Infrastructure** reports the advanced shell as `ready`.
+AssistantMD to expose the capability. Before starting, run
+`docker compose config` and inspect the rendered `advanced-shell` volumes and
+networks. Confirm that every bind-mount source expanded to the intended absolute
+host path and every target is unique. Then run `docker compose up -d` and confirm
+**System → Infrastructure** reports the advanced shell as `ready`.
 
 Stdio MCP servers installed there are launched when AssistantMD needs them. Ask
 chat to follow the bundled **Advanced Shell MCP Setup** skill, then review and

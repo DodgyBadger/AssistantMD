@@ -3,7 +3,7 @@
 # Copy this file to docker-compose.override.yml only when you need a custom
 # build, non-default runtime UID/GID, extra Docker network, or extra bind mount.
 # Delete sections you do not use. Keep ordinary values such as host paths,
-# ports, image tags, authentication, and execution mode in .env.
+# port bindings, image tags, authentication, and execution mode in .env.
 
 services:
   assistant:
@@ -27,6 +27,12 @@ services:
     # networks:
     #   - assistantmd_advanced_shell
     #   - caddy_default
+
+    # When a reverse proxy runs in a container on the shared network above,
+    # uncomment this line to remove the base file's host-published port. The
+    # proxy can reach AssistantMD directly at assistant:8000. Keep the default
+    # loopback port when the proxy runs on the host instead.
+    # ports: !reset []
 
     # Development-only source mount. Regular deployments should build the image.
     # volumes:
