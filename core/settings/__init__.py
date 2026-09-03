@@ -629,6 +629,19 @@ def get_max_concurrent_workflows() -> int:
     return limit if limit > 0 else 0
 
 
+def get_mcp_max_concurrent_advanced_shell_stdio_launches() -> int:
+    """Return the restart-bound managed stdio launch concurrency limit."""
+    entry = get_general_settings().get(
+        "mcp_max_concurrent_advanced_shell_stdio_launches"
+    )
+    value = getattr(entry, "value", None) if entry is not None else None
+    try:
+        limit = _setting_int(value)
+    except (TypeError, ValueError):
+        return 4
+    return max(1, min(limit, 32))
+
+
 def get_browser_navigation_timeout_seconds() -> float:
     """Return browser navigation timeout seconds, falling back to 20 seconds."""
     entry = get_general_settings().get("browser_navigation_timeout_seconds")

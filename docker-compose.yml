@@ -25,7 +25,7 @@ services:
     networks:
       - assistantmd_advanced_shell
     shm_size: "1gb"
-    
+
     # Standard browser-capable profile: at least 2G available to AssistantMD.
     # For an approximately 1G lightweight deployment, add `browser` to
     # `disabled_tools` rather than lowering this limit and relying on Chromium.
@@ -38,7 +38,7 @@ services:
         reservations:
           memory: 1G
           cpus: '0.5'
-    
+
     # Security options
     security_opt:
       - no-new-privileges:true

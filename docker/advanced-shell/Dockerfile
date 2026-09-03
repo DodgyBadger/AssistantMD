@@ -30,7 +30,16 @@ RUN apt-get update \
 ARG SHELL_USER_ID=1000
 ARG SHELL_GROUP_ID=1000
 
-RUN groupadd --gid "${SHELL_GROUP_ID}" advanced-shell \
+RUN set -eux; \
+    case "${SHELL_USER_ID}" in ''|*[!0-9]*) \
+        echo "SHELL_USER_ID must be a decimal integer." >&2; exit 1;; esac; \
+    case "${SHELL_GROUP_ID}" in ''|*[!0-9]*) \
+        echo "SHELL_GROUP_ID must be a decimal integer." >&2; exit 1;; esac; \
+    if [ "${SHELL_USER_ID}" = "0" ] || [ "${SHELL_GROUP_ID}" = "0" ]; then \
+        echo "SHELL_USER_ID and SHELL_GROUP_ID must be non-root identities." >&2; \
+        exit 1; \
+    fi; \
+    groupadd --gid "${SHELL_GROUP_ID}" advanced-shell \
     && useradd \
         --uid "${SHELL_USER_ID}" \
         --gid advanced-shell \

@@ -8,6 +8,7 @@ import re
 from pathlib import PurePosixPath
 
 STRUCTURED_STDIO_PREFIX = "assistantmd-stdio-v1:"
+MAX_STRUCTURED_STDIO_ENVELOPE_BYTES = 64 * 1024
 MAX_ARGUMENTS = 64
 MAX_ARGUMENT_BYTES = 32 * 1024
 MAX_ENVIRONMENT_VALUES = 16
@@ -112,4 +113,6 @@ def encode_structured_launch(
         separators=(",", ":"),
         sort_keys=True,
     ).encode()
+    if len(payload) > MAX_STRUCTURED_STDIO_ENVELOPE_BYTES:
+        raise ValueError("Advanced-shell stdio launch exceeds the size limit.")
     return STRUCTURED_STDIO_PREFIX + base64.urlsafe_b64encode(payload).decode("ascii")

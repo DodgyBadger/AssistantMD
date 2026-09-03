@@ -19,6 +19,11 @@ from fastmcp.client.transports import (
 )
 from mcp.types import Tool, ToolListChangedNotification
 
+from core.advanced_shell.authority import require_advanced_shell_authority
+from core.advanced_shell.preflight import (
+    AdvancedShellPreflightSnapshot,
+    AdvancedShellReadiness,
+)
 from core.advanced_shell.stdio import encode_structured_launch
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
@@ -49,11 +54,17 @@ MCP_READ_TIMEOUT_SECONDS = 30.0
 MCP_CLOSE_TIMEOUT_SECONDS = 5.0
 MCP_IDLE_TIMEOUT_SECONDS = 15 * 60.0
 MCP_MAX_TOOL_PAGES = 10
+MCP_TEST_MAX_RETURNED_TOOL_NAMES = 100
 MCP_CONNECT_ATTEMPTS = 2
+DEFAULT_MCP_MAX_CONCURRENT_STDIO_LAUNCHES = 4
 
 logger = UnifiedLogger(tag="mcp-manager")
 
 _ConnectionKey = tuple[str, str, int]
+
+
+class MCPAdvancedShellUnavailableError(RuntimeError):
+    """Raised when authenticated advanced-shell readiness is unavailable."""
 
 
 @dataclass(frozen=True)
@@ -134,10 +145,19 @@ class MCPConnectionManager:
         connections: MCPConnectionService,
         idle_timeout_seconds: float = MCP_IDLE_TIMEOUT_SECONDS,
         advanced_shell_stdio: ShellTransportConfig | None = None,
+        advanced_shell_readiness: (
+            Callable[[], Awaitable[AdvancedShellPreflightSnapshot]] | None
+        ) = None,
+        max_concurrent_stdio_launches: int = DEFAULT_MCP_MAX_CONCURRENT_STDIO_LAUNCHES,
     ) -> None:
         self._connections = connections
         self._idle_timeout_seconds = idle_timeout_seconds
         self._advanced_shell_stdio = advanced_shell_stdio
+        self._advanced_shell_readiness = advanced_shell_readiness
+        if max_concurrent_stdio_launches < 1:
+            raise ValueError("MCP stdio launch concurrency must be at least one.")
+        self._max_concurrent_stdio_launches = max_concurrent_stdio_launches
+        self._stdio_launch_semaphore = asyncio.Semaphore(max_concurrent_stdio_launches)
         self._entries: dict[_ConnectionKey, _ManagedConnection] = {}
         self._locks: dict[_ConnectionKey, asyncio.Lock] = {}
         self._invalidation_epochs: dict[tuple[str, str], int] = {}
@@ -165,10 +185,22 @@ class MCPConnectionManager:
             )
             if connection.enabled
         ]
-        results = await asyncio.gather(
-            *(self.acquire(authority, connection) for connection in connections),
-            return_exceptions=True,
-        )
+        tasks = [
+            asyncio.create_task(self.acquire(authority, connection))
+            for connection in connections
+        ]
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except BaseException:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            settled = await asyncio.gather(*tasks, return_exceptions=True)
+            acquired = tuple(
+                result for result in settled if isinstance(result, MCPConnectionLease)
+            )
+            await asyncio.gather(*(lease.close() for lease in acquired))
+            raise
         leases: list[MCPConnectionLease] = []
         unavailable: list[MCPUnavailableConnection] = []
         for connection, result in zip(connections, results, strict=True):
@@ -206,15 +238,19 @@ class MCPConnectionManager:
             if connection.allowed_tools is not None:
                 allowed = set(connection.allowed_tools)
                 names = tuple(name for name in names if name in allowed)
+            returned_names = names[:MCP_TEST_MAX_RETURNED_TOOL_NAMES]
+            message = (
+                "Connected successfully and discovered "
+                f"{len(names)} available MCP tool(s)."
+            )
+            if len(names) > len(returned_names):
+                message += f" Showing the first {len(returned_names)} names."
             return MCPConnectionTestResult(
                 status="ready",
                 ready=True,
                 tool_count=len(names),
-                tool_names=names,
-                message=(
-                    "Connected successfully and discovered "
-                    f"{len(names)} available MCP tool(s)."
-                ),
+                tool_names=returned_names,
+                message=message,
             )
         finally:
             await lease.close()
@@ -236,6 +272,12 @@ class MCPConnectionManager:
     ) -> MCPConnectionLease:
         if self._closed:
             raise RuntimeError("MCP connection manager is closed.")
+        authoritative = self._connections.get_connection_for_authority(
+            authority, connection.connection_id
+        )
+        if authoritative is None or authoritative != connection:
+            raise RuntimeError("MCP connection configuration is not current.")
+        connection = authoritative
         if require_enabled and not connection.enabled:
             raise RuntimeError("MCP connection is disabled.")
         key = _key(authority, connection)
@@ -280,31 +322,37 @@ class MCPConnectionManager:
                 async with self._state_lock:
                     self._connection_tasks.discard(connection_task)
             reject_entry = False
+            manager_closed = False
+            existing_entry: _ManagedConnection | None = None
             async with self._state_lock:
                 if self._closed:
-                    await _close_client(entry.client)
-                    raise RuntimeError("MCP connection manager is closed.")
-                if self._invalidation_epochs.get(
-                    target, 0
-                ) != invalidation_epoch or not self._is_authorized(
-                    authority,
-                    connection,
-                    require_enabled=require_enabled,
-                ):
-                    reject_entry = True
-                if reject_entry:
-                    existing = None
+                    manager_closed = True
                 else:
-                    existing = self._entries.get(key)
-                if existing is not None and not existing.invalidated:
-                    await _close_client(entry.client)
-                    existing.active_leases += 1
-                    existing.last_used = time.monotonic()
-                    return self._lease(key, existing)
-                if not reject_entry:
-                    entry.active_leases = 1
-                    self._entries[key] = entry
-                    return self._lease(key, entry)
+                    if self._invalidation_epochs.get(
+                        target, 0
+                    ) != invalidation_epoch or not self._is_authorized(
+                        authority,
+                        connection,
+                        require_enabled=require_enabled,
+                    ):
+                        reject_entry = True
+                    if not reject_entry:
+                        existing = self._entries.get(key)
+                        if existing is not None and not existing.invalidated:
+                            existing.active_leases += 1
+                            existing.last_used = time.monotonic()
+                            existing_entry = existing
+                        else:
+                            entry.active_leases = 1
+                            self._entries[key] = entry
+            if manager_closed:
+                await _close_client(entry.client)
+                raise RuntimeError("MCP connection manager is closed.")
+            if existing_entry is not None:
+                await _close_client(entry.client)
+                return self._lease(key, existing_entry)
+            if not reject_entry:
+                return self._lease(key, entry)
             await _close_client(entry.client)
             raise RuntimeError("MCP connection configuration changed while connecting.")
 
@@ -493,6 +541,11 @@ class MCPConnectionManager:
     ) -> _ManagedConnection:
         config = self._advanced_shell_stdio
         launch = connection.stdio
+        require_advanced_shell_authority(authority)
+        if self._advanced_shell_readiness is not None:
+            readiness = await self._advanced_shell_readiness()
+            if readiness.state is not AdvancedShellReadiness.READY:
+                raise MCPAdvancedShellUnavailableError(readiness.message)
         if config is None or launch is None:
             raise ValueError("Advanced-shell stdio requires advanced execution mode.")
         for path in (config.private_key_path, config.known_hosts_path):
@@ -523,13 +576,33 @@ class MCPConnectionManager:
             init_timeout=MCP_INIT_TIMEOUT_SECONDS,
             timeout=MCP_READ_TIMEOUT_SECONDS,
         )
+        launch_permit_acquired = False
         try:
             async with asyncio.timeout(MCP_CONNECT_TIMEOUT_SECONDS):
+                await self._stdio_launch_semaphore.acquire()
+                launch_permit_acquired = True
                 await client.__aenter__()
                 tools = await client.list_tools(max_pages=MCP_MAX_TOOL_PAGES)
+        except TimeoutError:
+            if not launch_permit_acquired:
+                logger.warning(
+                    "MCP stdio launch capacity unavailable",
+                    data={
+                        "event": "mcp_stdio_capacity_rejected",
+                        "principal_id": authority.principal_id,
+                        "connection_id": connection.connection_id,
+                        "limit": self._max_concurrent_stdio_launches,
+                        "reason": "launch_queue_timeout",
+                    },
+                )
+            await _close_client(client)
+            raise
         except BaseException:
             await _close_client(client)
             raise
+        finally:
+            if launch_permit_acquired:
+                self._stdio_launch_semaphore.release()
         logger.info(
             "MCP connection ready",
             data={
@@ -719,6 +792,9 @@ def _unavailable(
         message = "The MCP server did not become ready before the timeout."
     elif isinstance(error, MCPNetworkPolicyError):
         status = "network_policy_rejected"
+        message = str(error)
+    elif isinstance(error, MCPAdvancedShellUnavailableError):
+        status = "advanced_shell_unavailable"
         message = str(error)
     elif isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {
         401,

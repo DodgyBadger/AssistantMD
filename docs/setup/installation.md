@@ -279,7 +279,10 @@ ownership first.
 
 If your host user has another UID, clone the repository, copy
 `docker-compose.override.yml.example` to `docker-compose.override.yml`, set its
-`USER_ID`, `GROUP_ID`, and `user` values, then run:
+`USER_ID`, `GROUP_ID`, and `user` values, then run. IDs must be non-root decimal
+integers. Changing runtime IDs does not repair ownership of existing bind-mounted
+files or named-volume content; repair ownership deliberately before restarting
+with the new identity.
 
 ```bash
 docker compose up -d --build

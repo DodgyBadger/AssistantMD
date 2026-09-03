@@ -23,6 +23,7 @@ from core.advanced_shell import load_advanced_shell_config  # noqa: E402
 from core.advanced_shell.capability import AdvancedShellCapabilityService  # noqa: E402
 from core.advanced_shell.preflight import AdvancedShellPreflightService  # noqa: E402
 from core.authentication import load_authentication_policy  # noqa: E402
+from core.authentication.models import AuthenticationMode  # noqa: E402
 from core.logger import UnifiedLogger  # noqa: E402
 from core.runtime.bootstrap import bootstrap_runtime  # noqa: E402
 from core.runtime.config import RuntimeConfig  # noqa: E402
@@ -33,6 +34,7 @@ from core.tools.advanced_shell import ShellTransportConfig  # noqa: E402
 logger = UnifiedLogger(tag="main")
 app_settings = get_app_settings()
 advanced_shell_config = load_advanced_shell_config(app_settings)
+authentication_policy = load_authentication_policy(app_settings)
 _shell_key_root_value = os.environ.get("ASSISTANTMD_SHELL_KEY_ROOT", "").strip()
 _shell_key_root = Path(_shell_key_root_value) if _shell_key_root_value else None
 advanced_shell_preflight = AdvancedShellPreflightService(
@@ -75,6 +77,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Store runtime context in app state for API access
     app.state.runtime = runtime
 
+    if (
+        advanced_shell_config.enabled
+        and authentication_policy.mode is AuthenticationMode.DISABLED
+    ):
+        logger.warning(
+            "Advanced shell can reach the unauthenticated AssistantMD API",
+            data={
+                "event": "advanced_shell_security_posture_warning",
+                "execution_mode": advanced_shell_config.execution_mode.value,
+                "auth_mode": authentication_policy.mode.value,
+                "reason": "advanced_shell_peer_has_unauthenticated_api_access",
+            },
+        )
+
     execution_mode = advanced_shell_config.execution_mode.value
     logger.info(
         f"Application startup complete in {execution_mode} execution mode",
@@ -86,13 +102,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         },
     )
 
-    yield  # App runs here
-
-    # Shutdown
-    if hasattr(app.state, "runtime") and app.state.runtime:
-        await app.state.runtime.shutdown()
-        app.state.runtime = None  # Clear app state to match global context
-        logger.info("Application shutdown complete")
+    try:
+        yield  # App runs here
+    finally:
+        # Shutdown
+        if hasattr(app.state, "runtime") and app.state.runtime:
+            await app.state.runtime.shutdown()
+            app.state.runtime = None  # Clear app state to match global context
+            logger.info("Application shutdown complete")
 
 
 #######################################################################
@@ -100,7 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 #######################################################################
 
 app = create_application(
-    authentication_policy=load_authentication_policy(app_settings),
+    authentication_policy=authentication_policy,
     advanced_shell_config=advanced_shell_config,
     advanced_shell_preflight=advanced_shell_preflight,
     lifespan=lifespan,

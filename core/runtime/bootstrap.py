@@ -35,7 +35,10 @@ from core.scheduling.database import create_job_store
 from core.scheduling.job_history import attach_scheduler_history_listener
 from core.secrets import get_encrypted_secrets_service, initialize_secrets_bootstrap
 from core.secrets.legacy_migration import migrate_legacy_secrets_yaml
-from core.settings import validate_settings
+from core.settings import (
+    get_mcp_max_concurrent_advanced_shell_stdio_launches,
+    validate_settings,
+)
 from core.settings.store import get_general_settings, refresh_settings_cache
 from core.system_migrations import run_system_migrations
 from core.vault_state.activity import handle_task_terminal_for_activity
@@ -88,6 +91,7 @@ async def bootstrap_runtime(
     try:
         # Make bootstrap roots available for helpers that run before context is set
         set_bootstrap_roots(config.data_root, config.system_root)
+        refresh_settings_cache()
         secrets_status = initialize_secrets_bootstrap(config.system_root)
         migration_status = run_system_migrations(config.system_root, backup=True)
         logger.info(
@@ -149,6 +153,14 @@ async def bootstrap_runtime(
                     advanced_shell.transport_config
                     if advanced_shell is not None and advanced_shell.enabled
                     else None
+                ),
+                advanced_shell_readiness=(
+                    advanced_shell.readiness
+                    if advanced_shell is not None and advanced_shell.enabled
+                    else None
+                ),
+                max_concurrent_stdio_launches=(
+                    get_mcp_max_concurrent_advanced_shell_stdio_launches()
                 ),
             )
             manager_holder.append(mcp_manager)

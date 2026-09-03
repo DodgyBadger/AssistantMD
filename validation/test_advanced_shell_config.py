@@ -1,5 +1,7 @@
 """Deterministic tests for advanced-shell infrastructure configuration."""
 
+import base64
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -18,6 +20,10 @@ from core.advanced_shell.preflight import (
     AdvancedShellPreflightService,
     AdvancedShellPreflightSnapshot,
     AdvancedShellReadiness,
+)
+from core.advanced_shell.stdio import (
+    MAX_STRUCTURED_STDIO_ENVELOPE_BYTES,
+    encode_structured_launch,
 )
 from core.chat.instructions import primary_chat_instruction_layers
 from core.constants import ADVANCED_SHELL_FLIGHT_CARD
@@ -44,6 +50,29 @@ def test_advanced_shell_defaults_are_restricted_and_fixed() -> None:
     assert config.port == 2222
     assert config.user == "advanced-shell"
     assert config.host_key_alias is None
+
+
+def test_structured_stdio_envelope_enforces_complete_payload_budget() -> None:
+    environment = (("PAYLOAD", "x" * MAX_STRUCTURED_STDIO_ENVELOPE_BYTES),)
+
+    with pytest.raises(ValueError, match="launch exceeds the size limit"):
+        encode_structured_launch(
+            executable="/usr/bin/python3",
+            arguments=(),
+            working_directory="/workspace",
+            environment=environment,
+        )
+
+    encoded = encode_structured_launch(
+        executable="/usr/bin/python3",
+        arguments=("-m", "provider"),
+        working_directory="/workspace",
+        environment=(("LOG_LEVEL", "warning"),),
+    )
+    raw = encoded.partition(":")[2]
+    payload = base64.urlsafe_b64decode(raw)
+    assert len(payload) <= MAX_STRUCTURED_STDIO_ENVELOPE_BYTES
+    assert json.loads(payload)["args"] == ["-m", "provider"]
 
 
 def test_advanced_compose_profile_and_execution_mode_enable_shell() -> None:

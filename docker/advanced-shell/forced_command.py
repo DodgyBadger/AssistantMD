@@ -22,7 +22,7 @@ POLL_INTERVAL_SECONDS = 0.05
 FORWARDED_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
 PR_SET_CHILD_SUBREAPER = 36
 STRUCTURED_STDIO_PREFIX = "assistantmd-stdio-v1:"
-MAX_ENVELOPE_BYTES = 64 * 1024
+MAX_STRUCTURED_STDIO_ENVELOPE_BYTES = 64 * 1024
 MAX_ARGUMENTS = 64
 MAX_ARGUMENT_BYTES = 32 * 1024
 MAX_ENVIRONMENT_VALUES = 16
@@ -69,14 +69,14 @@ def _decode_structured_launch(
     if not command.startswith(STRUCTURED_STDIO_PREFIX):
         return None
     encoded = command.removeprefix(STRUCTURED_STDIO_PREFIX)
-    if not encoded or len(encoded) > MAX_ENVELOPE_BYTES * 2:
+    if not encoded or len(encoded) > MAX_STRUCTURED_STDIO_ENVELOPE_BYTES * 2:
         raise ValueError("Structured stdio launch envelope is invalid.")
     try:
         raw = base64.b64decode(encoded.encode("ascii"), altchars=b"-_", validate=True)
         payload = json.loads(raw)
     except (UnicodeEncodeError, binascii.Error, json.JSONDecodeError) as exc:
         raise ValueError("Structured stdio launch envelope is invalid.") from exc
-    if len(raw) > MAX_ENVELOPE_BYTES or not isinstance(payload, dict):
+    if len(raw) > MAX_STRUCTURED_STDIO_ENVELOPE_BYTES or not isinstance(payload, dict):
         raise ValueError("Structured stdio launch envelope is invalid.")
     if set(payload) != {"executable", "args", "cwd", "env"}:
         raise ValueError("Structured stdio launch fields are invalid.")
@@ -114,6 +114,18 @@ def _decode_structured_launch(
         )
     ):
         raise ValueError("Structured stdio working directory is outside allowed roots.")
+    try:
+        resolved_cwd = cwd.resolve(strict=True)
+        resolved_roots = tuple(
+            root.resolve(strict=True) for root in ALLOWED_WORKING_ROOTS
+        )
+    except OSError as exc:
+        raise ValueError("Structured stdio working directory is unavailable.") from exc
+    if not any(
+        resolved_cwd == root or resolved_cwd.is_relative_to(root)
+        for root in resolved_roots
+    ):
+        raise ValueError("Structured stdio working directory is outside allowed roots.")
     if (
         not isinstance(environment_values, dict)
         or len(environment_values) > MAX_ENVIRONMENT_VALUES
@@ -131,7 +143,7 @@ def _decode_structured_launch(
         ):
             raise ValueError("Structured stdio environment is invalid.")
         environment[name] = value
-    return [executable, *arguments], cwd, environment
+    return [executable, *arguments], resolved_cwd, environment
 
 
 def _signal_process_group(process: subprocess.Popen[bytes], signum: int) -> None:

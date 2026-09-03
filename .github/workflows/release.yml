@@ -63,6 +63,8 @@ jobs:
           docker buildx build \
             --push \
             --platform linux/amd64,linux/arm64 \
+            --sbom=true \
+            --provenance=mode=max \
             -f docker/Dockerfile \
             "${TAG_ARGS[@]}" \
             .

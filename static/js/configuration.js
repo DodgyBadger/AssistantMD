@@ -49,6 +49,7 @@
         googleDraft: false,
         mcpConnections: [],
         mcpAdvancedMode: false,
+        mcpAdvancedShellReady: false,
         mcpOAuthStatuses: {},
         importVaults: [],
         importResults: null,
@@ -2582,10 +2583,15 @@ async function saveModelRow(rowKey) {
             if (!response.ok) throw new Error(payload?.message || `HTTP ${response.status}`);
             const statusPayload = await safeJson(statusResponse);
             state.mcpAdvancedMode = statusResponse.ok && statusPayload?.advanced_shell?.execution_mode === 'advanced';
+            state.mcpAdvancedShellReady = state.mcpAdvancedMode && statusPayload?.advanced_shell?.readiness_state === 'ready';
             const stdioOption = elements.mcpCreateForm?.querySelector('option[value="advanced_shell_stdio"]');
             if (stdioOption instanceof HTMLOptionElement) {
                 stdioOption.disabled = !state.mcpAdvancedMode;
-                stdioOption.textContent = state.mcpAdvancedMode ? 'Advanced-shell stdio' : 'Advanced-shell stdio (requires advanced mode)';
+                stdioOption.textContent = !state.mcpAdvancedMode
+                    ? 'Advanced-shell stdio (requires advanced mode)'
+                    : state.mcpAdvancedShellReady
+                        ? 'Advanced-shell stdio'
+                        : 'Advanced-shell stdio (shell currently unavailable)';
             }
             state.mcpConnections = Array.isArray(payload) ? payload : [];
             renderMcpConnections();

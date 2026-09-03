@@ -985,28 +985,27 @@ async def _prepare_chat_execution(
         vault_path=vault_path,
     )
     mcp_chat = await _acquire_chat_mcp_capabilities()
-    advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
-    if advanced_shell_tool is not None:
-        tool_functions.append(advanced_shell_tool)
-    capabilities = build_chat_capabilities(
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        model_alias=model,
-        context_template=context_template,
-        now=_resolve_context_manager_now(),
-        workspace_path=workspace_path,
-        event_sink=_CHAT_STORE,
-        tools=tool_functions,
-        tool_instructions="",
-        history_processor_factory=build_context_manager_history_processor,
-    )
-    if mcp_chat is not None:
-        capabilities.extend(mcp_chat.capabilities)
-    recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
-    capabilities.append(recovery.capability(session_id=session_id))
-
     try:
+        advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
+        if advanced_shell_tool is not None:
+            tool_functions.append(advanced_shell_tool)
+        capabilities = build_chat_capabilities(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            model_alias=model,
+            context_template=context_template,
+            now=_resolve_context_manager_now(),
+            workspace_path=workspace_path,
+            event_sink=_CHAT_STORE,
+            tools=tool_functions,
+            tool_instructions="",
+            history_processor_factory=build_context_manager_history_processor,
+        )
+        if mcp_chat is not None:
+            capabilities.extend(mcp_chat.capabilities)
+        recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
+        capabilities.append(recovery.capability(session_id=session_id))
         agent = await create_agent(
             model=model_instance,
             output_type=[str, DeferredToolRequests],
@@ -1084,28 +1083,27 @@ async def _prepare_deferred_review_resume_execution(
     )
 
     mcp_chat = await _acquire_chat_mcp_capabilities()
-    advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
-    if advanced_shell_tool is not None:
-        tool_functions.append(advanced_shell_tool)
-    capabilities = build_chat_capabilities(
-        vault_name=vault_name,
-        vault_path=vault_path,
-        session_id=session_id,
-        model_alias=model,
-        context_template=context_template,
-        now=_resolve_context_manager_now(),
-        workspace_path=workspace_path,
-        event_sink=_CHAT_STORE,
-        tools=tool_functions,
-        tool_instructions="",
-        history_processor_factory=build_context_manager_history_processor,
-    )
-    if mcp_chat is not None:
-        capabilities.extend(mcp_chat.capabilities)
-    recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
-    capabilities.append(recovery.capability(session_id=session_id))
-
     try:
+        advanced_shell_tool = await _acquire_primary_chat_advanced_shell_tool()
+        if advanced_shell_tool is not None:
+            tool_functions.append(advanced_shell_tool)
+        capabilities = build_chat_capabilities(
+            vault_name=vault_name,
+            vault_path=vault_path,
+            session_id=session_id,
+            model_alias=model,
+            context_template=context_template,
+            now=_resolve_context_manager_now(),
+            workspace_path=workspace_path,
+            event_sink=_CHAT_STORE,
+            tools=tool_functions,
+            tool_instructions="",
+            history_processor_factory=build_context_manager_history_processor,
+        )
+        if mcp_chat is not None:
+            capabilities.extend(mcp_chat.capabilities)
+        recovery = ChatRunRecoveryCoordinator.from_tools(tool_functions)
+        capabilities.append(recovery.capability(session_id=session_id))
         agent = await create_agent(
             model=model_instance,
             output_type=[str, DeferredToolRequests],

@@ -77,7 +77,7 @@ def _structured_command(
 def _wait_for_file(path: Path, timeout_seconds: float = 5.0) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if path.exists():
+        if path.is_file() and path.stat().st_size > 0:
             return
         time.sleep(0.05)
     raise AssertionError(f"Timed out waiting for {path.name}")
@@ -178,6 +178,20 @@ def main() -> None:
         _stdout, traversing_stderr = traversing_structured.communicate(timeout=5)
         assert traversing_structured.returncode == 64
         assert "outside allowed roots" in traversing_stderr
+
+        escaping_directory = workspace / "escaping-directory"
+        escaping_directory.symlink_to(Path("/tmp"), target_is_directory=True)
+        symlink_structured = _wrapper_process(
+            workspace,
+            _structured_command(
+                executable=sys.executable,
+                args=[],
+                cwd=escaping_directory,
+            ),
+        )
+        _stdout, symlink_stderr = symlink_structured.communicate(timeout=5)
+        assert symlink_structured.returncode == 64
+        assert "outside allowed roots" in symlink_stderr
 
         child_pid_path = workspace / "child.pid"
         stubborn_program = (

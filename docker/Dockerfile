@@ -97,14 +97,19 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 
 RUN set -eux; \
+    case "${USER_ID}" in ''|*[!0-9]*) \
+        echo "USER_ID must be a decimal integer." >&2; exit 1;; esac; \
+    case "${GROUP_ID}" in ''|*[!0-9]*) \
+        echo "GROUP_ID must be a decimal integer." >&2; exit 1;; esac; \
+    if [ "${USER_ID}" = "0" ] || [ "${GROUP_ID}" = "0" ]; then \
+        echo "USER_ID and GROUP_ID must be non-root identities." >&2; exit 1; \
+    fi; \
     group_name="$(getent group "${GROUP_ID}" | cut -d: -f1 || true)"; \
     if [ -z "${group_name}" ]; then \
         group_name=appuser; \
         groupadd -g "${GROUP_ID}" "${group_name}"; \
     fi; \
-    if [ "${USER_ID}" != "0" ]; then \
-        useradd -u "${USER_ID}" -g "${group_name}" -m -d /home/appuser -s /bin/bash appuser; \
-    fi
+    useradd -u "${USER_ID}" -g "${group_name}" -m -d /home/appuser -s /bin/bash appuser
 
 # Set up application directory
 WORKDIR /app

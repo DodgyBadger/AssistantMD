@@ -54,6 +54,10 @@ a durable startup mechanism.
 
 Keep commands bounded and foregrounded. Stdio MCP servers are launched on demand
 by their AssistantMD connection and do not need to remain running between calls.
+AssistantMD bounds concurrent managed stdio provider initialization using the
+restart-bound `mcp_max_concurrent_advanced_shell_stdio_launches` setting. Commands
+started directly through `shell` do not consume those MCP launch permits and
+remain subject to the container's aggregate PID, memory, and CPU ceilings.
 Software that must run continuously or restart independently belongs in its own
 managed Compose service, not in the advanced shell.
 

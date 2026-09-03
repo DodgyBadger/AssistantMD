@@ -11,8 +11,10 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from core.advanced_shell.authority import require_advanced_shell_authority
 from core.advanced_shell.stdio import (
     MAX_ROOTS,
+    encode_structured_launch,
     validate_advanced_shell_path,
     validate_arguments,
     validate_environment,
@@ -99,6 +101,8 @@ class MCPConnectionService:
         previous = self._require_for_authority(authority, clean_id)
         normalized = _normalize_update(request)
         self._require_supported_transport(normalized.transport)
+        if normalized.transport is MCPTransport.ADVANCED_SHELL_STDIO:
+            require_advanced_shell_authority(authority)
         delete_credential = normalized.auth_mode not in {
             MCPAuthMode.BEARER,
             MCPAuthMode.HEADER,
@@ -401,6 +405,8 @@ class MCPConnectionService:
         """Trusted creation helper used to prove principal isolation."""
         normalized = _normalize_create(request)
         self._require_supported_transport(normalized.transport)
+        if normalized.transport is MCPTransport.ADVANCED_SHELL_STDIO:
+            require_advanced_shell_authority(authority)
         connection_id = str(uuid4())
         operation_id = str(uuid4())
         fence_token = random_secrets.token_hex(16)
@@ -1240,7 +1246,7 @@ def _normalize_stdio(value: MCPStdioConfig | None) -> MCPStdioConfig | None:
     )
     if len(roots) > MAX_ROOTS:
         raise ValueError("Advanced-shell stdio has too many Roots.")
-    return MCPStdioConfig(
+    normalized = MCPStdioConfig(
         executable=validate_executable(value.executable),
         arguments=arguments,
         working_directory=validate_advanced_shell_path(
@@ -1249,6 +1255,13 @@ def _normalize_stdio(value: MCPStdioConfig | None) -> MCPStdioConfig | None:
         environment=environment,
         roots=roots,
     )
+    encode_structured_launch(
+        executable=normalized.executable,
+        arguments=normalized.arguments,
+        working_directory=normalized.working_directory,
+        environment=normalized.environment,
+    )
+    return normalized
 
 
 def _sanitize_url(value: str | None) -> str:

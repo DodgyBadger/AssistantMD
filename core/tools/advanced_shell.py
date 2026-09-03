@@ -331,6 +331,17 @@ class FixedSshShellExecutor:
                 await self._stop_process(process)
             raise
         finally:
+            if process is not None and process.returncode is None:
+                try:
+                    await self._stop_process(process)
+                except OSError as exc:
+                    logger.warning(
+                        "Advanced shell process cleanup failed",
+                        data={
+                            "event": "advanced_shell_process_cleanup_failed",
+                            "error_type": type(exc).__name__,
+                        },
+                    )
             if process is not None and process.stdin is not None:
                 if not process.stdin.is_closing():
                     process.stdin.close()

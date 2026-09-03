@@ -455,8 +455,14 @@ async def get_system_status(
             configuration_status=configuration_status,
             authentication_mode=authentication_mode,
             authentication_warning=(
-                "Authentication is disabled. Every network peer that can reach "
-                "AssistantMD has full UI and API access."
+                (
+                    "Authentication is disabled. Every network peer that can reach "
+                    "AssistantMD has full UI and API access, including the advanced "
+                    "shell."
+                    if shell_config.enabled
+                    else "Authentication is disabled. Every network peer that can "
+                    "reach AssistantMD has full UI and API access."
+                )
                 if authentication_mode is AuthenticationMode.DISABLED
                 else None
             ),

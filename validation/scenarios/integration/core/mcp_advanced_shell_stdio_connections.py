@@ -23,7 +23,14 @@ from mcp.types import Tool  # noqa: E402
 
 from api.models import MCPConnectionImportRequest  # noqa: E402
 from api.services.mcp import parse_mcp_connection_import  # noqa: E402
-from core.identity import ExecutionAuthority  # noqa: E402
+from core.advanced_shell.preflight import (  # noqa: E402
+    AdvancedShellPreflightSnapshot,
+    AdvancedShellReadiness,
+)
+from core.identity import (  # noqa: E402
+    LOCAL_USER_AUTHORITY,
+    ExecutionAuthority,
+)
 from core.mcp import (  # noqa: E402
     MCPConnectionCreate,
     MCPConnectionManager,
@@ -40,7 +47,8 @@ class MCPAdvancedShellStdioConnectionsScenario(BaseScenario):
     """Prove stdio persistence, gating, import, and fixed transport behavior."""
 
     async def test_scenario(self) -> None:
-        owner = ExecutionAuthority("stdio-owner")
+        owner = LOCAL_USER_AUTHORITY
+        unsupported_owner = ExecutionAuthority("stdio-owner")
         system_root = self.run_path / "system"
         system_root.mkdir()
         secrets = EncryptedSecretsService(
@@ -77,6 +85,15 @@ class MCPAdvancedShellStdioConnectionsScenario(BaseScenario):
             secrets=secrets,
             advanced_shell_stdio_enabled=True,
         )
+        try:
+            service.create_connection_for_authority(unsupported_owner, request)
+        except PermissionError as exc:
+            self.soft_assert(
+                "unavailable for this principal" in str(exc),
+                "The single-user advanced shell should reject another principal",
+            )
+        else:
+            self.soft_assert(False, "Nonlocal stdio creation must fail closed")
         connection = service.create_connection_for_authority(owner, request)
         self.soft_assert_equal(
             (connection.url, connection.auth_mode.value, connection.stdio),
@@ -89,7 +106,6 @@ class MCPAdvancedShellStdioConnectionsScenario(BaseScenario):
             and b"warn" not in (system_root / "secrets.db").read_bytes(),
             "Non-secret environment belongs only in sanitized MCP metadata",
         )
-
         parsed = parse_mcp_connection_import(
             MCPConnectionImportRequest(
                 configuration="""
@@ -128,6 +144,28 @@ enabled: true
             private_key_path=key,
             known_hosts_path=known_hosts,
         )
+
+        async def unavailable_readiness() -> AdvancedShellPreflightSnapshot:
+            return AdvancedShellPreflightSnapshot(
+                AdvancedShellReadiness.CONNECTION_FAILURE,
+                "The advanced shell cannot be reached.",
+            )
+
+        unavailable_manager = MCPConnectionManager(
+            connections=service,
+            advanced_shell_stdio=transport_config,
+            advanced_shell_readiness=unavailable_readiness,
+        )
+        unavailable_result = await unavailable_manager.test_connection(
+            owner, connection
+        )
+        self.soft_assert_equal(
+            (unavailable_result.status, unavailable_result.ready),
+            ("advanced_shell_unavailable", False),
+            "Stdio tests should expose a stable advanced-shell readiness result",
+        )
+        await unavailable_manager.shutdown()
+
         clients: list[_StdioClient] = []
         transports: list[_CapturedTransport] = []
 

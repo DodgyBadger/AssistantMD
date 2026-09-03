@@ -15,8 +15,10 @@ services:
         USER_ID: 1000
         GROUP_ID: 1000
 
-    # Keep this in sync with USER_ID/GROUP_ID when host ownership requires a
-    # runtime user other than the published image's UID/GID 1000.
+    # IDs must be non-root decimal integers. Keep this in sync with
+    # USER_ID/GROUP_ID when host ownership requires a runtime user other than
+    # the published image's UID/GID 1000. Changing IDs does not repair ownership
+    # of existing persistent files or volumes.
     user: "1000:1000"
 
     # A reverse proxy in another Compose project needs a shared external
@@ -39,6 +41,8 @@ services:
       context: .
       dockerfile: docker/advanced-shell/Dockerfile
       args:
+        # IDs must be non-root decimal integers. Changing them does not repair
+        # ownership of existing advanced-shell home or workspace volumes.
         SHELL_USER_ID: 1000
         SHELL_GROUP_ID: 1000
 

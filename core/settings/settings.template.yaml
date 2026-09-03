@@ -125,6 +125,11 @@ settings:
     description: "Maximum number of workflows allowed to run at the same time across all vaults. 0 disables the global workflow concurrency limit."
     category: "Workflows"
     restart_required: false
+  mcp_max_concurrent_advanced_shell_stdio_launches:
+    value: 4
+    description: "Maximum advanced-shell stdio providers AssistantMD may initialize concurrently. This bounds managed MCP launch fan-out, not commands started directly through the shell tool."
+    category: "Advanced"
+    restart_required: true
   browser_navigation_timeout_seconds:
     value: 20
     description: "Navigation timeout in seconds for the browser extraction tool."
