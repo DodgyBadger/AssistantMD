@@ -25,6 +25,11 @@ if __name__ == "__main__":
     set_bootstrap_roots(data_root=data_root, system_root=system_root)
 
 from core.authoring.shared.tool_binding import _wrap_tool_function  # noqa: E402
+from core.connections import (  # noqa: E402
+    BuiltInConnectionService,
+    GmailPreferences,
+    GoogleConnectionCreate,
+)
 from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E402
 from core.integrations.google.gmail import GmailAttachment, GmailError  # noqa: E402
 from core.integrations.google.gmail_service import (  # noqa: E402
@@ -61,12 +66,10 @@ class GmailAttachmentToolScenario(BaseScenario):
         )
         selected = SimpleNamespace(connection_id="work-connection")
         with (
-            patch.object(service, "_preferences", return_value=(selected, object())),
-            patch.object(service, "_client", return_value=client) as client_factory,
-            patch(
-                "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
-                return_value=1024,
+            patch.object(
+                service, "_preferences", return_value=(selected, _preferences())
             ),
+            patch.object(service, "_client", return_value=client) as client_factory,
         ):
             downloaded = await service.download_attachment(
                 authority,
@@ -82,6 +85,7 @@ class GmailAttachmentToolScenario(BaseScenario):
         client_factory.assert_called_once_with(authority, "work-connection")
 
         await self._assert_service_rejections(service, authority)
+        await self._assert_connection_policy_selection(authority)
         await self._assert_tool_contract(authority)
         self.soft_assert_equal(
             Gmail.get_recovery_policy(),
@@ -103,6 +107,65 @@ class GmailAttachmentToolScenario(BaseScenario):
         self.assert_no_failures()
         self.teardown_scenario()
 
+    async def _assert_connection_policy_selection(
+        self, authority: ExecutionAuthority
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="gmail-policy-") as root:
+            connections = BuiltInConnectionService(system_root=root)
+            enabled = connections.create_google_connection_for_authority(
+                authority,
+                GoogleConnectionCreate(
+                    display_name="Enabled",
+                    client_id="enabled-client",
+                    is_default=True,
+                    gmail=GmailPreferences(
+                        attachment_download_enabled=True, attachment_max_mb=7
+                    ),
+                ),
+            )
+            disabled = connections.create_google_connection_for_authority(
+                authority,
+                GoogleConnectionCreate(
+                    display_name="Disabled",
+                    client_id="disabled-client",
+                ),
+            )
+            service = GmailResourceService(
+                connections=connections,
+                google=_AvailableGoogle(),  # type: ignore[arg-type]
+                oauth=object(),  # type: ignore[arg-type]
+            )
+            client = _AttachmentClient()
+            with patch.object(service, "_client", return_value=client) as factory:
+                await service.download_attachment(
+                    authority, "message-1", "attachment-1"
+                )
+                factory.assert_called_once_with(authority, enabled.connection_id)
+                factory.reset_mock()
+                try:
+                    await service.download_attachment(
+                        authority,
+                        "message-1",
+                        "attachment-1",
+                        connection=disabled.slug,
+                    )
+                except ValueError as exc:
+                    self.soft_assert(
+                        "disabled" in str(exc).lower(),
+                        "Disabled selected connection should reject download",
+                    )
+                else:
+                    self.soft_assert(
+                        False, "Disabled selected connection should reject"
+                    )
+                factory.assert_not_called()
+            status = service.status(authority)
+            self.soft_assert_equal(
+                (status["attachment_download_enabled"], status["attachment_max_mb"]),
+                (True, 7),
+                "Gmail status should disclose the selected connection attachment policy",
+            )
+
     async def _assert_service_rejections(
         self, service: GmailResourceService, authority: ExecutionAuthority
     ) -> None:
@@ -121,19 +184,30 @@ class GmailAttachmentToolScenario(BaseScenario):
                 "Only PDF",
             ),
             (_ATTACHMENT, 0, "disabled"),
-            (_ATTACHMENT, 4, "size limit"),
+            (
+                GmailAttachment(
+                    attachment_id="attachment-1",
+                    filename="large.pdf",
+                    media_type="application/pdf",
+                    declared_size=2 * 1024 * 1024,
+                    message_id="message-1",
+                ),
+                1024 * 1024,
+                "size limit",
+            ),
         )
         for attachment, limit, expected in cases:
             client = _AttachmentClient(attachment=attachment)
             with (
                 patch.object(
-                    service, "_preferences", return_value=(selected, object())
+                    service,
+                    "_preferences",
+                    return_value=(
+                        selected,
+                        _preferences(enabled=limit > 0, max_bytes=max(limit, 1)),
+                    ),
                 ),
                 patch.object(service, "_client", return_value=client),
-                patch(
-                    "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
-                    return_value=limit,
-                ),
             ):
                 try:
                     await service.download_attachment(
@@ -149,12 +223,10 @@ class GmailAttachmentToolScenario(BaseScenario):
 
         invalid_pdf_client = _AttachmentClient(content=b"not a pdf")
         with (
-            patch.object(service, "_preferences", return_value=(selected, object())),
-            patch.object(service, "_client", return_value=invalid_pdf_client),
-            patch(
-                "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
-                return_value=1024,
+            patch.object(
+                service, "_preferences", return_value=(selected, _preferences())
             ),
+            patch.object(service, "_client", return_value=invalid_pdf_client),
         ):
             try:
                 await service.download_attachment(
@@ -277,6 +349,13 @@ class _AttachmentClient:
         return self.content
 
 
+def _preferences(*, enabled: bool = True, max_bytes: int = 1024) -> SimpleNamespace:
+    return SimpleNamespace(
+        attachment_download_enabled=enabled,
+        attachment_max_mb=max(1, (max_bytes + 1024 * 1024 - 1) // (1024 * 1024)),
+    )
+
+
 class _AttachmentService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str | None]] = []
@@ -291,6 +370,16 @@ class _AttachmentService:
     ) -> GmailAttachmentDownload:
         self.calls.append((message_id, attachment_id, connection))
         return GmailAttachmentDownload(attachment=_ATTACHMENT, content=_PDF)
+
+
+class _AvailableGoogle:
+    def capability_availability(self, *_args: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            available=True, connection_state="ready", missing_scopes=()
+        )
+
+    def status(self, *_args: object) -> SimpleNamespace:
+        return SimpleNamespace(account_email="owner@example.com")
 
 
 if __name__ == "__main__":

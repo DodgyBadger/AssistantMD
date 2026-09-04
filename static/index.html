@@ -585,12 +585,14 @@
                                 </label>
                             </div>
                             <fieldset class="rounded-md border border-border-primary p-3 space-y-3">
-                                <legend class="px-1 text-sm font-medium text-txt-primary">Gmail read limits</legend>
+                                <legend class="px-1 text-sm font-medium text-txt-primary">Gmail capabilities and limits</legend>
                                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                     <label class="text-xs text-txt-secondary">Default search results<input name="search_default_results" type="number" min="1" max="500" value="20" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                                     <label class="text-xs text-txt-secondary">Maximum search results<input name="search_max_results" type="number" min="1" max="500" value="100" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                                     <label class="text-xs text-txt-secondary">Message characters<input name="message_max_characters" type="number" min="1" max="250000" value="50000" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                                     <label class="text-xs text-txt-secondary">Thread messages<input name="thread_max_messages" type="number" min="1" max="100" value="25" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
+                                    <label class="flex items-center text-sm text-txt-primary"><input name="attachment_download_enabled" type="checkbox" class="mr-2" />Allow attachment downloads</label>
+                                    <label class="text-xs text-txt-secondary">Maximum attachment MB<input name="attachment_max_mb" type="number" min="1" max="100" value="25" class="mt-1 w-full px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" /></label>
                                 </div>
                             </fieldset>
                             <div class="flex flex-wrap items-center gap-2">

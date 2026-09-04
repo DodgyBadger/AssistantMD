@@ -630,9 +630,10 @@ For the initial slice:
 - verify that the selected attachment belongs to the message, enforce a bounded
   declared and decoded size, validate PDF media type/signature, and never return
   attachment bytes to the model or logs;
-- add the live `gmail_attachment_max_mb` setting, defaulting to 25 MB; enforce it
-  against both declared and decoded size, and treat zero as disabling attachment
-  downloads without disabling Gmail reads;
+- add an opt-in attachment-download capability and maximum size to each Gmail
+  connection, defaulting existing and new connections to disabled with a 25 MB
+  limit; enforce the limit against both declared and decoded size without
+  disabling Gmail reads;
 - require an arbitrary vault-relative destination path, validate it through the
   existing vault boundary, write the attachment there through the vault mutation
   subsystem, and return the path actually used; never overwrite an existing

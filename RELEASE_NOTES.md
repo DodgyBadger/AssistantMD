@@ -59,8 +59,9 @@ controls.
   Chat can save a PDF attachment to any vault-relative path for later import,
   organization, or processing with other available tools. Existing files are
   preserved automatically with numbered filenames.
-- The configurable Gmail attachment limit defaults to 25 MB; attachment bytes
-  are written directly to the vault and never placed in chat context.
+- Attachment downloads are disabled by default and can be enabled per Gmail
+  connection with a 25 MB default limit; attachment bytes are written directly
+  to the vault and never placed in chat context.
 - Gmail tools appear only when a configured account is ready, and each account's
   OAuth grant remains separate.
 
@@ -140,7 +141,8 @@ controls.
    first; refresh installs the new explicit-only soul and playbook behavior.
 9. Confirm that model-provider API keys were imported, then reconnect existing
    OAuth accounts. Configure and test Gmail and MCP connections under **System →
-   Connections**.
+   Connections**. Attachment downloads are disabled on each Gmail connection
+   until you explicitly enable them and choose a size limit.
 
 On first startup, AssistantMD imports legacy non-OAuth secrets into encrypted
 storage and preserves the old file at

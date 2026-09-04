@@ -22,12 +22,19 @@ if __name__ == "__main__":
     bootstrap_system_root.mkdir()
     set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
 
+from api.models import GmailConnectionPreferencesRequest  # noqa: E402
 from core.connections import (  # noqa: E402
     BuiltInConnectionService,
     GmailPreferences,
     GoogleConnectionCreate,
     GoogleConnectionUpdate,
 )
+from core.connections.schema import (  # noqa: E402
+    CONNECTION_MIGRATIONS,
+    MIGRATION_NAMESPACE,
+    connect_connections,
+)
+from core.database_migrations import apply_sqlite_migrations  # noqa: E402
 from core.identity import ExecutionAuthority  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -36,6 +43,21 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
     """Prove Google metadata and Gmail preferences are owner-scoped."""
 
     def test_scenario(self) -> None:
+        self._assert_v4_attachment_preference_migration()
+        api_preferences = GmailConnectionPreferencesRequest.model_validate(
+            {
+                "attachment_download_enabled": True,
+                "attachment_max_mb": 40,
+            }
+        )
+        self.soft_assert_equal(
+            (
+                api_preferences.attachment_download_enabled,
+                api_preferences.attachment_max_mb,
+            ),
+            (True, 40),
+            "The public API should preserve Gmail attachment preferences",
+        )
         system_root = self.run_path / "system"
         system_root.mkdir()
         service = BuiltInConnectionService(system_root=str(system_root))
@@ -53,6 +75,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 created.gmail.search_max_results,
                 created.gmail.message_max_characters,
                 created.gmail.thread_max_messages,
+                created.gmail.attachment_download_enabled,
+                created.gmail.attachment_max_mb,
                 created.config_version,
                 created.oauth_generation,
                 created.display_name,
@@ -64,6 +88,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 20,
                 100,
                 50_000,
+                25,
+                False,
                 25,
                 1,
                 1,
@@ -88,6 +114,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     search_max_results=40,
                     message_max_characters=75_000,
                     thread_max_messages=30,
+                    attachment_download_enabled=True,
+                    attachment_max_mb=40,
                 ),
             ),
         )
@@ -105,6 +133,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     search_max_results=40,
                     message_max_characters=75_000,
                     thread_max_messages=30,
+                    attachment_download_enabled=True,
+                    attachment_max_mb=40,
                 ),
                 2,
                 2,
@@ -121,6 +151,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     search_max_results=40,
                     message_max_characters=75_000,
                     thread_max_messages=30,
+                    attachment_download_enabled=True,
+                    attachment_max_mb=60,
                 ),
             ),
         )
@@ -205,6 +237,10 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             {"search_default_results": 1, "search_max_results": 501},
             {"message_max_characters": 250_001},
             {"thread_max_messages": 101},
+            {"attachment_max_mb": 0},
+            {"attachment_max_mb": 101},
+            {"attachment_max_mb": True},
+            {"attachment_download_enabled": 1},
         )
         for invalid in invalid_cases:
             try:
@@ -230,6 +266,62 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
         )
         self.assert_no_failures()
         self.teardown_scenario()
+
+    def _assert_v4_attachment_preference_migration(self) -> None:
+        system_root = self.run_path / "migration-system"
+        system_root.mkdir()
+        conn = connect_connections(str(system_root))
+        try:
+            apply_sqlite_migrations(
+                conn,
+                namespace=MIGRATION_NAMESPACE,
+                migrations=CONNECTION_MIGRATIONS[:4],
+            )
+            before_columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(google_connections)")
+            }
+            self.soft_assert(
+                "gmail_attachment_download_enabled" not in before_columns,
+                "The migration fixture must represent the released v4 schema",
+            )
+            conn.execute(
+                """INSERT INTO google_connections
+                (owner_principal_id, connection_id, slug, display_name, client_id,
+                 is_default) VALUES ('migration-owner', 'legacy', 'legacy',
+                 'Legacy', 'legacy-client', 1)"""
+            )
+            conn.commit()
+            apply_sqlite_migrations(
+                conn,
+                namespace=MIGRATION_NAMESPACE,
+                migrations=CONNECTION_MIGRATIONS,
+            )
+            versions = [
+                int(row[0])
+                for row in conn.execute(
+                    "SELECT version FROM schema_migrations WHERE namespace = ? ORDER BY version",
+                    (MIGRATION_NAMESPACE,),
+                )
+            ]
+            self.soft_assert_equal(
+                versions,
+                [1, 2, 3, 4, 5],
+                "The attachment preference migration should be recorded as v5",
+            )
+        finally:
+            conn.close()
+        migrated = BuiltInConnectionService(
+            system_root=str(system_root)
+        ).get_google_connection_for_authority(ExecutionAuthority("migration-owner"))
+        self.soft_assert_equal(
+            (
+                migrated.gmail.attachment_download_enabled if migrated else None,
+                migrated.gmail.attachment_max_mb if migrated else None,
+            ),
+            (False, 25),
+            "Existing Gmail connections should migrate with downloads disabled",
+        )
 
 
 if __name__ == "__main__":

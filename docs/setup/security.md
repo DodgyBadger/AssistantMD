@@ -200,8 +200,8 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 - Google OAuth client secrets, access tokens, refresh tokens, connected account
   identity, and pending authorization state are principal-owned and encrypted
   in `system/secrets.db` and scoped to a named Google connection. Google client
-  IDs, display names, default selection, and Gmail result limits are non-secret
-  principal-owned connection metadata.
+  IDs, display names, default selection, and Gmail capability preferences and
+  limits are non-secret principal-owned connection metadata.
 - Gmail tools are absent unless the active principal has the required scope.
   Treat every email header, body, attachment descriptor, and downloaded file as
   untrusted external data. Bounded PDF attachments may be written to a

@@ -2305,6 +2305,9 @@ async function saveModelRow(rowKey) {
         setValue('search_max_results', connection?.gmail?.search_max_results ?? 100);
         setValue('message_max_characters', connection?.gmail?.message_max_characters ?? 50000);
         setValue('thread_max_messages', connection?.gmail?.thread_max_messages ?? 25);
+        setValue('attachment_max_mb', connection?.gmail?.attachment_max_mb ?? 25);
+        const attachmentDownloadInput = form.elements.namedItem('attachment_download_enabled');
+        if (attachmentDownloadInput instanceof HTMLInputElement) attachmentDownloadInput.checked = connection?.gmail?.attachment_download_enabled ?? false;
         const defaultInput = form.elements.namedItem('is_default');
         if (defaultInput instanceof HTMLInputElement) {
             defaultInput.checked = connection?.is_default || (!connection && state.googleConnections.length === 0);
@@ -2369,6 +2372,8 @@ async function saveModelRow(rowKey) {
                 search_max_results: Number(values.get('search_max_results')),
                 message_max_characters: Number(values.get('message_max_characters')),
                 thread_max_messages: Number(values.get('thread_max_messages')),
+                attachment_download_enabled: values.get('attachment_download_enabled') === 'on',
+                attachment_max_mb: Number(values.get('attachment_max_mb')),
             },
         };
         const endpoint = creating ? 'api/system/connections/google/connections' : `api/system/connections/google/connections/${encodeURIComponent(id)}`;

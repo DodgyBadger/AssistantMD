@@ -30,6 +30,11 @@ CONNECTION_MIGRATIONS = (
         name="durable_google_connection_deletions",
         apply=lambda conn: _create_google_connection_deletions_table(conn),
     ),
+    SQLiteMigration(
+        version=5,
+        name="gmail_attachment_download_preferences",
+        apply=lambda conn: _add_gmail_attachment_download_preferences(conn),
+    ),
 )
 
 
@@ -88,6 +93,13 @@ def _create_google_connection_table(conn: sqlite3.Connection) -> None:
 
 
 def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
+    """Create the latest table directly for a fresh database."""
+    _create_google_connection_collection_table_v2(conn)
+    _add_gmail_attachment_download_preferences(conn)
+
+
+def _create_google_connection_collection_table_v2(conn: sqlite3.Connection) -> None:
+    """Create the immutable v2 multi-connection table shape."""
     existing_columns = {
         str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
     }
@@ -158,15 +170,29 @@ def _create_google_connection_deletions_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_gmail_attachment_download_preferences(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
+    }
+    if "gmail_attachment_download_enabled" not in columns:
+        conn.execute(
+            "ALTER TABLE google_connections ADD COLUMN gmail_attachment_download_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_attachment_download_enabled IN (0, 1))"
+        )
+    if "gmail_attachment_max_mb" not in columns:
+        conn.execute(
+            "ALTER TABLE google_connections ADD COLUMN gmail_attachment_max_mb INTEGER NOT NULL DEFAULT 25 CHECK (gmail_attachment_max_mb BETWEEN 1 AND 100)"
+        )
+
+
 def _migrate_google_connections_collection(conn: sqlite3.Connection) -> None:
     columns = {
         str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
     }
     if "connection_id" in columns:
-        _create_current_google_connection_table(conn)
+        _create_google_connection_collection_table_v2(conn)
         return
     conn.execute("ALTER TABLE google_connections RENAME TO google_connections_v1")
-    _create_current_google_connection_table(conn)
+    _create_google_connection_collection_table_v2(conn)
     rows = conn.execute(
         """
         SELECT owner_principal_id, client_id, gmail_search_default_results,

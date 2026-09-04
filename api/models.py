@@ -1777,6 +1777,8 @@ class GmailConnectionPreferencesRequest(BaseModel):
     search_max_results: int = Field(100, ge=1, le=500)
     message_max_characters: int = Field(50_000, ge=1, le=250_000)
     thread_max_messages: int = Field(25, ge=1, le=100)
+    attachment_download_enabled: bool = False
+    attachment_max_mb: int = Field(25, ge=1, le=100)
 
 
 class GoogleConnectionUpdateRequest(BaseModel):
@@ -1793,6 +1795,8 @@ class GoogleConnectionUpdateRequest(BaseModel):
             search_max_results=100,
             message_max_characters=50_000,
             thread_max_messages=25,
+            attachment_download_enabled=False,
+            attachment_max_mb=25,
         )
     )
 

@@ -1037,20 +1037,6 @@ def get_vault_upload_max_bytes_per_file() -> int:
     return get_vault_upload_max_mb_per_file() * 1024 * 1024
 
 
-def get_gmail_attachment_max_mb() -> int:
-    """Return the configured Gmail attachment download limit in MB."""
-    entry = get_general_settings().get("gmail_attachment_max_mb")
-    value = getattr(entry, "value", None) if entry is not None else None
-    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
-        return 25
-    return value
-
-
-def get_gmail_attachment_max_bytes() -> int:
-    """Return the configured Gmail attachment download limit in bytes."""
-    return get_gmail_attachment_max_mb() * 1024 * 1024
-
-
 def get_chunking_max_images_per_prompt() -> int:
     """Return max image attachments per chunked prompt."""
     entry = get_general_settings().get("chunking_max_images_per_prompt")

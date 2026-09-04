@@ -12,7 +12,6 @@ from core.connections import (
 )
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
-from core.settings import get_gmail_attachment_max_bytes
 
 from .connection import GoogleCapability, GoogleConnectionService
 from .gmail import (
@@ -71,6 +70,8 @@ class GmailResourceService:
             "connection_state": availability.connection_state,
             "account_email": status.account_email,
             "missing_scopes": list(availability.missing_scopes),
+            "attachment_download_enabled": selected.gmail.attachment_download_enabled,
+            "attachment_max_mb": selected.gmail.attachment_max_mb,
         }
 
     def list_connections(
@@ -194,10 +195,20 @@ class GmailResourceService:
         connection: str | None = None,
     ) -> GmailAttachmentDownload:
         """Authorize and download one bounded PDF attachment."""
-        selected, _preferences = self._preferences(authority, connection)
-        limit = get_gmail_attachment_max_bytes()
-        if limit <= 0:
-            raise ValueError("Gmail attachment downloads are disabled by settings.")
+        selected, preferences = self._preferences(authority, connection)
+        if not preferences.attachment_download_enabled:
+            logger.info(
+                "Gmail attachment download denied by connection policy",
+                data={
+                    "event": "gmail_attachment_download_disabled",
+                    "principal_id": authority.principal_id,
+                    "connection_id": selected.connection_id,
+                },
+            )
+            raise ValueError(
+                "Gmail attachment downloads are disabled for this connection."
+            )
+        limit = preferences.attachment_max_mb * 1024 * 1024
         logger.info(
             "Gmail attachment download started",
             data={
