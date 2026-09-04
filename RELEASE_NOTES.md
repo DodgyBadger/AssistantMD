@@ -76,6 +76,9 @@ controls.
 
 ### Misc
 
+- Reduced recurring chat prompt overhead by relying on bound tool schemas rather
+  than repeating a capability list. The default context now loads soul and
+  playbook instructions only when those files exist in the vault.
 - Consolidated the developer architecture, setup, security, tool, and decision
   documentation around the current runtime and connection model.
 - Hardened connection cleanup, cancellation, startup recovery, network policy,
@@ -129,7 +132,10 @@ controls.
 7. Open **System → Infrastructure** and confirm that encrypted secrets and the
    intended authentication and execution modes are ready. If advanced mode is
    enabled, wait for the advanced shell to report `ready`.
-8. Confirm that model-provider API keys were imported, then reconnect existing
+8. If you use the packaged default context script, refresh system scripts under
+   **System → Misc**. Save any custom changes to the existing system script
+   first; refresh installs the new explicit-only soul and playbook behavior.
+9. Confirm that model-provider API keys were imported, then reconnect existing
    OAuth accounts. Configure and test Gmail and MCP connections under **System →
    Connections**.
 

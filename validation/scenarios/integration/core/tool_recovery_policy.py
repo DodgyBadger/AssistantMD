@@ -1,4 +1,4 @@
-"""Validate tool-owned recovery metadata and lightweight capability summaries."""
+"""Validate tool-owned recovery metadata without duplicate capability summaries."""
 
 from __future__ import annotations
 
@@ -89,14 +89,7 @@ class ToolRecoveryPolicyScenario(BaseScenario):
             )
             await _assert_snapshot_retention_is_bounded()
 
-            assert "Read, list, search, and inspect frontmatter" in (
-                binding.tool_instructions
-            )
-            assert "Create, append, edit lines, replace text" in (
-                binding.tool_instructions
-            )
-            assert "Full documentation" not in binding.tool_instructions
-            assert "__virtual_docs__" not in binding.tool_instructions
+            assert binding.tool_instructions == ""
 
             replay = await _unresolved_decision(ToolRecoveryPolicy.REPLAY_SAFE)
             assert replay.strategy is ChatRecoveryStrategy.REPLAY_NO_EFFECT

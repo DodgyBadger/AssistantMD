@@ -26,7 +26,7 @@ from core.advanced_shell.stdio import (
     encode_structured_launch,
 )
 from core.chat.instructions import primary_chat_instruction_layers
-from core.constants import ADVANCED_SHELL_FLIGHT_CARD
+from core.constants import ADVANCED_SHELL_FLIGHT_CARD, REGULAR_CHAT_INSTRUCTIONS
 from core.identity import ExecutionAuthority
 from core.runtime.paths import set_bootstrap_roots
 from core.settings import AppSettings
@@ -246,6 +246,13 @@ def test_primary_chat_instruction_layers_gate_advanced_shell_exactly_once() -> N
     assert restricted == ("base", "tools")
     assert advanced == ("base", "tools", ADVANCED_SHELL_FLIGHT_CARD)
     assert advanced.count(ADVANCED_SHELL_FLIGHT_CARD) == 1
+
+
+def test_base_instructions_keep_inline_edit_guidance_conditional() -> None:
+    assert "If inline edit mode is enabled" in REGULAR_CHAT_INSTRUCTIONS
+    assert "You have access to the following capabilities" not in (
+        REGULAR_CHAT_INSTRUCTIONS
+    )
 
 
 class _RecordingLogger:

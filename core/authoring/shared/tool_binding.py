@@ -19,7 +19,6 @@ from core.settings.store import (
     get_enabled_tools_config,
 )
 from core.tools.base import BaseTool, ToolRecoveryPolicy, tool_recovery_metadata
-from core.tools.utils import get_tool_instructions
 from core.tools.web_security import wrap_web_tool_result
 from core.utils.value_parser import DirectiveValueParser
 from core.web.config import get_web_tool_strategy_requirements
@@ -173,7 +172,7 @@ def resolve_tool_binding(
         except Exception as exc:
             raise ValueError(f"Failed to load tool '{tool_name}': {exc}") from exc
 
-    tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
+    tool_instructions = ""
     if skipped_tools:
         skipped_messages = [
             f"{name} (missing {', '.join(missing)})" for name, missing in skipped_tools
@@ -226,7 +225,7 @@ def merge_tool_bindings(results: list[Any]) -> ToolBindingResult:
         if tool_specs
         else fallback_functions
     )
-    tool_instructions = get_tool_instructions(tool_functions) if tool_functions else ""
+    tool_instructions = ""
 
     if notes:
         unique_notes: list[str] = []

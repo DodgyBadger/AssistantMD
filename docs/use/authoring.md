@@ -174,7 +174,9 @@ The packaged default context script loads `AssistantMD/soul.md`,
 `AssistantMD/Skills/save_user_note.md`, and the skill catalog from
 `AssistantMD/Skills/` when those files are present. These are vault-owned
 markdown files; customize or replace the context script when you want a
-different loading policy.
+different loading policy. The default script bounds each soul, vault playbook,
+workspace README, and workspace playbook to 6,000 characters; the Save User
+Note skill controls the user-notes limit.
 
 Workflows can use `retrieve_sessions(selection="pending_or_stale_summary")` to select current-vault chat sessions that do not yet have a stored summary or whose summary is stale. It returns session metadata only; use `retrieve_history()` or `session_ops` when a workflow needs to process a specific session. Stale selection compares the current persisted history revision with the revision recorded when the summary was extracted.
 
