@@ -18,6 +18,9 @@ Completed Slice 1:
 Optional mailbox mutation slices remain unapproved and require a separate
 planning and review effort.
 
+PDF attachment download is implemented as a follow-on slice. It does not
+require a broader Gmail OAuth scope.
+
 ADR 0037 records the native connection boundary, ADR 0041 records
 generation-bound Google credential mutations, and ADR 0045 records the shared
 restart-safe application-owned OAuth flow.
@@ -405,17 +408,14 @@ Gmail service, and submit content through the existing durable ingestion job,
 activity, and vault-mutation paths.
 
 No mailbox sync database, history cursor, ingestion source URI syntax,
-attachment ingestion, automatic Markdown layout, or Gmail-specific workflow is
-part of the current slices. Those contracts should be planned with the
-ingestion subsystem when the feature is requested.
+automatic Markdown layout, or Gmail-specific workflow is part of the current
+contract. Downloads produce ordinary vault files; downstream systems remain
+independent.
 
-The intended future attachment path is a connected Gmail attachment source
-importer that performs bounded authenticated download and submits the binary to
-the existing ingestion pipeline. PDF, DOCX, presentation, image/OCR, and similar
-formats should become usable Markdown/artifacts through normal extraction and
-vault-mutation behavior, not raw chat tool payloads. Tabular formats may warrant
-a format-preserving artifact alongside or instead of Markdown; that decision is
-deferred to the attachment-ingestion plan.
+The Gmail tool can perform a bounded authenticated PDF attachment download to a
+caller-selected vault path. It returns only sanitized metadata and the created
+path. Any later import, conversion, or shell processing is a separate user- and
+agent-directed operation.
 
 ## User Interface and API Surface
 
@@ -591,6 +591,88 @@ review, unattended workflows, recovery after ambiguous network failures,
 recipient/content confirmation, and audit metadata. No send capability should
 be introduced merely because the OAuth token has a broad scope.
 
+### Slice 7: PDF attachment download
+
+Status: complete. Gmail can copy a bounded PDF attachment to an arbitrary
+vault-relative path without selecting or invoking a downstream workflow.
+
+Add `download_attachment` to the existing connection-gated `gmail` tool. Gmail
+is the cohesive user-facing capability, and its operation surface may expand
+beyond mailbox reads over time; attachment retrieval does not justify a second
+tool.
+
+The current recovery framework classifies effects per tool rather than per
+operation. Change Gmail's declared policy from `REPLAY_SAFE` to
+`VAULT_TRANSACTIONAL` when the download operation lands, matching the existing
+vault-writing boundary. A failure before the vault write has no durable effect;
+the vault mutation subsystem records and recovers the write itself. Do not
+expand the recovery framework merely for this slice.
+
+The Gmail tool has exactly one responsibility for this operation: copy the
+selected attachment into an arbitrary caller-supplied vault-relative path and
+return the resulting path. Its responsibility ends once that vault write
+succeeds. Gmail must not enqueue an ingestion job, choose a downstream
+workflow, or coordinate a transaction with another subsystem.
+
+What happens next is decided by the user and agent. They may pass the returned
+path to `content_import`, move or retain the original, or make it available to
+the advanced shell for operations such as splitting, merging, or adding pages.
+Those are independent tool calls with their own authorization and recovery
+contracts.
+
+For the initial slice:
+
+- accept an exact message ID, attachment ID, and optional Google connection
+  slug returned by the existing Gmail reader;
+- resolve the principal-owned connection through `GmailResourceService` and
+  download the attachment synchronously while the caller's execution authority
+  is available;
+- verify that the selected attachment belongs to the message, enforce a bounded
+  declared and decoded size, validate PDF media type/signature, and never return
+  attachment bytes to the model or logs;
+- add the live `gmail_attachment_max_mb` setting, defaulting to 25 MB; enforce it
+  against both declared and decoded size, and treat zero as disabling attachment
+  downloads without disabling Gmail reads;
+- require an arbitrary vault-relative destination path, validate it through the
+  existing vault boundary, write the attachment there through the vault mutation
+  subsystem, and return the path actually used; never overwrite an existing
+  file and require no collision-control parameter—if the requested name exists,
+  append an incrementing suffix before the extension (for example,
+  `report.pdf`, `report (1).pdf`, `report (2).pdf`); select and create the path
+  atomically so concurrent downloads cannot claim the same numbered version;
+- return only sanitized attachment/source metadata useful for subsequent agent
+  decisions, without treating message content or filenames as trusted input;
+- expose the operation through the existing Gmail capability and its
+  `google.gmail.read` connection requirement. The existing `gmail.readonly`
+  grant is sufficient, so no Google reconnection or scope migration is needed.
+
+Keep the transport and vault-write implementation media-type neutral even
+though the initial product contract accepts PDFs only. Adding DOCX and other
+approved attachment types later should primarily extend an allowlist and
+validation policy rather than require a new download architecture.
+
+Do not implement `SourceKind.MAIL` as a background fetch for this slice.
+Ingestion workers do not carry the submitting execution authority, and jobs do
+not persist an owner plus exact Google connection identity. A true mail-source
+worker would therefore require a job-schema migration, authority-safe credential
+lookup, connection revocation/deletion semantics, and new retry/provenance
+behavior. A completed vault download is already a durable ordinary file that
+any authorized downstream tool can consume.
+
+Validation target: extend the deterministic Gmail HTTP scenario for attachment
+ownership, base64url decoding, malformed payloads, MIME/signature mismatch,
+declared/decoded size limits, connection isolation, safe path handling, vault
+mutation behavior, overwrite/collision policy, and returned metadata. Existing
+vault-file consumers remain independently responsible for their own scenarios;
+do not couple this Gmail slice to `content_import` or advanced-shell behavior.
+Maintainers run the full validation suite.
+
+Estimated implementation effort is one-and-a-half to three focused engineering
+days, including targeted scenarios, documentation, security review, and
+cleanup. A true background `MAIL` source is a larger five-to-eight-day change.
+A graphical mailbox attachment picker is outside this estimate and would add
+API/frontend work; the candidate slice is chat- and workflow-driven.
+
 ## Security Invariants
 
 - Google credentials are encrypted, principal-owned, and hidden from generic
@@ -611,7 +693,7 @@ be introduced merely because the OAuth token has a broad scope.
 - Gmail resource models retain stable external source identity/provenance fields
   without coupling the current feature to ingestion jobs or sync state.
 - Gmail tool results expose no attachment bodies; attachment IDs remain opaque
-  connected-source handles for a future authority-checked ingestion adapter.
+  authority-checked handles used to download into the vault.
 
 ## Documentation Impact
 
@@ -644,8 +726,9 @@ real migration is introduced.
   secrets remain separately encrypted.
 - Gmail requests reuse `default_api_timeout`; Google retry behavior is a fixed,
   bounded three-attempt policy in the first iteration.
-- Gmail message/thread results expose attachment metadata only, capped at 100
-  descriptors per message; content import is deferred to the ingestion pathway.
+- Gmail message/thread results expose at most 100 attachment descriptors per
+  message. Exact PDF attachment handles can be downloaded to the vault without
+  coupling Gmail to ingestion or later processing.
 - Google OAuth/token/identity/scope handling is a reusable principal-owned
   connection boundary shared by future Google capabilities.
 - State/PKCE, pending-flow, encrypted token-storage, token-exchange, and refresh

@@ -202,9 +202,11 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
   in `system/secrets.db` and scoped to a named Google connection. Google client
   IDs, display names, default selection, and Gmail result limits are non-secret
   principal-owned connection metadata.
-- Gmail tools are read-only and are absent unless the active principal has the
-  required scope. Treat every email header and body as untrusted external data;
-  attachment bytes are not exposed to chat.
+- Gmail tools are absent unless the active principal has the required scope.
+  Treat every email header, body, attachment descriptor, and downloaded file as
+  untrusted external data. Bounded PDF attachments may be written to a
+  caller-selected vault path, but attachment bytes are never exposed to chat or
+  logs. PDF format checks do not establish that a downloaded file is safe.
 - MCP servers are trusted tool providers, not passive content sources. Enabling
   a connection permits the model to call every allowed server tool; AssistantMD
   cannot infer whether an MCP tool reads data or causes external side effects.

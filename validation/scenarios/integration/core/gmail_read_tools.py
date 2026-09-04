@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,7 @@ if __name__ == "__main__":
     set_bootstrap_roots(data_root=data_root, system_root=system_root)
 
 from core.integrations.google.gmail import GmailAPIClient, GmailError  # noqa: E402
+from core.tools.gmail import _write_numbered_attachment  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -82,8 +83,198 @@ class GmailReadToolsScenario(BaseScenario):
         )
         self.soft_assert(
             all("attachments/" not in request.url.path for request in requests),
-            "Read-only Gmail support must never download attachment bytes",
+            "Message reads must not download attachment bytes",
         )
+
+        downloaded = await client.download_attachment(
+            "message-1", "attachment-1", max_bytes=32
+        )
+        self.soft_assert_equal(
+            downloaded,
+            b"%PDF-1.7\nexample",
+            "Attachment retrieval should decode bounded base64url bytes",
+        )
+        try:
+            await client.download_attachment("message-1", "attachment-1", max_bytes=4)
+        except GmailError as exc:
+            self.soft_assert_equal(
+                exc.category,
+                "attachment_too_large",
+                "Decoded attachment size must respect the configured limit",
+            )
+        else:
+            self.soft_assert(False, "Oversized attachments should fail")
+
+        descriptor_parts = [
+            {
+                "mimeType": "application/pdf",
+                "filename": f"report-{index}.pdf",
+                "body": {"attachmentId": f"attachment-{index}", "size": 12},
+            }
+            for index in range(102)
+        ]
+        descriptor_requests: list[httpx.Request] = []
+
+        def descriptor_response(request: httpx.Request) -> httpx.Response:
+            descriptor_requests.append(request)
+            return httpx.Response(
+                200,
+                json={"payload": {"parts": descriptor_parts}},
+            )
+
+        descriptor_client = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(descriptor_response),
+            sleep=_no_sleep,
+        )
+        late_attachment = await descriptor_client.find_attachment(
+            "message-many", "attachment-101"
+        )
+        self.soft_assert_equal(
+            late_attachment.filename if late_attachment else None,
+            "report-101.pdf",
+            "Attachment lookup must not inherit the 100-descriptor presentation limit",
+        )
+        descriptor_fields = descriptor_requests[0].url.params.get("fields", "")
+        self.soft_assert(
+            "body(attachmentId,size)" in descriptor_fields
+            and "data" not in descriptor_fields,
+            "Attachment lookup should request descriptors without inline body data",
+        )
+
+        malformed_attachment = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(
+                    200, json={"size": 4, "data": "!invalid!"}
+                )
+            ),
+            sleep=_no_sleep,
+        )
+        try:
+            await malformed_attachment.download_attachment(
+                "message-1", "attachment-1", max_bytes=32
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                exc.category,
+                "provider_response",
+                "Malformed attachment base64 should be rejected",
+            )
+        else:
+            self.soft_assert(False, "Malformed attachment base64 should fail")
+
+        invalid_json = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(200, content=b"not-json")
+            ),
+            sleep=_no_sleep,
+        )
+        try:
+            await invalid_json.download_attachment(
+                "message-1", "attachment-1", max_bytes=32
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                exc.category,
+                "provider_response",
+                "Malformed attachment envelopes should be rejected",
+            )
+        else:
+            self.soft_assert(False, "Malformed attachment envelopes should fail")
+
+        declared_oversize = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(
+                    200,
+                    headers={"Content-Length": "5000"},
+                    stream=_ChunkStream([b"{}"]),
+                )
+            ),
+            sleep=_no_sleep,
+        )
+        try:
+            await declared_oversize.download_attachment(
+                "message-1", "attachment-1", max_bytes=32
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                exc.category,
+                "attachment_too_large",
+                "Oversized declared response lengths should fail before buffering",
+            )
+        else:
+            self.soft_assert(False, "Oversized declared response should fail")
+
+        streamed_oversize = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(
+                lambda _request: httpx.Response(
+                    200,
+                    stream=_ChunkStream([b"x" * 5000]),
+                )
+            ),
+            sleep=_no_sleep,
+        )
+        try:
+            await streamed_oversize.download_attachment(
+                "message-1", "attachment-1", max_bytes=32
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                exc.category,
+                "attachment_too_large",
+                "Oversized streamed chunks should fail before entering the response buffer",
+            )
+        else:
+            self.soft_assert(False, "Oversized streamed response should fail")
+
+        attachment_retry_attempts = 0
+
+        def retry_attachment(_request: httpx.Request) -> httpx.Response:
+            nonlocal attachment_retry_attempts
+            attachment_retry_attempts += 1
+            if attachment_retry_attempts == 1:
+                return httpx.Response(429, headers={"Retry-After": "0"})
+            if attachment_retry_attempts == 2:
+                return httpx.Response(503)
+            return httpx.Response(
+                200, json={"size": 16, "data": "JVBERi0xLjcKZXhhbXBsZQ"}
+            )
+
+        retrying_attachment = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(retry_attachment),
+            sleep=_no_sleep,
+        )
+        retried_download = await retrying_attachment.download_attachment(
+            "message-1", "attachment-1", max_bytes=32
+        )
+        self.soft_assert_equal(
+            (attachment_retry_attempts, retried_download),
+            (3, b"%PDF-1.7\nexample"),
+            "Bounded attachment requests should preserve Gmail retry behavior",
+        )
+
+        with tempfile.TemporaryDirectory(prefix="gmail-attachment-vault-") as root:
+            vault = Path(root)
+            first = _write_numbered_attachment(
+                vault_path=str(vault),
+                destination_path="Inbox/report.pdf",
+                content=downloaded,
+            )
+            second = _write_numbered_attachment(
+                vault_path=str(vault),
+                destination_path="Inbox/report.pdf",
+                content=downloaded,
+            )
+            self.soft_assert_equal(
+                (first, second),
+                ("Inbox/report.pdf", "Inbox/report (1).pdf"),
+                "Attachment downloads should create numbered files instead of overwriting",
+            )
 
         retry_attempts = 0
 
@@ -199,6 +390,11 @@ def _gmail_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
             return httpx.Response(200, json=_message("message-1", "thread-1"))
         if path.endswith("/messages/message-2"):
             return httpx.Response(200, json=_message("message-2", "thread-2"))
+        if path.endswith("/messages/message-1/attachments/attachment-1"):
+            return httpx.Response(
+                200,
+                json={"size": 16, "data": "JVBERi0xLjcKZXhhbXBsZQ"},
+            )
         if path.endswith("/threads/thread-1"):
             return httpx.Response(
                 200,
@@ -220,6 +416,15 @@ def _response_client(
     respond: Callable[[httpx.Request], httpx.Response],
 ) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+
+class _ChunkStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
 
 
 def _message(message_id: str, thread_id: str) -> dict[str, Any]:

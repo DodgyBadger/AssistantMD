@@ -1,0 +1,297 @@
+"""Validate the Gmail attachment service and vault-writing tool boundary."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+_direct_run_root: tempfile.TemporaryDirectory[str] | None = None
+if __name__ == "__main__":
+    from core.runtime.paths import set_bootstrap_roots
+
+    _direct_run_root = tempfile.TemporaryDirectory(prefix="assistantmd-gmail-download-")
+    direct_root = Path(_direct_run_root.name)
+    data_root = direct_root / "data"
+    system_root = direct_root / "system"
+    data_root.mkdir()
+    system_root.mkdir()
+    set_bootstrap_roots(data_root=data_root, system_root=system_root)
+
+from core.authoring.shared.tool_binding import _wrap_tool_function  # noqa: E402
+from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E402
+from core.integrations.google.gmail import GmailAttachment, GmailError  # noqa: E402
+from core.integrations.google.gmail_service import (  # noqa: E402
+    GmailAttachmentDownload,
+    GmailResourceService,
+)
+from core.tools.base import (  # noqa: E402
+    ToolRecoveryPolicy,
+    recovery_policy_from_tool_metadata,
+)
+from core.tools.gmail import Gmail  # noqa: E402
+from validation.core.base_scenario import BaseScenario  # noqa: E402
+
+_PDF = b"%PDF-1.7\nuntrusted attachment"
+_ATTACHMENT = GmailAttachment(
+    attachment_id="attachment-1",
+    filename="provider-controlled.pdf",
+    media_type="application/pdf",
+    declared_size=len(_PDF),
+    message_id="message-1",
+)
+
+
+class GmailAttachmentToolScenario(BaseScenario):
+    """Prove authorization selection, format gates, and safe vault creation."""
+
+    async def test_scenario(self) -> None:
+        authority = ExecutionAuthority("gmail-download-owner")
+        client = _AttachmentClient()
+        service = GmailResourceService(
+            connections=object(),  # type: ignore[arg-type]
+            google=object(),  # type: ignore[arg-type]
+            oauth=object(),  # type: ignore[arg-type]
+        )
+        selected = SimpleNamespace(connection_id="work-connection")
+        with (
+            patch.object(service, "_preferences", return_value=(selected, object())),
+            patch.object(service, "_client", return_value=client) as client_factory,
+            patch(
+                "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
+                return_value=1024,
+            ),
+        ):
+            downloaded = await service.download_attachment(
+                authority,
+                "message-1",
+                "attachment-1",
+                connection="work",
+            )
+        self.soft_assert_equal(
+            downloaded,
+            GmailAttachmentDownload(attachment=_ATTACHMENT, content=_PDF),
+            "The service should return bounded bytes with their selected-message descriptor",
+        )
+        client_factory.assert_called_once_with(authority, "work-connection")
+
+        await self._assert_service_rejections(service, authority)
+        await self._assert_tool_contract(authority)
+        self.soft_assert_equal(
+            Gmail.get_recovery_policy(),
+            ToolRecoveryPolicy.VAULT_TRANSACTIONAL,
+            "The Gmail tool should declare transactional vault recovery semantics",
+        )
+        bound = _wrap_tool_function(
+            Gmail.get_tool(vault_path="unused"),
+            tool_name="gmail",
+            recovery_policy=Gmail.get_recovery_policy(),
+            requires_approval=None,
+        )
+        self.soft_assert_equal(
+            recovery_policy_from_tool_metadata(bound.metadata),
+            ToolRecoveryPolicy.VAULT_TRANSACTIONAL,
+            "The bound Gmail tool should carry transactional recovery metadata",
+        )
+
+        self.assert_no_failures()
+        self.teardown_scenario()
+
+    async def _assert_service_rejections(
+        self, service: GmailResourceService, authority: ExecutionAuthority
+    ) -> None:
+        selected = SimpleNamespace(connection_id="work-connection")
+        cases = (
+            (None, 1024, "not found"),
+            (
+                GmailAttachment(
+                    attachment_id="attachment-1",
+                    filename="document.docx",
+                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    declared_size=4,
+                    message_id="message-1",
+                ),
+                1024,
+                "Only PDF",
+            ),
+            (_ATTACHMENT, 0, "disabled"),
+            (_ATTACHMENT, 4, "size limit"),
+        )
+        for attachment, limit, expected in cases:
+            client = _AttachmentClient(attachment=attachment)
+            with (
+                patch.object(
+                    service, "_preferences", return_value=(selected, object())
+                ),
+                patch.object(service, "_client", return_value=client),
+                patch(
+                    "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
+                    return_value=limit,
+                ),
+            ):
+                try:
+                    await service.download_attachment(
+                        authority, "message-1", "attachment-1", connection="work"
+                    )
+                except (ValueError, GmailError) as exc:
+                    self.soft_assert(
+                        expected.lower() in str(exc).lower(),
+                        f"Service rejection should explain {expected}",
+                    )
+                else:
+                    self.soft_assert(False, f"Service should reject {expected}")
+
+        invalid_pdf_client = _AttachmentClient(content=b"not a pdf")
+        with (
+            patch.object(service, "_preferences", return_value=(selected, object())),
+            patch.object(service, "_client", return_value=invalid_pdf_client),
+            patch(
+                "core.integrations.google.gmail_service.get_gmail_attachment_max_bytes",
+                return_value=1024,
+            ),
+        ):
+            try:
+                await service.download_attachment(
+                    authority, "message-1", "attachment-1", connection="work"
+                )
+            except ValueError as exc:
+                self.soft_assert(
+                    "valid PDF" in str(exc),
+                    "Service should reject content without a PDF signature",
+                )
+            else:
+                self.soft_assert(False, "Service should reject a false PDF payload")
+
+    async def _assert_tool_contract(self, authority: ExecutionAuthority) -> None:
+        fake_service = _AttachmentService()
+        runtime = SimpleNamespace(gmail=fake_service)
+        with tempfile.TemporaryDirectory(prefix="gmail-tool-vault-") as root:
+            tool = Gmail.get_tool(vault_path=root)
+            with (
+                use_execution_authority(authority),
+                patch("core.tools.gmail.get_runtime_context", return_value=runtime),
+            ):
+                first, second = await asyncio.gather(
+                    tool.function(
+                        operation="download_attachment",
+                        message_id="message-1",
+                        attachment_id="attachment-1",
+                        connection="work",
+                        destination_path="Inbox/report.pdf",
+                    ),
+                    tool.function(
+                        operation="download_attachment",
+                        message_id="message-1",
+                        attachment_id="attachment-1",
+                        connection="work",
+                        destination_path="Inbox/report.pdf",
+                    ),
+                )
+                payloads = [json.loads(first), json.loads(second)]
+                self.soft_assert_equal(
+                    sorted(item["path"] for item in payloads),
+                    ["Inbox/report (1).pdf", "Inbox/report.pdf"],
+                    "Concurrent requests should create distinct numbered paths",
+                )
+                self.soft_assert(
+                    all(
+                        "content" not in item and str(_PDF) not in json.dumps(item)
+                        for item in payloads
+                    ),
+                    "Tool results must not expose attachment bytes",
+                )
+                self.soft_assert_equal(
+                    fake_service.calls,
+                    [("message-1", "attachment-1", "work")] * 2,
+                    "The tool should preserve the selected account and Gmail handles",
+                )
+                for destination in (
+                    "../escape.pdf",
+                    "/absolute.pdf",
+                    "Inbox/file.docx",
+                ):
+                    try:
+                        await tool.function(
+                            operation="download_attachment",
+                            message_id="message-1",
+                            attachment_id="attachment-1",
+                            destination_path=destination,
+                        )
+                    except ValueError:
+                        pass
+                    else:
+                        self.soft_assert(False, f"Tool should reject {destination}")
+                self.soft_assert_equal(
+                    len(fake_service.calls),
+                    2,
+                    "Invalid vault paths should be rejected before Gmail download",
+                )
+
+            vaultless = Gmail.get_tool(vault_path=None)
+            with (
+                use_execution_authority(authority),
+                patch("core.tools.gmail.get_runtime_context", return_value=runtime),
+            ):
+                try:
+                    await vaultless.function(
+                        operation="download_attachment",
+                        message_id="message-1",
+                        attachment_id="attachment-1",
+                        destination_path="report.pdf",
+                    )
+                except ValueError as exc:
+                    self.soft_assert(
+                        "vault is required" in str(exc).lower(),
+                        "Vaultless downloads should fail clearly",
+                    )
+                else:
+                    self.soft_assert(False, "Vaultless attachment download should fail")
+
+
+class _AttachmentClient:
+    def __init__(
+        self,
+        *,
+        attachment: GmailAttachment | None = _ATTACHMENT,
+        content: bytes = _PDF,
+    ) -> None:
+        self.attachment = attachment
+        self.content = content
+
+    async def find_attachment(
+        self, _message_id: str, _attachment_id: str
+    ) -> GmailAttachment | None:
+        return self.attachment
+
+    async def download_attachment(
+        self, _message_id: str, _attachment_id: str, *, max_bytes: int
+    ) -> bytes:
+        if len(self.content) > max_bytes:
+            raise GmailError("too large", category="attachment_too_large")
+        return self.content
+
+
+class _AttachmentService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str | None]] = []
+
+    async def download_attachment(
+        self,
+        _authority: ExecutionAuthority,
+        message_id: str,
+        attachment_id: str,
+        *,
+        connection: str | None = None,
+    ) -> GmailAttachmentDownload:
+        self.calls.append((message_id, attachment_id, connection))
+        return GmailAttachmentDownload(attachment=_ATTACHMENT, content=_PDF)
+
+
+if __name__ == "__main__":
+    asyncio.run(GmailAttachmentToolScenario().test_scenario())

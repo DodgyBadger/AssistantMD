@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from core.connections import (
     BuiltInConnectionService,
@@ -11,12 +12,28 @@ from core.connections import (
 )
 from core.identity import ExecutionAuthority
 from core.logger import UnifiedLogger
+from core.settings import get_gmail_attachment_max_bytes
 
 from .connection import GoogleCapability, GoogleConnectionService
-from .gmail import GmailAPIClient, GmailMessage, GmailSearchResult, GmailThread
+from .gmail import (
+    GmailAPIClient,
+    GmailAttachment,
+    GmailError,
+    GmailMessage,
+    GmailSearchResult,
+    GmailThread,
+)
 from .oauth import GoogleOAuthCoordinator
 
 logger = UnifiedLogger(tag="gmail-resource")
+
+
+@dataclass(frozen=True)
+class GmailAttachmentDownload:
+    """Authorized attachment bytes plus their provider-supplied descriptor."""
+
+    attachment: GmailAttachment
+    content: bytes
 
 
 class GmailResourceService:
@@ -168,6 +185,70 @@ class GmailResourceService:
         )
         return result
 
+    async def download_attachment(
+        self,
+        authority: ExecutionAuthority,
+        message_id: str,
+        attachment_id: str,
+        *,
+        connection: str | None = None,
+    ) -> GmailAttachmentDownload:
+        """Authorize and download one bounded PDF attachment."""
+        selected, _preferences = self._preferences(authority, connection)
+        limit = get_gmail_attachment_max_bytes()
+        if limit <= 0:
+            raise ValueError("Gmail attachment downloads are disabled by settings.")
+        logger.info(
+            "Gmail attachment download started",
+            data={
+                "event": "gmail_attachment_download_started",
+                "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
+                "max_bytes": limit,
+            },
+        )
+        try:
+            client = self._client(authority, selected.connection_id)
+            attachment = await client.find_attachment(message_id, attachment_id)
+            if attachment is None:
+                raise ValueError(
+                    "Gmail attachment was not found on the selected message."
+                )
+            if attachment.media_type != "application/pdf":
+                raise ValueError("Only PDF Gmail attachments are currently supported.")
+            if (
+                attachment.declared_size is not None
+                and attachment.declared_size > limit
+            ):
+                raise GmailError(
+                    "Gmail attachment exceeds the configured size limit.",
+                    category="attachment_too_large",
+                )
+            content = await client.download_attachment(
+                attachment.message_id, attachment.attachment_id, max_bytes=limit
+            )
+            if not content.startswith(b"%PDF-"):
+                raise ValueError("Gmail attachment content is not a valid PDF.")
+        except Exception as exc:
+            _log_failure(
+                "download_attachment",
+                authority,
+                exc,
+                connection_id=selected.connection_id,
+            )
+            raise
+        logger.info(
+            "Gmail attachment download completed",
+            data={
+                "event": "gmail_attachment_download_completed",
+                "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
+                "content_bytes": len(content),
+                "declared_bytes": attachment.declared_size,
+            },
+        )
+        return GmailAttachmentDownload(attachment=attachment, content=content)
+
     def _preferences(
         self, authority: ExecutionAuthority, selector: str | None
     ) -> tuple[GoogleConnection, GmailPreferences]:
@@ -215,13 +296,20 @@ class GmailResourceService:
         )
 
 
-def _log_failure(operation: str, authority: ExecutionAuthority, exc: Exception) -> None:
+def _log_failure(
+    operation: str,
+    authority: ExecutionAuthority,
+    exc: Exception,
+    *,
+    connection_id: str | None = None,
+) -> None:
     logger.warning(
         "Gmail resource operation failed",
         data={
             "event": "gmail_resource_failed",
             "principal_id": authority.principal_id,
             "operation": operation,
+            "connection_id": connection_id,
             "error_type": type(exc).__name__,
             "category": getattr(exc, "category", "unknown"),
             "retryable": bool(getattr(exc, "retryable", False)),

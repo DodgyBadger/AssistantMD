@@ -48,16 +48,19 @@ controls.
   prefer AssistantMD's encrypted connection credentials over credentials stored
   directly in the shell.
 
-### Search and read Gmail from chat
+### Search Gmail and save PDF attachments
 
 - Connect one or more Google accounts under **System → Connections**, choose a
   default account, and let chat search mail or read relevant messages and
   complete threads.
-- Gmail access is read-only in this release: AssistantMD cannot send, modify,
+- Gmail mailbox access is read-only in this release: AssistantMD cannot send, modify,
   move, or delete your mail.
 - Search results stay compact until chat requests a specific message or thread.
-  Attachment names, types, sizes, and identifiers are available, but attachment
-  contents are not downloaded or processed yet.
+  Chat can save a PDF attachment to any vault-relative path for later import,
+  organization, or processing with other available tools. Existing files are
+  preserved automatically with numbered filenames.
+- The configurable Gmail attachment limit defaults to 25 MB; attachment bytes
+  are written directly to the vault and never placed in chat context.
 - Gmail tools appear only when a configured account is ready, and each account's
   OAuth grant remains separate.
 

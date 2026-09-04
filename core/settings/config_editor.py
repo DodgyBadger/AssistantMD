@@ -75,6 +75,10 @@ def _validate_general_setting_value(
         raise SettingsError(
             "Managed advanced-shell stdio launch concurrency must be between 1 and 32."
         )
+    if name == "gmail_attachment_max_mb" and not (
+        isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+    ):
+        raise SettingsError("Gmail attachment limit must be between 0 and 100 MB.")
 
     delay_names = {
         "model_stream_retry_base_delay_seconds",

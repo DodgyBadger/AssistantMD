@@ -317,6 +317,11 @@ settings:
     description: "Maximum response body size in megabytes for one URL ingestion request. The 25 MB default accommodates typical research PDFs; lower it for tighter memory limits."
     category: "Import"
     restart_required: false
+  gmail_attachment_max_mb:
+    value: 25
+    description: "Maximum decoded size in megabytes for one Gmail attachment downloaded into a vault. 0 disables attachment downloads."
+    category: "Files"
+    restart_required: false
   content_import_max_batch_size:
     value: 20
     description: "Maximum number of sources or job ids accepted by one content_import tool call."
@@ -479,7 +484,7 @@ providers:
 tools:
   gmail:
     module: core.tools.gmail
-    description: "Read the connected Gmail account using bounded search, message, and thread operations"
+    description: "Read connected Gmail accounts and save bounded PDF attachments into the vault"
     requires_secrets: []
     requires_connection: google.gmail.read
     user_editable: false
