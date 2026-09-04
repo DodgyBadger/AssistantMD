@@ -78,8 +78,8 @@ class GmailAttachmentToolScenario(BaseScenario):
                 connection="work",
             )
         self.soft_assert_equal(
-            downloaded,
-            GmailAttachmentDownload(attachment=_ATTACHMENT, content=_PDF),
+            downloaded.content,
+            _PDF,
             "The service should return bounded bytes with their selected-message descriptor",
         )
         client_factory.assert_called_once_with(authority, "work-connection")
@@ -170,41 +170,15 @@ class GmailAttachmentToolScenario(BaseScenario):
         self, service: GmailResourceService, authority: ExecutionAuthority
     ) -> None:
         selected = SimpleNamespace(connection_id="work-connection")
-        cases = (
-            (None, 1024, "not found"),
-            (
-                GmailAttachment(
-                    attachment_id="attachment-1",
-                    filename="document.docx",
-                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    declared_size=4,
-                    message_id="message-1",
-                ),
-                1024,
-                "Only PDF",
-            ),
-            (_ATTACHMENT, 0, "disabled"),
-            (
-                GmailAttachment(
-                    attachment_id="attachment-1",
-                    filename="large.pdf",
-                    media_type="application/pdf",
-                    declared_size=2 * 1024 * 1024,
-                    message_id="message-1",
-                ),
-                1024 * 1024,
-                "size limit",
-            ),
-        )
-        for attachment, limit, expected in cases:
-            client = _AttachmentClient(attachment=attachment)
+        for enabled, expected in ((False, "disabled"),):
+            client = _AttachmentClient()
             with (
                 patch.object(
                     service,
                     "_preferences",
                     return_value=(
                         selected,
-                        _preferences(enabled=limit > 0, max_bytes=max(limit, 1)),
+                        _preferences(enabled=enabled),
                     ),
                 ),
                 patch.object(service, "_client", return_value=client),

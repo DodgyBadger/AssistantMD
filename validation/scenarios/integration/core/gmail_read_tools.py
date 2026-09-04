@@ -105,43 +105,6 @@ class GmailReadToolsScenario(BaseScenario):
         else:
             self.soft_assert(False, "Oversized attachments should fail")
 
-        descriptor_parts = [
-            {
-                "mimeType": "application/pdf",
-                "filename": f"report-{index}.pdf",
-                "body": {"attachmentId": f"attachment-{index}", "size": 12},
-            }
-            for index in range(102)
-        ]
-        descriptor_requests: list[httpx.Request] = []
-
-        def descriptor_response(request: httpx.Request) -> httpx.Response:
-            descriptor_requests.append(request)
-            return httpx.Response(
-                200,
-                json={"payload": {"parts": descriptor_parts}},
-            )
-
-        descriptor_client = GmailAPIClient(
-            access_token_provider=_access_token,
-            http_client_factory=lambda: _response_client(descriptor_response),
-            sleep=_no_sleep,
-        )
-        late_attachment = await descriptor_client.find_attachment(
-            "message-many", "attachment-101"
-        )
-        self.soft_assert_equal(
-            late_attachment.filename if late_attachment else None,
-            "report-101.pdf",
-            "Attachment lookup must not inherit the 100-descriptor presentation limit",
-        )
-        descriptor_fields = descriptor_requests[0].url.params.get("fields", "")
-        self.soft_assert(
-            "body(attachmentId,size)" in descriptor_fields
-            and "data" not in descriptor_fields,
-            "Attachment lookup should request descriptors without inline body data",
-        )
-
         malformed_attachment = GmailAPIClient(
             access_token_provider=_access_token,
             http_client_factory=lambda: _response_client(

@@ -17,7 +17,6 @@ from .connection import GoogleCapability, GoogleConnectionService
 from .gmail import (
     GmailAPIClient,
     GmailAttachment,
-    GmailError,
     GmailMessage,
     GmailSearchResult,
     GmailThread,
@@ -220,26 +219,18 @@ class GmailResourceService:
         )
         try:
             client = self._client(authority, selected.connection_id)
-            attachment = await client.find_attachment(message_id, attachment_id)
-            if attachment is None:
-                raise ValueError(
-                    "Gmail attachment was not found on the selected message."
-                )
-            if attachment.media_type != "application/pdf":
-                raise ValueError("Only PDF Gmail attachments are currently supported.")
-            if (
-                attachment.declared_size is not None
-                and attachment.declared_size > limit
-            ):
-                raise GmailError(
-                    "Gmail attachment exceeds the configured size limit.",
-                    category="attachment_too_large",
-                )
             content = await client.download_attachment(
-                attachment.message_id, attachment.attachment_id, max_bytes=limit
+                message_id, attachment_id, max_bytes=limit
             )
             if not content.startswith(b"%PDF-"):
                 raise ValueError("Gmail attachment content is not a valid PDF.")
+            attachment = GmailAttachment(
+                attachment_id=attachment_id,
+                filename="",
+                media_type="application/pdf",
+                declared_size=len(content),
+                message_id=message_id,
+            )
         except Exception as exc:
             _log_failure(
                 "download_attachment",

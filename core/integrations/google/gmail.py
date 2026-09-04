@@ -21,8 +21,6 @@ from core.settings import get_default_api_timeout
 GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1/users/me"
 GMAIL_REQUEST_ATTEMPTS = 3
 GMAIL_ATTACHMENT_LIMIT = 100
-GMAIL_ATTACHMENT_DESCRIPTOR_RESPONSE_LIMIT = 2 * 1024 * 1024
-GMAIL_ATTACHMENT_DESCRIPTOR_DEPTH = 32
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _RETRYABLE_403_REASONS = frozenset(
     {"rateLimitExceeded", "userRateLimitExceeded", "backendError"}
@@ -226,32 +224,6 @@ class GmailAPIClient:
                 category="attachment_too_large",
             )
         return content
-
-    async def find_attachment(
-        self, message_id: str, attachment_id: str
-    ) -> GmailAttachment | None:
-        """Find an attachment without applying the chat descriptor limit."""
-        clean_message_id = _resource_id(message_id, "message")
-        clean_attachment_id = _resource_id(attachment_id, "attachment")
-        payload = await self._bounded_request(
-            "GET",
-            f"/messages/{clean_message_id}",
-            params={
-                "format": "full",
-                "fields": _attachment_descriptor_fields(),
-            },
-            max_response_bytes=GMAIL_ATTACHMENT_DESCRIPTOR_RESPONSE_LIMIT,
-            too_large_message="Gmail message attachment metadata is too large.",
-            too_large_category="provider_response",
-        )
-        root = payload.get("payload")
-        if isinstance(root, dict):
-            return _find_attachment_part(
-                root,
-                message_id=clean_message_id,
-                attachment_id=clean_attachment_id,
-            )
-        return None
 
     async def _bounded_request(
         self,
@@ -480,44 +452,6 @@ def _walk_parts(
                     html_parts=html_parts,
                     attachments=attachments,
                 )
-
-
-def _find_attachment_part(
-    root: dict[str, Any],
-    *,
-    message_id: str,
-    attachment_id: str,
-) -> GmailAttachment | None:
-    """Find one descriptor without decoding bodies or accumulating sibling parts."""
-    pending = [root]
-    while pending:
-        part = pending.pop()
-        raw_body = part.get("body")
-        body: dict[str, Any] = raw_body if isinstance(raw_body, dict) else {}
-        if str(body.get("attachmentId") or "") == attachment_id:
-            return GmailAttachment(
-                attachment_id=attachment_id,
-                filename=str(part.get("filename") or ""),
-                media_type=str(
-                    part.get("mimeType") or "application/octet-stream"
-                ).lower(),
-                declared_size=_integer(body.get("size")),
-                message_id=message_id,
-            )
-        children = part.get("parts")
-        if isinstance(children, list):
-            pending.extend(
-                child for child in reversed(children) if isinstance(child, dict)
-            )
-    return None
-
-
-def _attachment_descriptor_fields() -> str:
-    """Build a bounded-depth partial-response selector that excludes body data."""
-    selector = "filename,mimeType,body(attachmentId,size)"
-    for _ in range(GMAIL_ATTACHMENT_DESCRIPTOR_DEPTH):
-        selector = f"filename,mimeType,body(attachmentId,size),parts({selector})"
-    return f"payload({selector})"
 
 
 def _headers(value: object) -> dict[str, str]:
