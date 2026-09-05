@@ -240,6 +240,7 @@
             refresh: icon.REFRESH_ICON_SVG,
             save: icon.SAVE_ICON_SVG,
             trash: icon.TRASH_ICON_SVG,
+            alert: icon.ALERT_ICON_SVG,
             x: icon.X_ICON_SVG,
             circleX: icon.CIRCLE_X_ICON_SVG,
             check: icon.CHECK_ICON_SVG,
@@ -2282,10 +2283,14 @@ async function saveModelRow(rowKey) {
         details.className = 'rounded-lg border border-border-primary bg-app-card shadow-sm';
         details.open = !connection;
         details.dataset.googleId = connection?.connection_id || 'draft';
+        const draftAuthorizationRequired = Boolean(connection?.gmail_available && connection?.gmail?.draft_creation_enabled && !connection?.gmail_draft_available);
         const gmailReady = Boolean(connection?.gmail_available && (!connection?.gmail?.draft_creation_enabled || connection?.gmail_draft_available));
         const summary = document.createElement('summary');
         summary.className = 'collapsible-summary connection-card-summary';
-        const statusIcon = connection ? `<span class="connection-card-status-icon ${gmailReady ? 'state-success' : 'text-txt-secondary'}" title="${gmailReady ? 'Connected' : 'Setup required'}">${iconSvg(gmailReady ? 'check' : 'x')}</span>` : '';
+        const statusIconTone = gmailReady ? 'state-success' : (draftAuthorizationRequired ? 'state-warning' : 'text-txt-secondary');
+        const statusIconTitle = gmailReady ? 'Connected' : (draftAuthorizationRequired ? 'Reauthorization required for Gmail drafts' : 'Setup required');
+        const statusIconName = gmailReady ? 'check' : (draftAuthorizationRequired ? 'alert' : 'x');
+        const statusIcon = connection ? `<span class="connection-card-status-icon ${statusIconTone}" title="${statusIconTitle}">${iconSvg(statusIconName)}</span>` : '';
         summary.innerHTML = `<div class="summary-text"><span class="summary-title">${escapeHtml(connection?.display_name || 'New Google connection')}</span>${statusIcon}</div><svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
         const form = template.cloneNode(true);
         form.removeAttribute('id');
@@ -2329,7 +2334,8 @@ async function saveModelRow(rowKey) {
         const account = connection?.account_email ? ` as ${connection.account_email}` : '';
         const status = form.querySelector('#google-connection-status');
         if (status) status.removeAttribute('id');
-        setStatus(status, connection ? `${labels[connection.state] || connection.state}${account}.` : 'Enter Google OAuth client settings.', gmailReady ? 'success' : 'info');
+        const statusTone = gmailReady ? 'success' : (draftAuthorizationRequired ? 'warning' : 'info');
+        setStatus(status, connection ? `${labels[connection.state] || connection.state}${account}.` : 'Enter Google OAuth client settings.', statusTone);
         const feedback = form.querySelector('#google-connection-feedback');
         if (feedback) feedback.removeAttribute('id');
         const authorize = form.querySelector('[data-google-action="authorize"]');

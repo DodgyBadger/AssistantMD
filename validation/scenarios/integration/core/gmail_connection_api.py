@@ -124,6 +124,11 @@ class GmailConnectionAPIScenario(BaseScenario):
             and "const gmailReady = Boolean" in script,
             "The UI should require persisted policy and share full capability readiness",
         )
+        self.soft_assert(
+            "draftAuthorizationRequired ? 'state-warning'" in script
+            and "Reauthorization required for Gmail drafts" in script,
+            "Missing compose authorization should have a visible warning state",
+        )
         self.assert_no_failures()
         self.teardown_scenario()
 
