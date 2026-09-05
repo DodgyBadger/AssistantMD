@@ -35,6 +35,7 @@ from core.connections import (  # noqa: E402
 )
 from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E402
 from core.integrations.google import (  # noqa: E402
+    GMAIL_COMPOSE_SCOPE,
     GMAIL_READONLY_SCOPE,
     GOOGLE_IDENTITY_SCOPES,
     GmailResourceService,
@@ -161,9 +162,17 @@ class GmailPrincipalConnectionScenario(BaseScenario):
         )
         google.save_token_state(owner, partial_token)
         partial = google.capability_availability(owner, GoogleCapability.GMAIL_READ)
+        partial_compose = google.capability_availability(
+            owner, GoogleCapability.GMAIL_COMPOSE
+        )
         self.soft_assert(
             not partial.available and partial.missing_scopes == (GMAIL_READONLY_SCOPE,),
             "A connected Google account without Gmail scope must not expose Gmail",
+        )
+        self.soft_assert(
+            not partial_compose.available
+            and GMAIL_COMPOSE_SCOPE in partial_compose.missing_scopes,
+            "A connection without compose scope must not expose draft creation",
         )
 
         ready_token = GoogleOAuthTokenState(
@@ -177,6 +186,9 @@ class GmailPrincipalConnectionScenario(BaseScenario):
         google.save_token_state(owner, ready_token)
         status = google.status(owner)
         ready = google.capability_availability(owner, GoogleCapability.GMAIL_READ)
+        read_only_compose = google.capability_availability(
+            owner, GoogleCapability.GMAIL_COMPOSE
+        )
         self.soft_assert_equal(
             (
                 status.state,
@@ -187,6 +199,11 @@ class GmailPrincipalConnectionScenario(BaseScenario):
             ),
             ("ready", True, "owner@example.com", True, True),
             "A complete scoped grant should make Gmail available",
+        )
+        self.soft_assert(
+            not read_only_compose.available
+            and read_only_compose.missing_scopes == (GMAIL_COMPOSE_SCOPE,),
+            "Read-only Gmail authorization must remain insufficient for drafts",
         )
         with (
             use_execution_authority(owner),

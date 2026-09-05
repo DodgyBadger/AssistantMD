@@ -207,6 +207,14 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
   untrusted external data. Bounded PDF attachments may be written to a
   caller-selected vault path, but attachment bytes are never exposed to chat or
   logs. PDF format checks do not establish that a downloaded file is safe.
+  Draft creation is a separate per-connection opt-in and requires Google's
+  compose scope. Although that scope also permits sending, AssistantMD exposes
+  recipient-free draft creation only and never retries a draft request whose
+  outcome is uncertain. Draft content remains in the chat/session record but is
+  excluded from operational logs.
+  Disabling the capability blocks AssistantMD draft creation but does not revoke
+  a compose scope already granted by Google; disconnect/reconnect or revoke the
+  Google authorization to remove provider-side authority.
 - MCP servers are trusted tool providers, not passive content sources. Enabling
   a connection permits the model to call every allowed server tool; AssistantMD
   cannot infer whether an MCP tool reads data or causes external side effects.

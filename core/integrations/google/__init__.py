@@ -1,6 +1,7 @@
 """Principal-owned Google connection domain."""
 
 from .connection import (
+    GMAIL_COMPOSE_SCOPE,
     GMAIL_READONLY_SCOPE,
     GOOGLE_IDENTITY_SCOPES,
     GoogleCapability,
@@ -15,6 +16,7 @@ from .connection import (
 from .gmail import (
     GmailAPIClient,
     GmailAttachment,
+    GmailDraft,
     GmailError,
     GmailMessage,
     GmailSearchResult,
@@ -24,6 +26,7 @@ from .gmail_service import GmailResourceService
 from .oauth import GoogleOAuthCoordinator, GoogleOAuthError, GoogleOAuthStart
 
 __all__ = [
+    "GMAIL_COMPOSE_SCOPE",
     "GMAIL_READONLY_SCOPE",
     "GOOGLE_IDENTITY_SCOPES",
     "GoogleCapability",
@@ -39,6 +42,7 @@ __all__ = [
     "GoogleOAuthStart",
     "GmailAPIClient",
     "GmailAttachment",
+    "GmailDraft",
     "GmailError",
     "GmailMessage",
     "GmailSearchResult",

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import sys
 import tempfile
 from collections.abc import AsyncIterator, Callable
+from email import policy
+from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +62,141 @@ class GmailReadToolsScenario(BaseScenario):
             ("Known message", "Hello world!", True),
             "Message reads should prefer and bound normalized plain text",
         )
+
+        draft = await client.create_draft(
+            subject="Review notes",
+            body="Plain draft body",
+        )
+        self.soft_assert_equal(
+            (draft.draft_id, draft.message_id, draft.thread_id),
+            ("draft-1", "draft-message-1", "draft-thread-1"),
+            "Draft creation should return only stable Gmail handles",
+        )
+        draft_request = next(
+            request for request in requests if request.url.path.endswith("/drafts")
+        )
+        encoded_raw = json.loads(draft_request.content)["message"]["raw"]
+        raw = base64.urlsafe_b64decode(encoded_raw + "=" * (-len(encoded_raw) % 4))
+        parsed = BytesParser(policy=policy.default).parsebytes(raw)
+        self.soft_assert_equal(
+            (parsed["To"], parsed["Subject"], parsed.get_content().strip()),
+            (None, "Review notes", "Plain draft body"),
+            "Draft creation should produce recipient-free bounded plain-text MIME",
+        )
+
+        draft_attempts = 0
+
+        def ambiguous_draft(_request: httpx.Request) -> httpx.Response:
+            nonlocal draft_attempts
+            draft_attempts += 1
+            return httpx.Response(503)
+
+        ambiguous_client = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(ambiguous_draft),
+            sleep=_no_sleep,
+        )
+        try:
+            await ambiguous_client.create_draft(
+                subject="Potential duplicate",
+                body="Inspect Gmail before trying again.",
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                (draft_attempts, exc.category, exc.retryable),
+                (1, "mutation_outcome_unknown", False),
+                "Ambiguous draft mutations must not retry automatically",
+            )
+        else:
+            self.soft_assert(False, "Ambiguous draft creation should fail explicitly")
+
+        request_timeout_attempts = 0
+
+        def request_timeout(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_timeout_attempts
+            request_timeout_attempts += 1
+            return httpx.Response(408)
+
+        timed_out_client = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(request_timeout),
+            sleep=_no_sleep,
+        )
+        try:
+            await timed_out_client.create_draft(subject="Created?", body="Body")
+        except GmailError as exc:
+            self.soft_assert_equal(
+                (request_timeout_attempts, exc.category, exc.retryable),
+                (1, "mutation_outcome_unknown", False),
+                "Post-dispatch request timeouts must report an unknown outcome",
+            )
+        else:
+            self.soft_assert(False, "Timed-out draft creation should fail explicitly")
+
+        definite_draft_attempts = 0
+
+        def rejected_draft(_request: httpx.Request) -> httpx.Response:
+            nonlocal definite_draft_attempts
+            definite_draft_attempts += 1
+            return httpx.Response(400, json={"error": {"message": "invalid"}})
+
+        rejected_client = GmailAPIClient(
+            access_token_provider=_access_token,
+            http_client_factory=lambda: _response_client(rejected_draft),
+            sleep=_no_sleep,
+        )
+        try:
+            await rejected_client.create_draft(
+                subject="Rejected",
+                body="Body",
+            )
+        except GmailError as exc:
+            self.soft_assert_equal(
+                (definite_draft_attempts, exc.category, exc.retryable),
+                (1, "validation", False),
+                "Definite draft validation failures should remain non-retryable",
+            )
+        else:
+            self.soft_assert(False, "Rejected draft creation should fail explicitly")
+
+        for invalid_subject in (
+            "Injected\r\nBcc: hidden@example.com",
+            "Control\x00character",
+        ):
+            try:
+                await client.create_draft(
+                    subject=invalid_subject,
+                    body="Body",
+                )
+            except ValueError:
+                pass
+            else:
+                self.soft_assert(False, "Draft headers should reject invalid input")
+
+        for response in (
+            httpx.Response(200, content=b"not-json"),
+            httpx.Response(200, content=b"x" * (64 * 1024 + 1)),
+            httpx.Response(200, json={"message": {"id": "message-only"}}),
+        ):
+            malformed_success = GmailAPIClient(
+                access_token_provider=_access_token,
+                http_client_factory=lambda response=response: _response_client(
+                    lambda _request: response
+                ),
+                sleep=_no_sleep,
+            )
+            try:
+                await malformed_success.create_draft(subject="Created?", body="Body")
+            except GmailError as exc:
+                self.soft_assert_equal(
+                    (exc.category, exc.retryable),
+                    ("mutation_outcome_unknown", False),
+                    "Malformed successful responses must report an unknown outcome",
+                )
+            else:
+                self.soft_assert(
+                    False, "Malformed draft success should fail explicitly"
+                )
         self.soft_assert_equal(
             (
                 len(message.attachments),
@@ -347,6 +486,17 @@ def _gmail_client(requests: list[httpx.Request]) -> httpx.AsyncClient:
                     ],
                     "resultSizeEstimate": 2,
                     "nextPageToken": "next-page",
+                },
+            )
+        if path.endswith("/drafts") and request.method == "POST":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "draft-1",
+                    "message": {
+                        "id": "draft-message-1",
+                        "threadId": "draft-thread-1",
+                    },
                 },
             )
         if path.endswith("/messages/message-1"):

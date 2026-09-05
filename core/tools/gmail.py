@@ -25,7 +25,7 @@ _UNTRUSTED_NOTICE = (
 
 
 class Gmail(BaseTool):
-    """Expose bounded Gmail reads and attachment downloads."""
+    """Expose bounded Gmail reads, attachment downloads, and draft creation."""
 
     @classmethod
     def get_tool(cls, vault_path: str | None = None) -> Tool:
@@ -39,10 +39,12 @@ class Gmail(BaseTool):
             attachment_id: str = "",
             connection: str = "",
             destination_path: str = "",
+            subject: str = "",
+            body: str = "",
         ) -> str:
-            """Read Gmail or download a PDF without changing mailbox state.
+            """Read Gmail, download a PDF, or create an unsent draft if enabled.
 
-            :param operation: connections, status, search, get_message, get_thread, or download_attachment
+            :param operation: connections, status, search, get_message, get_thread, download_attachment, or create_draft
             :param query: Gmail search syntax for the search operation
             :param max_results: Optional requested search result count
             :param message_id: Message handle returned by search
@@ -50,6 +52,8 @@ class Gmail(BaseTool):
             :param attachment_id: Attachment handle returned by get_message
             :param connection: Optional Google connection slug; omitted uses the default
             :param destination_path: Vault-relative PDF path for download_attachment
+            :param subject: Subject for create_draft
+            :param body: Plain-text body for create_draft
             """
             runtime = get_runtime_context()
             service = runtime.gmail
@@ -106,10 +110,19 @@ class Gmail(BaseTool):
                     "path": created_path,
                     "attachment": asdict(downloaded.attachment),
                 }
+            elif normalized == "create_draft":
+                payload = asdict(
+                    await service.create_draft(
+                        authority,
+                        subject=subject,
+                        body=body,
+                        connection=connection or None,
+                    )
+                )
             else:
                 raise ValueError(
                     "Gmail operation must be connections, status, search, get_message, "
-                    "get_thread, or download_attachment."
+                    "get_thread, download_attachment, or create_draft."
                 )
             return json.dumps(
                 {"untrusted_content_notice": _UNTRUSTED_NOTICE, **payload},
@@ -121,7 +134,8 @@ class Gmail(BaseTool):
             gmail,
             name="gmail",
             description=(
-                "Read configured Gmail accounts and save PDF attachments to the vault. "
+                "Read configured Gmail accounts, save PDF attachments, and create "
+                "unsent drafts when enabled. "
                 "List connections when account choice is unclear; omitted connection "
                 "uses the default. Search first, then retrieve a message or thread by "
                 "ID. Read "
@@ -131,7 +145,7 @@ class Gmail(BaseTool):
 
     @classmethod
     def get_recovery_policy(cls) -> ToolRecoveryPolicy:
-        return ToolRecoveryPolicy.VAULT_TRANSACTIONAL
+        return ToolRecoveryPolicy.MANUAL_REQUIRED
 
 
 def _write_numbered_attachment(

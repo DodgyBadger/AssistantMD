@@ -89,8 +89,8 @@ class GmailAttachmentToolScenario(BaseScenario):
         await self._assert_tool_contract(authority)
         self.soft_assert_equal(
             Gmail.get_recovery_policy(),
-            ToolRecoveryPolicy.VAULT_TRANSACTIONAL,
-            "The Gmail tool should declare transactional vault recovery semantics",
+            ToolRecoveryPolicy.MANUAL_REQUIRED,
+            "The Gmail tool should require inspection after unresolved remote mutations",
         )
         bound = _wrap_tool_function(
             Gmail.get_tool(vault_path="unused"),
@@ -100,8 +100,8 @@ class GmailAttachmentToolScenario(BaseScenario):
         )
         self.soft_assert_equal(
             recovery_policy_from_tool_metadata(bound.metadata),
-            ToolRecoveryPolicy.VAULT_TRANSACTIONAL,
-            "The bound Gmail tool should carry transactional recovery metadata",
+            ToolRecoveryPolicy.MANUAL_REQUIRED,
+            "The bound Gmail tool should carry manual recovery metadata",
         )
 
         self.assert_no_failures()

@@ -13,6 +13,8 @@ GMAIL_THREAD_MAX_MESSAGES = 25
 GMAIL_THREAD_MESSAGES_CEILING = 100
 GMAIL_ATTACHMENT_MAX_MB = 25
 GMAIL_ATTACHMENT_MAX_MB_CEILING = 100
+GMAIL_DRAFT_MAX_CHARACTERS = 50_000
+GMAIL_DRAFT_CHARACTERS_CEILING = 250_000
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,8 @@ class GmailPreferences:
     thread_max_messages: int = GMAIL_THREAD_MAX_MESSAGES
     attachment_download_enabled: bool = False
     attachment_max_mb: int = GMAIL_ATTACHMENT_MAX_MB
+    draft_creation_enabled: bool = False
+    draft_max_characters: int = GMAIL_DRAFT_MAX_CHARACTERS
 
     def __post_init__(self) -> None:
         if not 1 <= self.search_default_results <= GMAIL_SEARCH_RESULTS_CEILING:
@@ -47,6 +51,14 @@ class GmailPreferences:
             or not 1 <= self.attachment_max_mb <= GMAIL_ATTACHMENT_MAX_MB_CEILING
         ):
             raise ValueError("Gmail attachment limit must be between 1 and 100 MB.")
+        if not isinstance(self.draft_creation_enabled, bool):
+            raise ValueError("Gmail draft creation enabled must be boolean.")
+        if (
+            not isinstance(self.draft_max_characters, int)
+            or isinstance(self.draft_max_characters, bool)
+            or not 1 <= self.draft_max_characters <= GMAIL_DRAFT_CHARACTERS_CEILING
+        ):
+            raise ValueError("Gmail draft characters must be between 1 and 250000.")
 
 
 @dataclass(frozen=True)

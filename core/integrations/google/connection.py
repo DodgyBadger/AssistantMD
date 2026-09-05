@@ -23,6 +23,7 @@ GOOGLE_IDENTITY_SCOPES = (
     "https://www.googleapis.com/auth/userinfo.email",
 )
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GOOGLE_OAUTH_NAMESPACE = "oauth.google"
 _CLIENT_SECRET_KEY = "client-secret"
 _TOKEN_STATE_KEY = "token-state"
@@ -44,11 +45,14 @@ class GoogleCapability(StrEnum):
     """Built-in capabilities backed by one Google connection."""
 
     GMAIL_READ = "gmail.read"
+    GMAIL_COMPOSE = "gmail.compose"
 
     @property
     def required_scopes(self) -> frozenset[str]:
         if self is GoogleCapability.GMAIL_READ:
             return frozenset((*GOOGLE_IDENTITY_SCOPES, GMAIL_READONLY_SCOPE))
+        if self is GoogleCapability.GMAIL_COMPOSE:
+            return frozenset((*GOOGLE_IDENTITY_SCOPES, GMAIL_COMPOSE_SCOPE))
         raise AssertionError(f"Unhandled Google capability: {self}")
 
 

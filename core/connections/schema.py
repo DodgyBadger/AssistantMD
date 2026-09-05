@@ -35,6 +35,11 @@ CONNECTION_MIGRATIONS = (
         name="gmail_attachment_download_preferences",
         apply=lambda conn: _add_gmail_attachment_download_preferences(conn),
     ),
+    SQLiteMigration(
+        version=6,
+        name="gmail_draft_creation_preferences",
+        apply=lambda conn: _add_gmail_draft_creation_preferences(conn),
+    ),
 )
 
 
@@ -96,6 +101,7 @@ def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
     """Create the latest table directly for a fresh database."""
     _create_google_connection_collection_table_v2(conn)
     _add_gmail_attachment_download_preferences(conn)
+    _add_gmail_draft_creation_preferences(conn)
 
 
 def _create_google_connection_collection_table_v2(conn: sqlite3.Connection) -> None:
@@ -181,6 +187,20 @@ def _add_gmail_attachment_download_preferences(conn: sqlite3.Connection) -> None
     if "gmail_attachment_max_mb" not in columns:
         conn.execute(
             "ALTER TABLE google_connections ADD COLUMN gmail_attachment_max_mb INTEGER NOT NULL DEFAULT 25 CHECK (gmail_attachment_max_mb BETWEEN 1 AND 100)"
+        )
+
+
+def _add_gmail_draft_creation_preferences(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
+    }
+    if "gmail_draft_creation_enabled" not in columns:
+        conn.execute(
+            "ALTER TABLE google_connections ADD COLUMN gmail_draft_creation_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_draft_creation_enabled IN (0, 1))"
+        )
+    if "gmail_draft_max_characters" not in columns:
+        conn.execute(
+            "ALTER TABLE google_connections ADD COLUMN gmail_draft_max_characters INTEGER NOT NULL DEFAULT 50000 CHECK (gmail_draft_max_characters BETWEEN 1 AND 250000)"
         )
 
 

@@ -17,6 +17,7 @@ from .connection import GoogleCapability, GoogleConnectionService
 from .gmail import (
     GmailAPIClient,
     GmailAttachment,
+    GmailDraft,
     GmailMessage,
     GmailSearchResult,
     GmailThread,
@@ -59,6 +60,9 @@ class GmailResourceService:
         availability = self._google.capability_availability(
             authority, GoogleCapability.GMAIL_READ, selected.connection_id
         )
+        compose = self._google.capability_availability(
+            authority, GoogleCapability.GMAIL_COMPOSE, selected.connection_id
+        )
         return {
             "provider": "google",
             "connection": selected.slug,
@@ -71,6 +75,11 @@ class GmailResourceService:
             "missing_scopes": list(availability.missing_scopes),
             "attachment_download_enabled": selected.gmail.attachment_download_enabled,
             "attachment_max_mb": selected.gmail.attachment_max_mb,
+            "draft_creation_enabled": selected.gmail.draft_creation_enabled,
+            "draft_creation_available": (
+                selected.gmail.draft_creation_enabled and compose.available
+            ),
+            "draft_missing_scopes": list(compose.missing_scopes),
         }
 
     def list_connections(
@@ -250,6 +259,61 @@ class GmailResourceService:
             },
         )
         return GmailAttachmentDownload(attachment=attachment, content=content)
+
+    async def create_draft(
+        self,
+        authority: ExecutionAuthority,
+        *,
+        subject: str,
+        body: str,
+        connection: str | None = None,
+    ) -> GmailDraft:
+        """Create one bounded plain-text draft under explicit connection policy."""
+        selected = self._resolve_connection(authority, connection)
+        preferences = selected.gmail
+        if not preferences.draft_creation_enabled:
+            raise ValueError("Gmail draft creation is disabled for this connection.")
+        availability = self._google.capability_availability(
+            authority, GoogleCapability.GMAIL_COMPOSE, selected.connection_id
+        )
+        if not availability.available:
+            raise ValueError(
+                "Gmail draft creation requires adding Gmail compose permission."
+            )
+        if len(body) > preferences.draft_max_characters:
+            raise ValueError(
+                "Gmail draft body exceeds this connection's character limit."
+            )
+        if not body:
+            raise ValueError("Gmail draft body cannot be empty.")
+        logger.info(
+            "Gmail draft creation started",
+            data={
+                "event": "gmail_draft_creation_started",
+                "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
+                "body_characters": len(body),
+            },
+        )
+        try:
+            draft = await self._client(authority, selected.connection_id).create_draft(
+                subject=subject, body=body
+            )
+        except Exception as exc:
+            _log_failure(
+                "create_draft", authority, exc, connection_id=selected.connection_id
+            )
+            raise
+        logger.info(
+            "Gmail draft creation completed",
+            data={
+                "event": "gmail_draft_creation_completed",
+                "principal_id": authority.principal_id,
+                "connection_id": selected.connection_id,
+                "body_characters": len(body),
+            },
+        )
+        return draft
 
     def _preferences(
         self, authority: ExecutionAuthority, selector: str | None

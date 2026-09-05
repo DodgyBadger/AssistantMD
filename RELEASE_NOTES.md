@@ -4,9 +4,9 @@
 
 v0.8.0 makes AssistantMD extensible beyond its built-in tools. It can connect to
 remote MCP services, run local stdio MCP providers in an optional advanced Linux
-environment, and search and read Gmail through a first-class connection. This
-release also adds encrypted credential storage and explicit deployment access
-controls.
+environment, and search and read Gmail or create unsent drafts through a
+first-class connection. This release also adds encrypted credential storage and
+explicit deployment access controls.
 
 ### Connect tools and services with MCP
 
@@ -48,13 +48,14 @@ controls.
   prefer AssistantMD's encrypted connection credentials over credentials stored
   directly in the shell.
 
-### Search Gmail and save PDF attachments
+### Search Gmail, save PDF attachments, and create drafts
 
 - Connect one or more Google accounts under **System → Connections**, choose a
   default account, and let chat search mail or read relevant messages and
   complete threads.
-- Gmail mailbox access is read-only in this release: AssistantMD cannot send, modify,
-  move, or delete your mail.
+- AssistantMD can create recipient-free, unsent plain-text drafts when
+  explicitly enabled on a Gmail connection. The user adds recipients, reviews,
+  and sends in Gmail; AssistantMD cannot send, modify, move, or delete mail.
 - Search results stay compact until chat requests a specific message or thread.
   Chat can save a PDF attachment to any vault-relative path for later import,
   organization, or processing with other available tools. Existing files are
@@ -64,6 +65,9 @@ controls.
   to the vault and never placed in chat context.
 - Gmail tools appear only when a configured account is ready, and each account's
   OAuth grant remains separate.
+- Draft creation is disabled by default, has a configurable body limit, and
+  requires reauthorizing the opted-in connection. Ambiguous creation failures
+  are never retried automatically, avoiding accidental duplicate drafts.
 
 ### Protect connections and application access
 
@@ -141,8 +145,9 @@ controls.
    first; refresh installs the new explicit-only soul and playbook behavior.
 9. Confirm that model-provider API keys were imported, then reconnect existing
    OAuth accounts. Configure and test Gmail and MCP connections under **System →
-   Connections**. Attachment downloads are disabled on each Gmail connection
-   until you explicitly enable them and choose a size limit.
+   Connections**. Attachment downloads and draft creation are disabled on each
+   Gmail connection until you explicitly enable them. Enabling draft creation
+   requires reauthorizing that connection for Gmail compose permission.
 
 On first startup, AssistantMD imports legacy non-OAuth secrets into encrypted
 storage and preserves the old file at

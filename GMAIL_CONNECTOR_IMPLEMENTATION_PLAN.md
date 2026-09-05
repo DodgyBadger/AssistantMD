@@ -50,9 +50,9 @@ The initial useful release will let the local user:
    thread content; and
 6. disconnect the account and remove its stored tokens.
 
-The initial release will not send mail, create drafts, delete mail, download
-attachments, manage filters, or mutate labels/read state. Those capabilities
-require separate review and slices below.
+The initial release will not send mail, delete mail, manage filters, or mutate
+labels/read state. Recipient-free draft creation and bounded PDF attachment
+downloads are included through the separately reviewed slices below.
 
 Users who do not configure Gmail will see no Gmail tool in chat, delegate,
 authoring, or workflow tool availability. Gmail remains an optional integration
@@ -583,13 +583,111 @@ reconnection UX, non-replay-safe recovery metadata where appropriate, and a
 clear workflow mutation policy. Archive, trash, delete, and filter management
 remain out of scope unless separately approved.
 
-### Slice 6: Optional drafting and sending (separate approval)
+### Slice 6: Draft creation
 
-Treat draft creation and sending as distinct capabilities. Prefer a draft-only
-milestone before sending. Sending requires explicit product policy for chat
-review, unattended workflows, recovery after ambiguous network failures,
-recipient/content confirmation, and audit metadata. No send capability should
-be introduced merely because the OAuth token has a broad scope.
+Status: implementation complete; targeted validation passed.
+
+Add draft creation as an opt-in, per-connection Gmail capability. Drafting and
+sending remain distinct AssistantMD capabilities even though Google's
+`gmail.compose` scope technically authorizes both. AssistantMD must never bind
+or call a send endpoint merely because a connection has that OAuth grant.
+
+The first drafting slice creates new, plain-text drafts only. It does not send,
+update, delete, or attach files; choose arbitrary `From` identities; or construct
+threaded replies. Those extensions require their own concrete contracts.
+
+#### Recovery and transaction boundary
+
+Draft creation is a remote mailbox mutation, not a vault transaction. Gmail's
+successful `drafts.create` response supplies the durable draft ID, but a network
+failure can occur after Google commits the draft and before AssistantMD receives
+that response. Gmail documents no idempotency-key contract for draft creation.
+Automatic POST retry could therefore create duplicates, while vault rollback
+cannot undo the remote effect.
+
+Change the single Gmail tool's recovery policy to `MANUAL_REQUIRED` when draft
+creation lands. The current recovery ledger records an unresolved effect by
+tool name, not operation, and bound-tool recovery metadata is static. Do not
+misclassify remote draft mutation as `VAULT_TRANSACTIONAL`, automatically replay
+it, persist draft bodies in recovery metadata, or expand the recovery framework
+solely for this slice.
+
+This conservative policy matters only when a Gmail tool call is unresolved
+during a retryable run failure. Completed draft calls already have settled tool
+returns and resumable snapshots. An ambiguous draft-create failure must tell the
+user that the draft may exist and recommend inspecting Gmail drafts before
+retrying. Ordinary provider validation errors are definite failures. Mutating
+requests use one network attempt; they do not inherit the read client's 429/5xx
+retry loop.
+
+A future operation-aware recovery design may record a non-sensitive operation
+class alongside each tool effect, but must not persist recipients, subjects, or
+bodies. A future reconciliation design may generate an RFC Message-ID and query
+drafts by `rfc822msgid`, but search consistency is not a sufficient transaction
+guarantee for the initial contract.
+
+#### Capability and OAuth contract
+
+- Add `draft_creation_enabled` to each Gmail connection, default `false` for
+  new and migrated connections. Gmail read and attachment settings remain
+  independent.
+- Add `GMAIL_COMPOSE` to the Google capability model, requiring identity scopes
+  plus `https://www.googleapis.com/auth/gmail.compose`.
+- When draft creation is enabled, the connection UI reports whether compose
+  permission is present and offers the existing incremental authorization flow
+  to add it. Enabling the preference alone never implies that the scope exists.
+- Runtime draft creation requires both the selected connection's opt-in and its
+  usable compose grant. Resolve both against the same principal-owned connection
+  ID before constructing the Gmail client.
+- The Gmail tool remains available for reading when compose permission is
+  absent. `status` and `connections` expose sanitized draft opt-in, readiness,
+  and missing-scope information so chat can inspect capability without failing
+  a mutation.
+
+#### Draft creation contract
+
+Add `create_draft` to the existing `gmail` tool with bounded inputs:
+
+- required `subject` and plain-text `body`;
+- no recipient fields; the user adds recipients while reviewing in Gmail;
+- strict rejection of control characters in the subject header;
+- a per-connection `draft_max_characters` preference with a fixed internal
+  ceiling; and
+- no caller-supplied `From`, raw MIME, HTML, attachments, or send behavior in
+  this slice.
+
+Build standards-compliant RFC 2822 MIME with Python's email package and submit
+base64url content to `POST /users/me/drafts`. Treat all composed fields as
+sensitive: do not put subject, body, raw MIME, or provider response content in
+operational logs. Subject and body remain in the ordinary persisted chat
+tool-call record, consistent with other chat and Gmail content. Return only
+sanitized connection identity, draft ID, message ID, and thread ID. Log
+start/completion/failure with principal, connection, stable category, and body
+character count only.
+
+The tool description and virtual documentation must state that creation only
+saves an unsent Gmail draft. Connection opt-in authorizes chat and owning
+workflows to create drafts without per-call approval; it never authorizes send.
+
+Validation target: deterministic Gmail HTTP scenarios for exact MIME shape,
+base64url encoding, header validation, input bounds, selected-account
+isolation, opt-in plus scope gating, incremental scope requests, sanitized
+results/logs, definite 4xx failure, and ambiguous timeout/5xx behavior with no
+automatic POST replay. Extend recovery-policy coverage to prove unresolved
+Gmail effects select manual recovery and never vault rollback/restart. Add a
+populated prior-schema migration scenario proving existing connections default
+draft creation to disabled.
+
+Manual checkpoint: incrementally authorize a disposable Gmail account, create a
+recognizable draft from chat and an owning workflow, verify it remains unsent,
+and confirm a read-only connection still works without compose permission.
+
+### Future sending capability (separate approval)
+
+Sending requires a separate per-connection opt-in even when `gmail.compose` is
+already granted. It also requires explicit policy for recipient/content review,
+unattended workflows, ambiguous delivery, duplicate-send prevention, and audit
+metadata. No send capability should be introduced as part of draft creation.
 
 ### Slice 7: PDF attachment download
 
@@ -601,11 +699,12 @@ is the cohesive user-facing capability, and its operation surface may expand
 beyond mailbox reads over time; attachment retrieval does not justify a second
 tool.
 
-The current recovery framework classifies effects per tool rather than per
-operation. Change Gmail's declared policy from `REPLAY_SAFE` to
-`VAULT_TRANSACTIONAL` when the download operation lands, matching the existing
-vault-writing boundary. A failure before the vault write has no durable effect;
-the vault mutation subsystem records and recovers the write itself. Do not
+At the attachment-only stage, Gmail's declared policy changed from
+`REPLAY_SAFE` to `VAULT_TRANSACTIONAL`, matching the vault-writing boundary.
+Draft creation subsequently required the tool-wide `MANUAL_REQUIRED` policy
+documented in Slice 6 because recovery metadata is not operation-specific. A
+failure before the vault write has no durable effect; the vault mutation
+subsystem records the write itself. Do not
 expand the recovery framework merely for this slice.
 
 The Gmail tool has exactly one responsibility for this operation: copy the
@@ -684,7 +783,8 @@ API/frontend work; the candidate slice is chat- and workflow-driven.
   authorization code, client secret, raw email body, or sensitive OAuth URL.
 - A missing or locked secrets database disables Google connection configuration
   and Gmail use without modifying encrypted records.
-- Read-only tool code cannot call mutating Gmail endpoints.
+- Gmail mutation is limited to explicitly enabled draft creation; no send,
+  mailbox-state, or deletion operation is exposed.
 - Email content is treated as untrusted data, never as tool or system
   instructions.
 - Scheduled workflows use only their owning principal's Google connection.
@@ -716,8 +816,8 @@ real migration is introduced.
 
 ## Resolved Review Decisions
 
-- The first milestone is strictly read-only and requests
-  `gmail.readonly` plus identity scopes.
+- Gmail reads request `gmail.readonly` plus identity scopes. Connections with
+  draft creation enabled additionally request `gmail.compose`.
 - The Google client ID is visible/editable after save; the client secret remains
   write-only.
 - A configured `ASSISTANTMD_PUBLIC_URL` is required to start Google OAuth.
@@ -740,8 +840,8 @@ real migration is introduced.
 
 Using a disposable Gmail account is optional manual-testing guidance, not a
 product or implementation decision. Multi-account selection follows ADR 0038.
-Sending, deletion, and unattended mailbox mutation remain outside the approved
-read-only milestone.
+Sending, deletion, and other mailbox mutation remain outside the approved
+capabilities.
 
 ## Delivery and Validation Gates
 
@@ -756,8 +856,8 @@ full-suite results before merge.
 
 ## Next Phase
 
-Request the maintainer-owned full validation results for the completed
-read-only milestone and proceed through review preparation and cleanup before
-merge. ADR 0037 records the native connection-backed integration boundary.
-Any mailbox mutation capability requires separate approval and a new or updated
-root implementation plan.
+Request the maintainer-owned full validation results and proceed through review
+preparation and cleanup before merge. ADR 0037 records the native
+connection-backed integration boundary. Sending or any additional mailbox
+mutation requires separate approval and a new or updated root implementation
+plan.

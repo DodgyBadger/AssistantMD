@@ -23,6 +23,7 @@ if __name__ == "__main__":
     set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
 
 from api.models import GmailConnectionPreferencesRequest  # noqa: E402
+from api.services.google_connections import _google_oauth_capabilities  # noqa: E402
 from core.connections import (  # noqa: E402
     BuiltInConnectionService,
     GmailPreferences,
@@ -36,6 +37,7 @@ from core.connections.schema import (  # noqa: E402
 )
 from core.database_migrations import apply_sqlite_migrations  # noqa: E402
 from core.identity import ExecutionAuthority  # noqa: E402
+from core.integrations.google import GoogleCapability  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
@@ -77,6 +79,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 created.gmail.thread_max_messages,
                 created.gmail.attachment_download_enabled,
                 created.gmail.attachment_max_mb,
+                created.gmail.draft_creation_enabled,
+                created.gmail.draft_max_characters,
                 created.config_version,
                 created.oauth_generation,
                 created.display_name,
@@ -91,6 +95,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                 25,
                 False,
                 25,
+                False,
+                50_000,
                 1,
                 1,
                 "Google",
@@ -116,6 +122,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     thread_max_messages=30,
                     attachment_download_enabled=True,
                     attachment_max_mb=40,
+                    draft_creation_enabled=True,
+                    draft_max_characters=80_000,
                 ),
             ),
         )
@@ -135,6 +143,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     thread_max_messages=30,
                     attachment_download_enabled=True,
                     attachment_max_mb=40,
+                    draft_creation_enabled=True,
+                    draft_max_characters=80_000,
                 ),
                 2,
                 2,
@@ -153,6 +163,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
                     thread_max_messages=30,
                     attachment_download_enabled=True,
                     attachment_max_mb=60,
+                    draft_creation_enabled=True,
+                    draft_max_characters=90_000,
                 ),
             ),
         )
@@ -160,6 +172,20 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             (preferences_only.config_version, preferences_only.oauth_generation),
             (3, 2),
             "Non-identity edits should advance config version without invalidating OAuth",
+        )
+        self.soft_assert_equal(
+            (
+                _google_oauth_capabilities(created),
+                _google_oauth_capabilities(preferences_only),
+            ),
+            (
+                (GoogleCapability.GMAIL_READ,),
+                (
+                    GoogleCapability.GMAIL_READ,
+                    GoogleCapability.GMAIL_COMPOSE,
+                ),
+            ),
+            "OAuth scope selection should follow persisted draft capability policy",
         )
 
         secondary = service.create_google_connection_for_authority(
@@ -241,6 +267,9 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             {"attachment_max_mb": 101},
             {"attachment_max_mb": True},
             {"attachment_download_enabled": 1},
+            {"draft_creation_enabled": 1},
+            {"draft_max_characters": 0},
+            {"draft_max_characters": 250_001},
         )
         for invalid in invalid_cases:
             try:
@@ -306,8 +335,8 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             ]
             self.soft_assert_equal(
                 versions,
-                [1, 2, 3, 4, 5],
-                "The attachment preference migration should be recorded as v5",
+                [1, 2, 3, 4, 5, 6],
+                "Gmail capability preference migrations should be recorded",
             )
         finally:
             conn.close()
@@ -318,9 +347,11 @@ class BuiltInConnectionConfigurationScenario(BaseScenario):
             (
                 migrated.gmail.attachment_download_enabled if migrated else None,
                 migrated.gmail.attachment_max_mb if migrated else None,
+                migrated.gmail.draft_creation_enabled if migrated else None,
+                migrated.gmail.draft_max_characters if migrated else None,
             ),
-            (False, 25),
-            "Existing Gmail connections should migrate with downloads disabled",
+            (False, 25, False, 50_000),
+            "Existing Gmail connections should migrate with mutations disabled",
         )
 
 

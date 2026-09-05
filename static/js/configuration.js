@@ -2282,9 +2282,10 @@ async function saveModelRow(rowKey) {
         details.className = 'rounded-lg border border-border-primary bg-app-card shadow-sm';
         details.open = !connection;
         details.dataset.googleId = connection?.connection_id || 'draft';
+        const gmailReady = Boolean(connection?.gmail_available && (!connection?.gmail?.draft_creation_enabled || connection?.gmail_draft_available));
         const summary = document.createElement('summary');
         summary.className = 'collapsible-summary connection-card-summary';
-        const statusIcon = connection ? `<span class="connection-card-status-icon ${connection.gmail_available ? 'state-success' : 'text-txt-secondary'}" title="${connection.gmail_available ? 'Connected' : 'Setup required'}">${iconSvg(connection.gmail_available ? 'check' : 'x')}</span>` : '';
+        const statusIcon = connection ? `<span class="connection-card-status-icon ${gmailReady ? 'state-success' : 'text-txt-secondary'}" title="${gmailReady ? 'Connected' : 'Setup required'}">${iconSvg(gmailReady ? 'check' : 'x')}</span>` : '';
         summary.innerHTML = `<div class="summary-text"><span class="summary-title">${escapeHtml(connection?.display_name || 'New Google connection')}</span>${statusIcon}</div><svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
         const form = template.cloneNode(true);
         form.removeAttribute('id');
@@ -2306,8 +2307,11 @@ async function saveModelRow(rowKey) {
         setValue('message_max_characters', connection?.gmail?.message_max_characters ?? 50000);
         setValue('thread_max_messages', connection?.gmail?.thread_max_messages ?? 25);
         setValue('attachment_max_mb', connection?.gmail?.attachment_max_mb ?? 25);
+        setValue('draft_max_characters', connection?.gmail?.draft_max_characters ?? 50000);
         const attachmentDownloadInput = form.elements.namedItem('attachment_download_enabled');
         if (attachmentDownloadInput instanceof HTMLInputElement) attachmentDownloadInput.checked = connection?.gmail?.attachment_download_enabled ?? false;
+        const draftCreationInput = form.elements.namedItem('draft_creation_enabled');
+        if (draftCreationInput instanceof HTMLInputElement) draftCreationInput.checked = connection?.gmail?.draft_creation_enabled ?? false;
         const defaultInput = form.elements.namedItem('is_default');
         if (defaultInput instanceof HTMLInputElement) {
             defaultInput.checked = connection?.is_default || (!connection && state.googleConnections.length === 0);
@@ -2315,13 +2319,17 @@ async function saveModelRow(rowKey) {
         const labels = {
             not_configured: connection?.client_id ? 'Client secret required' : 'Not configured',
             authorization_required: 'Ready to authorize',
-            ready: connection?.gmail_available ? 'Connected; Gmail tools available' : 'Connected; Gmail scope required',
+            ready: connection?.gmail_available
+                ? (connection?.gmail?.draft_creation_enabled && !connection?.gmail_draft_available
+                    ? 'Connected; reauthorize to enable Gmail drafts'
+                    : 'Connected; Gmail tools available')
+                : 'Connected; Gmail scope required',
             reconnect_required: 'Reconnect required',
         };
         const account = connection?.account_email ? ` as ${connection.account_email}` : '';
         const status = form.querySelector('#google-connection-status');
         if (status) status.removeAttribute('id');
-        setStatus(status, connection ? `${labels[connection.state] || connection.state}${account}.` : 'Enter Google OAuth client settings.', connection?.gmail_available ? 'success' : 'info');
+        setStatus(status, connection ? `${labels[connection.state] || connection.state}${account}.` : 'Enter Google OAuth client settings.', gmailReady ? 'success' : 'info');
         const feedback = form.querySelector('#google-connection-feedback');
         if (feedback) feedback.removeAttribute('id');
         const authorize = form.querySelector('[data-google-action="authorize"]');
@@ -2374,6 +2382,8 @@ async function saveModelRow(rowKey) {
                 thread_max_messages: Number(values.get('thread_max_messages')),
                 attachment_download_enabled: values.get('attachment_download_enabled') === 'on',
                 attachment_max_mb: Number(values.get('attachment_max_mb')),
+                draft_creation_enabled: values.get('draft_creation_enabled') === 'on',
+                draft_max_characters: Number(values.get('draft_max_characters')),
             },
         };
         const endpoint = creating ? 'api/system/connections/google/connections' : `api/system/connections/google/connections/${encodeURIComponent(id)}`;
@@ -2404,6 +2414,12 @@ async function saveModelRow(rowKey) {
         const id = form.dataset.googleId;
         const action = button.dataset.googleAction;
         if (action === 'authorize') {
+            const savedConnection = state.googleConnections.find((item) => item.connection_id === id);
+            const draftEnabled = form.elements.namedItem('draft_creation_enabled')?.checked ?? false;
+            if (draftEnabled !== (savedConnection?.gmail?.draft_creation_enabled ?? false)) {
+                setStatus(elements.connectionsFeedback, 'Save the Gmail capability changes before authorizing Google.', 'warning');
+                return;
+            }
             await startGoogleOAuth(form, id);
         } else if (action === 'complete') {
             const redirect = form.elements.namedItem('oauth_redirect')?.value || '';

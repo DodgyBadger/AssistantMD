@@ -1779,6 +1779,8 @@ class GmailConnectionPreferencesRequest(BaseModel):
     thread_max_messages: int = Field(25, ge=1, le=100)
     attachment_download_enabled: bool = False
     attachment_max_mb: int = Field(25, ge=1, le=100)
+    draft_creation_enabled: bool = False
+    draft_max_characters: int = Field(50_000, ge=1, le=250_000)
 
 
 class GoogleConnectionUpdateRequest(BaseModel):
@@ -1797,6 +1799,8 @@ class GoogleConnectionUpdateRequest(BaseModel):
             thread_max_messages=25,
             attachment_download_enabled=False,
             attachment_max_mb=25,
+            draft_creation_enabled=False,
+            draft_max_characters=50_000,
         )
     )
 
@@ -1829,6 +1833,8 @@ class GoogleConnectionResponse(BaseModel):
     gmail: GmailConnectionPreferencesRequest
     gmail_available: bool
     gmail_missing_scopes: list[str] = Field(default_factory=list)
+    gmail_draft_available: bool
+    gmail_draft_missing_scopes: list[str] = Field(default_factory=list)
     oauth_redirect_uri: str | None
 
 

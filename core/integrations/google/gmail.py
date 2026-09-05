@@ -1,4 +1,4 @@
-"""Bounded, read-only Gmail API resources independent from LLM formatting."""
+"""Bounded Gmail API resources independent from LLM formatting."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from email.header import decode_header, make_header
+from email.message import EmailMessage
+from email.policy import SMTP
 from html.parser import HTMLParser
 from typing import Any
 
@@ -86,8 +88,15 @@ class GmailThread:
     truncated: bool
 
 
+@dataclass(frozen=True)
+class GmailDraft:
+    draft_id: str
+    message_id: str
+    thread_id: str
+
+
 class GmailAPIClient:
-    """Issue authenticated Gmail read requests and normalize provider payloads."""
+    """Issue authenticated bounded Gmail requests and normalize provider payloads."""
 
     def __init__(
         self,
@@ -225,19 +234,70 @@ class GmailAPIClient:
             )
         return content
 
+    async def create_draft(
+        self,
+        *,
+        subject: str,
+        body: str,
+    ) -> GmailDraft:
+        """Create one plain-text draft without retrying an ambiguous mutation."""
+        clean_subject = _validated_header(subject, "subject", required=True)
+        if not isinstance(body, str) or not body:
+            raise ValueError("Gmail draft body cannot be empty.")
+        message = EmailMessage()
+        message["Subject"] = clean_subject
+        message.set_content(body)
+        raw = base64.urlsafe_b64encode(message.as_bytes(policy=SMTP)).decode("ascii")
+        try:
+            payload = await self._bounded_request(
+                "POST",
+                "/drafts",
+                params={},
+                json_body={"message": {"raw": raw.rstrip("=")}},
+                attempts=1,
+                max_response_bytes=64 * 1024,
+                too_large_message="Gmail returned an oversized draft response.",
+                too_large_category="provider_response",
+            )
+            draft_id = _resource_id(str(payload.get("id") or ""), "draft")
+            raw_message = payload.get("message")
+            draft_message = raw_message if isinstance(raw_message, dict) else {}
+            message_id = _resource_id(str(draft_message.get("id") or ""), "message")
+            thread_id = _resource_id(str(draft_message.get("threadId") or ""), "thread")
+        except (GmailError, ValueError) as exc:
+            definite_categories = {
+                "authentication",
+                "permission",
+                "validation",
+                "not_found",
+            }
+            if isinstance(exc, ValueError) or exc.category not in definite_categories:
+                raise GmailError(
+                    "Gmail draft creation outcome is unknown. Inspect Gmail drafts before retrying.",
+                    category="mutation_outcome_unknown",
+                ) from exc
+            raise
+        return GmailDraft(
+            draft_id=draft_id,
+            message_id=message_id,
+            thread_id=thread_id,
+        )
+
     async def _bounded_request(
         self,
         method: str,
         path: str,
         *,
         params: dict[str, str],
+        json_body: dict[str, Any] | None = None,
+        attempts: int = GMAIL_REQUEST_ATTEMPTS,
         max_response_bytes: int,
         too_large_message: str,
         too_large_category: str,
     ) -> dict[str, Any]:
-        """Read a JSON response without allowing unbounded buffering."""
+        """Receive a JSON response without allowing unbounded buffering."""
         last_error: Exception | None = None
-        for attempt in range(GMAIL_REQUEST_ATTEMPTS):
+        for attempt in range(attempts):
             token = await self._access_token_provider()
             try:
                 async with self._http_client_factory() as client:
@@ -245,6 +305,7 @@ class GmailAPIClient:
                         method,
                         f"{GMAIL_API_ROOT}{path}",
                         params=params,
+                        json=json_body,
                         headers={"Authorization": f"Bearer {token}"},
                     ) as response:
                         declared = response.headers.get("content-length")
@@ -274,7 +335,7 @@ class GmailAPIClient:
                         response_request = response.request
             except httpx.RequestError as exc:
                 last_error = exc
-                if attempt + 1 < GMAIL_REQUEST_ATTEMPTS:
+                if attempt + 1 < attempts:
                     await self._sleep(_retry_delay(attempt, None))
                     continue
                 raise GmailError(
@@ -291,7 +352,7 @@ class GmailAPIClient:
                 request=response_request,
             )
             retryable = _response_retryable(bounded_response)
-            if retryable and attempt + 1 < GMAIL_REQUEST_ATTEMPTS:
+            if retryable and attempt + 1 < attempts:
                 await self._sleep(_retry_delay(attempt, bounded_response))
                 continue
             raise _gmail_response_error(bounded_response, retryable=retryable)
@@ -461,6 +522,17 @@ def _headers(value: object) -> dict[str, str]:
             if isinstance(item, dict) and item.get("name") and item.get("value"):
                 result[str(item["name"]).lower()] = str(item["value"])
     return result
+
+
+def _validated_header(value: str, name: str, *, required: bool = False) -> str:
+    clean = str(value or "").strip()
+    if required and not clean:
+        raise ValueError(f"Gmail draft {name} cannot be empty.")
+    if any(ord(character) < 32 or ord(character) == 127 for character in clean):
+        raise ValueError(f"Gmail draft {name} contains an invalid control character.")
+    if len(clean) > 998:
+        raise ValueError(f"Gmail draft {name} is too long.")
+    return clean
 
 
 def _decode_body(value: str) -> str:

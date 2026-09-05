@@ -131,8 +131,9 @@ class BuiltInConnectionService:
                         client_id, is_default, gmail_search_default_results,
                         gmail_search_max_results, gmail_message_max_characters,
                         gmail_thread_max_messages, gmail_attachment_download_enabled,
-                        gmail_attachment_max_mb
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        gmail_attachment_max_mb, gmail_draft_creation_enabled,
+                        gmail_draft_max_characters
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         authority.principal_id,
@@ -147,6 +148,8 @@ class BuiltInConnectionService:
                         request.gmail.thread_max_messages,
                         int(request.gmail.attachment_download_enabled),
                         request.gmail.attachment_max_mb,
+                        int(request.gmail.draft_creation_enabled),
+                        request.gmail.draft_max_characters,
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -189,7 +192,8 @@ class BuiltInConnectionService:
                         is_default = ?, gmail_search_default_results = ?,
                         gmail_search_max_results = ?, gmail_message_max_characters = ?,
                         gmail_thread_max_messages = ?, gmail_attachment_download_enabled = ?,
-                        gmail_attachment_max_mb = ?, config_version = config_version + 1,
+                        gmail_attachment_max_mb = ?, gmail_draft_creation_enabled = ?,
+                        gmail_draft_max_characters = ?, config_version = config_version + 1,
                         oauth_generation = oauth_generation +
                             CASE WHEN client_id <> ? THEN 1 ELSE 0 END,
                         updated_at = CURRENT_TIMESTAMP
@@ -205,6 +209,8 @@ class BuiltInConnectionService:
                         request.gmail.thread_max_messages,
                         int(request.gmail.attachment_download_enabled),
                         request.gmail.attachment_max_mb,
+                        int(request.gmail.draft_creation_enabled),
+                        request.gmail.draft_max_characters,
                         request.client_id,
                         authority.principal_id,
                         existing.connection_id,
@@ -423,6 +429,8 @@ def _row_to_google_connection(row: sqlite3.Row) -> GoogleConnection:
             thread_max_messages=int(row["gmail_thread_max_messages"]),
             attachment_download_enabled=bool(row["gmail_attachment_download_enabled"]),
             attachment_max_mb=int(row["gmail_attachment_max_mb"]),
+            draft_creation_enabled=bool(row["gmail_draft_creation_enabled"]),
+            draft_max_characters=int(row["gmail_draft_max_characters"]),
         ),
         config_version=int(row["config_version"]),
         oauth_generation=int(row["oauth_generation"]),

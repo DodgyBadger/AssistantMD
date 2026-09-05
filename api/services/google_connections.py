@@ -8,6 +8,7 @@ from dataclasses import asdict
 
 from core.connections import (
     GmailPreferences,
+    GoogleConnection,
     GoogleConnectionCreate,
     GoogleConnectionUpdate,
 )
@@ -90,6 +91,9 @@ def _google_connection_response(
     availability = service.capability_availability(
         authority, GoogleCapability.GMAIL_READ, connection_id
     )
+    draft_availability = service.capability_availability(
+        authority, GoogleCapability.GMAIL_COMPOSE, connection_id
+    )
     gmail = connection.gmail if connection is not None else GmailPreferences()
     return GoogleConnectionResponse.model_validate(
         {
@@ -98,6 +102,10 @@ def _google_connection_response(
             "gmail": asdict(gmail),
             "gmail_available": availability.available,
             "gmail_missing_scopes": list(availability.missing_scopes),
+            "gmail_draft_available": (
+                gmail.draft_creation_enabled and draft_availability.available
+            ),
+            "gmail_draft_missing_scopes": list(draft_availability.missing_scopes),
             "oauth_redirect_uri": _oauth_redirect_uri(
                 connection_id=status.connection_id, required=False
             ),
@@ -186,21 +194,38 @@ def set_google_client_secret(
 
 
 def start_google_oauth(connection_id: str | None = None) -> GoogleOAuthStartResponse:
-    """Start authorization for the first Gmail read capability."""
+    """Start authorization for enabled Gmail capabilities."""
     redirect_uri = _oauth_redirect_uri(connection_id=connection_id, required=True)
     if redirect_uri is None:  # pragma: no cover - guarded by required=True
         raise AssertionError("Required Google OAuth redirect URI was not resolved.")
+    authority = require_current_execution_authority()
+    connection = (
+        get_runtime_context().built_in_connections.get_google_connection_for_authority(
+            authority, connection_id
+        )
+    )
+    capabilities = _google_oauth_capabilities(connection)
     with _domain_errors():
         result = _oauth_coordinator().start(
-            authority=require_current_execution_authority(),
+            authority=authority,
             redirect_uri=redirect_uri,
-            capabilities=(GoogleCapability.GMAIL_READ,),
+            capabilities=capabilities,
             connection_id=connection_id,
         )
     logger.info("Google OAuth started", data={"event": "google_oauth_started"})
     payload = asdict(result)
     payload["requested_scopes"] = list(result.requested_scopes)
     return GoogleOAuthStartResponse.model_validate(payload)
+
+
+def _google_oauth_capabilities(
+    connection: GoogleConnection | None,
+) -> tuple[GoogleCapability, ...]:
+    """Request only the Gmail capabilities enabled on the persisted connection."""
+    capabilities = [GoogleCapability.GMAIL_READ]
+    if connection is not None and connection.gmail.draft_creation_enabled:
+        capabilities.append(GoogleCapability.GMAIL_COMPOSE)
+    return tuple(capabilities)
 
 
 async def complete_google_oauth(
