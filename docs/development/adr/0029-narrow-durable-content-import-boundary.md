@@ -26,14 +26,16 @@ Monty workflows.
 
 Expose one settings-backed `content_import` capability with two operations:
 
-- `submit` creates one durable ingestion job per accepted URL or vault file;
+- `submit` creates one durable ingestion job per accepted URL or vault file and
+  processes it immediately by default, with explicit queue-only submission for
+  large batches;
 - `status` reads durable job state by job ID within the active vault.
 
 Use the same ingestion service, job store, strategy registry, rendering, storage,
 execution-task attribution, and vault-mutation path for chat, Monty, API, and UI
 entry points. Per-job destinations and validated extraction options are part of
-the import contract. The durable ingestion queue remains the authority for
-background execution and status.
+the import contract. Durable ingestion jobs remain the authority for immediate
+and background execution, status, outputs, and failures.
 
 Keep source discovery, research manifests, source-level deduplication, retry and
 resumption policy, index generation, summarization, and library organization
@@ -43,8 +45,9 @@ workflows.
 
 ## Consequences
 
-- Tool submission returns promptly with job IDs; callers choose when to inspect
-  status.
+- Routine tool submission awaits terminal jobs so imported Markdown is
+  available in the current agent turn. Queue-only submission returns promptly
+  with job IDs for later status inspection.
 - The tool and Monty binding expose the same operation and result schema.
 - Manual import remains an adapter over shared ingestion behavior rather than a
   parallel conversion pipeline.
@@ -64,4 +67,4 @@ workflows.
 - `docs/tools/content_import.md`
 - Current system map: `docs/development/architecture.md`
 - `validation/scenarios/integration/core/content_import_tool.py`
-- Implementation plan: `content-import-plan.md`
+- Implementation plan: `CONTENT_IMPORT_IMMEDIATE_EXECUTION_PLAN.md`

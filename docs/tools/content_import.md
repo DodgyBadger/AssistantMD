@@ -1,8 +1,8 @@
 # Content Import
 
-`content_import` submits URLs or vault files to the durable ingestion pipeline
-and reads the resulting job status. Imported content is written as vault
-artifacts under the configured ingestion output path. Markdown files land
+`content_import` imports URLs or vault files through the durable ingestion
+pipeline and reads the resulting job status. Imported content is written as
+vault artifacts under the configured ingestion output path. Markdown files land
 directly in the selected destination. Optional companion files are grouped under
 `assets/<import-name>/` within that destination.
 
@@ -18,10 +18,26 @@ content_import(
 ```
 
 Sources may be public HTTP/HTTPS URLs or vault-relative file paths. Vault files
-are preserved after import. The call queues one durable ingestion job per source
-and returns promptly; it does not wait for extraction to finish. The returned
-JSON includes an `items` array with the `job_id`, source, source kind, and queued
-status for every accepted source. Retain those job ids to inspect the jobs later.
+are preserved after import. The call creates one durable ingestion job per
+source, processes each job immediately by default, and returns after every job
+reaches a terminal state. The returned JSON includes an `items` array with each
+job's ID, source, source kind, status, output paths or error, and extraction
+provenance.
+
+Keep the default for routine imports so the imported Markdown is available in
+the current turn. For a large multi-file submission, set `queue_only=true` to
+return promptly with queued job records and let the background worker process
+them:
+
+```text
+content_import(
+  operation="submit",
+  sources=["Research/one.pdf", "Research/two.pdf"],
+  queue_only=true
+)
+```
+
+Retain the returned job IDs and use `status` to inspect queue-only submissions.
 
 Optional `options`:
 
@@ -79,9 +95,8 @@ content_import(operation="status", job_ids=[41, 42])
 The returned JSON includes an `items` array with the job id, source, source kind,
 current state, output paths, any durable ingestion error, strategies attempted,
 the selected strategy/provider/model, and any fallback reason. Selection fields
-remain empty while a job is queued or when no extractor succeeds. A caller can
-choose when to inspect queued work; the tool does not define research progress
-or retry policy.
+remain empty while a queue-only job is waiting or when no extractor succeeds.
+The tool does not define research progress or retry policy.
 
 ## Boundaries
 

@@ -1,5 +1,8 @@
 # Release Notes
 
+- Content imports invoked by agents now run immediately by default and return
+  completed output paths or durable failures in the same tool call. Large
+  multi-file submissions can opt into background processing with `queue_only`.
 - Connection metadata, encrypted credentials, and OAuth state now share atomic
   SQLite transactions in `system/access.db`, while retaining separate domain
   ownership and the embedded file-first deployment model.
