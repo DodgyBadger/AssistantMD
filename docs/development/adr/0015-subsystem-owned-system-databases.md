@@ -14,6 +14,11 @@ schema bleed between unrelated stores.
 
 ## Decision
 
+Subsystem ownership is logical and does not require one physical file per owner.
+State that must change atomically may share a SQLite file while domain modules
+retain explicit table and policy ownership. ADR 0046 applies this rule to access
+state.
+
 Declare known system databases centrally in `core/database.py`, including name,
 owner, and description. Keep subsystem data in separate SQLite files when the
 lifecycle and ownership boundaries are distinct. Require table creation to be

@@ -28,9 +28,14 @@ from fastmcp.client.auth.oauth import TokenStorageAdapter  # noqa: E402
 from mcp.shared.auth import OAuthToken  # noqa: E402
 
 from core.identity import ExecutionAuthority  # noqa: E402
-from core.mcp import ConnectedMCPOAuth, EncryptedMCPOAuthStorage  # noqa: E402
+from core.mcp import (  # noqa: E402
+    ConnectedMCPOAuth,
+    EncryptedMCPOAuthStorage,
+    MCPAuthMode,
+    MCPConnectionCreate,
+    MCPConnectionService,
+)  # noqa: E402
 from core.mcp.oauth_storage import (  # noqa: E402
-    MCP_OAUTH_FENCE_NAME,  # noqa: E402
     has_mcp_oauth_tokens,
     mcp_oauth_http_client_factory,
 )
@@ -54,22 +59,43 @@ class MCPOAuthStorageScenario(BaseScenario):
         )
         owner = ExecutionAuthority("oauth-owner")
         other = ExecutionAuthority("oauth-other")
-        fence_token = "oauth-storage-fence"
-        namespace = "mcp.connection.shared-connection-id"
-        secrets.set_for_authority(owner, namespace, MCP_OAUTH_FENCE_NAME, fence_token)
-        secrets.set_for_authority(other, namespace, MCP_OAUTH_FENCE_NAME, fence_token)
-        owner_store = EncryptedMCPOAuthStorage(
-            secrets=secrets,
-            authority=owner,
-            connection_id="shared-connection-id",
-            fence_token=fence_token,
+        service = MCPConnectionService(system_root=str(system_root), secrets=secrets)
+        owner_connection = service.create_connection_for_authority(
+            owner,
+            MCPConnectionCreate(
+                display_name="OAuth owner",
+                url="https://mail.example/mcp",
+                auth_mode=MCPAuthMode.OAUTH,
+            ),
         )
-        other_store = EncryptedMCPOAuthStorage(
+        other_connection = service.create_connection_for_authority(
+            other,
+            MCPConnectionCreate(
+                display_name="OAuth other",
+                url="https://mail.example/mcp",
+                auth_mode=MCPAuthMode.OAUTH,
+            ),
+        )
+        owner_store = service.oauth_storage(owner, owner_connection.connection_id)
+        other_store = service.oauth_storage(other, other_connection.connection_id)
+        foreign_store = EncryptedMCPOAuthStorage(
             secrets=secrets,
             authority=other,
-            connection_id="shared-connection-id",
-            fence_token=fence_token,
+            connection_id=owner_connection.connection_id,
+            fence_token=owner_store._fence_token,
         )
+        for operation in (
+            lambda: foreign_store.put_sync("forbidden", {"token": "wrong-owner"}),
+            lambda: foreign_store.get_sync("forbidden"),
+        ):
+            try:
+                operation()
+            except SecretGuardMismatchError:
+                pass
+            else:
+                self.soft_assert(
+                    False, "Foreign principal must not access a connection revision"
+                )
         owner_adapter = TokenStorageAdapter(
             async_key_value=owner_store,
             server_url="https://mail.example/mcp",
@@ -113,7 +139,7 @@ class MCPOAuthStorageScenario(BaseScenario):
             ),
             "Runtime connection preflight should recognize persisted OAuth tokens",
         )
-        database_bytes = (system_root / "secrets.db").read_bytes()
+        database_bytes = (system_root / "access.db").read_bytes()
         self.soft_assert(
             b"owner-access-token" not in database_bytes
             and b"owner-refresh-token" not in database_bytes
@@ -188,15 +214,8 @@ class MCPOAuthStorageScenario(BaseScenario):
             "MCP OAuth HTTP clients should use the socket-authoritative transport",
         )
 
-        secrets.set_for_authority(
-            other, namespace, MCP_OAUTH_FENCE_NAME, "rotated-oauth-fence"
-        )
-        rotated_store = EncryptedMCPOAuthStorage(
-            secrets=secrets,
-            authority=other,
-            connection_id="shared-connection-id",
-            fence_token="rotated-oauth-fence",
-        )
+        service.disconnect_oauth(other, other_connection.connection_id)
+        rotated_store = service.oauth_storage(other, other_connection.connection_id)
         await rotated_store.put("guarded-delete", {"token": "preserve-after-rotation"})
         try:
             await other_store.delete("guarded-delete")
@@ -208,7 +227,7 @@ class MCPOAuthStorageScenario(BaseScenario):
                 "An OAuth adapter issued before fence rotation must not delete state",
             )
         self.soft_assert_equal(
-            await other_store.get("guarded-delete"),
+            await rotated_store.get("guarded-delete"),
             {"token": "preserve-after-rotation"},
             "Rejected stale OAuth deletes must preserve the current encrypted record",
         )
@@ -222,10 +241,19 @@ class MCPOAuthStorageScenario(BaseScenario):
                 "An OAuth adapter issued before fence rotation must not persist state",
             )
         self.soft_assert_equal(
-            await other_store.get("stale-write"),
+            await rotated_store.get("stale-write"),
             None,
             "Rejected stale OAuth writes must leave no encrypted record",
         )
+
+        try:
+            await other_store.get("guarded-delete")
+        except SecretGuardMismatchError:
+            pass
+        else:
+            self.soft_assert(
+                False, "A stale reader must not access a newly authorized grant"
+            )
 
         self.assert_no_failures()
         self.teardown_scenario()

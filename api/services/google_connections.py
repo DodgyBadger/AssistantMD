@@ -36,6 +36,8 @@ GOOGLE_OAUTH_CALLBACK_PATH = "/api/system/connections/google/oauth/callback"
 def list_google_connections() -> list[GoogleConnectionResponse]:
     authority = require_current_execution_authority()
     runtime = get_runtime_context()
+    if runtime.google_connection is None:
+        raise _secrets_locked()
     return [
         _google_connection_response(connection.connection_id)
         for connection in runtime.built_in_connections.list_google_connections_for_authority(
@@ -47,6 +49,8 @@ def list_google_connections() -> list[GoogleConnectionResponse]:
 def create_google_connection(
     request: GoogleConnectionCreateRequest,
 ) -> GoogleConnectionResponse:
+    if get_runtime_context().google_connection is None:
+        raise _secrets_locked()
     with _domain_errors():
         connection = (
             get_runtime_context().built_in_connections.create_google_connection(
@@ -67,6 +71,8 @@ def get_google_connection() -> GoogleConnectionResponse:
 
 
 def get_google_connection_by_id(connection_id: str) -> GoogleConnectionResponse:
+    if get_runtime_context().google_connection is None:
+        raise _secrets_locked()
     with _domain_errors():
         connection = get_runtime_context().built_in_connections.get_google_connection_for_authority(
             require_current_execution_authority(), connection_id
@@ -81,12 +87,12 @@ def _google_connection_response(
 ) -> GoogleConnectionResponse:
     authority = require_current_execution_authority()
     runtime = get_runtime_context()
-    connection = runtime.built_in_connections.get_google_connection_for_authority(
-        authority, connection_id
-    )
     service = runtime.google_connection
     if service is None:
         raise _secrets_locked()
+    connection = runtime.built_in_connections.get_google_connection_for_authority(
+        authority, connection_id
+    )
     status = service.status(authority, connection_id)
     availability = service.capability_availability(
         authority, GoogleCapability.GMAIL_READ, connection_id
@@ -119,21 +125,33 @@ def update_google_connection(
     """Persist non-secret Google client metadata and Gmail preferences."""
     authority = require_current_execution_authority()
     runtime = get_runtime_context()
+    if runtime.google_connection is None:
+        raise _secrets_locked()
     previous = runtime.built_in_connections.get_google_connection_for_authority(
         authority
     )
+    update = GoogleConnectionUpdate(
+        client_id=request.client_id,
+        display_name=request.display_name,
+        is_default=request.is_default,
+        gmail=GmailPreferences(**request.gmail.model_dump()),
+    )
     with _domain_errors():
-        connection = runtime.built_in_connections.set_google_connection(
-            GoogleConnectionUpdate(
-                client_id=request.client_id,
-                display_name=request.display_name,
-                is_default=request.is_default,
-                gmail=GmailPreferences(**request.gmail.model_dump()),
+        if previous is None:
+            connection = runtime.built_in_connections.create_google_connection(
+                GoogleConnectionCreate(
+                    display_name=update.display_name or "Google",
+                    client_id=update.client_id,
+                    is_default=True,
+                    gmail=update.gmail,
+                )
             )
-        )
-        if previous is not None and runtime.google_connection is not None:
-            runtime.google_connection.handle_metadata_update(
-                authority, previous, connection
+        else:
+            service = runtime.google_connection
+            if service is None:
+                raise _secrets_locked()
+            connection = service.update_connection(
+                authority, previous.connection_id, update
             )
     logger.info(
         "Google connection configuration changed",
@@ -150,13 +168,19 @@ def update_google_connection_by_id(
 ) -> GoogleConnectionResponse:
     authority = require_current_execution_authority()
     runtime = get_runtime_context()
+    if runtime.google_connection is None:
+        raise _secrets_locked()
     previous = runtime.built_in_connections.get_google_connection_for_authority(
         authority, connection_id
     )
     with _domain_errors():
         if previous is None:
             raise LookupError("Google connection not found.")
-        updated = runtime.built_in_connections.update_google_connection(
+        service = runtime.google_connection
+        if service is None:
+            raise _secrets_locked()
+        service.update_connection(
+            authority,
             connection_id,
             GoogleConnectionUpdate(
                 client_id=request.client_id,
@@ -165,10 +189,6 @@ def update_google_connection_by_id(
                 gmail=GmailPreferences(**request.gmail.model_dump()),
             ),
         )
-        if runtime.google_connection is not None:
-            runtime.google_connection.handle_metadata_update(
-                authority, previous, updated
-            )
     return _google_connection_response(connection_id)
 
 
@@ -195,6 +215,8 @@ def set_google_client_secret(
 
 def start_google_oauth(connection_id: str | None = None) -> GoogleOAuthStartResponse:
     """Start authorization for enabled Gmail capabilities."""
+    if get_runtime_context().google_connection is None:
+        raise _secrets_locked()
     redirect_uri = _oauth_redirect_uri(connection_id=connection_id, required=True)
     if redirect_uri is None:  # pragma: no cover - guarded by required=True
         raise AssertionError("Required Google OAuth redirect URI was not resolved.")
@@ -255,6 +277,8 @@ def disconnect_google_oauth(connection_id: str | None = None) -> OperationResult
     if service is None:
         raise _secrets_locked()
     authority = require_current_execution_authority()
+    if get_runtime_context().google_connection is None:
+        raise _secrets_locked()
     with _domain_errors():
         connection = get_runtime_context().built_in_connections.get_google_connection_for_authority(
             authority, connection_id
@@ -279,36 +303,23 @@ def delete_google_connection(
 ) -> OperationResult:
     """Remove Google metadata and all encrypted Google credentials."""
     runtime = get_runtime_context()
+    if runtime.google_connection is None:
+        raise _secrets_locked()
     service = runtime.google_connection
     if service is None:
         raise _secrets_locked()
     authority = require_current_execution_authority()
     with _domain_errors():
-        if (
-            connection_id is not None
-            and runtime.built_in_connections.has_google_connection_deletion_for_authority(
-                authority, connection_id
-            )
-        ):
-            service.reconcile_connection_deletion(authority, connection_id)
-            return OperationResult(
-                success=True,
-                message="Google connection removed.",
-                restart_required=False,
-            )
-        connection = runtime.built_in_connections.validate_google_connection_deletion_for_authority(
-            authority,
-            connection_id,
-            replacement_default_id=replacement_default_id,
+        connection = runtime.built_in_connections.get_google_connection_for_authority(
+            authority, connection_id
         )
-        if connection.is_default:
-            service.clear_legacy_state(authority)
-        runtime.built_in_connections.delete_google_connection_for_authority(
+        if connection is None:
+            raise LookupError("Google connection not found.")
+        service.delete_connection(
             authority,
             connection.connection_id,
             replacement_default_id=replacement_default_id,
         )
-        service.reconcile_connection_deletion(authority, connection.connection_id)
     logger.info(
         "Google connection deleted", data={"event": "google_connection_deleted"}
     )

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from core.access_store import DB_NAME as ACCESS_DB_NAME
+
 from .crypto import SecretIntegrityError, SecretKeyring
 from .service import EncryptedSecretsService
 
@@ -40,10 +42,24 @@ def initialize_secrets_bootstrap(system_root: str | Path) -> SecretsBootstrapSta
     global _service, _status
     try:
         keyring = SecretKeyring.from_environment()
+        root = Path(system_root)
+        access_path = root / f"{ACCESS_DB_NAME}.db"
         service = EncryptedSecretsService(
-            system_root=str(Path(system_root)), keyring=keyring
+            system_root=str(root),
+            keyring=keyring,
+            initialize_schema=not access_path.exists(),
         )
-        service.verify_all()
+        if access_path.exists():
+            conn = sqlite3.connect(
+                f"{access_path.resolve().as_uri()}?mode=ro", uri=True
+            )
+            conn.row_factory = sqlite3.Row
+            try:
+                service._verify_all(conn)
+            finally:
+                conn.close()
+        else:
+            service.verify_all()
     except (RuntimeError, ValueError, sqlite3.DatabaseError) as exc:
         _service = None
         _status = SecretsBootstrapStatus(

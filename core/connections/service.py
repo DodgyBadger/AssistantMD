@@ -6,7 +6,9 @@ import re
 import sqlite3
 from uuid import uuid4
 
+from core.access_store import write_transaction
 from core.identity import ExecutionAuthority, require_current_execution_authority
+from core.secrets.crypto import SecretIntegrityError
 
 from .models import (
     GmailPreferences,
@@ -22,9 +24,23 @@ _SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 class BuiltInConnectionService:
     """Manage non-secret built-in connection metadata by principal."""
 
-    def __init__(self, *, system_root: str) -> None:
+    def __init__(
+        self,
+        *,
+        system_root: str,
+        initialize_schema: bool = True,
+        available: bool = True,
+    ) -> None:
         self._system_root = system_root
-        ensure_connections_schema(system_root)
+        self._available = available
+        if available and initialize_schema:
+            ensure_connections_schema(system_root)
+
+    def _require_available(self) -> None:
+        if not self._available:
+            raise SecretIntegrityError(
+                "Google connections are unavailable while encrypted secrets are locked."
+            )
 
     def list_google_connections(self) -> list[GoogleConnection]:
         return self.list_google_connections_for_authority(
@@ -34,6 +50,7 @@ class BuiltInConnectionService:
     def list_google_connections_for_authority(
         self, authority: ExecutionAuthority
     ) -> list[GoogleConnection]:
+        self._require_available()
         conn = connect_connections(self._system_root)
         try:
             rows = conn.execute(
@@ -59,6 +76,7 @@ class BuiltInConnectionService:
         authority: ExecutionAuthority,
         connection_id: str | None = None,
     ) -> GoogleConnection | None:
+        self._require_available()
         conn = connect_connections(self._system_root)
         try:
             if connection_id is None:
@@ -84,6 +102,7 @@ class BuiltInConnectionService:
     def get_google_connection_by_slug_for_authority(
         self, authority: ExecutionAuthority, slug: str
     ) -> GoogleConnection | None:
+        self._require_available()
         conn = connect_connections(self._system_root)
         try:
             row = conn.execute(
@@ -107,10 +126,10 @@ class BuiltInConnectionService:
     def create_google_connection_for_authority(
         self, authority: ExecutionAuthority, request: GoogleConnectionCreate
     ) -> GoogleConnection:
+        self._require_available()
         connection_id = str(uuid4())
-        conn = connect_connections(self._system_root)
         try:
-            with conn:
+            with write_transaction(self._system_root) as conn:
                 count = int(
                     conn.execute(
                         "SELECT COUNT(*) FROM google_connections WHERE owner_principal_id = ?",
@@ -124,6 +143,10 @@ class BuiltInConnectionService:
                         (authority.principal_id,),
                     )
                 slug = _unique_slug(conn, authority.principal_id, request.display_name)
+                conn.execute(
+                    "INSERT INTO google_connection_slugs (owner_principal_id, connection_id, slug) VALUES (?, ?, ?)",
+                    (authority.principal_id, connection_id, slug),
+                )
                 conn.execute(
                     """
                     INSERT INTO google_connections (
@@ -154,40 +177,30 @@ class BuiltInConnectionService:
                 )
         except sqlite3.IntegrityError as exc:
             raise ValueError("Google connection name must be unique.") from exc
-        finally:
-            conn.close()
         return self._require_for_authority(authority, connection_id)
 
-    def update_google_connection(
-        self, connection_id: str, request: GoogleConnectionUpdate
-    ) -> GoogleConnection:
-        return self.update_google_connection_for_authority(
-            require_current_execution_authority(), connection_id, request
-        )
-
-    def update_google_connection_for_authority(
+    def update_google_connection_on_connection(
         self,
+        conn: sqlite3.Connection,
         authority: ExecutionAuthority,
-        connection_id: str,
+        existing: GoogleConnection,
         request: GoogleConnectionUpdate,
-    ) -> GoogleConnection:
-        existing = self._require_for_authority(authority, connection_id)
-        display_name = request.display_name or existing.display_name
-        requested_default = (
+    ) -> None:
+        """Update metadata through a caller-owned access transaction."""
+        self._require_available()
+        resolved_name = request.display_name or existing.display_name
+        resolved_default = (
             existing.is_default if request.is_default is None else request.is_default
         )
-        if existing.is_default and not requested_default:
+        if existing.is_default and not resolved_default:
             raise ValueError("Select another default Google connection first.")
-        conn = connect_connections(self._system_root)
-        try:
-            with conn:
-                if requested_default and not existing.is_default:
-                    conn.execute(
-                        "UPDATE google_connections SET is_default = 0 WHERE owner_principal_id = ?",
-                        (authority.principal_id,),
-                    )
-                cursor = conn.execute(
-                    """
+        if resolved_default and not existing.is_default:
+            conn.execute(
+                "UPDATE google_connections SET is_default = 0 WHERE owner_principal_id = ?",
+                (authority.principal_id,),
+            )
+        cursor = conn.execute(
+            """
                     UPDATE google_connections SET display_name = ?, client_id = ?,
                         is_default = ?, gmail_search_default_results = ?,
                         gmail_search_max_results = ?, gmail_message_max_characters = ?,
@@ -199,192 +212,41 @@ class BuiltInConnectionService:
                         updated_at = CURRENT_TIMESTAMP
                     WHERE owner_principal_id = ? AND connection_id = ?
                     """,
-                    (
-                        display_name,
-                        request.client_id,
-                        int(requested_default),
-                        request.gmail.search_default_results,
-                        request.gmail.search_max_results,
-                        request.gmail.message_max_characters,
-                        request.gmail.thread_max_messages,
-                        int(request.gmail.attachment_download_enabled),
-                        request.gmail.attachment_max_mb,
-                        int(request.gmail.draft_creation_enabled),
-                        request.gmail.draft_max_characters,
-                        request.client_id,
-                        authority.principal_id,
-                        existing.connection_id,
-                    ),
-                )
-                if cursor.rowcount == 0:
-                    raise LookupError("Google connection not found.")
-        except sqlite3.IntegrityError as exc:
-            raise ValueError("Google connection name must be unique.") from exc
-        finally:
-            conn.close()
-        return self._require_for_authority(authority, existing.connection_id)
-
-    def set_google_connection(
-        self, request: GoogleConnectionUpdate
-    ) -> GoogleConnection:
-        """Compatibility upsert targeting the current principal's default."""
-        return self.set_google_connection_for_authority(
-            require_current_execution_authority(), request
-        )
-
-    def set_google_connection_for_authority(
-        self, authority: ExecutionAuthority, request: GoogleConnectionUpdate
-    ) -> GoogleConnection:
-        existing = self.get_google_connection_for_authority(authority)
-        if existing is None:
-            return self.create_google_connection_for_authority(
-                authority,
-                GoogleConnectionCreate(
-                    display_name=request.display_name or "Google",
-                    client_id=request.client_id,
-                    is_default=True,
-                    gmail=request.gmail,
-                ),
-            )
-        return self.update_google_connection_for_authority(
-            authority, existing.connection_id, request
-        )
-
-    def delete_google_connection(
-        self,
-        connection_id: str | None = None,
-        *,
-        replacement_default_id: str | None = None,
-    ) -> bool:
-        return self.delete_google_connection_for_authority(
-            require_current_execution_authority(),
-            connection_id,
-            replacement_default_id=replacement_default_id,
-        )
-
-    def delete_google_connection_for_authority(
-        self,
-        authority: ExecutionAuthority,
-        connection_id: str | None = None,
-        *,
-        replacement_default_id: str | None = None,
-    ) -> bool:
-        existing = self.validate_google_connection_deletion_for_authority(
-            authority,
-            connection_id,
-            replacement_default_id=replacement_default_id,
-        )
-        replacement_connection_id = (
-            self._require_for_authority(authority, replacement_default_id).connection_id
-            if existing.is_default and replacement_default_id is not None
-            else None
-        )
-        conn = connect_connections(self._system_root)
-        try:
-            with conn:
-                if replacement_connection_id is not None:
-                    conn.execute(
-                        """
-                        UPDATE google_connections SET is_default = 0
-                        WHERE owner_principal_id = ? AND connection_id = ?
-                        """,
-                        (authority.principal_id, existing.connection_id),
-                    )
-                    conn.execute(
-                        """
-                        UPDATE google_connections SET is_default = 1,
-                            config_version = config_version + 1,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE owner_principal_id = ? AND connection_id = ?
-                        """,
-                        (authority.principal_id, replacement_connection_id),
-                    )
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO google_connection_deletions (
-                        owner_principal_id, connection_id
-                    ) VALUES (?, ?)
-                    """,
-                    (authority.principal_id, existing.connection_id),
-                )
-                cursor = conn.execute(
-                    """
-                    DELETE FROM google_connections
-                    WHERE owner_principal_id = ? AND connection_id = ?
-                    """,
-                    (authority.principal_id, existing.connection_id),
-                )
-        finally:
-            conn.close()
-        return cursor.rowcount > 0
-
-    def has_google_connection_deletion_for_authority(
-        self, authority: ExecutionAuthority, connection_id: str
-    ) -> bool:
-        conn = connect_connections(self._system_root)
-        try:
-            row = conn.execute(
-                """
-                SELECT 1 FROM google_connection_deletions
-                WHERE owner_principal_id = ? AND connection_id = ?
-                """,
-                (authority.principal_id, connection_id),
-            ).fetchone()
-            return row is not None
-        finally:
-            conn.close()
-
-    def list_google_connection_deletions(
-        self,
-    ) -> list[tuple[ExecutionAuthority, str]]:
-        conn = connect_connections(self._system_root)
-        try:
-            rows = conn.execute(
-                """
-                SELECT owner_principal_id, connection_id
-                FROM google_connection_deletions
-                ORDER BY created_at, owner_principal_id, connection_id
-                """
-            ).fetchall()
-        finally:
-            conn.close()
-        return [
             (
-                ExecutionAuthority(str(row["owner_principal_id"])),
-                str(row["connection_id"]),
-            )
-            for row in rows
-        ]
-
-    def validate_google_connection_deletion_for_authority(
-        self,
-        authority: ExecutionAuthority,
-        connection_id: str | None = None,
-        *,
-        replacement_default_id: str | None = None,
-    ) -> GoogleConnection:
-        """Validate deletion policy without mutating metadata."""
-        existing = (
-            self.get_google_connection_for_authority(authority, connection_id)
-            if connection_id is not None
-            else self.get_google_connection_for_authority(authority)
+                resolved_name,
+                request.client_id,
+                int(resolved_default),
+                request.gmail.search_default_results,
+                request.gmail.search_max_results,
+                request.gmail.message_max_characters,
+                request.gmail.thread_max_messages,
+                int(request.gmail.attachment_download_enabled),
+                request.gmail.attachment_max_mb,
+                int(request.gmail.draft_creation_enabled),
+                request.gmail.draft_max_characters,
+                request.client_id,
+                authority.principal_id,
+                existing.connection_id,
+            ),
         )
-        if existing is None:
+        if cursor.rowcount == 0:
             raise LookupError("Google connection not found.")
-        others = [
-            item
-            for item in self.list_google_connections_for_authority(authority)
-            if item.connection_id != existing.connection_id
-        ]
-        if existing.is_default and others:
-            if replacement_default_id is None:
-                raise ValueError(
-                    "Choose a replacement default before deleting this Google connection."
-                )
-            replacement = self._require_for_authority(authority, replacement_default_id)
-            if replacement.connection_id == existing.connection_id:
-                raise ValueError("Replacement default must be another connection.")
-        return existing
+
+    def require_google_connection_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        connection_id: str,
+    ) -> GoogleConnection:
+        """Resolve authoritative metadata within the caller's transaction."""
+        self._require_available()
+        row = conn.execute(
+            "SELECT * FROM google_connections WHERE owner_principal_id=? AND connection_id=?",
+            (authority.principal_id, _required_id(connection_id)),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Google connection not found.")
+        return _row_to_google_connection(row)
 
     def _require_for_authority(
         self, authority: ExecutionAuthority, connection_id: str
@@ -407,7 +269,7 @@ def _unique_slug(conn: sqlite3.Connection, principal_id: str, display_name: str)
     slug = base
     suffix = 2
     while conn.execute(
-        "SELECT 1 FROM google_connections WHERE owner_principal_id = ? AND slug = ?",
+        "SELECT 1 FROM google_connection_slugs WHERE owner_principal_id = ? AND slug = ?",
         (principal_id, slug),
     ).fetchone():
         slug = f"{base}-{suffix}"

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from core.access_store import write_transaction
 from core.identity import LOCAL_USER_AUTHORITY, SYSTEM_AUTHORITY, ExecutionAuthority
 from core.migration_backups import get_migration_backup_directory
 
@@ -65,9 +66,9 @@ def migrate_legacy_secrets_yaml(
             source_bytes = source_path.read_bytes()
             values = _parse_legacy_yaml(source_bytes)
             writes, skipped_oauth_count = _build_writes(values)
-            service.set_many_for_authorities(writes)
-            _record_imported(
+            _import_and_record(
                 root,
+                service=service,
                 fingerprint=_fingerprint(source_bytes),
                 writes=writes,
             )
@@ -175,6 +176,45 @@ def _record_imported(
             )
     finally:
         conn.close()
+
+
+def _import_and_record(
+    root: Path,
+    *,
+    service: EncryptedSecretsService,
+    fingerprint: str,
+    writes: list[SecretWrite],
+) -> None:
+    """Commit imported ciphertext and restart state in one access transaction."""
+    with write_transaction(str(root)) as conn:
+        for write in writes:
+            service.set_for_authority_on_connection(
+                conn,
+                write.authority,
+                write.namespace,
+                write.name,
+                write.value,
+            )
+        conn.execute(
+            """INSERT INTO secrets_bootstrap_migrations (
+                migration_name, phase, source_fingerprint, imported_count
+            ) VALUES (?, 'imported', ?, ?)""",
+            (MIGRATION_NAME, fingerprint, len(writes)),
+        )
+        conn.executemany(
+            """INSERT INTO secrets_bootstrap_import_items (
+                migration_name, owner_principal_id, namespace, name
+            ) VALUES (?, ?, ?, ?)""",
+            [
+                (
+                    MIGRATION_NAME,
+                    write.authority.principal_id,
+                    write.namespace,
+                    write.name,
+                )
+                for write in writes
+            ],
+        )
 
 
 def _read_migration_state(root: Path) -> tuple[str, str | None, int] | None:

@@ -4,114 +4,34 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.database import connect_sqlite_from_system_db
-from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
+from core.access_store.schema import DB_NAME as ACCESS_DB_NAME
+from core.access_store.schema import connect_access
 
-DB_NAME = "connections"
-MIGRATION_NAMESPACE = "connections"
-CONNECTION_MIGRATIONS = (
-    SQLiteMigration(
-        version=1,
-        name="principal_owned_google_connection",
-        apply=lambda conn: _create_google_connection_table(conn),
-    ),
-    SQLiteMigration(
-        version=2,
-        name="multi_google_connections",
-        apply=lambda conn: _migrate_google_connections_collection(conn),
-    ),
-    SQLiteMigration(
-        version=3,
-        name="google_oauth_generation",
-        apply=lambda conn: _add_google_oauth_generation(conn),
-    ),
-    SQLiteMigration(
-        version=4,
-        name="durable_google_connection_deletions",
-        apply=lambda conn: _create_google_connection_deletions_table(conn),
-    ),
-    SQLiteMigration(
-        version=5,
-        name="gmail_attachment_download_preferences",
-        apply=lambda conn: _add_gmail_attachment_download_preferences(conn),
-    ),
-    SQLiteMigration(
-        version=6,
-        name="gmail_draft_creation_preferences",
-        apply=lambda conn: _add_gmail_draft_creation_preferences(conn),
-    ),
-)
+MIGRATION_NAMESPACE = "access"
+DB_NAME = ACCESS_DB_NAME
 
 
 def ensure_connections_schema(
     system_root: str | None = None, *, apply_migrations: bool = False
 ) -> None:
     """Create the current built-in connections schema."""
-    conn = connect_sqlite_from_system_db(DB_NAME, system_root)
-    try:
-        if apply_migrations:
-            apply_sqlite_migrations(
-                conn,
-                namespace=MIGRATION_NAMESPACE,
-                migrations=CONNECTION_MIGRATIONS,
-            )
-        else:
-            _create_current_google_connection_table(conn)
-            _create_google_connection_deletions_table(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    from core.access_store.schema import ensure_access_schema
+
+    ensure_access_schema(system_root, apply_migrations=apply_migrations)
 
 
 def connect_connections(system_root: str | None = None) -> sqlite3.Connection:
     """Open the built-in connections database with named row access."""
-    conn = connect_sqlite_from_system_db(DB_NAME, system_root)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_access(system_root)
 
 
-def _create_google_connection_table(conn: sqlite3.Connection) -> None:
-    """Create the v1 singleton table for ordered migration replay."""
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS google_connections (
-            owner_principal_id TEXT PRIMARY KEY,
-            client_id TEXT NOT NULL,
-            gmail_search_default_results INTEGER NOT NULL DEFAULT 20,
-            gmail_search_max_results INTEGER NOT NULL DEFAULT 100,
-            gmail_message_max_characters INTEGER NOT NULL DEFAULT 50000,
-            gmail_thread_max_messages INTEGER NOT NULL DEFAULT 25,
-            config_version INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            CHECK (length(owner_principal_id) > 0),
-            CHECK (length(client_id) > 0),
-            CHECK (gmail_search_default_results BETWEEN 1 AND 500),
-            CHECK (gmail_search_max_results BETWEEN 1 AND 500),
-            CHECK (gmail_search_default_results <= gmail_search_max_results),
-            CHECK (gmail_message_max_characters BETWEEN 1 AND 250000),
-            CHECK (gmail_thread_max_messages BETWEEN 1 AND 100),
-            CHECK (config_version > 0)
-        )
-        """
-    )
+def create_connections_schema(conn: sqlite3.Connection) -> None:
+    """Create current native-connection tables on a caller-owned connection."""
+    _create_current_google_connection_table(conn)
 
 
 def _create_current_google_connection_table(conn: sqlite3.Connection) -> None:
     """Create the latest table directly for a fresh database."""
-    _create_google_connection_collection_table_v2(conn)
-    _add_gmail_attachment_download_preferences(conn)
-    _add_gmail_draft_creation_preferences(conn)
-
-
-def _create_google_connection_collection_table_v2(conn: sqlite3.Connection) -> None:
-    """Create the immutable v2 multi-connection table shape."""
-    existing_columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
-    }
-    if existing_columns and "connection_id" not in existing_columns:
-        # Managed startup migrations own conversion of the v1 singleton table.
-        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS google_connections (
@@ -125,6 +45,10 @@ def _create_google_connection_collection_table_v2(conn: sqlite3.Connection) -> N
             gmail_search_max_results INTEGER NOT NULL DEFAULT 100,
             gmail_message_max_characters INTEGER NOT NULL DEFAULT 50000,
             gmail_thread_max_messages INTEGER NOT NULL DEFAULT 25,
+            gmail_attachment_download_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_attachment_download_enabled IN (0, 1)),
+            gmail_attachment_max_mb INTEGER NOT NULL DEFAULT 25 CHECK (gmail_attachment_max_mb BETWEEN 1 AND 100),
+            gmail_draft_creation_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_draft_creation_enabled IN (0, 1)),
+            gmail_draft_max_characters INTEGER NOT NULL DEFAULT 50000 CHECK (gmail_draft_max_characters BETWEEN 1 AND 250000),
             config_version INTEGER NOT NULL DEFAULT 1,
             oauth_generation INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -160,104 +84,11 @@ def _create_google_connection_collection_table_v2(conn: sqlite3.Connection) -> N
         """
     )
 
-
-def _create_google_connection_deletions_table(conn: sqlite3.Connection) -> None:
     conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS google_connection_deletions (
+        """CREATE TABLE IF NOT EXISTS google_connection_slugs (
+            connection_id TEXT PRIMARY KEY,
             owner_principal_id TEXT NOT NULL,
-            connection_id TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (owner_principal_id, connection_id),
-            CHECK (length(owner_principal_id) > 0),
-            CHECK (length(connection_id) > 0)
-        )
-        """
+            slug TEXT NOT NULL,
+            UNIQUE (owner_principal_id, slug)
+        )"""
     )
-
-
-def _add_gmail_attachment_download_preferences(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
-    }
-    if "gmail_attachment_download_enabled" not in columns:
-        conn.execute(
-            "ALTER TABLE google_connections ADD COLUMN gmail_attachment_download_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_attachment_download_enabled IN (0, 1))"
-        )
-    if "gmail_attachment_max_mb" not in columns:
-        conn.execute(
-            "ALTER TABLE google_connections ADD COLUMN gmail_attachment_max_mb INTEGER NOT NULL DEFAULT 25 CHECK (gmail_attachment_max_mb BETWEEN 1 AND 100)"
-        )
-
-
-def _add_gmail_draft_creation_preferences(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
-    }
-    if "gmail_draft_creation_enabled" not in columns:
-        conn.execute(
-            "ALTER TABLE google_connections ADD COLUMN gmail_draft_creation_enabled INTEGER NOT NULL DEFAULT 0 CHECK (gmail_draft_creation_enabled IN (0, 1))"
-        )
-    if "gmail_draft_max_characters" not in columns:
-        conn.execute(
-            "ALTER TABLE google_connections ADD COLUMN gmail_draft_max_characters INTEGER NOT NULL DEFAULT 50000 CHECK (gmail_draft_max_characters BETWEEN 1 AND 250000)"
-        )
-
-
-def _migrate_google_connections_collection(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
-    }
-    if "connection_id" in columns:
-        _create_google_connection_collection_table_v2(conn)
-        return
-    conn.execute("ALTER TABLE google_connections RENAME TO google_connections_v1")
-    _create_google_connection_collection_table_v2(conn)
-    rows = conn.execute(
-        """
-        SELECT owner_principal_id, client_id, gmail_search_default_results,
-               gmail_search_max_results, gmail_message_max_characters,
-               gmail_thread_max_messages, config_version, created_at, updated_at
-        FROM google_connections_v1
-        """
-    ).fetchall()
-    for index, row in enumerate(rows):
-        owner = str(row[0])
-        connection_id = f"legacy-google-{index + 1}-{owner}"
-        conn.execute(
-            """
-            INSERT INTO google_connections (
-                owner_principal_id, connection_id, slug, display_name, client_id,
-                is_default, gmail_search_default_results,
-                gmail_search_max_results, gmail_message_max_characters,
-                gmail_thread_max_messages, config_version, created_at, updated_at
-            ) VALUES (?, ?, 'google', 'Google', ?, 1, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                owner,
-                connection_id,
-                row[1],
-                row[2],
-                row[3],
-                row[4],
-                row[5],
-                row[6],
-                row[7],
-                row[8],
-            ),
-        )
-    conn.execute("DROP TABLE google_connections_v1")
-
-
-def _add_google_oauth_generation(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1]) for row in conn.execute("PRAGMA table_info(google_connections)")
-    }
-    if "oauth_generation" not in columns:
-        conn.execute(
-            """
-            ALTER TABLE google_connections
-            ADD COLUMN oauth_generation INTEGER NOT NULL DEFAULT 1
-            CHECK (oauth_generation > 0)
-            """
-        )

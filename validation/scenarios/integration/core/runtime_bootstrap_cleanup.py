@@ -35,9 +35,6 @@ class _FakeMCPConnectionService:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    def reconcile_pending_mutations(self) -> None:
-        pass
-
 
 class _FakeMCPManager:
     instance: _FakeMCPManager | None = None

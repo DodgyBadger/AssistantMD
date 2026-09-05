@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +53,7 @@ MCP_CONNECT_TIMEOUT_SECONDS = 10.0
 MCP_INIT_TIMEOUT_SECONDS = 8.0
 MCP_READ_TIMEOUT_SECONDS = 30.0
 MCP_CLOSE_TIMEOUT_SECONDS = 5.0
+MCP_INVALIDATION_TIMEOUT_SECONDS = 5.0
 MCP_IDLE_TIMEOUT_SECONDS = 15 * 60.0
 MCP_MAX_TOOL_PAGES = 10
 MCP_TEST_MAX_RETURNED_TOOL_NAMES = 100
@@ -375,7 +377,7 @@ class MCPConnectionManager:
         )
 
     def invalidate(self, principal_id: str, connection_id: str) -> None:
-        """Mark matching clients stale; active leases finish against their snapshot."""
+        """Acknowledge stale marking; existing leases finish and cleanup is observed."""
         try:
             running_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -383,11 +385,18 @@ class MCPConnectionManager:
         if running_loop is self._loop:
             self._spawn_invalidation(principal_id, connection_id)
             return
-        self._loop.call_soon_threadsafe(
-            self._spawn_invalidation,
-            principal_id,
-            connection_id,
-        )
+        acknowledged: Future[None] = Future()
+
+        def mark() -> None:
+            try:
+                self._spawn_invalidation(principal_id, connection_id)
+            except Exception as exc:
+                acknowledged.set_exception(exc)
+            else:
+                acknowledged.set_result(None)
+
+        self._loop.call_soon_threadsafe(mark)
+        acknowledged.result(timeout=MCP_INVALIDATION_TIMEOUT_SECONDS)
 
     async def evict_idle(self) -> int:
         """Close retained clients that have no active lease and exceeded idle TTL."""
@@ -441,12 +450,38 @@ class MCPConnectionManager:
 
     def _spawn_invalidation(self, principal_id: str, connection_id: str) -> None:
         if self._closed:
-            return
+            raise RuntimeError("MCP connection manager is closed.")
+        # All state mutations run on this event loop without an intervening await.
+        # The async state-lock sections likewise never suspend while changing entries.
         target = (principal_id, connection_id)
         self._invalidation_epochs[target] = self._invalidation_epochs.get(target, 0) + 1
-        task = asyncio.create_task(self._invalidate(principal_id, connection_id))
+        to_close: list[_ManagedConnection] = []
+        for key, entry in list(self._entries.items()):
+            if key[:2] != target:
+                continue
+            entry.invalidated = True
+            if entry.active_leases == 0:
+                self._entries.pop(key, None)
+                to_close.append(entry)
+        if not to_close:
+            return
+        task = asyncio.create_task(self._close_invalidated(to_close))
         self._invalidation_tasks.add(task)
-        task.add_done_callback(self._invalidation_tasks.discard)
+        task.add_done_callback(self._invalidation_finished)
+
+    def _invalidation_finished(self, task: asyncio.Task[None]) -> None:
+        self._invalidation_tasks.discard(task)
+        if task.cancelled():
+            error_type = "CancelledError"
+        else:
+            error = task.exception()
+            if error is None:
+                return
+            error_type = type(error).__name__
+        logger.warning(
+            "MCP invalidated client cleanup failed",
+            data={"event": "mcp_invalidation_cleanup_failed", "error_type": error_type},
+        )
 
     async def _idle_eviction_loop(self) -> None:
         interval = max(1.0, min(60.0, self._idle_timeout_seconds))
@@ -462,18 +497,21 @@ class MCPConnectionManager:
         if connection.transport is MCPTransport.ADVANCED_SHELL_STDIO:
             return await self._connect_advanced_shell_stdio(authority, connection)
         url = _require_http_url(connection)
-        await validate_mcp_endpoint(
-            url,
-            allow_private_http=connection.allow_private_http,
-        )
         credential = self._connections.resolve_credential(
             authority,
             connection.connection_id,
+            expected_connection=connection,
         )
         oauth_storage = (
-            self._connections.oauth_storage(authority, connection.connection_id)
+            self._connections.oauth_storage(
+                authority, connection.connection_id, expected_connection=connection
+            )
             if connection.auth_mode is MCPAuthMode.OAUTH
             else None
+        )
+        await validate_mcp_endpoint(
+            url,
+            allow_private_http=connection.allow_private_http,
         )
         if oauth_storage is not None and not await has_mcp_oauth_tokens(
             storage=oauth_storage,
@@ -682,16 +720,7 @@ class MCPConnectionManager:
         if close_entry:
             await _close_client(entry.client, connection=entry.connection)
 
-    async def _invalidate(self, principal_id: str, connection_id: str) -> None:
-        to_close: list[_ManagedConnection] = []
-        async with self._state_lock:
-            for key, entry in list(self._entries.items()):
-                if key[0] != principal_id or key[1] != connection_id:
-                    continue
-                entry.invalidated = True
-                if entry.active_leases == 0:
-                    self._entries.pop(key, None)
-                    to_close.append(entry)
+    async def _close_invalidated(self, to_close: list[_ManagedConnection]) -> None:
         await asyncio.gather(
             *(
                 _close_client(entry.client, connection=entry.connection)

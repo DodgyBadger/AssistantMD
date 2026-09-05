@@ -6,11 +6,13 @@ import json
 import re
 import secrets as random_secrets
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from core.access_store import write_transaction
 from core.advanced_shell.authority import require_advanced_shell_authority
 from core.advanced_shell.stdio import (
     MAX_ROOTS,
@@ -24,10 +26,6 @@ from core.identity import ExecutionAuthority, require_current_execution_authorit
 from core.logger import UnifiedLogger
 from core.secrets import (
     EncryptedSecretsService,
-    SecretCopy,
-    SecretIdentity,
-    SecretNamespaceDeletion,
-    SecretWrite,
 )
 
 from .models import (
@@ -38,20 +36,19 @@ from .models import (
     MCPStdioConfig,
     MCPTransport,
 )
-from .oauth_storage import MCP_OAUTH_FENCE_NAME, EncryptedMCPOAuthStorage
+from .oauth_storage import EncryptedMCPOAuthStorage
 from .schema import connect_mcp, ensure_mcp_schema
 
 MCP_SECRET_NAMESPACE_PREFIX = "mcp.connection."
 MCP_CREDENTIAL_NAME = "credential"
 MCP_OAUTH_CLIENT_SECRET_NAME = "oauth_client_secret"
-MCP_MUTATION_NAMESPACE_PREFIX = "mcp.mutation."
 _SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 _HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 logger = UnifiedLogger(tag="mcp-connection-mutations")
 
 
 class MCPMutationUnavailableError(RuntimeError):
-    """Raised when a durable connection mutation cannot currently converge."""
+    """Raised when committed metadata could not invalidate runtime state."""
 
 
 class MCPConnectionService:
@@ -63,13 +60,11 @@ class MCPConnectionService:
         system_root: str,
         secrets: EncryptedSecretsService,
         on_change: Callable[[str, str], None] | None = None,
-        mutation_failpoint: Callable[[str, str], None] | None = None,
         advanced_shell_stdio_enabled: bool = False,
     ) -> None:
         self._system_root = system_root
         self._secrets = secrets
         self._on_change = on_change
-        self._mutation_failpoint = mutation_failpoint
         self._advanced_shell_stdio_enabled = advanced_shell_stdio_enabled
         ensure_mcp_schema(system_root)
 
@@ -97,8 +92,6 @@ class MCPConnectionService:
         """Update mutable metadata while preserving immutable identity and slug."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        previous = self._require_for_authority(authority, clean_id)
         normalized = _normalize_update(request)
         self._require_supported_transport(normalized.transport)
         if normalized.transport is MCPTransport.ADVANCED_SHELL_STDIO:
@@ -108,51 +101,19 @@ class MCPConnectionService:
             MCPAuthMode.HEADER,
         }
         delete_oauth_client_secret = normalized.auth_mode is not MCPAuthMode.OAUTH
-        delete_oauth_state = delete_oauth_client_secret or (
-            previous.auth_mode is MCPAuthMode.OAUTH
-            and (
-                previous.url != normalized.url
-                or previous.oauth_client_id != normalized.oauth_client_id
-                or previous.oauth_scopes != normalized.oauth_scopes
+        with self._mutation(authority, clean_id, "update") as conn:
+            previous = self._require_row(conn, authority, clean_id)
+            delete_oauth_state = delete_oauth_client_secret or (
+                previous["auth_mode"] != normalized.auth_mode.value
+                or previous["url"] != normalized.url
+                or previous["transport"] != normalized.transport.value
+                or previous["oauth_client_id"] != normalized.oauth_client_id
+                or _load_allowed_tools(previous["oauth_scopes_json"])
+                != normalized.oauth_scopes
             )
-        )
-        operation_id = str(uuid4())
-        fence_token = random_secrets.token_hex(16) if delete_oauth_state else None
-        payload = _mutation_payload(
-            copies=(MCP_OAUTH_FENCE_NAME,) if fence_token else (),
-            deletions=tuple(
-                name
-                for name, required in (
-                    (MCP_CREDENTIAL_NAME, delete_credential),
-                    (MCP_OAUTH_CLIENT_SECRET_NAME, delete_oauth_client_secret),
-                )
-                if required
-            ),
-            delete_oauth_state=delete_oauth_state,
-        )
-        if fence_token is not None:
-            self._register_staging_mutation(
-                authority,
-                operation_id,
-                clean_id,
-                kind="update",
-                payload=payload,
-            )
-            try:
-                self._stage_values(
-                    authority,
-                    operation_id,
-                    {MCP_OAUTH_FENCE_NAME: fence_token},
-                )
-                self._failpoint("after_stage", operation_id)
-            except Exception:
-                self._abandon_staging(authority, operation_id)
-                raise
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                cursor = conn.execute(
-                    """
+            fence_token = random_secrets.token_hex(16) if delete_oauth_state else None
+            cursor = conn.execute(
+                """
                     UPDATE mcp_connections SET
                         display_name = ?, url = ?, transport = ?, auth_mode = ?,
                         header_name = ?, enabled = ?, allow_private_http = ?,
@@ -161,94 +122,92 @@ class MCPConnectionService:
                         stdio_executable = ?, stdio_arguments_json = ?,
                         stdio_working_directory = ?, stdio_environment_json = ?,
                         stdio_roots_json = ?,
-                        lifecycle_state = 'pending',
+                        config_version = config_version + 1,
                         oauth_fence_token = COALESCE(?, oauth_fence_token),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE owner_principal_id = ? AND connection_id = ?
-                      AND lifecycle_state = 'active'
                     """,
-                    (
-                        normalized.display_name,
-                        normalized.url,
-                        normalized.transport.value,
-                        normalized.auth_mode.value,
-                        normalized.header_name,
-                        int(normalized.enabled),
-                        int(normalized.allow_private_http),
-                        _dump_allowed_tools(normalized.allowed_tools),
-                        normalized.oauth_client_id,
-                        _dump_allowed_tools(normalized.oauth_scopes),
-                        normalized.stdio.executable if normalized.stdio else None,
-                        _dump_stdio_arguments(normalized.stdio),
-                        (
-                            normalized.stdio.working_directory
-                            if normalized.stdio
-                            else None
-                        ),
-                        _dump_stdio_environment(normalized.stdio),
-                        _dump_stdio_roots(normalized.stdio),
-                        fence_token,
-                        authority.principal_id,
-                        clean_id,
-                    ),
+                (
+                    normalized.display_name,
+                    normalized.url,
+                    normalized.transport.value,
+                    normalized.auth_mode.value,
+                    normalized.header_name,
+                    int(normalized.enabled),
+                    int(normalized.allow_private_http),
+                    _dump_allowed_tools(normalized.allowed_tools),
+                    normalized.oauth_client_id,
+                    _dump_allowed_tools(normalized.oauth_scopes),
+                    normalized.stdio.executable if normalized.stdio else None,
+                    _dump_stdio_arguments(normalized.stdio),
+                    (normalized.stdio.working_directory if normalized.stdio else None),
+                    _dump_stdio_environment(normalized.stdio),
+                    _dump_stdio_roots(normalized.stdio),
+                    fence_token,
+                    authority.principal_id,
+                    clean_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise LookupError("MCP connection not found.")
+            namespace = _credential_namespace(clean_id)
+            if delete_credential:
+                self._secrets.delete_for_authority_on_connection(
+                    conn, authority, namespace, MCP_CREDENTIAL_NAME
                 )
-                if cursor.rowcount == 0:
-                    raise LookupError("MCP connection not found.")
-                if fence_token is None:
-                    self._insert_mutation(
-                        conn,
-                        operation_id=operation_id,
-                        authority=authority,
-                        connection_id=clean_id,
-                        kind="update",
-                        payload=payload,
-                    )
-                else:
-                    self._promote_staging_intent(conn, operation_id)
-        except Exception:
-            if fence_token is not None:
-                self._abandon_staging(authority, operation_id)
-            raise
-        finally:
-            conn.close()
-        self._log_mutation_started(operation_id, clean_id, "update")
-        self._failpoint("after_intent", operation_id)
-        self._finish_new_mutation(operation_id)
+            if delete_oauth_client_secret:
+                self._secrets.delete_for_authority_on_connection(
+                    conn, authority, namespace, MCP_OAUTH_CLIENT_SECRET_NAME
+                )
+            if delete_oauth_state:
+                self._secrets.delete_namespace_for_authority_on_connection(
+                    conn, authority, f"{namespace}.oauth"
+                )
         return self._require_for_authority(authority, clean_id)
 
     def set_credential(self, connection_id: str, credential: str) -> MCPConnection:
         """Create or replace the current-principal encrypted static credential."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        connection = self._require_for_authority(authority, clean_id)
-        if connection.auth_mode not in {MCPAuthMode.BEARER, MCPAuthMode.HEADER}:
-            raise ValueError("This MCP connection does not use a static credential.")
         value = str(credential or "").strip()
         if not value:
             raise ValueError("MCP credential cannot be empty.")
-        self._start_staged_mutation(
-            authority,
-            clean_id,
-            kind="set_credential",
-            staged_values={MCP_CREDENTIAL_NAME: value},
-        )
+        with self._mutation(authority, clean_id, "set_credential") as conn:
+            connection = self._require_row(conn, authority, clean_id)
+            if connection["auth_mode"] not in {MCPAuthMode.BEARER, MCPAuthMode.HEADER}:
+                raise ValueError(
+                    "This MCP connection does not use a static credential."
+                )
+            self._secrets.set_for_authority_on_connection(
+                conn,
+                authority,
+                _credential_namespace(clean_id),
+                MCP_CREDENTIAL_NAME,
+                value,
+            )
+            conn.execute(
+                "UPDATE mcp_connections SET config_version=config_version+1, updated_at=CURRENT_TIMESTAMP WHERE owner_principal_id=? AND connection_id=?",
+                (authority.principal_id, clean_id),
+            )
         return self._require_for_authority(authority, clean_id)
 
     def clear_credential(self, connection_id: str) -> MCPConnection:
         """Remove a current-principal static credential."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        connection = self._require_for_authority(authority, clean_id)
-        if connection.transport is MCPTransport.ADVANCED_SHELL_STDIO:
-            raise ValueError("Advanced-shell stdio connections do not use credentials.")
-        self._start_simple_mutation(
-            authority,
-            clean_id,
-            kind="clear_credential",
-            payload=_mutation_payload(deletions=(MCP_CREDENTIAL_NAME,)),
-        )
+        with self._mutation(authority, clean_id, "clear_credential") as conn:
+            connection = self._require_row(conn, authority, clean_id)
+            if connection["transport"] == MCPTransport.ADVANCED_SHELL_STDIO:
+                raise ValueError(
+                    "Advanced-shell stdio connections do not use credentials."
+                )
+            self._secrets.delete_for_authority_on_connection(
+                conn, authority, _credential_namespace(clean_id), MCP_CREDENTIAL_NAME
+            )
+            conn.execute(
+                "UPDATE mcp_connections SET config_version=config_version+1, updated_at=CURRENT_TIMESTAMP WHERE owner_principal_id=? AND connection_id=?",
+                (authority.principal_id, clean_id),
+            )
         return self._require_for_authority(authority, clean_id)
 
     def set_oauth_client_secret(
@@ -257,34 +216,37 @@ class MCPConnectionService:
         """Create or replace a write-only OAuth client secret."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        connection = self._require_for_authority(authority, clean_id)
-        if connection.auth_mode is not MCPAuthMode.OAUTH:
-            raise ValueError("This MCP connection does not use OAuth.")
         value = str(client_secret or "").strip()
         if not value:
             raise ValueError("OAuth client secret cannot be empty.")
-        self._start_staged_mutation(
-            authority,
-            clean_id,
-            kind="set_oauth_client_secret",
-            staged_values={
-                MCP_OAUTH_CLIENT_SECRET_NAME: value,
-                MCP_OAUTH_FENCE_NAME: random_secrets.token_hex(16),
-            },
-            delete_oauth_state=True,
-        )
+        fence = random_secrets.token_hex(16)
+        with self._mutation(authority, clean_id, "set_oauth_client_secret") as conn:
+            connection = self._require_row(conn, authority, clean_id)
+            if connection["auth_mode"] != MCPAuthMode.OAUTH:
+                raise ValueError("This MCP connection does not use OAuth.")
+            namespace = _credential_namespace(clean_id)
+            self._secrets.set_for_authority_on_connection(
+                conn, authority, namespace, MCP_OAUTH_CLIENT_SECRET_NAME, value
+            )
+            self._secrets.delete_namespace_for_authority_on_connection(
+                conn, authority, f"{namespace}.oauth"
+            )
+            conn.execute(
+                "UPDATE mcp_connections SET oauth_fence_token=?, config_version=config_version+1, updated_at=CURRENT_TIMESTAMP WHERE owner_principal_id=? AND connection_id=?",
+                (fence, authority.principal_id, clean_id),
+            )
         return self._require_for_authority(authority, clean_id)
 
     def resolve_oauth_client_secret(
-        self, authority: ExecutionAuthority, connection_id: str
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        *,
+        expected_connection: MCPConnection | None = None,
     ) -> str | None:
         """Resolve an OAuth client secret only after proving ownership."""
-        self._require_for_authority(authority, connection_id)
-        return self._secrets.get_for_authority(
-            authority,
-            _credential_namespace(connection_id),
-            MCP_OAUTH_CLIENT_SECRET_NAME,
+        return self._resolve_secret(
+            authority, connection_id, MCP_OAUTH_CLIENT_SECRET_NAME, expected_connection
         )
 
     def disconnect_oauth(
@@ -292,66 +254,59 @@ class MCPConnectionService:
     ) -> MCPConnection:
         """Fence OAuth writers and atomically clear durable OAuth state."""
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        connection = self._require_for_authority(authority, clean_id)
-        if connection.auth_mode is not MCPAuthMode.OAUTH:
-            raise ValueError("This MCP connection does not use OAuth.")
-        self._start_staged_mutation(
-            authority,
-            clean_id,
-            kind="disconnect_oauth",
-            staged_values={MCP_OAUTH_FENCE_NAME: random_secrets.token_hex(16)},
-            delete_oauth_state=True,
-        )
+        fence = random_secrets.token_hex(16)
+        with self._mutation(authority, clean_id, "disconnect_oauth") as conn:
+            connection = self._require_row(conn, authority, clean_id)
+            if connection["auth_mode"] != MCPAuthMode.OAUTH:
+                raise ValueError("This MCP connection does not use OAuth.")
+            namespace = _credential_namespace(clean_id)
+            self._secrets.delete_namespace_for_authority_on_connection(
+                conn, authority, f"{namespace}.oauth"
+            )
+            conn.execute(
+                "UPDATE mcp_connections SET oauth_fence_token=?, config_version=config_version+1, updated_at=CURRENT_TIMESTAMP WHERE owner_principal_id=? AND connection_id=?",
+                (fence, authority.principal_id, clean_id),
+            )
         return self._require_for_authority(authority, clean_id)
 
     def delete_connection(self, connection_id: str) -> None:
         """Delete a current-principal connection and its encrypted credential."""
         authority = require_current_execution_authority()
         clean_id = _required_id(connection_id)
-        self._reconcile_target(authority, clean_id)
-        self._require_for_authority(authority, clean_id)
-        operation_id = str(uuid4())
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                cursor = conn.execute(
-                    """
-                    UPDATE mcp_connections SET lifecycle_state = 'deleting',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE owner_principal_id = ? AND connection_id = ?
-                      AND lifecycle_state = 'active'
-                    """,
-                    (authority.principal_id, clean_id),
-                )
-                if cursor.rowcount != 1:
-                    raise LookupError("MCP connection not found.")
-                self._insert_mutation(
-                    conn,
-                    operation_id=operation_id,
-                    authority=authority,
-                    connection_id=clean_id,
-                    kind="delete",
-                    payload=_mutation_payload(delete_connection_secrets=True),
-                )
-        finally:
-            conn.close()
-        self._log_mutation_started(operation_id, clean_id, "delete")
-        self._failpoint("after_intent", operation_id)
-        self._finish_new_mutation(operation_id)
+        with self._mutation(authority, clean_id, "delete") as conn:
+            self._require_row(conn, authority, clean_id)
+            self._secrets.delete_namespace_for_authority_on_connection(
+                conn, authority, _credential_namespace(clean_id)
+            )
+            self._secrets.delete_namespace_for_authority_on_connection(
+                conn, authority, f"{_credential_namespace(clean_id)}.oauth"
+            )
+            cursor = conn.execute(
+                "DELETE FROM mcp_connections WHERE owner_principal_id=? AND connection_id=?",
+                (authority.principal_id, clean_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("MCP connection not found.")
 
     def get_connection_test_material(
         self, connection_id: str
     ) -> tuple[MCPConnection, str | None]:
         """Resolve one connection and credential under current authority."""
         authority = require_current_execution_authority()
-        connection = self._require_for_authority(authority, connection_id)
-        credential = self._secrets.get_for_authority(
-            authority,
-            _credential_namespace(connection_id),
-            MCP_CREDENTIAL_NAME,
-        )
-        return connection, credential
+        conn = connect_mcp(self._system_root)
+        try:
+            conn.execute("BEGIN")
+            row = self._require_row(conn, authority, connection_id)
+            connection = self._connection_from_row(conn, authority, row)
+            credential = self._secrets.get_for_authority_on_connection(
+                conn,
+                authority,
+                _credential_namespace(connection_id),
+                MCP_CREDENTIAL_NAME,
+            )
+            return connection, credential
+        finally:
+            conn.close()
 
     def list_connections_for_authority(
         self, authority: ExecutionAuthority
@@ -359,22 +314,18 @@ class MCPConnectionService:
         """Trusted isolation helper for non-request execution and tests."""
         conn = connect_mcp(self._system_root)
         try:
+            conn.execute("BEGIN")
             rows = conn.execute(
                 """
                 SELECT * FROM mcp_connections
-                WHERE owner_principal_id = ? AND lifecycle_state = 'active'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM mcp_connection_mutations mutations
-                    WHERE mutations.owner_principal_id = mcp_connections.owner_principal_id
-                      AND mutations.connection_id = mcp_connections.connection_id
-                  )
+                WHERE owner_principal_id = ?
                 ORDER BY LOWER(display_name), connection_id
                 """,
                 (authority.principal_id,),
             ).fetchall()
+            return [self._connection_from_row(conn, authority, row) for row in rows]
         finally:
             conn.close()
-        return [self._connection_from_row(authority, row) for row in rows]
 
     def get_connection_for_authority(
         self, authority: ExecutionAuthority, connection_id: str
@@ -382,22 +333,21 @@ class MCPConnectionService:
         """Trusted lookup that still scopes the query by its explicit authority."""
         conn = connect_mcp(self._system_root)
         try:
+            conn.execute("BEGIN")
             row = conn.execute(
                 """
                 SELECT * FROM mcp_connections
                 WHERE owner_principal_id = ? AND connection_id = ?
-                  AND lifecycle_state = 'active'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM mcp_connection_mutations mutations
-                    WHERE mutations.owner_principal_id = mcp_connections.owner_principal_id
-                      AND mutations.connection_id = mcp_connections.connection_id
-                  )
                 """,
                 (authority.principal_id, _required_id(connection_id)),
             ).fetchone()
+            return (
+                self._connection_from_row(conn, authority, row)
+                if row is not None
+                else None
+            )
         finally:
             conn.close()
-        return self._connection_from_row(authority, row) if row is not None else None
 
     def create_connection_for_authority(
         self, authority: ExecutionAuthority, request: MCPConnectionCreate
@@ -408,41 +358,19 @@ class MCPConnectionService:
         if normalized.transport is MCPTransport.ADVANCED_SHELL_STDIO:
             require_advanced_shell_authority(authority)
         connection_id = str(uuid4())
-        operation_id = str(uuid4())
         fence_token = random_secrets.token_hex(16)
-        staged_values = {MCP_OAUTH_FENCE_NAME: fence_token}
-        if normalized.credential is not None:
-            staged_values[MCP_CREDENTIAL_NAME] = normalized.credential
-        if normalized.oauth_client_secret is not None:
-            staged_values[MCP_OAUTH_CLIENT_SECRET_NAME] = normalized.oauth_client_secret
-        payload = _mutation_payload(copies=tuple(staged_values))
-        self._register_staging_mutation(
-            authority,
-            operation_id,
-            connection_id,
-            kind="create",
-            payload=payload,
-        )
-        try:
-            self._stage_values(authority, operation_id, staged_values)
-            self._failpoint("after_stage", operation_id)
-        except Exception:
-            self._abandon_staging(authority, operation_id)
-            raise
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                slug = _unique_slug(conn, authority, normalized.display_name)
-                conn.execute(
-                    """
+        with self._mutation(authority, connection_id, "create") as conn:
+            slug = _unique_slug(conn, authority, normalized.display_name)
+            conn.execute(
+                """
                     INSERT INTO mcp_connection_slugs (
                         connection_id, owner_principal_id, slug
                     ) VALUES (?, ?, ?)
                     """,
-                    (connection_id, authority.principal_id, slug),
-                )
-                conn.execute(
-                    """
+                (connection_id, authority.principal_id, slug),
+            )
+            conn.execute(
+                """
                     INSERT INTO mcp_connections (
                         connection_id, owner_principal_id, slug, display_name,
                         url, transport, auth_mode, header_name, enabled,
@@ -450,46 +378,49 @@ class MCPConnectionService:
                         , oauth_client_id, oauth_scopes_json,
                         stdio_executable, stdio_arguments_json,
                         stdio_working_directory, stdio_environment_json,
-                        stdio_roots_json, lifecycle_state,
-                        oauth_fence_token
+                        stdio_roots_json, oauth_fence_token
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                              'pending', ?)
+                              ?)
                     """,
-                    (
-                        connection_id,
-                        authority.principal_id,
-                        slug,
-                        normalized.display_name,
-                        normalized.url,
-                        normalized.transport.value,
-                        normalized.auth_mode.value,
-                        normalized.header_name,
-                        int(normalized.enabled),
-                        int(normalized.allow_private_http),
-                        _dump_allowed_tools(normalized.allowed_tools),
-                        normalized.oauth_client_id,
-                        _dump_allowed_tools(normalized.oauth_scopes),
-                        normalized.stdio.executable if normalized.stdio else None,
-                        _dump_stdio_arguments(normalized.stdio),
-                        (
-                            normalized.stdio.working_directory
-                            if normalized.stdio
-                            else None
-                        ),
-                        _dump_stdio_environment(normalized.stdio),
-                        _dump_stdio_roots(normalized.stdio),
-                        fence_token,
-                    ),
+                (
+                    connection_id,
+                    authority.principal_id,
+                    slug,
+                    normalized.display_name,
+                    normalized.url,
+                    normalized.transport.value,
+                    normalized.auth_mode.value,
+                    normalized.header_name,
+                    int(normalized.enabled),
+                    int(normalized.allow_private_http),
+                    _dump_allowed_tools(normalized.allowed_tools),
+                    normalized.oauth_client_id,
+                    _dump_allowed_tools(normalized.oauth_scopes),
+                    normalized.stdio.executable if normalized.stdio else None,
+                    _dump_stdio_arguments(normalized.stdio),
+                    (normalized.stdio.working_directory if normalized.stdio else None),
+                    _dump_stdio_environment(normalized.stdio),
+                    _dump_stdio_roots(normalized.stdio),
+                    fence_token,
+                ),
+            )
+            namespace = _credential_namespace(connection_id)
+            if normalized.credential is not None:
+                self._secrets.set_for_authority_on_connection(
+                    conn,
+                    authority,
+                    namespace,
+                    MCP_CREDENTIAL_NAME,
+                    normalized.credential,
                 )
-                self._promote_staging_intent(conn, operation_id)
-        except Exception:
-            self._abandon_staging(authority, operation_id)
-            raise
-        finally:
-            conn.close()
-        self._log_mutation_started(operation_id, connection_id, "create")
-        self._failpoint("after_intent", operation_id)
-        self._finish_new_mutation(operation_id)
+            if normalized.oauth_client_secret is not None:
+                self._secrets.set_for_authority_on_connection(
+                    conn,
+                    authority,
+                    namespace,
+                    MCP_OAUTH_CLIENT_SECRET_NAME,
+                    normalized.oauth_client_secret,
+                )
         return self._require_for_authority(authority, connection_id)
 
     def _require_supported_transport(self, transport: MCPTransport) -> None:
@@ -500,604 +431,92 @@ class MCPConnectionService:
             raise ValueError("Advanced-shell stdio requires advanced execution mode.")
 
     def resolve_credential(
-        self, authority: ExecutionAuthority, connection_id: str
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        *,
+        expected_connection: MCPConnection | None = None,
     ) -> str | None:
         """Resolve a credential only after proving matching connection ownership."""
-        self._require_for_authority(authority, connection_id)
-        return self._secrets.get_for_authority(
-            authority,
-            _credential_namespace(connection_id),
-            MCP_CREDENTIAL_NAME,
+        return self._resolve_secret(
+            authority, connection_id, MCP_CREDENTIAL_NAME, expected_connection
         )
 
+    def _resolve_secret(
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        name: str,
+        expected_connection: MCPConnection | None,
+    ) -> str | None:
+        conn = connect_mcp(self._system_root)
+        try:
+            conn.execute("BEGIN")
+            self._require_expected_row(
+                conn, authority, connection_id, expected_connection
+            )
+            return self._secrets.get_for_authority_on_connection(
+                conn, authority, _credential_namespace(connection_id), name
+            )
+        finally:
+            conn.close()
+
     def oauth_storage(
-        self, authority: ExecutionAuthority, connection_id: str
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        *,
+        expected_connection: MCPConnection | None = None,
     ) -> EncryptedMCPOAuthStorage:
         """Return encrypted OAuth storage after proving connection ownership."""
-        self._require_for_authority(authority, connection_id)
+        conn = connect_mcp(self._system_root)
+        try:
+            row = self._require_expected_row(
+                conn, authority, connection_id, expected_connection
+            )
+            fence_token = str(row["oauth_fence_token"])
+        finally:
+            conn.close()
         return EncryptedMCPOAuthStorage(
             secrets=self._secrets,
             authority=authority,
             connection_id=connection_id,
-            fence_token=self._oauth_fence_token(authority, connection_id),
+            fence_token=fence_token,
         )
 
-    def reconcile_pending_mutations(self) -> int:
-        """Converge every durable MCP mutation before runtime acquisition."""
-        conn = connect_mcp(self._system_root)
-        try:
-            operation_ids = [
-                str(row["operation_id"])
-                for row in conn.execute(
-                    """
-                    SELECT operation_id FROM mcp_connection_mutations
-                    ORDER BY created_at, operation_id
-                    """
-                ).fetchall()
-            ]
-        finally:
-            conn.close()
-        for operation_id in operation_ids:
-            try:
-                self._reconcile_operation(operation_id)
-            except Exception:
-                continue
-        self._ensure_active_fences()
-        return len(operation_ids)
-
-    def _start_staged_mutation(
+    def _require_expected_row(
         self,
-        authority: ExecutionAuthority,
-        connection_id: str,
-        *,
-        kind: str,
-        staged_values: dict[str, str],
-        delete_oauth_state: bool = False,
-    ) -> None:
-        operation_id = str(uuid4())
-        payload = _mutation_payload(
-            copies=tuple(staged_values),
-            delete_oauth_state=delete_oauth_state,
-        )
-        self._register_staging_mutation(
-            authority,
-            operation_id,
-            connection_id,
-            kind=kind,
-            payload=payload,
-        )
-        try:
-            self._stage_values(authority, operation_id, staged_values)
-            self._failpoint("after_stage", operation_id)
-            conn = connect_mcp(self._system_root)
-            try:
-                with conn:
-                    fence_token = staged_values.get(MCP_OAUTH_FENCE_NAME)
-                    cursor = conn.execute(
-                        """
-                        UPDATE mcp_connections SET lifecycle_state = 'pending',
-                            oauth_fence_token = COALESCE(?, oauth_fence_token),
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE owner_principal_id = ? AND connection_id = ?
-                          AND lifecycle_state = 'active'
-                        """,
-                        (fence_token, authority.principal_id, connection_id),
-                    )
-                    if cursor.rowcount != 1:
-                        raise LookupError("MCP connection not found.")
-                    self._promote_staging_intent(conn, operation_id)
-            finally:
-                conn.close()
-        except Exception:
-            self._abandon_staging(authority, operation_id)
-            raise
-        self._log_mutation_started(operation_id, connection_id, kind)
-        self._failpoint("after_intent", operation_id)
-        self._finish_new_mutation(operation_id)
-
-    def _start_simple_mutation(
-        self,
-        authority: ExecutionAuthority,
-        connection_id: str,
-        *,
-        kind: str,
-        payload: str,
-    ) -> None:
-        operation_id = str(uuid4())
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                cursor = conn.execute(
-                    """
-                    UPDATE mcp_connections SET lifecycle_state = 'pending',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE owner_principal_id = ? AND connection_id = ?
-                      AND lifecycle_state = 'active'
-                    """,
-                    (authority.principal_id, connection_id),
-                )
-                if cursor.rowcount != 1:
-                    raise LookupError("MCP connection not found.")
-                self._insert_mutation(
-                    conn,
-                    operation_id=operation_id,
-                    authority=authority,
-                    connection_id=connection_id,
-                    kind=kind,
-                    payload=payload,
-                )
-        finally:
-            conn.close()
-        self._log_mutation_started(operation_id, connection_id, kind)
-        self._failpoint("after_intent", operation_id)
-        self._finish_new_mutation(operation_id)
-
-    @staticmethod
-    def _insert_mutation(
         conn: sqlite3.Connection,
-        *,
-        operation_id: str,
         authority: ExecutionAuthority,
         connection_id: str,
-        kind: str,
-        payload: str,
-        state: str = "intent",
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO mcp_connection_mutations (
-                operation_id, owner_principal_id, connection_id,
-                mutation_kind, payload_json, state
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                operation_id,
-                authority.principal_id,
-                connection_id,
-                kind,
-                payload,
-                state,
-            ),
-        )
-
-    def _register_staging_mutation(
-        self,
-        authority: ExecutionAuthority,
-        operation_id: str,
-        connection_id: str,
-        *,
-        kind: str,
-        payload: str,
-    ) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                self._insert_mutation(
-                    conn,
-                    operation_id=operation_id,
-                    authority=authority,
-                    connection_id=connection_id,
-                    kind=kind,
-                    payload=payload,
-                    state="staging",
-                )
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _promote_staging_intent(conn: sqlite3.Connection, operation_id: str) -> None:
-        cursor = conn.execute(
-            """
-            UPDATE mcp_connection_mutations SET state = 'intent',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE operation_id = ? AND state = 'staging'
-            """,
-            (operation_id,),
-        )
-        if cursor.rowcount != 1:
-            raise RuntimeError("MCP mutation staging record is unavailable.")
-
-    def _stage_values(
-        self,
-        authority: ExecutionAuthority,
-        operation_id: str,
-        values: dict[str, str],
-    ) -> None:
-        self._secrets.set_many_for_authorities(
-            [
-                SecretWrite(
-                    authority=authority,
-                    namespace=_mutation_namespace(operation_id),
-                    name=name,
-                    value=value,
-                )
-                for name, value in values.items()
-            ]
-        )
-
-    def _reconcile_target(
-        self, authority: ExecutionAuthority, connection_id: str
-    ) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            row = conn.execute(
-                """
-                SELECT operation_id FROM mcp_connection_mutations
-                WHERE owner_principal_id = ? AND connection_id = ?
-                """,
-                (authority.principal_id, connection_id),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is not None:
-            try:
-                self._reconcile_operation(str(row["operation_id"]))
-            except Exception as exc:
-                raise MCPMutationUnavailableError(
-                    "MCP connection configuration is temporarily unavailable."
-                ) from exc
-
-    def _finish_new_mutation(self, operation_id: str) -> None:
-        try:
-            self._reconcile_operation(operation_id)
-        except Exception as exc:
-            raise MCPMutationUnavailableError(
-                "MCP connection configuration is temporarily unavailable."
-            ) from exc
-
-    def _reconcile_operation(self, operation_id: str) -> None:
-        try:
-            while True:
-                mutation = self._mutation_row(operation_id)
-                if mutation is None:
-                    return
-                authority = ExecutionAuthority(str(mutation["owner_principal_id"]))
-                connection_id = str(mutation["connection_id"])
-                state = str(mutation["state"])
-                payload = _parse_mutation_payload(str(mutation["payload_json"]))
-                if state == "staging":
-                    self._cleanup_pre_intent(authority, operation_id)
-                    self._delete_mutation(operation_id)
-                    return
-                if state == "intent":
-                    self._apply_secret_effects(
-                        authority,
-                        operation_id,
-                        connection_id,
-                        payload,
-                    )
-                    self._failpoint("after_secret_effects", operation_id)
-                    self._advance_mutation_state(
-                        operation_id, expected="intent", desired="secrets_applied"
-                    )
-                    self._failpoint("after_secrets_applied", operation_id)
-                    continue
-                if state == "secrets_applied":
-                    self._finalize_metadata(
-                        operation_id=operation_id,
-                        authority=authority,
-                        connection_id=connection_id,
-                        kind=str(mutation["mutation_kind"]),
-                    )
-                    self._failpoint("after_finalize", operation_id)
-                    continue
-                if state == "finalized":
-                    self._cleanup_pre_intent(authority, operation_id)
-                    self._dispatch_finalized_mutation(
-                        operation_id=operation_id,
-                        authority=authority,
-                        connection_id=connection_id,
-                        mutation_kind=str(mutation["mutation_kind"]),
-                    )
-                    return
-                raise RuntimeError("Stored MCP mutation state is invalid.")
-        except Exception as exc:
-            self._record_mutation_failure(operation_id, exc)
-            raise
-
-    def _apply_secret_effects(
-        self,
-        authority: ExecutionAuthority,
-        operation_id: str,
-        connection_id: str,
-        payload: dict[str, object],
-    ) -> None:
-        copies = tuple(
-            SecretCopy(
-                source=SecretIdentity(_mutation_namespace(operation_id), name),
-                destination=SecretIdentity(_credential_namespace(connection_id), name),
-                overwrite=True,
+        expected: MCPConnection | None,
+    ) -> sqlite3.Row:
+        row = self._require_row(conn, authority, connection_id)
+        if expected is not None and (
+            expected.connection_id != connection_id
+            or expected.config_version != int(row["config_version"])
+        ):
+            raise ValueError(
+                "MCP connection configuration changed before credential resolution."
             )
-            for name in _payload_names(payload, "copies")
-        )
-        deletions = tuple(
-            SecretIdentity(_credential_namespace(connection_id), name)
-            for name in _payload_names(payload, "deletions")
-        )
-        namespace_deletions: list[SecretNamespaceDeletion] = []
-        if payload["delete_oauth_state"] is True:
-            namespace_deletions.append(
-                SecretNamespaceDeletion(_oauth_namespace(connection_id))
-            )
-        if payload["delete_connection_secrets"] is True:
-            namespace_deletions.extend(
-                (
-                    SecretNamespaceDeletion(_credential_namespace(connection_id)),
-                    SecretNamespaceDeletion(_oauth_namespace(connection_id)),
-                )
-            )
-        self._secrets.mutate_for_authority(
-            authority,
-            copies=copies,
-            deletions=deletions,
-            namespace_deletions=tuple(namespace_deletions),
-        )
-
-    def _finalize_metadata(
-        self,
-        *,
-        operation_id: str,
-        authority: ExecutionAuthority,
-        connection_id: str,
-        kind: str,
-    ) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                claim = conn.execute(
-                    """
-                    UPDATE mcp_connection_mutations SET updated_at = updated_at
-                    WHERE operation_id = ? AND state = 'secrets_applied'
-                    """,
-                    (operation_id,),
-                )
-                if claim.rowcount != 1:
-                    return
-                if kind == "delete":
-                    conn.execute(
-                        """
-                        DELETE FROM mcp_connections
-                        WHERE owner_principal_id = ? AND connection_id = ?
-                        """,
-                        (authority.principal_id, connection_id),
-                    )
-                else:
-                    version_expression = (
-                        "config_version" if kind == "create" else "config_version + 1"
-                    )
-                    cursor = conn.execute(
-                        f"""
-                        UPDATE mcp_connections SET lifecycle_state = 'active',
-                            config_version = {version_expression},
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE owner_principal_id = ? AND connection_id = ?
-                          AND lifecycle_state = 'pending'
-                        """,
-                        (authority.principal_id, connection_id),
-                    )
-                    if cursor.rowcount != 1:
-                        raise RuntimeError(
-                            "Pending MCP connection metadata is missing."
-                        )
-                conn.execute(
-                    """
-                    UPDATE mcp_connection_mutations SET state = 'finalized',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE operation_id = ? AND state = 'secrets_applied'
-                    """,
-                    (operation_id,),
-                )
-        finally:
-            conn.close()
-
-    def _advance_mutation_state(
-        self, operation_id: str, *, expected: str, desired: str
-    ) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                conn.execute(
-                    """
-                    UPDATE mcp_connection_mutations SET state = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE operation_id = ? AND state = ?
-                    """,
-                    (desired, operation_id, expected),
-                )
-        finally:
-            conn.close()
-
-    def _mutation_row(self, operation_id: str) -> sqlite3.Row | None:
-        conn = connect_mcp(self._system_root)
-        try:
-            return cast(
-                sqlite3.Row | None,
-                conn.execute(
-                    """
-                SELECT * FROM mcp_connection_mutations WHERE operation_id = ?
-                """,
-                    (operation_id,),
-                ).fetchone(),
-            )
-        finally:
-            conn.close()
-
-    def _delete_mutation(self, operation_id: str) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                conn.execute(
-                    "DELETE FROM mcp_connection_mutations WHERE operation_id = ?",
-                    (operation_id,),
-                )
-        finally:
-            conn.close()
-
-    def _dispatch_finalized_mutation(
-        self,
-        *,
-        operation_id: str,
-        authority: ExecutionAuthority,
-        connection_id: str,
-        mutation_kind: str,
-    ) -> None:
-        """Serialize terminal effects while retaining rollback-safe retry evidence."""
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute(
-                    """
-                    SELECT 1 FROM mcp_connection_mutations
-                    WHERE operation_id = ? AND state = 'finalized'
-                    """,
-                    (operation_id,),
-                ).fetchone()
-                if row is None:
-                    return
-                self._notify(authority, connection_id)
-                self._failpoint("after_notify", operation_id)
-                logger.info(
-                    "MCP connection mutation completed",
-                    data={
-                        "event": "mcp_connection_mutation_completed",
-                        "operation_id": operation_id,
-                        "connection_id": connection_id,
-                        "mutation_kind": mutation_kind,
-                    },
-                )
-                self._failpoint("after_terminal_log", operation_id)
-                conn.execute(
-                    "DELETE FROM mcp_connection_mutations WHERE operation_id = ?",
-                    (operation_id,),
-                )
-        finally:
-            conn.close()
-
-    def _record_mutation_failure(self, operation_id: str, exc: Exception) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            with conn:
-                conn.execute(
-                    """
-                    UPDATE mcp_connection_mutations
-                    SET attempt_count = attempt_count + 1,
-                        last_error_class = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE operation_id = ?
-                    """,
-                    (type(exc).__name__[:120], operation_id),
-                )
-        finally:
-            conn.close()
-        logger.warning(
-            "MCP connection mutation retry failed",
-            data={
-                "event": "mcp_connection_mutation_retry_failed",
-                "operation_id": operation_id,
-                "error_class": type(exc).__name__[:120],
-            },
-        )
-
-    def _cleanup_pre_intent(
-        self, authority: ExecutionAuthority, operation_id: str
-    ) -> None:
-        self._secrets.mutate_for_authority(
-            authority,
-            namespace_deletions=(
-                SecretNamespaceDeletion(_mutation_namespace(operation_id)),
-            ),
-        )
-
-    def _abandon_staging(
-        self, authority: ExecutionAuthority, operation_id: str
-    ) -> None:
-        self._cleanup_pre_intent(authority, operation_id)
-        self._delete_mutation(operation_id)
-
-    def _ensure_active_fences(self) -> None:
-        conn = connect_mcp(self._system_root)
-        try:
-            rows = conn.execute(
-                """
-                SELECT owner_principal_id, connection_id, oauth_fence_token
-                FROM mcp_connections WHERE lifecycle_state = 'active'
-                """
-            ).fetchall()
-        finally:
-            conn.close()
-        for row in rows:
-            authority = ExecutionAuthority(str(row["owner_principal_id"]))
-            connection_id = str(row["connection_id"])
-            namespace = _credential_namespace(connection_id)
-            if (
-                self._secrets.get_for_authority(
-                    authority, namespace, MCP_OAUTH_FENCE_NAME
-                )
-                is None
-            ):
-                self._secrets.set_for_authority(
-                    authority,
-                    namespace,
-                    MCP_OAUTH_FENCE_NAME,
-                    str(row["oauth_fence_token"]),
-                )
-
-    def _failpoint(self, boundary: str, operation_id: str) -> None:
-        if self._mutation_failpoint is not None:
-            self._mutation_failpoint(boundary, operation_id)
-
-    @staticmethod
-    def _log_mutation_started(
-        operation_id: str, connection_id: str, mutation_kind: str
-    ) -> None:
-        logger.info(
-            "MCP connection mutation started",
-            data={
-                "event": "mcp_connection_mutation_started",
-                "operation_id": operation_id,
-                "connection_id": connection_id,
-                "mutation_kind": mutation_kind,
-            },
-        )
-
-    def _oauth_fence_token(
-        self, authority: ExecutionAuthority, connection_id: str
-    ) -> str:
-        conn = connect_mcp(self._system_root)
-        try:
-            row = conn.execute(
-                """
-                SELECT oauth_fence_token FROM mcp_connections
-                WHERE owner_principal_id = ? AND connection_id = ?
-                  AND lifecycle_state = 'active'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM mcp_connection_mutations mutations
-                    WHERE mutations.owner_principal_id = mcp_connections.owner_principal_id
-                      AND mutations.connection_id = mcp_connections.connection_id
-                  )
-                """,
-                (authority.principal_id, _required_id(connection_id)),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is None:
-            raise LookupError("MCP connection not found.")
-        return str(row["oauth_fence_token"])
+        return row
 
     def _connection_from_row(
-        self, authority: ExecutionAuthority, row: sqlite3.Row
+        self, conn: sqlite3.Connection, authority: ExecutionAuthority, row: sqlite3.Row
     ) -> MCPConnection:
         values = dict(row)
         connection_id = str(values["connection_id"])
         credential_present = bool(
-            self._secrets.get_for_authority(
+            self._secrets.get_for_authority_on_connection(
+                conn,
                 authority,
                 _credential_namespace(connection_id),
                 MCP_CREDENTIAL_NAME,
             )
         )
         oauth_client_secret_present = bool(
-            self._secrets.get_for_authority(
+            self._secrets.get_for_authority_on_connection(
+                conn,
                 authority,
                 _credential_namespace(connection_id),
                 MCP_OAUTH_CLIENT_SECRET_NAME,
@@ -1133,6 +552,72 @@ class MCPConnectionService:
         if connection is None:
             raise LookupError("MCP connection not found.")
         return connection
+
+    @staticmethod
+    def _require_row(
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        connection_id: str,
+    ) -> sqlite3.Row:
+        row = conn.execute(
+            "SELECT * FROM mcp_connections WHERE owner_principal_id=? AND connection_id=?",
+            (authority.principal_id, _required_id(connection_id)),
+        ).fetchone()
+        if row is None:
+            raise LookupError("MCP connection not found.")
+        return cast(sqlite3.Row, row)
+
+    @contextmanager
+    def _mutation(
+        self, authority: ExecutionAuthority, connection_id: str, kind: str
+    ) -> Iterator[sqlite3.Connection]:
+        """Commit domain writes, then acknowledge invalidation outside the lock."""
+        details = {
+            "operation_id": str(uuid4()),
+            "connection_id": connection_id,
+            "mutation_kind": kind,
+        }
+        logger.info(
+            "MCP connection mutation started",
+            data={"event": "mcp_connection_mutation_started", **details},
+        )
+        try:
+            with write_transaction(self._system_root) as conn:
+                yield conn
+        except Exception as exc:
+            logger.warning(
+                "MCP connection mutation rolled back",
+                data={
+                    "event": "connection_mutation_failed",
+                    **details,
+                    "provider": "mcp",
+                    "phase": "transaction",
+                    "committed": False,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            raise
+        try:
+            self._notify(authority, connection_id)
+        except Exception as exc:
+            logger.error(
+                "MCP state committed but runtime invalidation failed",
+                data={
+                    "event": "connection_mutation_failed",
+                    **details,
+                    "provider": "mcp",
+                    "phase": "runtime_invalidation",
+                    "committed": True,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            raise MCPMutationUnavailableError(
+                "MCP configuration was saved, but runtime invalidation failed; restart AssistantMD."
+            ) from exc
+        logger.info(
+            "MCP connection mutation completed",
+            data={"event": "mcp_connection_mutation_completed", **details},
+        )
 
     def _notify(self, authority: ExecutionAuthority, connection_id: str) -> None:
         if self._on_change is not None:
@@ -1315,14 +800,6 @@ def _credential_namespace(connection_id: str) -> str:
     return f"{MCP_SECRET_NAMESPACE_PREFIX}{_required_id(connection_id)}"
 
 
-def _oauth_namespace(connection_id: str) -> str:
-    return f"{_credential_namespace(connection_id)}.oauth"
-
-
-def _mutation_namespace(operation_id: str) -> str:
-    return f"{MCP_MUTATION_NAMESPACE_PREFIX}{_required_id(operation_id)}"
-
-
 def _required_id(value: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -1387,75 +864,3 @@ def _load_stdio_config(values: dict[str, object]) -> MCPStdioConfig | None:
             roots=_load_json_strings(values["stdio_roots_json"], label="Roots"),
         )
     )
-
-
-def _mutation_payload(
-    *,
-    copies: tuple[str, ...] = (),
-    deletions: tuple[str, ...] = (),
-    delete_oauth_state: bool = False,
-    delete_connection_secrets: bool = False,
-) -> str:
-    allowed_names = {
-        MCP_CREDENTIAL_NAME,
-        MCP_OAUTH_CLIENT_SECRET_NAME,
-        MCP_OAUTH_FENCE_NAME,
-    }
-    if not set(copies).union(deletions).issubset(allowed_names):
-        raise ValueError("MCP mutation contains an unsupported secret identity.")
-    return json.dumps(
-        {
-            "version": 1,
-            "copies": list(copies),
-            "deletions": list(deletions),
-            "delete_oauth_state": delete_oauth_state,
-            "delete_connection_secrets": delete_connection_secrets,
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def _parse_mutation_payload(value: str) -> dict[str, object]:
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Stored MCP mutation payload is invalid.") from exc
-    expected_keys = {
-        "version",
-        "copies",
-        "deletions",
-        "delete_oauth_state",
-        "delete_connection_secrets",
-    }
-    if not isinstance(payload, dict) or set(payload) != expected_keys:
-        raise RuntimeError("Stored MCP mutation payload is invalid.")
-    if payload["version"] != 1:
-        raise RuntimeError("Stored MCP mutation payload version is unsupported.")
-    for key in ("copies", "deletions"):
-        names = payload[key]
-        if (
-            not isinstance(names, list)
-            or not all(isinstance(name, str) for name in names)
-            or len(set(names)) != len(names)
-        ):
-            raise RuntimeError("Stored MCP mutation payload is invalid.")
-        allowed_names = {
-            MCP_CREDENTIAL_NAME,
-            MCP_OAUTH_CLIENT_SECRET_NAME,
-            MCP_OAUTH_FENCE_NAME,
-        }
-        if not set(names).issubset(allowed_names):
-            raise RuntimeError("Stored MCP mutation payload is invalid.")
-    if not isinstance(payload["delete_oauth_state"], bool) or not isinstance(
-        payload["delete_connection_secrets"], bool
-    ):
-        raise RuntimeError("Stored MCP mutation payload is invalid.")
-    return payload
-
-
-def _payload_names(payload: dict[str, object], key: str) -> tuple[str, ...]:
-    values = payload[key]
-    if not isinstance(values, list):
-        raise RuntimeError("Stored MCP mutation payload is invalid.")
-    return tuple(str(value) for value in values)

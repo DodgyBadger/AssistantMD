@@ -1569,6 +1569,9 @@ class SystemMigrationTargetInfo(BaseModel):
     backup_path: str | None = Field(
         None, description="Backup created during the latest migration run"
     )
+    inspection_error: str | None = Field(
+        None, description="Why migration versions could not be inspected"
+    )
 
 
 class SystemMigrationStatusResponse(BaseModel):

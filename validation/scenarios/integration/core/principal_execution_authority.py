@@ -26,7 +26,7 @@ if __name__ == "__main__":
     set_bootstrap_roots(direct_data_root, direct_system_root)
 
 from core.chat.chat_store import ChatStore  # noqa: E402
-from core.connections import GoogleConnectionUpdate  # noqa: E402
+from core.connections import GoogleConnectionCreate  # noqa: E402
 from core.identity import (  # noqa: E402
     LOCAL_USER_AUTHORITY,
     LOCAL_USER_PRINCIPAL_ID,
@@ -275,8 +275,11 @@ class PrincipalExecutionAuthorityScenario(BaseScenario):
         )
 
         with use_execution_authority(LOCAL_USER_AUTHORITY):
-            runtime.built_in_connections.set_google_connection(
-                GoogleConnectionUpdate(client_id="workflow.apps.googleusercontent.com")
+            runtime.built_in_connections.create_google_connection(
+                GoogleConnectionCreate(
+                    display_name="Google",
+                    client_id="workflow.apps.googleusercontent.com",
+                )
             )
             assert runtime.google_connection is not None
             runtime.google_connection.set_client_secret(

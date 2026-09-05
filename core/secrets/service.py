@@ -81,10 +81,17 @@ class SecretMutationResult:
 class EncryptedSecretsService:
     """Store secrets under the current execution principal."""
 
-    def __init__(self, *, system_root: str, keyring: SecretKeyring) -> None:
+    def __init__(
+        self,
+        *,
+        system_root: str,
+        keyring: SecretKeyring,
+        initialize_schema: bool = True,
+    ) -> None:
         self._system_root = system_root
         self._keyring = keyring
-        ensure_secrets_schema(system_root)
+        if initialize_schema:
+            ensure_secrets_schema(system_root)
 
     def get(self, namespace: str, name: str) -> str | None:
         """Return a current-principal secret without exposing other owners."""
@@ -135,6 +142,87 @@ class EncryptedSecretsService:
             namespace=namespace,
             name=name,
         )
+
+    def get_for_authority_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        namespace: str,
+        name: str,
+    ) -> str | None:
+        """Read a secret through a caller-owned access transaction."""
+        namespace, name = _normalize_identity(namespace, name)
+        row = self._select_row(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=namespace,
+            name=name,
+        )
+        if row is None:
+            return None
+        return self._decrypt_row(
+            row,
+            owner_principal_id=authority.principal_id,
+            namespace=namespace,
+            name=name,
+        )
+
+    def set_for_authority_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        namespace: str,
+        name: str,
+        value: str,
+    ) -> None:
+        """Encrypt and verify a secret in a caller-owned access transaction."""
+        namespace, name = _normalize_identity(namespace, name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Secret value must be a non-empty string.")
+        encrypted = self._keyring.encrypt(
+            value,
+            owner_principal_id=authority.principal_id,
+            namespace=namespace,
+            name=name,
+        )
+        self._upsert_encrypted(
+            conn,
+            owner_principal_id=authority.principal_id,
+            namespace=namespace,
+            name=name,
+            encrypted=encrypted,
+        )
+        self._verify_value(
+            conn,
+            authority=authority,
+            identity=SecretIdentity(namespace, name),
+            expected=value,
+        )
+
+    def delete_for_authority_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        namespace: str,
+        name: str,
+    ) -> bool:
+        """Delete a secret in a caller-owned access transaction."""
+        identity = SecretIdentity(*_normalize_identity(namespace, name))
+        return bool(self._delete_identity(conn, authority=authority, identity=identity))
+
+    def delete_namespace_for_authority_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        authority: ExecutionAuthority,
+        namespace: str,
+    ) -> int:
+        """Delete one exact encrypted namespace in a caller-owned transaction."""
+        cursor = conn.execute(
+            """DELETE FROM encrypted_secrets
+            WHERE owner_principal_id = ? AND namespace = ?""",
+            (authority.principal_id, _normalize_namespace(namespace)),
+        )
+        return cursor.rowcount
 
     def set_for_authority(
         self,

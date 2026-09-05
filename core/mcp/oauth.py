@@ -19,6 +19,7 @@ from mcp.shared.auth import OAuthToken
 from pydantic import AnyHttpUrl
 
 from core.identity import ExecutionAuthority
+from core.logger import UnifiedLogger
 from core.oauth import (
     OAuthCompletionError,
     OAuthPKCEState,
@@ -29,6 +30,7 @@ from core.oauth import (
     parse_oauth_completion as parse_shared_oauth_completion,
 )
 from core.runtime.public_url import PublicOrigin
+from core.secrets import SecretGuardMismatchError
 
 from .manager import MCPConnectionManager
 from .models import MCPAuthMode, MCPConnection, MCPTransport
@@ -36,13 +38,14 @@ from .oauth_storage import (
     EncryptedMCPOAuthStorage,
     mcp_oauth_http_client_factory,
 )
-from .service import MCPConnectionService
+from .service import MCPConnectionService, MCPMutationUnavailableError
 
 MCP_OAUTH_START_TIMEOUT_SECONDS = 15.0
 MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS = 10 * 60.0
 MCP_OAUTH_COMPLETE_TIMEOUT_SECONDS = 30.0
 _PENDING_COLLECTION = "assistantmd"
 _PENDING_KEY = "pending-authorization"
+logger = UnifiedLogger(tag="mcp-oauth")
 
 
 class MCPOAuthError(ValueError):
@@ -117,6 +120,8 @@ class _Attempt:
     callback: asyncio.Future[tuple[str, str | None]]
     task: asyncio.Task[None] | None
     expires_at: datetime
+    storage: EncryptedMCPOAuthStorage
+    client_secret: str | None
 
 
 class _HeadlessOAuth(OAuth):
@@ -237,6 +242,10 @@ class MCPOAuthCoordinator:
         self._manager = manager
         self._attempts: dict[tuple[str, str], _Attempt] = {}
         self._lock = asyncio.Lock()
+        self._start_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._closed = False
+        self._completion_tasks: set[asyncio.Task[Any]] = set()
+        self._attempt_tasks: set[asyncio.Task[None]] = set()
 
     async def start(
         self,
@@ -245,16 +254,35 @@ class MCPOAuthCoordinator:
         connection_id: str,
         redirect_uri: str,
     ) -> MCPOAuthStart:
+        key = (authority.principal_id, connection_id)
+        lock = self._start_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            return await self._start(
+                authority=authority,
+                connection_id=connection_id,
+                redirect_uri=redirect_uri,
+            )
+
+    async def _start(
+        self, *, authority: ExecutionAuthority, connection_id: str, redirect_uri: str
+    ) -> MCPOAuthStart:
+        if self._closed:
+            raise MCPOAuthError("MCP OAuth coordinator is closed.")
         connection = self._require_oauth_connection(authority, connection_id)
         clean_redirect_uri = _validate_redirect_uri(redirect_uri)
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
-        await self._clear_pending(authority, connection)
-        adapter = TokenStorageAdapter(
-            async_key_value=self._connections.oauth_storage(authority, connection_id),
-            server_url=connection.require_url(),
+        if self._closed:
+            raise MCPOAuthError("MCP OAuth coordinator is closed.")
+        # A new attempt revokes old completion and refresh writers while retaining
+        # configured client credentials. Capture all material before yielding.
+        connection = self._connections.disconnect_oauth(authority, connection_id)
+        storage = self._connections.oauth_storage(
+            authority, connection_id, expected_connection=connection
         )
-        await adapter.clear()
+        client_secret = self._connections.resolve_oauth_client_secret(
+            authority, connection_id, expected_connection=connection
+        )
         loop = asyncio.get_running_loop()
         attempt = _Attempt(
             authority=authority,
@@ -265,11 +293,19 @@ class MCPOAuthCoordinator:
             task=None,
             expires_at=datetime.now(UTC)
             + timedelta(seconds=MCP_OAUTH_CALLBACK_TIMEOUT_SECONDS),
+            storage=storage,
+            client_secret=client_secret,
         )
         async with self._lock:
+            if self._closed:
+                raise MCPOAuthError("MCP OAuth coordinator is closed.")
             self._attempts[key] = attempt
         task = asyncio.create_task(self._run_attempt(attempt))
         attempt.task = task
+        self._attempt_tasks.add(task)
+        task.add_done_callback(
+            lambda finished: self._attempt_finished(finished, attempt)
+        )
         try:
             wait_set: set[asyncio.Future[Any]] = {attempt.authorization_url, task}
             done, _ = await asyncio.wait(
@@ -287,8 +323,8 @@ class MCPOAuthCoordinator:
             else:
                 raise TimeoutError
         except BaseException as exc:
-            await self._cancel_attempt(key)
-            await self._clear_pending(authority, connection)
+            await self._cancel_attempt(key, expected=attempt)
+            self._clear_attempt_pending(attempt)
             if isinstance(exc, asyncio.CancelledError):
                 raise
             if isinstance(exc, MCPOAuthError):
@@ -312,6 +348,27 @@ class MCPOAuthCoordinator:
         code: str,
         state: str,
     ) -> MCPOAuthStatus:
+        if self._closed:
+            raise MCPOAuthError("MCP OAuth coordinator is closed.")
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError("MCP OAuth completion requires an async task.")
+        self._completion_tasks.add(task)
+        try:
+            return await self._complete(
+                authority=authority, connection_id=connection_id, code=code, state=state
+            )
+        finally:
+            self._completion_tasks.discard(task)
+
+    async def _complete(
+        self,
+        *,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        code: str,
+        state: str,
+    ) -> MCPOAuthStatus:
         key = (authority.principal_id, connection_id)
         async with self._lock:
             attempt = self._attempts.get(key)
@@ -323,19 +380,23 @@ class MCPOAuthCoordinator:
                 code=code,
                 state=state,
             )
-            self._manager.invalidate(authority.principal_id, connection_id)
+            self._invalidate_committed(authority, connection_id, "oauth_complete")
             return MCPOAuthStatus(status="connected", connected=True)
         if datetime.now(UTC) >= attempt.expires_at:
-            await self._cancel_attempt(key)
-            await self._clear_pending(authority, attempt.connection)
+            await self._cancel_attempt(key, expected=attempt)
+            self._clear_attempt_pending(attempt)
             raise MCPOAuthError("The MCP OAuth connection attempt has expired.")
         expected_state = _required_query_value(
             await asyncio.shield(attempt.authorization_url), "state"
         )
         if not secrets.compare_digest(state, expected_state):
             raise MCPOAuthError("The MCP OAuth state did not match.")
-        if not attempt.callback.done():
-            attempt.callback.set_result((code, state))
+        if attempt.callback.done():
+            raise MCPOAuthError(
+                "The MCP OAuth authorization attempt was already consumed."
+            )
+        self._consume_pending(attempt.storage, state)
+        attempt.callback.set_result((code, state))
         try:
             await asyncio.wait_for(
                 asyncio.shield(attempt.task),
@@ -343,17 +404,18 @@ class MCPOAuthCoordinator:
             )
         except BaseException as exc:
             if isinstance(exc, asyncio.CancelledError):
+                await self._cancel_attempt(key, expected=attempt)
                 raise
-            await self._cancel_attempt(key)
-            await self._clear_pending(authority, attempt.connection)
+            await self._cancel_attempt(key, expected=attempt)
+            self._clear_attempt_pending(attempt)
             raise MCPOAuthError(
                 "The MCP server did not complete OAuth authorization."
             ) from exc
         finally:
             async with self._lock:
-                self._attempts.pop(key, None)
-        await self._clear_pending(authority, attempt.connection)
-        self._manager.invalidate(authority.principal_id, connection_id)
+                if self._attempts.get(key) is attempt:
+                    self._attempts.pop(key, None)
+        self._invalidate_committed(authority, connection_id, "oauth_complete")
         return MCPOAuthStatus(status="connected", connected=True)
 
     async def status(
@@ -368,7 +430,7 @@ class MCPOAuthCoordinator:
                 try:
                     attempt.task.result()
                 except BaseException:
-                    await self._cancel_attempt(key)
+                    await self._cancel_attempt(key, expected=attempt)
                     return MCPOAuthStatus(status="failed", connected=False)
             return MCPOAuthStatus(
                 status="pending",
@@ -376,7 +438,7 @@ class MCPOAuthCoordinator:
                 pending_expires_at=attempt.expires_at.isoformat(),
             )
         if attempt is not None:
-            await self._cancel_attempt(key)
+            await self._cancel_attempt(key, expected=attempt)
         adapter = TokenStorageAdapter(
             async_key_value=self._connections.oauth_storage(authority, connection_id),
             server_url=connection.require_url(),
@@ -402,29 +464,61 @@ class MCPOAuthCoordinator:
         key = (authority.principal_id, connection.connection_id)
         await self._cancel_attempt(key)
         self._connections.disconnect_oauth(authority, connection_id)
-        self._manager.invalidate(authority.principal_id, connection_id)
+        self._invalidate_committed(authority, connection_id, "oauth_disconnect")
+
+    def _invalidate_committed(
+        self, authority: ExecutionAuthority, connection_id: str, mutation_kind: str
+    ) -> None:
+        """Preserve the saved OAuth outcome when runtime acknowledgement fails."""
+        try:
+            self._manager.invalidate(authority.principal_id, connection_id)
+        except Exception as exc:
+            logger.error(
+                "MCP OAuth state committed but runtime invalidation failed",
+                data={
+                    "event": "connection_mutation_failed",
+                    "provider": "mcp",
+                    "connection_id": connection_id,
+                    "mutation_kind": mutation_kind,
+                    "phase": "runtime_invalidation",
+                    "committed": True,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            raise MCPMutationUnavailableError(
+                "MCP OAuth state was saved, but runtime invalidation failed; restart AssistantMD."
+            ) from exc
 
     async def shutdown(self) -> None:
+        self._closed = True
         async with self._lock:
             keys = tuple(self._attempts)
+        completion_tasks = tuple(self._completion_tasks)
+        for task in completion_tasks:
+            task.cancel()
+        if completion_tasks:
+            await asyncio.gather(*completion_tasks, return_exceptions=True)
         await asyncio.gather(*(self._cancel_attempt(key) for key in keys))
+        # A superseding start can already have removed its old attempt while
+        # awaiting cancellation cleanup. Retain ownership until that task settles.
+        draining = tuple(self._attempt_tasks)
+        for task in draining:
+            if not task.cancelling():
+                task.cancel()
+        if draining:
+            await asyncio.gather(*draining, return_exceptions=True)
 
     async def _run_attempt(self, attempt: _Attempt) -> None:
-        storage = self._connections.oauth_storage(
-            attempt.authority, attempt.connection.connection_id
-        )
         auth = _HeadlessOAuth(
             mcp_url=attempt.connection.require_url(),
             redirect_uri=attempt.redirect_uri,
-            storage=storage,
+            storage=attempt.storage,
             authorization_url=attempt.authorization_url,
             callback=attempt.callback,
             allow_private_http=attempt.connection.allow_private_http,
             scopes=attempt.connection.oauth_scopes,
             client_id=attempt.connection.oauth_client_id,
-            client_secret=self._connections.resolve_oauth_client_secret(
-                attempt.authority, attempt.connection.connection_id
-            ),
+            client_secret=attempt.client_secret,
         )
         await _prime_oauth_authorization(auth, attempt.connection.require_url())
         http_client_factory = mcp_oauth_http_client_factory(
@@ -446,6 +540,21 @@ class MCPOAuthCoordinator:
         async with Client(transport, init_timeout=10.0, timeout=30.0):
             return
 
+    def _attempt_finished(self, task: asyncio.Task[None], attempt: _Attempt) -> None:
+        self._attempt_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning(
+                "MCP OAuth authorization attempt failed",
+                data={
+                    "event": "mcp_oauth_attempt_failed",
+                    "connection_id": attempt.connection.connection_id,
+                    "error_type": type(error).__name__,
+                },
+            )
+
     async def _complete_persisted_attempt(
         self,
         *,
@@ -454,12 +563,10 @@ class MCPOAuthCoordinator:
         code: str,
         state: str,
     ) -> None:
-        pending = await self._load_pending(authority, connection)
-        if pending is None:
-            raise MCPOAuthError("No active OAuth connection attempt was found.")
-        expected_state = str(pending["state"])
-        if not secrets.compare_digest(state, expected_state):
-            raise MCPOAuthError("The MCP OAuth state did not match.")
+        storage = self._connections.oauth_storage(
+            authority, connection.connection_id, expected_connection=connection
+        )
+        pending = self._consume_pending(storage, state)
         token_data = {
             "grant_type": "authorization_code",
             "code": code,
@@ -498,26 +605,34 @@ class MCPOAuthCoordinator:
             response.raise_for_status()
             tokens = OAuthToken.model_validate(response.json())
             adapter = TokenStorageAdapter(
-                async_key_value=self._connections.oauth_storage(
-                    authority, connection.connection_id
-                ),
+                async_key_value=storage,
                 server_url=connection.require_url(),
             )
             await adapter.set_tokens(tokens)
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, SecretGuardMismatchError) as exc:
             raise MCPOAuthError(
                 "The MCP server rejected OAuth completion. Start a new connection attempt."
             ) from exc
-        finally:
-            await self._clear_pending(authority, connection)
 
     async def _load_pending(
         self, authority: ExecutionAuthority, connection: MCPConnection
     ) -> dict[str, Any] | None:
-        storage = self._connections.oauth_storage(authority, connection.connection_id)
-        pending = await storage.get(_PENDING_KEY, collection=_PENDING_COLLECTION)
-        if pending is None:
+        storage = self._connections.oauth_storage(
+            authority, connection.connection_id, expected_connection=connection
+        )
+        stored = self._pending_value(storage)
+        return stored[0] if stored is not None else None
+
+    @staticmethod
+    def _pending_value(
+        storage: EncryptedMCPOAuthStorage,
+    ) -> tuple[dict[str, Any], float | None] | None:
+        stored = storage.get_sync_with_expiry(
+            _PENDING_KEY, collection=_PENDING_COLLECTION
+        )
+        if stored is None:
             return None
+        pending, stored_expiry = stored
         required = {
             "state",
             "code_verifier",
@@ -527,29 +642,84 @@ class MCPOAuthCoordinator:
             "token_endpoint_auth_method",
             "expires_at",
         }
-        if not required.issubset(pending):
-            await self._clear_pending(authority, connection)
-            raise MCPOAuthError("Stored MCP OAuth pending state is invalid.")
         try:
+            if not required.issubset(pending):
+                raise ValueError
             expires_at = datetime.fromisoformat(str(pending["expires_at"]))
-        except ValueError as exc:
-            await self._clear_pending(authority, connection)
+            if expires_at.tzinfo is None:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            storage.delete_sync_if_unchanged(
+                _PENDING_KEY,
+                pending,
+                collection=_PENDING_COLLECTION,
+                expires_at=stored_expiry,
+            )
             raise MCPOAuthError("Stored MCP OAuth pending state is invalid.") from exc
-        if expires_at.tzinfo is None or datetime.now(UTC) >= expires_at:
-            await self._clear_pending(authority, connection)
+        if datetime.now(UTC) >= expires_at:
+            storage.delete_sync_if_unchanged(
+                _PENDING_KEY,
+                pending,
+                collection=_PENDING_COLLECTION,
+                expires_at=stored_expiry,
+            )
             return None
-        return pending
+        return stored
 
-    async def _clear_pending(
-        self, authority: ExecutionAuthority, connection: MCPConnection
+    @classmethod
+    def _consume_pending(
+        cls, storage: EncryptedMCPOAuthStorage, state: str
+    ) -> dict[str, Any]:
+        try:
+            stored = cls._pending_value(storage)
+            if stored is None:
+                raise MCPOAuthError("No active OAuth connection attempt was found.")
+            pending, expires_at = stored
+            if not secrets.compare_digest(state, str(pending["state"])):
+                raise MCPOAuthError("The MCP OAuth state did not match.")
+            storage.delete_sync_if_unchanged(
+                _PENDING_KEY,
+                pending,
+                collection=_PENDING_COLLECTION,
+                expires_at=expires_at,
+            )
+            return pending
+        except SecretGuardMismatchError as exc:
+            raise MCPOAuthError("The MCP OAuth authorization attempt changed.") from exc
+
+    @staticmethod
+    def _clear_attempt_pending(attempt: _Attempt) -> None:
+        if (
+            not attempt.authorization_url.done()
+            or attempt.authorization_url.cancelled()
+        ):
+            return
+        if attempt.authorization_url.exception() is not None:
+            return
+        state = _required_query_value(attempt.authorization_url.result(), "state")
+        try:
+            stored = attempt.storage.get_sync_with_expiry(
+                _PENDING_KEY, collection=_PENDING_COLLECTION
+            )
+            if stored is not None and stored[0].get("state") == state:
+                attempt.storage.delete_sync_if_unchanged(
+                    _PENDING_KEY,
+                    stored[0],
+                    collection=_PENDING_COLLECTION,
+                    expires_at=stored[1],
+                )
+        except SecretGuardMismatchError:
+            # The newer attempt or revoked connection owns its state now.
+            return
+
+    async def _cancel_attempt(
+        self, key: tuple[str, str], *, expected: _Attempt | None = None
     ) -> None:
-        await self._connections.oauth_storage(
-            authority, connection.connection_id
-        ).delete(_PENDING_KEY, collection=_PENDING_COLLECTION)
-
-    async def _cancel_attempt(self, key: tuple[str, str]) -> None:
         async with self._lock:
-            attempt = self._attempts.pop(key, None)
+            attempt = self._attempts.get(key)
+            if expected is not None and attempt is not expected:
+                return
+            self._attempts.pop(key, None)
         if attempt is None:
             return
         if not attempt.callback.done():

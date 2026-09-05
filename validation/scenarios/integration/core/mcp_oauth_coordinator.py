@@ -180,7 +180,7 @@ class MCPOAuthCoordinatorScenario(BaseScenario):
             "Durable token state should survive completion of the attempt",
         )
         self.soft_assert(
-            b"validation-access-token" not in (system_root / "secrets.db").read_bytes(),
+            b"validation-access-token" not in (system_root / "access.db").read_bytes(),
             "Completed OAuth credentials must remain encrypted at rest",
         )
 

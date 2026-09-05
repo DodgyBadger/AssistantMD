@@ -195,11 +195,11 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
 - Test prompt-injection-sensitive workflows before trusting them with write/delete capabilities
 - Keep backups of important vault data
 - API keys and OpenAI OAuth token state are encrypted at rest in
-  `system/secrets.db`. Protect and back up the installation key in `.env`
+  `system/access.db`. Protect and back up the installation key in `.env`
   separately; losing it requires re-entering stored credentials.
 - Google OAuth client secrets, access tokens, refresh tokens, connected account
   identity, and pending authorization state are principal-owned and encrypted
-  in `system/secrets.db` and scoped to a named Google connection. Google client
+  in `system/access.db` and scoped to a named Google connection. Google client
   IDs, display names, default selection, and Gmail capability preferences and
   limits are non-secret principal-owned connection metadata.
 - Gmail tools are absent unless the active principal has the required scope.
@@ -221,7 +221,7 @@ These controls reduce the blast radius, but they do **not** make browser-fetched
   Use exact allowlists, connect only servers you trust, and apply the same
   caution to unattended workflows.
 - MCP definitions and OAuth/static credentials are principal-owned. Credentials
-  and OAuth state are encrypted in `system/secrets.db`, while sanitized
-  connection metadata is stored in `system/mcp.db`. Remote endpoints require
+  and OAuth state are encrypted in `system/access.db`, alongside sanitized
+  connection metadata in separate domain tables. Remote endpoints require
   HTTPS. Private-network HTTP requires explicit acknowledgement on each
   connection and never permits public plaintext endpoints.

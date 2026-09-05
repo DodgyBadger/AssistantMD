@@ -1,5 +1,9 @@
 # Release Notes
 
+- Connection metadata, encrypted credentials, and OAuth state now share atomic
+  SQLite transactions in `system/access.db`, while retaining separate domain
+  ownership and the embedded file-first deployment model.
+
 ## v0.8.0
 
 v0.8.0 makes AssistantMD extensible beyond its built-in tools. It can connect to

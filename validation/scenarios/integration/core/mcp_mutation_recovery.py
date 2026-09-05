@@ -1,13 +1,17 @@
-"""Recovery contracts for durable cross-database MCP mutations."""
+"""Atomic access-state mutation contracts for MCP connections."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
+import os
 import sqlite3
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
@@ -15,15 +19,19 @@ _direct_run_root: tempfile.TemporaryDirectory[str] | None = None
 if __name__ == "__main__":
     from core.runtime.paths import set_bootstrap_roots
 
-    _direct_run_root = tempfile.TemporaryDirectory(prefix="assistantmd-mcp-saga-")
+    _direct_run_root = tempfile.TemporaryDirectory(prefix="assistantmd-access-atomic-")
     direct_root = Path(_direct_run_root.name)
-    data_root = direct_root / "data"
-    bootstrap_system_root = direct_root / "system"
-    data_root.mkdir()
-    bootstrap_system_root.mkdir()
-    set_bootstrap_roots(data_root=data_root, system_root=bootstrap_system_root)
+    (direct_root / "data").mkdir()
+    (direct_root / "system").mkdir()
+    set_bootstrap_roots(direct_root / "data", direct_root / "system")
 
-from core.identity import ExecutionAuthority, use_execution_authority  # noqa: E402
+import api.services.mcp as mcp_api  # noqa: E402
+import core.mcp.service as service_module  # noqa: E402
+from api.exceptions import APIException  # noqa: E402
+from api.models import MCPCredentialUpdateRequest  # noqa: E402
+from api.utils import create_error_response  # noqa: E402
+from core.access_store import write_transaction  # noqa: E402
+from core.identity import LOCAL_USER_AUTHORITY, use_execution_authority  # noqa: E402
 from core.mcp import (  # noqa: E402
     MCPAuthMode,
     MCPConnectionCreate,
@@ -31,458 +39,399 @@ from core.mcp import (  # noqa: E402
     MCPConnectionUpdate,
     MCPTransport,
 )
-from core.secrets import (  # noqa: E402
-    EncryptedSecretsService,
-    SecretGuardMismatchError,
-    SecretKeyring,
-)
-from core.system_migrations import run_system_migrations  # noqa: E402
+from core.runtime.paths import set_bootstrap_roots  # noqa: E402
+from core.secrets import SecretGuardMismatchError  # noqa: E402
+from core.secrets.crypto import SecretKeyring  # noqa: E402
+from core.secrets.service import EncryptedSecretsService  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
 
-class _OneShotFailure:
-    def __init__(self, boundary: str) -> None:
-        self.boundary = boundary
-        self.fired = False
-
-    def __call__(self, boundary: str, _operation_id: str) -> None:
-        if boundary == self.boundary and not self.fired:
-            self.fired = True
-            raise RuntimeError(f"injected {boundary} failure")
-
-
-class _SimulatedProcessCrash(BaseException):
-    """Bypass ordinary exception cleanup to model process termination."""
-
-
-class _CrashAfterStage:
-    def __call__(self, boundary: str, _operation_id: str) -> None:
-        if boundary == "after_stage":
-            raise _SimulatedProcessCrash
-
-
 class MCPMutationRecoveryScenario(BaseScenario):
-    """Prove MCP mutations converge exactly once after durable-boundary failures."""
+    """Prove metadata and ciphertext commit or roll back together."""
 
     async def test_scenario(self) -> None:
-        owner = ExecutionAuthority("mcp-saga-owner")
         system_root = self.run_path / "system"
-        system_root.mkdir()
-        run_system_migrations(system_root, backup=False)
+        data_root = self.run_path / "data"
+        system_root.mkdir(parents=True)
+        data_root.mkdir(parents=True)
+        set_bootstrap_roots(data_root, system_root)
+        os.environ["ASSISTANTMD_SECRETS_KEY"] = base64.urlsafe_b64encode(
+            b"a" * 32
+        ).decode()
         secrets = EncryptedSecretsService(
-            system_root=str(system_root),
-            keyring=SecretKeyring(keys={1: bytes(range(32))}, active_version=1),
+            system_root=str(system_root), keyring=SecretKeyring.from_environment()
         )
-
-        crashed_before_intent = MCPConnectionService(
+        changed: list[str] = []
+        service = MCPConnectionService(
             system_root=str(system_root),
             secrets=secrets,
-            mutation_failpoint=_CrashAfterStage(),
+            on_change=lambda _principal, connection_id: changed.append(connection_id),
         )
-        try:
-            crashed_before_intent.create_connection_for_authority(
-                owner,
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            connection = service.create_connection(
                 MCPConnectionCreate(
-                    display_name="Never committed",
-                    url="https://never-committed.example/mcp",
+                    display_name="Atomic MCP",
+                    url="https://mcp.example.test",
+                    transport=MCPTransport.STREAMABLE_HTTP,
                     auth_mode=MCPAuthMode.BEARER,
-                    credential="orphan-stage-token",
-                ),
-            )
-        except _SimulatedProcessCrash:
-            pass
-        else:
-            self.soft_assert(False, "The process-crash failpoint should terminate")
-        with sqlite3.connect(system_root / "mcp.db") as conn:
-            staging_count = int(
-                conn.execute(
-                    """
-                    SELECT COUNT(*) FROM mcp_connection_mutations
-                    WHERE state = 'staging'
-                    """
-                ).fetchone()[0]
-            )
-        self.soft_assert_equal(
-            staging_count,
-            1,
-            "Pre-intent staging must have a durable cleanup record",
-        )
-        staging_recovery = MCPConnectionService(
-            system_root=str(system_root), secrets=secrets
-        )
-        self.soft_assert_equal(
-            staging_recovery.reconcile_pending_mutations(),
-            1,
-            "Startup should reconcile a process death before intent commit",
-        )
-        self.soft_assert(
-            not any(
-                item.namespace.startswith("mcp.mutation.")
-                for item in secrets.list_metadata_for_authority(owner)
-            ),
-            "Pre-intent crash recovery must remove encrypted staging records",
-        )
-        self.soft_assert_equal(
-            staging_recovery.list_connections_for_authority(owner),
-            [],
-            "Pre-intent crash recovery must preserve the prior absent state",
-        )
-
-        create_failure = _OneShotFailure("after_intent")
-        interrupted_create = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            mutation_failpoint=create_failure,
-        )
-        try:
-            interrupted_create.create_connection_for_authority(
-                owner,
-                MCPConnectionCreate(
-                    display_name="Recovered",
-                    url="https://recovered.example/mcp",
-                    auth_mode=MCPAuthMode.BEARER,
-                    credential="recovered-token",
-                ),
-            )
-        except RuntimeError:
-            pass
-        else:
-            self.soft_assert(False, "The create failpoint should interrupt the request")
-        self.soft_assert_equal(
-            interrupted_create.list_connections_for_authority(owner),
-            [],
-            "A pending create must remain unavailable to runtime listings",
-        )
-
-        recovered = MCPConnectionService(system_root=str(system_root), secrets=secrets)
-        self.soft_assert_equal(
-            recovered.reconcile_pending_mutations(),
-            1,
-            "Startup reconciliation should recover the durable create intent",
-        )
-        created = recovered.list_connections_for_authority(owner)[0]
-        self.soft_assert_equal(
-            (
-                created.config_version,
-                recovered.resolve_credential(owner, created.connection_id),
-                recovered.reconcile_pending_mutations(),
-            ),
-            (1, "recovered-token", 0),
-            "Create recovery should preserve version one and be idempotent",
-        )
-
-        concurrent_failure = _OneShotFailure("after_secrets_applied")
-        interrupted_credential = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            mutation_failpoint=concurrent_failure,
-        )
-        with use_execution_authority(owner):
-            try:
-                interrupted_credential.set_credential(
-                    created.connection_id, "concurrently-recovered-token"
+                    credential="first-secret",
                 )
-            except RuntimeError:
+            )
+            with sqlite3.connect(system_root / "access.db") as conn:
+                conn.execute(
+                    """CREATE TRIGGER reject_metadata_update BEFORE UPDATE ON mcp_connections
+                    BEGIN SELECT RAISE(ABORT, 'injected metadata failure'); END"""
+                )
+            try:
+                service.set_credential(connection.connection_id, "second-secret")
+            except sqlite3.IntegrityError:
                 pass
             else:
                 self.soft_assert(
-                    False, "The secrets-applied failpoint should interrupt the request"
+                    False, "Failure after the encrypted write should propagate"
                 )
-        concurrent_notifications: list[tuple[str, str]] = []
-        reconcilers = (
-            MCPConnectionService(
-                system_root=str(system_root),
-                secrets=secrets,
-                on_change=lambda principal_id, connection_id: concurrent_notifications.append(
-                    (principal_id, connection_id)
-                ),
-            ),
-            MCPConnectionService(
-                system_root=str(system_root),
-                secrets=secrets,
-                on_change=lambda principal_id, connection_id: concurrent_notifications.append(
-                    (principal_id, connection_id)
-                ),
-            ),
-        )
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [
-                executor.submit(service.reconcile_pending_mutations)
-                for service in reconcilers
-            ]
-            for future in futures:
-                future.result()
-        concurrent_connection = recovered.get_connection_for_authority(
-            owner, created.connection_id
-        )
-        self.soft_assert(
-            concurrent_connection is not None,
-            "Concurrent reconcilers should converge the pending credential update",
-        )
-        if concurrent_connection is not None:
+            current, credential = service.get_connection_test_material(
+                connection.connection_id
+            )
             self.soft_assert_equal(
-                (
-                    concurrent_connection.config_version,
-                    recovered.resolve_credential(owner, created.connection_id),
-                ),
-                (created.config_version + 1, "concurrently-recovered-token"),
-                "Concurrent reconciliation should finalize one version increment",
+                (current.config_version, credential),
+                (connection.config_version, "first-secret"),
+                "Failed composed mutation must roll back metadata and ciphertext",
             )
-        self.soft_assert_equal(
-            len(concurrent_notifications),
-            1,
-            "Concurrent reconcilers must serialize terminal notification",
-        )
-
-        with use_execution_authority(owner):
-            oauth_connection = recovered.create_connection(
-                MCPConnectionCreate(
-                    display_name="OAuth server",
-                    url="https://oauth.example/mcp",
-                    auth_mode=MCPAuthMode.OAUTH,
-                    oauth_client_id="client-a",
-                    oauth_client_secret="client-secret",
-                    oauth_scopes=("read",),
+        with sqlite3.connect(system_root / "access.db") as conn:
+            tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
                 )
-            )
-        stale_storage = recovered.oauth_storage(owner, oauth_connection.connection_id)
-        await stale_storage.put("token", {"access_token": "old-token"})
-
-        update_failure = _OneShotFailure("after_secret_effects")
-        interrupted_update = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            mutation_failpoint=update_failure,
+            }
+        self.soft_assert(
+            "mcp_connection_mutations" not in tables,
+            "Final access schema must not retain the cross-database saga",
         )
-        with use_execution_authority(owner):
+        self.soft_assert_equal(
+            changed,
+            [connection.connection_id],
+            "Runtime invalidation must run only after committed mutations",
+        )
+        with sqlite3.connect(system_root / "access.db") as conn:
+            conn.execute("DROP TRIGGER reject_metadata_update")
+            conn.execute(
+                """CREATE TRIGGER reject_credential_delete BEFORE DELETE ON encrypted_secrets
+                WHEN OLD.name = 'credential' BEGIN
+                SELECT RAISE(ABORT, 'injected deletion failure'); END"""
+            )
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
             try:
-                interrupted_update.update_connection(
-                    oauth_connection.connection_id,
+                service.update_connection(
+                    connection.connection_id,
                     MCPConnectionUpdate(
-                        display_name="OAuth server",
-                        url="https://oauth.example/v2/mcp",
-                        transport=MCPTransport.STREAMABLE_HTTP,
-                        auth_mode=MCPAuthMode.OAUTH,
+                        display_name="Should roll back",
+                        url=connection.url,
+                        transport=connection.transport,
+                        auth_mode=MCPAuthMode.NONE,
                         header_name=None,
                         enabled=True,
                         allow_private_http=False,
                         allowed_tools=None,
-                        oauth_client_id="client-b",
-                        oauth_scopes=("read", "write"),
                     ),
                 )
-            except RuntimeError:
+            except sqlite3.IntegrityError:
+                pass
+            else:
+                self.soft_assert(False, "Failure after metadata write must propagate")
+            restored, credential = service.get_connection_test_material(
+                connection.connection_id
+            )
+            self.soft_assert_equal(
+                (restored.display_name, restored.config_version, credential),
+                (connection.display_name, connection.config_version, "first-secret"),
+                "Metadata written before encrypted deletion must roll back on failure",
+            )
+        with sqlite3.connect(system_root / "access.db") as conn:
+            conn.execute("DROP TRIGGER reject_credential_delete")
+        await self._assert_process_exit(
+            system_root, data_root, connection.connection_id
+        )
+        await self._assert_authoritative_mutations(service)
+        self._assert_committed_failure(system_root, secrets, connection.connection_id)
+        self.assert_no_failures()
+
+    def _assert_committed_failure(self, system_root, secrets, connection_id) -> None:
+        observed = []
+
+        def reject_notification(_principal, target):
+            # A separate writer can enter here only after the mutation released
+            # its lock; committed state is already independently visible.
+            with write_transaction(str(system_root)) as conn:
+                row = conn.execute(
+                    "SELECT config_version FROM mcp_connections WHERE connection_id=?",
+                    (target,),
+                ).fetchone()
+                observed.append(row[0])
+            raise RuntimeError("fixture notification failure")
+
+        service = MCPConnectionService(
+            system_root=str(system_root), secrets=secrets, on_change=reject_notification
+        )
+        with (
+            use_execution_authority(LOCAL_USER_AUTHORITY),
+            patch.object(service_module.logger, "info") as info,
+            patch.object(service_module.logger, "error") as error,
+            patch.object(mcp_api, "_service", return_value=service),
+        ):
+            try:
+                mcp_api.set_mcp_credential(
+                    connection_id,
+                    MCPCredentialUpdateRequest(credential="saved-despite-notification"),
+                )
+            except APIException as exc:
+                self.soft_assert_equal(
+                    (exc.status_code, exc.details),
+                    (503, {"committed": True, "retry_safe": False}),
+                    "API must identify a committed change and prevent blind retry",
+                )
+                self.soft_assert(
+                    "saved" in str(exc.detail), "API must explain the durable outcome"
+                )
+                rendered = json.loads(create_error_response(exc).body)
+                self.soft_assert_equal(
+                    rendered["details"]["retryable"],
+                    False,
+                    "Rendered committed mutation errors must prohibit automatic retry",
+                )
+                self.soft_assert(
+                    "committed" in rendered["details"]["suggested_action"],
+                    "Rendered guidance must preserve the committed outcome",
+                )
+            else:
+                self.soft_assert(
+                    False, "Notification failure must not report normal success"
+                )
+            current, credential = service.get_connection_test_material(connection_id)
+        self.soft_assert_equal(
+            (current.config_version, credential, observed),
+            (3, "saved-despite-notification", [3]),
+            "Post-commit notification failure must preserve committed data without replay",
+        )
+        events = [call.kwargs["data"] for call in info.call_args_list]
+        self.soft_assert_equal(
+            [item["event"] for item in events],
+            ["mcp_connection_mutation_started"],
+            "Completion event must wait for acknowledged invalidation",
+        )
+        failure = error.call_args.kwargs["data"]
+        self.soft_assert_equal(
+            (failure["event"], failure["committed"], failure["phase"]),
+            ("connection_mutation_failed", True, "runtime_invalidation"),
+            "Failure diagnostics must distinguish committed changes from rollback",
+        )
+        self.soft_assert(
+            "saved-despite-notification" not in repr(events + [failure]),
+            "Events must not expose credentials",
+        )
+
+    async def _assert_process_exit(
+        self, system_root: Path, data_root: Path, connection_id: str
+    ) -> None:
+        script = """
+import os, sys
+from pathlib import Path
+from contextlib import contextmanager
+from core.runtime.paths import set_bootstrap_roots
+set_bootstrap_roots(Path(sys.argv[1]), Path(sys.argv[2]))
+from core.access_store import write_transaction
+from core.identity import LOCAL_USER_AUTHORITY, use_execution_authority
+from core.secrets import EncryptedSecretsService, SecretKeyring
+import core.mcp.service as module
+secrets = EncryptedSecretsService(system_root=sys.argv[2], keyring=SecretKeyring.from_environment())
+@contextmanager
+def interrupted(root):
+    with write_transaction(root) as conn:
+        yield conn
+        os._exit(73)
+service = module.MCPConnectionService(system_root=sys.argv[2], secrets=secrets)
+if sys.argv[4] == 'before':
+    module.write_transaction = interrupted
+with use_execution_authority(LOCAL_USER_AUTHORITY):
+    service.set_credential(sys.argv[3], 'committed-secret')
+os._exit(74)
+"""
+        for phase, expected_code, expected_version, expected_secret in (
+            ("before", 73, 1, "first-secret"),
+            ("after", 74, 2, "committed-secret"),
+        ):
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                script,
+                str(data_root),
+                str(system_root),
+                connection_id,
+                phase,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+            except TimeoutError:
+                process.kill()
+                await process.communicate()
+                raise
+            self.soft_assert_equal(
+                process.returncode,
+                expected_code,
+                f"Child must exit {phase} commit: {stderr.decode()}",
+            )
+            reopened_secrets = EncryptedSecretsService(
+                system_root=str(system_root), keyring=SecretKeyring.from_environment()
+            )
+            reopened = MCPConnectionService(
+                system_root=str(system_root), secrets=reopened_secrets
+            )
+            with use_execution_authority(LOCAL_USER_AUTHORITY):
+                current, credential = reopened.get_connection_test_material(
+                    connection_id
+                )
+            self.soft_assert_equal(
+                (current.config_version, credential),
+                (expected_version, expected_secret),
+                f"Process exit {phase} commit must preserve one complete durable state",
+            )
+
+    async def _assert_authoritative_mutations(
+        self, service: MCPConnectionService
+    ) -> None:
+        with use_execution_authority(LOCAL_USER_AUTHORITY):
+            connection = service.create_connection(
+                MCPConnectionCreate(
+                    display_name="OAuth race",
+                    url="https://oauth.example.test/mcp",
+                    transport=MCPTransport.STREAMABLE_HTTP,
+                    auth_mode=MCPAuthMode.OAUTH,
+                    oauth_client_id="client-a",
+                )
+            )
+            request = MCPConnectionUpdate(
+                display_name="OAuth race",
+                url=connection.url,
+                transport=connection.transport,
+                header_name=None,
+                enabled=True,
+                allow_private_http=False,
+                allowed_tools=None,
+                auth_mode=MCPAuthMode.OAUTH,
+                oauth_client_id="client-a",
+            )
+            stale_storage = []
+
+            @contextmanager
+            def interleaved_transaction(root):
+                with patch.object(
+                    service_module, "write_transaction", write_transaction
+                ):
+                    service.update_connection(
+                        connection.connection_id,
+                        MCPConnectionUpdate(
+                            display_name="OAuth race",
+                            url=connection.url,
+                            transport=connection.transport,
+                            header_name=None,
+                            enabled=True,
+                            allow_private_http=False,
+                            allowed_tools=None,
+                            auth_mode=MCPAuthMode.OAUTH,
+                            oauth_client_id="client-b",
+                        ),
+                    )
+                    storage = service.oauth_storage(
+                        LOCAL_USER_AUTHORITY, connection.connection_id
+                    )
+                    storage.put_sync("grant", {"access_token": "client-b-token"})
+                    stale_storage.append(storage)
+                with write_transaction(root) as conn:
+                    yield conn
+
+            with patch.object(
+                service_module, "write_transaction", interleaved_transaction
+            ):
+                service.update_connection(connection.connection_id, request)
+            try:
+                stale_storage[0].put_sync("grant", {"access_token": "late-client-b"})
+            except SecretGuardMismatchError:
                 pass
             else:
                 self.soft_assert(
-                    False, "The update failpoint should interrupt the request"
+                    False, "The superseded client-b adapter must be fenced"
                 )
-        try:
-            await stale_storage.put("late", {"access_token": "stale-token"})
-        except SecretGuardMismatchError:
-            pass
-        else:
-            self.soft_assert(False, "A rotated OAuth fence must reject stale writers")
-        self.soft_assert_equal(
-            interrupted_update.get_connection_for_authority(
-                owner, oauth_connection.connection_id
-            ),
-            None,
-            "A partially applied update must remain unavailable",
-        )
-
-        recovered_update = MCPConnectionService(
-            system_root=str(system_root), secrets=secrets
-        )
-        recovered_update.reconcile_pending_mutations()
-        updated = recovered_update.get_connection_for_authority(
-            owner, oauth_connection.connection_id
-        )
-        self.soft_assert(
-            updated is not None,
-            "Update reconciliation should restore the connection to active state",
-        )
-        if updated is not None:
+            current_storage = service.oauth_storage(
+                LOCAL_USER_AUTHORITY, connection.connection_id
+            )
             self.soft_assert_equal(
-                (updated.config_version, updated.oauth_client_id, updated.oauth_scopes),
-                (oauth_connection.config_version + 1, "client-b", ("read", "write")),
-                "Update recovery should finalize desired metadata exactly once",
+                current_storage.get_sync("grant"),
+                None,
+                "Returning to client-a must remove the client-b grant",
             )
-        self.soft_assert_equal(
-            await recovered_update.oauth_storage(
-                owner, oauth_connection.connection_id
-            ).get("token"),
-            None,
-            "OAuth-sensitive metadata changes should clear prior OAuth state",
-        )
+            for resolver in (
+                service.resolve_credential,
+                service.resolve_oauth_client_secret,
+                service.oauth_storage,
+            ):
+                try:
+                    resolver(
+                        LOCAL_USER_AUTHORITY,
+                        connection.connection_id,
+                        expected_connection=connection,
+                    )
+                except ValueError:
+                    pass
+                else:
+                    self.soft_assert(
+                        False,
+                        "A stale endpoint snapshot must not resolve current credentials or OAuth authority",
+                    )
 
-        finalize_failure = _OneShotFailure("after_finalize")
-        interrupted_secret = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            mutation_failpoint=finalize_failure,
-        )
-        with use_execution_authority(owner):
-            try:
-                interrupted_secret.set_oauth_client_secret(
-                    oauth_connection.connection_id, "replacement-secret"
-                )
-            except RuntimeError:
-                pass
-            else:
-                self.soft_assert(
-                    False, "The finalize failpoint should interrupt the request"
-                )
-        with sqlite3.connect(system_root / "mcp.db") as conn:
-            finalized_version = int(
-                conn.execute(
-                    "SELECT config_version FROM mcp_connections WHERE connection_id = ?",
-                    (oauth_connection.connection_id,),
-                ).fetchone()[0]
-            )
-        recovered_secret = MCPConnectionService(
-            system_root=str(system_root), secrets=secrets
-        )
-        recovered_secret.reconcile_pending_mutations()
-        secret_connection = recovered_secret.get_connection_for_authority(
-            owner, oauth_connection.connection_id
-        )
-        self.soft_assert(
-            secret_connection is not None,
-            "Finalized secret replacement should become visible after journal cleanup",
-        )
-        if secret_connection is not None:
+            @contextmanager
+            def changed_auth_transaction(root):
+                with patch.object(
+                    service_module, "write_transaction", write_transaction
+                ):
+                    service.update_connection(
+                        connection.connection_id,
+                        MCPConnectionUpdate(
+                            display_name="OAuth race",
+                            url=connection.url,
+                            transport=connection.transport,
+                            header_name=None,
+                            enabled=True,
+                            allow_private_http=False,
+                            allowed_tools=None,
+                            auth_mode=MCPAuthMode.NONE,
+                        ),
+                    )
+                with write_transaction(root) as conn:
+                    yield conn
+
+            with patch.object(
+                service_module, "write_transaction", changed_auth_transaction
+            ):
+                try:
+                    service.set_oauth_client_secret(
+                        connection.connection_id, "late-secret"
+                    )
+                except ValueError:
+                    pass
+                else:
+                    self.soft_assert(
+                        False, "Credential admission must use locked current metadata"
+                    )
             self.soft_assert_equal(
-                (secret_connection.config_version, finalized_version),
-                (finalized_version, finalized_version),
-                "Finalized replay must not increment the version twice",
-            )
-
-        notifications: list[tuple[str, str]] = []
-        notify_attempts = 0
-
-        def fail_first_notification(principal_id: str, connection_id: str) -> None:
-            nonlocal notify_attempts
-            notify_attempts += 1
-            if notify_attempts == 1:
-                raise RuntimeError("injected notification failure")
-            notifications.append((principal_id, connection_id))
-
-        interrupted_notify = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            on_change=fail_first_notification,
-        )
-        with use_execution_authority(owner):
-            try:
-                interrupted_notify.set_oauth_client_secret(
-                    oauth_connection.connection_id,
-                    "notify-claim-secret",
-                )
-            except RuntimeError:
-                pass
-            else:
-                self.soft_assert(False, "The notification failpoint should interrupt")
-        notify_recovery = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            on_change=lambda principal_id, connection_id: notifications.append(
-                (principal_id, connection_id)
-            ),
-        )
-        self.soft_assert_equal(
-            (
-                notify_recovery.reconcile_pending_mutations(),
-                notify_attempts,
-                len(notifications),
-            ),
-            (1, 1, 1),
-            "A failed terminal dispatch must retain evidence and notify during recovery",
-        )
-        notify_connection = notify_recovery.get_connection_for_authority(
-            owner, oauth_connection.connection_id
-        )
-        self.soft_assert(
-            notify_connection is not None,
-            "The claimed terminal notification must leave active metadata visible",
-        )
-
-        disconnect_storage = recovered_secret.oauth_storage(
-            owner, oauth_connection.connection_id
-        )
-        await disconnect_storage.put("disconnect-token", {"access_token": "token"})
-        disconnected = recovered_secret.disconnect_oauth(
-            owner, oauth_connection.connection_id
-        )
-        try:
-            await disconnect_storage.put("late-disconnect", {"access_token": "late"})
-        except SecretGuardMismatchError:
-            pass
-        else:
-            self.soft_assert(
-                False, "OAuth disconnect must fence issued storage adapters"
-            )
-        self.soft_assert_equal(
-            (
-                disconnected.config_version,
-                await recovered_secret.oauth_storage(
-                    owner, oauth_connection.connection_id
-                ).get("disconnect-token"),
-            ),
-            (
-                (
-                    notify_connection.config_version + 1
-                    if notify_connection is not None
-                    else -1
+                service.resolve_oauth_client_secret(
+                    LOCAL_USER_AUTHORITY, connection.connection_id
                 ),
                 None,
-            ),
-            "OAuth disconnect should clear its namespace and increment once",
-        )
-
-        slug = created.slug
-        delete_failure = _OneShotFailure("after_finalize")
-        interrupted_delete = MCPConnectionService(
-            system_root=str(system_root),
-            secrets=secrets,
-            mutation_failpoint=delete_failure,
-        )
-        with use_execution_authority(owner):
-            try:
-                interrupted_delete.delete_connection(created.connection_id)
-            except RuntimeError:
-                pass
-            else:
-                self.soft_assert(
-                    False, "The delete failpoint should interrupt the request"
-                )
-        recovered_delete = MCPConnectionService(
-            system_root=str(system_root), secrets=secrets
-        )
-        recovered_delete.reconcile_pending_mutations()
-        with sqlite3.connect(system_root / "mcp.db") as conn:
-            journal_count = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM mcp_connection_mutations"
-                ).fetchone()[0]
+                "No OAuth client secret may be stored after auth mode changes",
             )
-            retained_slug = conn.execute(
-                "SELECT slug FROM mcp_connection_slugs WHERE connection_id = ?",
-                (created.connection_id,),
-            ).fetchone()
-        self.soft_assert_equal(
-            (journal_count, retained_slug[0] if retained_slug else None),
-            (0, slug),
-            "Delete recovery should clear its journal while retaining slug reservation",
-        )
-        self.soft_assert(
-            b"recovered-token" not in (system_root / "mcp.db").read_bytes()
-            and b"replacement-secret" not in (system_root / "mcp.db").read_bytes(),
-            "Mutation metadata must never persist secret plaintext",
-        )
-
-        self.assert_no_failures()
-        self.teardown_scenario()
 
 
 if __name__ == "__main__":

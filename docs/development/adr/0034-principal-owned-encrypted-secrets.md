@@ -19,7 +19,7 @@ OAuth accounts; AssistantMD does not need to provide key escrow or export.
 
 ## Decision
 
-Replace the runtime YAML secret store with a subsystem-owned `secrets.db` under
+Replace the runtime YAML secret store with encrypted tables in `access.db` under
 the configured system root. Register it as a managed system database. Every
 secret record is owned by an explicit principal ID, including the reserved
 `system` principal for operational credentials. Normal lookups derive ownership
@@ -99,7 +99,7 @@ values are credentials that can be re-entered or reauthorized.
 
 ## Consequences
 
-- `secrets.db` and `.env` must be backed up separately to preserve encrypted
+- `access.db` and `.env` must be backed up together to preserve encrypted
   credentials across disaster recovery.
 - Database-only backups intentionally cannot decrypt secret values.
 - Restoring a database with the wrong or missing key leaves secrets locked and

@@ -101,9 +101,8 @@ class MCPAdvancedShellStdioConnectionsScenario(BaseScenario):
             "Advanced-shell launch metadata should round-trip without an HTTP endpoint",
         )
         self.soft_assert(
-            b"LOG_LEVEL" in (system_root / "mcp.db").read_bytes()
-            and b"warn" in (system_root / "mcp.db").read_bytes()
-            and b"warn" not in (system_root / "secrets.db").read_bytes(),
+            b"LOG_LEVEL" in (system_root / "access.db").read_bytes()
+            and b"warn" in (system_root / "access.db").read_bytes(),
             "Non-secret environment belongs only in sanitized MCP metadata",
         )
         parsed = parse_mcp_connection_import(

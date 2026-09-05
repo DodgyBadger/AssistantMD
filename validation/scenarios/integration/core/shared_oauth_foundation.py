@@ -75,7 +75,7 @@ class SharedOAuthFoundationScenario(BaseScenario):
             "OAuth state must remain isolated between principals",
         )
         self.soft_assert(
-            b"owner-access-token" not in (system_root / "secrets.db").read_bytes(),
+            b"owner-access-token" not in (system_root / "access.db").read_bytes(),
             "OAuth state must remain encrypted at rest",
         )
 

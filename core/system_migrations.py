@@ -8,6 +8,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from core.access_store import (
+    ACCESS_MIGRATIONS,
+    ensure_access_schema,
+)
+from core.access_store import (
+    DB_NAME as ACCESS_DB_NAME,
+)
+from core.access_store import (
+    MIGRATION_NAMESPACE as ACCESS_MIGRATION_NAMESPACE,
+)
 from core.chat.schema import (
     CHAT_SESSION_MIGRATIONS,
     ensure_chat_sessions_schema,
@@ -17,11 +27,6 @@ from core.chat.schema import (
 )
 from core.chat.schema import (
     MIGRATION_NAMESPACE as CHAT_SESSIONS_MIGRATION_NAMESPACE,
-)
-from core.connections.schema import CONNECTION_MIGRATIONS, ensure_connections_schema
-from core.connections.schema import DB_NAME as CONNECTIONS_DB_NAME
-from core.connections.schema import (
-    MIGRATION_NAMESPACE as CONNECTIONS_MIGRATION_NAMESPACE,
 )
 from core.database import get_system_database_path
 from core.database_migrations import SQLiteMigration
@@ -46,9 +51,6 @@ from core.ingestion.schema import (
     MIGRATION_NAMESPACE as INGESTION_JOBS_MIGRATION_NAMESPACE,
 )
 from core.logger import UnifiedLogger
-from core.mcp.schema import DB_NAME as MCP_DB_NAME
-from core.mcp.schema import MCP_MIGRATIONS, ensure_mcp_schema
-from core.mcp.schema import MIGRATION_NAMESPACE as MCP_MIGRATION_NAMESPACE
 from core.memory.schema import (
     DB_NAME as SESSION_SUMMARIES_DB_NAME,
 )
@@ -65,9 +67,6 @@ from core.migration_backups import (
 )
 from core.runtime.paths import get_system_root
 from core.secrets.bootstrap import get_secrets_bootstrap_status
-from core.secrets.schema import DB_NAME as SECRETS_DB_NAME
-from core.secrets.schema import MIGRATION_NAMESPACE as SECRETS_MIGRATION_NAMESPACE
-from core.secrets.schema import SECRETS_MIGRATIONS, ensure_secrets_schema
 from core.vault_state.schema import (
     DB_NAME as VAULT_STATE_DB_NAME,
 )
@@ -113,6 +112,7 @@ class SystemMigrationTargetStatus:
     applied_versions: tuple[int, ...]
     pending_versions: tuple[int, ...]
     backup_path: str | None = None
+    inspection_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,12 +129,11 @@ class SystemMigrationStatus:
 
 MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
     SystemMigrationTarget(
-        db_name=CONNECTIONS_DB_NAME,
-        namespace=CONNECTIONS_MIGRATION_NAMESPACE,
-        migrations=CONNECTION_MIGRATIONS,
-        ensure_schema=lambda system_root: ensure_connections_schema(
-            system_root,
-            apply_migrations=True,
+        db_name=ACCESS_DB_NAME,
+        namespace=ACCESS_MIGRATION_NAMESPACE,
+        migrations=ACCESS_MIGRATIONS,
+        ensure_schema=lambda system_root: ensure_access_schema(
+            system_root, apply_migrations=True
         ),
     ),
     SystemMigrationTarget(
@@ -191,24 +190,6 @@ MIGRATION_TARGETS: tuple[SystemMigrationTarget, ...] = (
             apply_migrations=True,
         ),
     ),
-    SystemMigrationTarget(
-        db_name=SECRETS_DB_NAME,
-        namespace=SECRETS_MIGRATION_NAMESPACE,
-        migrations=SECRETS_MIGRATIONS,
-        ensure_schema=lambda system_root: ensure_secrets_schema(
-            system_root,
-            apply_migrations=True,
-        ),
-    ),
-    SystemMigrationTarget(
-        db_name=MCP_DB_NAME,
-        namespace=MCP_MIGRATION_NAMESPACE,
-        migrations=MCP_MIGRATIONS,
-        ensure_schema=lambda system_root: ensure_mcp_schema(
-            system_root,
-            apply_migrations=True,
-        ),
-    ),
 )
 
 
@@ -232,7 +213,7 @@ def run_system_migrations(
     before = get_system_migration_status(root)
     secrets_status = get_secrets_bootstrap_status()
     excluded_db_names = (
-        frozenset({SECRETS_DB_NAME})
+        frozenset({ACCESS_DB_NAME})
         if secrets_status is not None and not secrets_status.ready
         else frozenset()
     )
@@ -257,6 +238,7 @@ def run_system_migrations(
             applied_versions=target_status.applied_versions,
             pending_versions=target_status.pending_versions,
             backup_path=backup_paths.get(target_status.db_name),
+            inspection_error=target_status.inspection_error,
         )
         for target_status in after.targets
     )
@@ -286,6 +268,23 @@ def _target_status(
     target: SystemMigrationTarget, system_root: Path
 ) -> SystemMigrationTargetStatus:
     db_path = Path(get_system_database_path(target.db_name, str(system_root)))
+    secrets_status = get_secrets_bootstrap_status()
+    if (
+        target.db_name == ACCESS_DB_NAME
+        and secrets_status is not None
+        and not secrets_status.ready
+    ):
+        # Version information is unknown while locked. Even reading SQLite here
+        # can trigger recovery or fail on the very corruption being diagnosed.
+        return SystemMigrationTargetStatus(
+            db_name=target.db_name,
+            namespace=target.namespace,
+            db_path=str(db_path),
+            exists=db_path.exists(),
+            applied_versions=(),
+            pending_versions=(),
+            inspection_error=secrets_status.reason or "Encrypted secrets are locked.",
+        )
     applied_versions = (
         _applied_versions(db_path, namespace=target.namespace)
         if db_path.exists()
@@ -310,7 +309,7 @@ def _target_status(
 
 
 def _applied_versions(db_path: Path, *, namespace: str) -> tuple[int, ...]:
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
     try:
         if not _table_exists(conn, "schema_migrations"):
             return ()

@@ -74,20 +74,12 @@ SYSTEM_DATABASES: dict[str, SystemDatabaseDefinition] = {
         owner="core.workflow_runs",
         description="Durable workflow attempts, outcomes, and failure history.",
     ),
-    "secrets": SystemDatabaseDefinition(
-        name="secrets",
-        owner="core.secrets",
-        description="Principal-owned authenticated encrypted secret values.",
-    ),
-    "mcp": SystemDatabaseDefinition(
-        name="mcp",
-        owner="core.mcp",
-        description="Principal-owned MCP connection definitions and policy.",
-    ),
-    "connections": SystemDatabaseDefinition(
-        name="connections",
-        owner="core.connections",
-        description="Principal-owned built-in connection metadata and preferences.",
+    "access": SystemDatabaseDefinition(
+        name="access",
+        owner="core.access_store",
+        description=(
+            "Principal-owned encrypted credentials and MCP/native connection state."
+        ),
     ),
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 import httpx
@@ -9,18 +10,22 @@ from fastmcp.client.auth import OAuth
 from fastmcp.client.auth.oauth import TokenStorageAdapter
 from mcp.shared._httpx_utils import McpHttpClientFactory
 
+from core.access_store import connect_access, write_transaction
 from core.identity import ExecutionAuthority
 from core.oauth import EncryptedOAuthStorage
-from core.secrets import EncryptedSecretsService, SecretIdentity
+from core.secrets import (
+    EncryptedSecretsService,
+    SecretGuardMismatchError,
+    SecretIdentity,
+)
 
 from .network import MCPAsyncHTTPTransport, validate_mcp_endpoint
 
 _OAUTH_NAMESPACE_SUFFIX = ".oauth"
-MCP_OAUTH_FENCE_NAME = "oauth_fence_token"
 
 
 class EncryptedMCPOAuthStorage(EncryptedOAuthStorage):
-    """Implement FastMCP's async KV contract over encrypted secret records."""
+    """Guard OAuth reads and writes by the authoritative MCP row revision."""
 
     def __init__(
         self,
@@ -30,16 +35,68 @@ class EncryptedMCPOAuthStorage(EncryptedOAuthStorage):
         connection_id: str,
         fence_token: str,
     ) -> None:
-        namespace = f"mcp.connection.{connection_id}"
         super().__init__(
             secrets=secrets,
             authority=authority,
-            namespace=f"{namespace}{_OAUTH_NAMESPACE_SUFFIX}",
-            write_guard=(
-                SecretIdentity(namespace=namespace, name=MCP_OAUTH_FENCE_NAME),
-                fence_token,
-            ),
+            namespace=f"mcp.connection.{connection_id}{_OAUTH_NAMESPACE_SUFFIX}",
         )
+        self._connection_id = connection_id
+        self._fence_token = fence_token
+
+    def _check_transaction(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            "SELECT oauth_fence_token FROM mcp_connections "
+            "WHERE owner_principal_id=? AND connection_id=?",
+            (self._authority.principal_id, self._connection_id),
+        ).fetchone()
+        if row is None or row["oauth_fence_token"] != self._fence_token:
+            raise SecretGuardMismatchError("MCP OAuth connection state changed.")
+
+    def _read_payload(self, target: SecretIdentity) -> str | None:
+        # One read snapshot binds the row check and ciphertext. No writer lock is
+        # needed until a subsequent conditional expiry cleanup or mutation.
+        conn = connect_access(self._secrets._system_root)
+        try:
+            conn.execute("BEGIN")
+            self._check_transaction(conn)
+            return self._secrets.get_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name
+            )
+        finally:
+            conn.close()
+
+    def _write_payload(self, target: SecretIdentity, payload: str) -> None:
+        with write_transaction(self._secrets._system_root) as conn:
+            self._check_transaction(conn)
+            self._secrets.set_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name, payload
+            )
+
+    def _delete_payload(self, target: SecretIdentity) -> bool:
+        with write_transaction(self._secrets._system_root) as conn:
+            self._check_transaction(conn)
+            return self._secrets.delete_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name
+            )
+
+    def _delete_payload_if_unchanged(
+        self, target: SecretIdentity, expected_payload: str
+    ) -> bool:
+        with write_transaction(self._secrets._system_root) as conn:
+            self._check_transaction(conn)
+            stored = self._secrets.get_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name
+            )
+            if stored != expected_payload:
+                raise SecretGuardMismatchError(
+                    "MCP OAuth authorization attempt changed."
+                )
+            return self._secrets.delete_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name
+            )
+
+    def _check_compound_mutation(self) -> None:
+        raise ValueError("MCP OAuth storage requires revision-bound operations.")
 
 
 class ConnectedMCPOAuth(OAuth):

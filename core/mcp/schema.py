@@ -4,71 +4,30 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.database import connect_sqlite_from_system_db
-from core.database_migrations import SQLiteMigration, apply_sqlite_migrations
+from core.access_store.schema import DB_NAME as ACCESS_DB_NAME
+from core.access_store.schema import connect_access
 
-DB_NAME = "mcp"
-MIGRATION_NAMESPACE = "mcp"
-MCP_MIGRATIONS = (
-    SQLiteMigration(
-        version=1,
-        name="principal_owned_connections",
-        apply=lambda conn: _create_connection_tables(conn),
-    ),
-    SQLiteMigration(
-        version=2,
-        name="oauth_client_configuration",
-        apply=lambda conn: _add_oauth_client_columns(conn),
-    ),
-    SQLiteMigration(
-        version=3,
-        name="durable_connection_mutations",
-        apply=lambda conn: _add_connection_mutation_lifecycle(conn),
-    ),
-    SQLiteMigration(
-        version=4,
-        name="connection_scoped_private_http",
-        apply=lambda conn: _add_private_http_column(conn),
-    ),
-    SQLiteMigration(
-        version=5,
-        name="companion_stdio_transport",
-        apply=lambda conn: _add_stdio_transport(conn),
-    ),
-    SQLiteMigration(
-        version=6,
-        name="advanced_shell_stdio_transport",
-        apply=lambda conn: _rename_advanced_shell_stdio_transport(conn),
-    ),
-)
+MIGRATION_NAMESPACE = "access"
+DB_NAME = ACCESS_DB_NAME
 
 
 def ensure_mcp_schema(
     system_root: str | None = None, *, apply_migrations: bool = False
 ) -> None:
     """Create the current MCP connection schema."""
-    conn = connect_sqlite_from_system_db(DB_NAME, system_root)
-    try:
-        if apply_migrations:
-            apply_sqlite_migrations(
-                conn,
-                namespace=MIGRATION_NAMESPACE,
-                migrations=MCP_MIGRATIONS,
-            )
-        else:
-            if not _table_exists(conn, "mcp_connections"):
-                _create_connection_tables(conn)
-            _assert_current_schema(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    from core.access_store.schema import ensure_access_schema
+
+    ensure_access_schema(system_root, apply_migrations=apply_migrations)
 
 
 def connect_mcp(system_root: str | None = None) -> sqlite3.Connection:
     """Open the MCP database with named row access."""
-    conn = connect_sqlite_from_system_db(DB_NAME, system_root)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_access(system_root)
+
+
+def create_mcp_schema(conn: sqlite3.Connection) -> None:
+    """Create current MCP tables on a caller-owned connection."""
+    _create_connection_tables(conn)
 
 
 def _create_connection_tables(conn: sqlite3.Connection) -> None:
@@ -108,7 +67,6 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             stdio_environment_json TEXT,
             stdio_roots_json TEXT,
             config_version INTEGER NOT NULL DEFAULT 1,
-            lifecycle_state TEXT NOT NULL DEFAULT 'active',
             oauth_fence_token TEXT NOT NULL
                 DEFAULT (lower(hex(randomblob(16)))),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -124,7 +82,6 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
             CHECK (enabled IN (0, 1)),
             CHECK (allow_private_http IN (0, 1)),
             CHECK (config_version > 0),
-            CHECK (lifecycle_state IN ('active', 'pending', 'deleting')),
             CHECK (length(oauth_fence_token) = 32),
             CHECK (
                 (transport IN ('streamable_http', 'sse')
@@ -151,292 +108,10 @@ def _create_connection_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_mcp_connections_owner_lifecycle_enabled
-        ON mcp_connections(
-            owner_principal_id, lifecycle_state, enabled, display_name
-        )
-        """
-    )
-    conn.execute(
-        """
         INSERT OR IGNORE INTO mcp_connection_slugs (
             connection_id, owner_principal_id, slug, created_at
         )
         SELECT connection_id, owner_principal_id, slug, created_at
         FROM mcp_connections
         """
-    )
-    _create_mutation_table(conn)
-
-
-def _add_oauth_client_columns(conn: sqlite3.Connection) -> None:
-    columns = {
-        str(row[1])
-        for row in conn.execute("PRAGMA table_info(mcp_connections)").fetchall()
-    }
-    if "oauth_client_id" not in columns:
-        conn.execute("ALTER TABLE mcp_connections ADD COLUMN oauth_client_id TEXT")
-    if "oauth_scopes_json" not in columns:
-        conn.execute("ALTER TABLE mcp_connections ADD COLUMN oauth_scopes_json TEXT")
-
-
-def _add_connection_mutation_lifecycle(conn: sqlite3.Connection) -> None:
-    columns = _connection_columns(conn)
-    if "lifecycle_state" not in columns:
-        conn.execute(
-            """
-            ALTER TABLE mcp_connections
-            ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'
-            CHECK (lifecycle_state IN ('active', 'pending', 'deleting'))
-            """
-        )
-    if "oauth_fence_token" not in columns:
-        conn.execute("ALTER TABLE mcp_connections ADD COLUMN oauth_fence_token TEXT")
-        conn.execute(
-            """
-            UPDATE mcp_connections
-            SET oauth_fence_token = lower(hex(randomblob(16)))
-            WHERE oauth_fence_token IS NULL
-            """
-        )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_mcp_connections_owner_lifecycle_enabled
-        ON mcp_connections(
-            owner_principal_id, lifecycle_state, enabled, display_name
-        )
-        """
-    )
-    _create_mutation_table(conn)
-
-
-def _add_private_http_column(conn: sqlite3.Connection) -> None:
-    if "allow_private_http" not in _connection_columns(conn):
-        conn.execute(
-            """
-            ALTER TABLE mcp_connections
-            ADD COLUMN allow_private_http INTEGER NOT NULL DEFAULT 0
-            CHECK (allow_private_http IN (0, 1))
-            """
-        )
-
-
-def _add_stdio_transport(conn: sqlite3.Connection) -> None:
-    if "stdio_executable" in _connection_columns(conn):
-        return
-    conn.execute("ALTER TABLE mcp_connections RENAME TO mcp_connections_legacy")
-    conn.execute(
-        """
-        CREATE TABLE mcp_connections (
-            connection_id TEXT PRIMARY KEY,
-            owner_principal_id TEXT NOT NULL,
-            slug TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            url TEXT,
-            transport TEXT NOT NULL,
-            auth_mode TEXT NOT NULL,
-            header_name TEXT,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            allow_private_http INTEGER NOT NULL DEFAULT 0,
-            allowed_tools_json TEXT,
-            oauth_client_id TEXT,
-            oauth_scopes_json TEXT,
-            stdio_executable TEXT,
-            stdio_arguments_json TEXT,
-            stdio_working_directory TEXT,
-            stdio_environment_json TEXT,
-            stdio_roots_json TEXT,
-            config_version INTEGER NOT NULL DEFAULT 1,
-            lifecycle_state TEXT NOT NULL DEFAULT 'active',
-            oauth_fence_token TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(owner_principal_id, slug),
-            CHECK (length(connection_id) > 0),
-            CHECK (length(owner_principal_id) > 0),
-            CHECK (length(slug) > 0),
-            CHECK (length(display_name) > 0),
-            CHECK (url IS NULL OR length(url) > 0),
-            CHECK (transport IN ('streamable_http', 'sse', 'companion_stdio')),
-            CHECK (auth_mode IN ('none', 'bearer', 'header', 'oauth')),
-            CHECK (enabled IN (0, 1)),
-            CHECK (allow_private_http IN (0, 1)),
-            CHECK (config_version > 0),
-            CHECK (lifecycle_state IN ('active', 'pending', 'deleting')),
-            CHECK (length(oauth_fence_token) = 32),
-            CHECK (
-                (transport IN ('streamable_http', 'sse')
-                 AND url IS NOT NULL AND stdio_executable IS NULL)
-                OR
-                (transport = 'companion_stdio' AND url IS NULL
-                 AND auth_mode = 'none' AND header_name IS NULL
-                 AND allow_private_http = 0 AND oauth_client_id IS NULL
-                 AND oauth_scopes_json IS NULL
-                 AND stdio_executable IS NOT NULL
-                 AND stdio_arguments_json IS NOT NULL
-                 AND stdio_working_directory IS NOT NULL
-                 AND stdio_environment_json IS NOT NULL
-                 AND stdio_roots_json IS NOT NULL)
-            )
-        )
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO mcp_connections (
-            connection_id, owner_principal_id, slug, display_name, url,
-            transport, auth_mode, header_name, enabled, allow_private_http,
-            allowed_tools_json, oauth_client_id, oauth_scopes_json,
-            config_version, lifecycle_state, oauth_fence_token, created_at,
-            updated_at
-        )
-        SELECT connection_id, owner_principal_id, slug, display_name, url,
-               transport, auth_mode, header_name, enabled, allow_private_http,
-               allowed_tools_json, oauth_client_id, oauth_scopes_json,
-               config_version, lifecycle_state, oauth_fence_token, created_at,
-               updated_at
-        FROM mcp_connections_legacy
-        """
-    )
-    conn.execute("DROP TABLE mcp_connections_legacy")
-    conn.execute(
-        """
-        CREATE INDEX idx_mcp_connections_owner_enabled
-        ON mcp_connections(owner_principal_id, enabled, display_name)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX idx_mcp_connections_owner_lifecycle_enabled
-        ON mcp_connections(
-            owner_principal_id, lifecycle_state, enabled, display_name
-        )
-        """
-    )
-
-
-def _rename_advanced_shell_stdio_transport(conn: sqlite3.Connection) -> None:
-    schema_row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mcp_connections'"
-    ).fetchone()
-    schema_sql = str(schema_row[0] or "") if schema_row is not None else ""
-    if "companion_stdio" not in schema_sql:
-        return
-
-    conn.execute("ALTER TABLE mcp_connections RENAME TO mcp_connections_legacy")
-    conn.execute("DROP INDEX IF EXISTS idx_mcp_connections_owner_enabled")
-    conn.execute("DROP INDEX IF EXISTS idx_mcp_connections_owner_lifecycle_enabled")
-    _create_connection_tables(conn)
-    conn.execute(
-        """
-        INSERT INTO mcp_connections (
-            connection_id, owner_principal_id, slug, display_name, url,
-            transport, auth_mode, header_name, enabled, allow_private_http,
-            allowed_tools_json, oauth_client_id, oauth_scopes_json,
-            stdio_executable, stdio_arguments_json, stdio_working_directory,
-            stdio_environment_json, stdio_roots_json, config_version,
-            lifecycle_state, oauth_fence_token, created_at, updated_at
-        )
-        SELECT connection_id, owner_principal_id, slug, display_name, url,
-               CASE transport
-                   WHEN 'companion_stdio' THEN 'advanced_shell_stdio'
-                   ELSE transport
-               END,
-               auth_mode, header_name, enabled, allow_private_http,
-               allowed_tools_json, oauth_client_id, oauth_scopes_json,
-               stdio_executable, stdio_arguments_json, stdio_working_directory,
-               stdio_environment_json, stdio_roots_json, config_version,
-               lifecycle_state, oauth_fence_token, created_at, updated_at
-        FROM mcp_connections_legacy
-        """
-    )
-    conn.execute("DROP TABLE mcp_connections_legacy")
-
-
-def _create_mutation_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS mcp_connection_mutations (
-            operation_id TEXT PRIMARY KEY,
-            owner_principal_id TEXT NOT NULL,
-            connection_id TEXT NOT NULL,
-            mutation_kind TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            state TEXT NOT NULL DEFAULT 'staging',
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            last_error_class TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(owner_principal_id, connection_id),
-            CHECK (length(operation_id) > 0),
-            CHECK (length(owner_principal_id) > 0),
-            CHECK (length(connection_id) > 0),
-            CHECK (mutation_kind IN (
-                'create', 'update', 'set_credential',
-                'set_oauth_client_secret', 'clear_credential',
-                'disconnect_oauth', 'delete'
-            )),
-            CHECK (state IN (
-                'staging', 'intent', 'secrets_applied', 'finalized'
-            )),
-            CHECK (attempt_count >= 0)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_mcp_connection_mutations_state_updated
-        ON mcp_connection_mutations(state, updated_at)
-        """
-    )
-
-
-def _assert_current_schema(conn: sqlite3.Connection) -> None:
-    required = {
-        "oauth_client_id",
-        "oauth_scopes_json",
-        "lifecycle_state",
-        "oauth_fence_token",
-        "allow_private_http",
-        "stdio_executable",
-        "stdio_arguments_json",
-        "stdio_working_directory",
-        "stdio_environment_json",
-        "stdio_roots_json",
-    }
-    missing = sorted(required - _connection_columns(conn))
-    if missing:
-        raise RuntimeError(
-            "MCP schema is not current; run managed system migrations before "
-            f"constructing MCP services (missing: {', '.join(missing)})."
-        )
-    if not conn.execute(
-        """
-        SELECT 1 FROM sqlite_master
-        WHERE type = 'table' AND name = 'mcp_connection_mutations'
-        """
-    ).fetchone():
-        raise RuntimeError(
-            "MCP schema is not current; run managed system migrations before "
-            "constructing MCP services (missing mutation journal)."
-        )
-
-
-def _connection_columns(conn: sqlite3.Connection) -> set[str]:
-    return {
-        str(row[1])
-        for row in conn.execute("PRAGMA table_info(mcp_connections)").fetchall()
-    }
-
-
-def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    return (
-        conn.execute(
-            """
-            SELECT 1 FROM sqlite_master
-            WHERE type = 'table' AND name = ?
-            """,
-            (table_name,),
-        ).fetchone()
-        is not None
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -32,7 +33,6 @@ class EncryptedOAuthStorage:
         secrets: EncryptedSecretsService,
         authority: ExecutionAuthority,
         namespace: str,
-        write_guard: tuple[SecretIdentity, str] | None = None,
     ) -> None:
         clean_namespace = str(namespace or "").strip()
         if not clean_namespace:
@@ -40,7 +40,6 @@ class EncryptedOAuthStorage:
         self._secrets = secrets
         self._authority = authority
         self._namespace = clean_namespace
-        self._write_guard = write_guard
 
     async def get(
         self, key: str, *, collection: str | None = None
@@ -62,6 +61,18 @@ class EncryptedOAuthStorage:
         if stored is None:
             return None
         return stored.value, stored.expires_at
+
+    def get_sync_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        key: str,
+        *,
+        collection: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Read OAuth JSON within a caller-owned access transaction."""
+        self._check_transaction(conn)
+        stored = self._load(key, collection=collection, conn=conn)
+        return stored.value if stored is not None else None
 
     async def ttl(
         self, key: str, *, collection: str | None = None
@@ -98,22 +109,55 @@ class EncryptedOAuthStorage:
         expires_at = time.time() + float(ttl) if ttl is not None else None
         payload = _encode_stored_value(value, expires_at=expires_at)
         target = self._identity(key, collection)
-        if self._write_guard is None:
-            self._secrets.set_for_authority(
-                self._authority,
-                target.namespace,
-                target.name,
-                payload,
+        self._write_payload(target, payload)
+
+    def _write_payload(self, target: SecretIdentity, payload: str) -> None:
+        """Persist one encoded value through the storage's authority boundary."""
+        self._secrets.set_for_authority(
+            self._authority, target.namespace, target.name, payload
+        )
+
+    def put_sync_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        key: str,
+        value: Mapping[str, Any],
+        *,
+        collection: str | None = None,
+        expires_at: float | None = None,
+    ) -> None:
+        """Write OAuth state through a caller-owned access transaction."""
+        self._check_transaction(conn)
+        target = self._identity(key, collection)
+        self._secrets.set_for_authority_on_connection(
+            conn,
+            self._authority,
+            target.namespace,
+            target.name,
+            _encode_stored_value(value, expires_at=expires_at),
+        )
+
+    def delete_many_sync_on_connection(
+        self,
+        conn: sqlite3.Connection,
+        keys: Sequence[str],
+        *,
+        collection: str | None = None,
+    ) -> int:
+        """Delete OAuth keys through a caller-owned access transaction."""
+        self._check_transaction(conn)
+        deleted = 0
+        for key in keys:
+            target = self._identity(key, collection)
+            deleted += int(
+                self._secrets.delete_for_authority_on_connection(
+                    conn,
+                    self._authority,
+                    target.namespace,
+                    target.name,
+                )
             )
-        else:
-            guard, expected_value = self._write_guard
-            self._secrets.guarded_set_for_authority(
-                self._authority,
-                guard=guard,
-                expected_guard_value=expected_value,
-                target=target,
-                value=payload,
-            )
+        return deleted
 
     def put_sync_if_unchanged(
         self,
@@ -131,6 +175,7 @@ class EncryptedOAuthStorage:
         expires_at: float | None = None,
     ) -> float | None:
         """Write only while another OAuth value is unchanged."""
+        self._check_compound_mutation()
         if ttl is not None and expires_at is not None:
             raise ValueError("OAuth expiry must use either ttl or expires_at.")
         target = self._identity(key, collection)
@@ -173,22 +218,12 @@ class EncryptedOAuthStorage:
     def delete_sync(self, key: str, *, collection: str | None = None) -> bool:
         """Delete OAuth JSON from synchronous service boundaries."""
         target = self._identity(key, collection)
-        existed = self._secrets.get_for_authority(
+        return self._delete_payload(target)
+
+    def _delete_payload(self, target: SecretIdentity) -> bool:
+        return self._secrets.delete_for_authority(
             self._authority, target.namespace, target.name
         )
-        if self._write_guard is None:
-            self._secrets.delete_for_authority(
-                self._authority, target.namespace, target.name
-            )
-        else:
-            guard, expected_value = self._write_guard
-            self._secrets.guarded_delete_for_authority(
-                self._authority,
-                guard=guard,
-                expected_guard_value=expected_value,
-                target=target,
-            )
-        return existed is not None
 
     def delete_sync_if_unchanged(
         self,
@@ -200,13 +235,17 @@ class EncryptedOAuthStorage:
     ) -> bool:
         """Delete one OAuth value only if its exact payload is unchanged."""
         target = self._identity(key, collection)
+        return self._delete_payload_if_unchanged(
+            target, _encode_stored_value(expected_value, expires_at=expires_at)
+        )
+
+    def _delete_payload_if_unchanged(
+        self, target: SecretIdentity, expected_payload: str
+    ) -> bool:
         return self._secrets.guarded_delete_for_authority(
             self._authority,
             guard=target,
-            expected_guard_value=_encode_stored_value(
-                expected_value,
-                expires_at=expires_at,
-            ),
+            expected_guard_value=expected_payload,
             target=target,
         )
 
@@ -219,6 +258,8 @@ class EncryptedOAuthStorage:
         overwrite: bool = False,
     ) -> bool:
         """Move one OAuth entry atomically without exposing its hashed identity."""
+        self._check_compound_mutation()
+        destination._check_compound_mutation()
         self._require_compatible_storage(destination)
         result = self._secrets.mutate_for_authority(
             self._authority,
@@ -241,6 +282,8 @@ class EncryptedOAuthStorage:
     ) -> int:
         """Delete entries across compatible OAuth namespaces atomically."""
         storages = (self, *additional_storages)
+        for storage in storages:
+            storage._check_compound_mutation()
         for storage in storages[1:]:
             self._require_compatible_storage(storage)
         identities = tuple(
@@ -261,6 +304,7 @@ class EncryptedOAuthStorage:
         expected_value: Mapping[str, Any] | None = None,
     ) -> int:
         """Replace one non-expiring value and delete related entries atomically."""
+        self._check_compound_mutation()
         payload = _encode_stored_value(value, expires_at=None)
         return self._secrets.replace_and_delete_for_authority(
             self._authority,
@@ -307,10 +351,20 @@ class EncryptedOAuthStorage:
             removed += int(await self.delete(key, collection=collection))
         return removed
 
-    def _load(self, key: str, *, collection: str | None) -> _StoredValue | None:
-        name = _storage_name(key, collection)
-        payload = self._secrets.get_for_authority(
-            self._authority, self._namespace, name
+    def _load(
+        self,
+        key: str,
+        *,
+        collection: str | None,
+        conn: sqlite3.Connection | None = None,
+    ) -> _StoredValue | None:
+        target = self._identity(key, collection)
+        payload = (
+            self._read_payload(target)
+            if conn is None
+            else self._secrets.get_for_authority_on_connection(
+                conn, self._authority, target.namespace, target.name
+            )
         )
         if payload is None:
             return None
@@ -325,20 +379,25 @@ class EncryptedOAuthStorage:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("Stored OAuth state is invalid.") from exc
         if expires_at is not None and expires_at <= time.time():
-            if self._write_guard is None:
-                self._secrets.delete_for_authority(
-                    self._authority, self._namespace, name
-                )
+            if conn is None:
+                self._delete_payload_if_unchanged(target, payload)
             else:
-                guard, expected_value = self._write_guard
-                self._secrets.guarded_delete_for_authority(
-                    self._authority,
-                    guard=guard,
-                    expected_guard_value=expected_value,
-                    target=SecretIdentity(namespace=self._namespace, name=name),
+                self._secrets.delete_for_authority_on_connection(
+                    conn, self._authority, target.namespace, target.name
                 )
             return None
         return _StoredValue(value=value, expires_at=expires_at)
+
+    def _read_payload(self, target: SecretIdentity) -> str | None:
+        return self._secrets.get_for_authority(
+            self._authority, target.namespace, target.name
+        )
+
+    def _check_transaction(self, conn: sqlite3.Connection) -> None:
+        """Allow provider storage to enforce a caller-owned transaction guard."""
+
+    def _check_compound_mutation(self) -> None:
+        """Allow provider storage to reject unsupported compound mutation paths."""
 
     def _identity(self, key: str, collection: str | None) -> SecretIdentity:
         return SecretIdentity(

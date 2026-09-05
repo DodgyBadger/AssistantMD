@@ -51,7 +51,7 @@ unchanged.
 Disconnect preserves configured client credentials while atomically rotating
 their internal credential identity and deleting pending and granted state.
 Connection deletion records a permanent sanitized deletion entry in
-`connections.db` before independently purging the connection's encrypted
+the metadata tables before purging the connection's encrypted
 namespace. Reconcile incomplete purges after restart and never reuse a deleted
 connection identity. The deletion entry, generation, and credential bindings
 are authoritative; physical stale-record cleanup is defense in depth.
@@ -67,7 +67,7 @@ are authoritative; physical stale-record cleanup is defense in depth.
   disconnect, reauthorization, or deletion fail closed.
 - Disconnect can invalidate active grants without deleting reusable OAuth client
   configuration.
-- Connection deletion converges across `connections.db` and `secrets.db` after
+- Connection deletion commits metadata and encrypted state together in `access.db` after
   interruption without permitting the deleted identity to become usable again.
 - Conservative legacy handling may require users to reconnect rather than
   preserving an unverifiable grant.

@@ -156,7 +156,7 @@ class MCPConnectionIsolationScenario(BaseScenario):
                 False, "A foreign principal must not resolve OAuth secrets"
             )
         self.soft_assert(
-            b"owner-client-secret" not in (system_root / "secrets.db").read_bytes(),
+            b"owner-client-secret" not in (system_root / "access.db").read_bytes(),
             "OAuth client secrets must be encrypted at rest",
         )
 
@@ -191,8 +191,7 @@ class MCPConnectionIsolationScenario(BaseScenario):
             "Sanitized records should expose credential presence but never values",
         )
         self.soft_assert(
-            b"owner-token" not in (system_root / "mcp.db").read_bytes()
-            and b"owner-token" not in (system_root / "secrets.db").read_bytes(),
+            b"owner-token" not in (system_root / "access.db").read_bytes(),
             "Neither MCP metadata nor encrypted storage may contain credential plaintext",
         )
 

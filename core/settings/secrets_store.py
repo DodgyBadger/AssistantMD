@@ -120,7 +120,7 @@ def secret_has_value(name: str) -> bool:
 def ensure_secrets_file() -> Path:
     """Ensure encrypted storage is ready and return its managed database path."""
     get_encrypted_secrets_service()
-    return get_system_root() / "secrets.db"
+    return get_system_root() / "access.db"
 
 
 def _namespace_for_name(name: str) -> str:

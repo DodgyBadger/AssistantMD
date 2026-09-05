@@ -17,8 +17,8 @@ startup unreliable.
 
 AssistantMD acts as an MCP client. It does not expose an AssistantMD MCP server.
 
-Store sanitized connection metadata in subsystem-owned `mcp.db` and store
-credentials, OAuth state, and tokens in principal-owned encrypted `secrets.db`.
+Store sanitized connection metadata and principal-owned encrypted credentials,
+OAuth state, and tokens in separate domain tables within `access.db`.
 All configuration, catalog, credential, and tool-call operations derive their
 owner from `ExecutionAuthority`; normal APIs neither accept nor expose an owner
 selector.

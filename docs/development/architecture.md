@@ -161,9 +161,7 @@ ad hoc SQL.
 | Vault content | Canonical user-owned Markdown and related files | data root |
 | Authoring catalog | Managed and project-local Markdown definitions | vaults beneath the data root |
 | Installation settings | Deployment-wide typed configuration | system root and restart-bound environment |
-| Encrypted credentials and OAuth state | Principal or explicit system owner | `secrets.db`, encrypted with the external installation key |
-| MCP connections | Principal-owned sanitized metadata | `mcp.db` |
-| Native connections | Principal-owned sanitized metadata and defaults | `connections.db` |
+| Encrypted credentials, OAuth state, MCP and native connections | Separate principal-owned domain tables sharing atomic mutations | `access.db`; credentials use the external installation key |
 | Chats and messages | Principal-owned canonical conversation state | chat subsystem databases |
 | Workflow outcomes | Principal-owned durable domain history | workflow-run database |
 | Vault activity and recovery | Attributed activities, revisions, and snapshots | vault-state databases and snapshot storage |

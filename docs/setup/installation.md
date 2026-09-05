@@ -81,7 +81,7 @@ If you will access AssistantMD through a TLS reverse proxy, choose
 [Access from another device](#access-from-another-device) before starting it.
 
 Keep `.env` safe and back it up separately from `system/`. You need both the
-encryption key and `system/secrets.db` to restore stored credentials.
+encryption key and `system/access.db` to restore stored credentials and connections.
 On Linux, restrict it with `chmod 600 .env`.
 
 ## 5. Start AssistantMD

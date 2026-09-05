@@ -66,7 +66,7 @@ def main() -> None:
     parser.add_argument(
         "--system-root",
         default=DEFAULT_SYSTEM_ROOT,
-        help=f"System root containing secrets.db (default: {DEFAULT_SYSTEM_ROOT}).",
+        help=f"System root containing access.db (default: {DEFAULT_SYSTEM_ROOT}).",
     )
     parser.add_argument(
         "--keys",

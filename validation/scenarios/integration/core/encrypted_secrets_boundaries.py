@@ -98,7 +98,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
             "Missing key configuration should enter secrets-locked mode",
         )
         self.soft_assert(
-            not (locked_root / "secrets.db").exists(),
+            not (locked_root / "access.db").exists(),
             "Locked bootstrap must not create or mutate the secrets database",
         )
         execution_blocked = False
@@ -112,7 +112,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
         )
         run_system_migrations(locked_root, backup=False)
         self.soft_assert(
-            not (locked_root / "secrets.db").exists(),
+            not (locked_root / "access.db").exists(),
             "General system migrations must not touch locked encrypted storage",
         )
         reset_secrets_bootstrap_status()
@@ -383,7 +383,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
 
         service.set_for_authority(owner, "copy-rollback", "source", "copy-value")
         service.set_for_authority(owner, "delete-rollback", "blocked", "keep-value")
-        with sqlite3.connect(system_root / "secrets.db") as conn:
+        with sqlite3.connect(system_root / "access.db") as conn:
             conn.execute(
                 """
                 CREATE TRIGGER reject_namespace_delete
@@ -412,7 +412,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
             self.soft_assert(
                 False, "Injected namespace deletion failure should propagate"
             )
-        with sqlite3.connect(system_root / "secrets.db") as conn:
+        with sqlite3.connect(system_root / "access.db") as conn:
             conn.execute("DROP TRIGGER reject_namespace_delete")
         self.soft_assert_equal(
             (
@@ -425,7 +425,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
         )
 
         service.set_for_authority(owner, "rollback", "source", "rollback-value")
-        with sqlite3.connect(system_root / "secrets.db") as conn:
+        with sqlite3.connect(system_root / "access.db") as conn:
             conn.execute(
                 """
                 CREATE TRIGGER reject_relocation_delete
@@ -452,7 +452,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
             pass
         else:
             self.soft_assert(False, "Injected relocation failure should propagate")
-        with sqlite3.connect(system_root / "secrets.db") as conn:
+        with sqlite3.connect(system_root / "access.db") as conn:
             conn.execute("DROP TRIGGER reject_relocation_delete")
         self.soft_assert_equal(
             (
@@ -503,7 +503,7 @@ class EncryptedSecretsBoundariesScenario(BaseScenario):
                 "Rotated values should no longer require the retired key",
             )
 
-        database_path = system_root / "secrets.db"
+        database_path = system_root / "access.db"
         conn = sqlite3.connect(database_path)
         try:
             conn.execute(

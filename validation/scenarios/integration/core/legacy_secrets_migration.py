@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -140,7 +141,7 @@ EMPTY_VALUE:
             invalid_source.exists(),
             "Failed migration must preserve the plaintext source",
         )
-        conn = sqlite3.connect(invalid_root / "secrets.db")
+        conn = sqlite3.connect(invalid_root / "access.db")
         try:
             secret_count = int(
                 conn.execute("SELECT COUNT(*) FROM encrypted_secrets").fetchone()[0]
@@ -185,8 +186,109 @@ EMPTY_VALUE:
             "A backup collision should preserve the existing rollback file",
         )
 
+        self._assert_crash_recovery(keyring)
+
         self.assert_no_failures()
         self.teardown_scenario()
+
+    def _assert_crash_recovery(self, keyring: SecretKeyring) -> None:
+        """Restart a killed importer at each durable/filesystem boundary."""
+        for phase in ("during-import", "after-import", "after-rename"):
+            root = self.run_path / phase
+            root.mkdir()
+            source = root / "secrets.yaml"
+            source.write_text("OPENAI_API_KEY: original\nLOGFIRE_TOKEN: operational\n")
+            script = r"""
+import os, sys
+from pathlib import Path
+from unittest.mock import patch
+root = Path(sys.argv[1])
+from core.runtime.paths import set_bootstrap_roots
+set_bootstrap_roots(root / 'data', root)
+from core.secrets import EncryptedSecretsService, SecretKeyring
+from core.secrets import legacy_migration
+service = EncryptedSecretsService(system_root=str(root), keyring=SecretKeyring(keys={1: bytes(range(32))}, active_version=1))
+def die(*args, **kwargs):
+    os._exit(71)
+if sys.argv[2] == 'during-import':
+    original = service.set_for_authority_on_connection
+    def write_then_die(*args, **kwargs):
+        original(*args, **kwargs)
+        die()
+    target, name, replacement = service, 'set_for_authority_on_connection', write_then_die
+elif sys.argv[2] == 'after-import':
+    target, name, replacement = legacy_migration, '_verify_writes', die
+else:
+    target, name, replacement = legacy_migration, '_mark_complete', die
+with patch.object(target, name, replacement):
+    legacy_migration.migrate_legacy_secrets_yaml(system_root=root, service=service)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(root), phase],
+                cwd=Path(__file__).resolve().parents[4],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.soft_assert_equal(
+                result.returncode,
+                71,
+                f"{phase} must kill the importer at the intended boundary: {result.stderr}",
+            )
+            with sqlite3.connect(root / "access.db") as conn:
+                counts = (
+                    conn.execute("SELECT count(*) FROM encrypted_secrets").fetchone()[
+                        0
+                    ],
+                    conn.execute(
+                        "SELECT count(*) FROM secrets_bootstrap_migrations"
+                    ).fetchone()[0],
+                )
+            self.soft_assert_equal(
+                counts,
+                (0, 0) if phase == "during-import" else (2, 1),
+                f"{phase} must commit ciphertext and import state together",
+            )
+            self.soft_assert_equal(
+                source.exists(),
+                phase != "after-rename",
+                f"{phase} should preserve the expected source location",
+            )
+            service = EncryptedSecretsService(system_root=str(root), keyring=keyring)
+            expected = "original"
+            if phase == "after-rename":
+                # Recovery must verify identity presence without replaying the
+                # retired YAML over a newer credential.
+                expected = "newer"
+                service.set_for_authority(
+                    LOCAL_USER_AUTHORITY, DEFAULT_NAMESPACE, "OPENAI_API_KEY", expected
+                )
+            resumed = migrate_legacy_secrets_yaml(system_root=root, service=service)
+            self.soft_assert_equal(
+                resumed.phase, "complete", f"{phase} must resume to completion"
+            )
+            self.soft_assert_equal(
+                service.get_for_authority(
+                    LOCAL_USER_AUTHORITY, DEFAULT_NAMESPACE, "OPENAI_API_KEY"
+                ),
+                expected,
+                f"{phase} must preserve committed credentials",
+            )
+            self.soft_assert_equal(
+                service.get_for_authority(
+                    SYSTEM_AUTHORITY, DEFAULT_NAMESPACE, "LOGFIRE_TOKEN"
+                ),
+                "operational",
+                f"{phase} must preserve system ownership",
+            )
+            self.soft_assert(
+                (root / MIGRATION_BACKUP_DIRECTORY / LEGACY_BACKUP_FILENAME).exists(),
+                f"{phase} must retain the plaintext backup",
+            )
+            repeated = migrate_legacy_secrets_yaml(system_root=root, service=service)
+            self.soft_assert_equal(
+                repeated.phase, "complete", f"{phase} recovery must be repeatable"
+            )
 
 
 if __name__ == "__main__":

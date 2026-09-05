@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0046](0046-share-atomic-access-state-transactions.md).
 
 ## Context
 

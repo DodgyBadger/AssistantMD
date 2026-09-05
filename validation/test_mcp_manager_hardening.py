@@ -63,12 +63,22 @@ class _ConnectionSource:
         )
 
     def resolve_credential(
-        self, authority: ExecutionAuthority, connection_id: str
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        *,
+        expected_connection: MCPConnection | None = None,
     ) -> None:
         del authority, connection_id
         return None
 
-    def oauth_storage(self, authority: ExecutionAuthority, connection_id: str) -> None:
+    def oauth_storage(
+        self,
+        authority: ExecutionAuthority,
+        connection_id: str,
+        *,
+        expected_connection: MCPConnection | None = None,
+    ) -> None:
         del authority, connection_id
         return None
 
@@ -364,3 +374,137 @@ async def test_client_cleanup_failure_logs_sanitized_connection_context(
             "transport": connection.transport.value,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_invalidation_acknowledges_marking_and_preserves_active_lease() -> None:
+    connection = _connection("acknowledged")
+    manager = MCPConnectionManager(
+        connections=cast(MCPConnectionService, _ConnectionSource((connection,)))
+    )
+    closes = 0
+
+    class _Client:
+        async def __aexit__(self, *_args: object) -> None:
+            nonlocal closes
+            closes += 1
+
+    key = (LOCAL_USER_AUTHORITY.principal_id, connection.connection_id, 1)
+    entry = manager_module._ManagedConnection(
+        connection, cast(Client, _Client()), (), 1, 0
+    )
+    manager._entries[key] = entry
+    lease = manager._lease(key, entry)
+    manager.invalidate(LOCAL_USER_AUTHORITY.principal_id, connection.connection_id)
+    assert entry.invalidated  # No event-loop yield is needed for acknowledgement.
+    assert closes == 0
+    await lease.close()
+    assert closes == 1
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_worker_invalidation_acknowledges_and_propagates_marking_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MCPConnectionManager(
+        connections=cast(MCPConnectionService, _ConnectionSource(()))
+    )
+    target = (LOCAL_USER_AUTHORITY.principal_id, "worker")
+    await asyncio.to_thread(manager.invalidate, *target)
+    assert manager._invalidation_epochs[target] == 1
+
+    def fail(*_args: object) -> None:
+        raise RuntimeError("injected marking failure")
+
+    monkeypatch.setattr(manager, "_spawn_invalidation", fail)
+    with pytest.raises(RuntimeError, match="injected marking failure"):
+        await asyncio.to_thread(manager.invalidate, *target)
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_invalidation_cleanup_failure_is_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _connection("cleanup")
+    manager = MCPConnectionManager(
+        connections=cast(MCPConnectionService, _ConnectionSource((connection,)))
+    )
+    key = (LOCAL_USER_AUTHORITY.principal_id, connection.connection_id, 1)
+    manager._entries[key] = manager_module._ManagedConnection(
+        connection, cast(Client, object()), (), 0, 0
+    )
+    records: list[dict[str, object]] = []
+
+    async def fail(_entries: object) -> None:
+        raise RuntimeError("sensitive provider message")
+
+    monkeypatch.setattr(manager, "_close_invalidated", fail)
+    monkeypatch.setattr(
+        manager_module.logger,
+        "warning",
+        lambda _message, *, data: records.append(data),
+    )
+    manager.invalidate(LOCAL_USER_AUTHORITY.principal_id, connection.connection_id)
+    assert key not in manager._entries
+    await _wait_until(lambda: bool(records))
+    assert records == [
+        {"event": "mcp_invalidation_cleanup_failed", "error_type": "RuntimeError"}
+    ]
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_connection_captures_bound_credential_before_endpoint_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = replace(_connection("old-endpoint"), auth_mode=MCPAuthMode.BEARER)
+    secret = "old-secret"
+
+    class _Source(_ConnectionSource):
+        def resolve_credential(
+            self,
+            authority: ExecutionAuthority,
+            connection_id: str,
+            *,
+            expected_connection: MCPConnection | None = None,
+        ) -> str:
+            assert expected_connection == self.connections[0]
+            return secret
+
+    source = _Source((connection,))
+    manager = MCPConnectionManager(connections=cast(MCPConnectionService, source))
+
+    async def mutate_during_resolution(*_args: object, **_kwargs: object) -> None:
+        nonlocal secret
+        source.connections = (
+            replace(connection, config_version=2, url="https://new.example/"),
+        )
+        secret = "new-secret"
+
+    def check_material(candidate: MCPConnection, credential: str, **_kwargs: object):
+        assert candidate.url == connection.url
+        assert credential == "old-secret"
+        return None, credential
+
+    class _Client:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            pass
+
+        async def list_tools(self, **_kwargs: object) -> list[Tool]:
+            return []
+
+    monkeypatch.setattr(
+        manager_module, "validate_mcp_endpoint", mutate_during_resolution
+    )
+    monkeypatch.setattr(manager_module, "_build_auth", check_material)
+    monkeypatch.setattr(manager_module, "Client", _Client)
+    await manager._connect(LOCAL_USER_AUTHORITY, connection)
+    await manager.shutdown()
