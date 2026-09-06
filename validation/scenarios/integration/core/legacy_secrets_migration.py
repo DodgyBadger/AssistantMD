@@ -164,26 +164,35 @@ EMPTY_VALUE:
         collision_root.mkdir()
         collision_source = collision_root / "secrets.yaml"
         collision_source.write_text("OPENAI_API_KEY: new-value\n", encoding="utf-8")
-        collision_backup = collision_root / LEGACY_BACKUP_FILENAME
+        collision_backup_directory = collision_root / MIGRATION_BACKUP_DIRECTORY
+        collision_backup_directory.mkdir()
+        collision_backup = collision_backup_directory / LEGACY_BACKUP_FILENAME
         collision_backup.write_text("OPENAI_API_KEY: old-value\n", encoding="utf-8")
         collision_service = EncryptedSecretsService(
             system_root=str(collision_root), keyring=keyring
         )
-        collision_failed = False
-        try:
-            migrate_legacy_secrets_yaml(
-                system_root=collision_root, service=collision_service
-            )
-        except FileExistsError:
-            collision_failed = True
-        self.soft_assert(
-            collision_failed,
-            "Migration should not overwrite an existing legacy backup",
+        collision_result = migrate_legacy_secrets_yaml(
+            system_root=collision_root, service=collision_service
+        )
+        self.soft_assert_equal(
+            collision_result.phase,
+            "complete",
+            "An existing backup should not block migration",
         )
         self.soft_assert_equal(
             collision_backup.read_text(encoding="utf-8"),
             "OPENAI_API_KEY: old-value\n",
             "A backup collision should preserve the existing rollback file",
+        )
+        versioned_backup = collision_backup_directory / f"{LEGACY_BACKUP_FILENAME} (2)"
+        self.soft_assert_equal(
+            versioned_backup.read_text(encoding="utf-8"),
+            "OPENAI_API_KEY: new-value\n",
+            "A backup collision should retire the source under the next version",
+        )
+        self.soft_assert(
+            not collision_source.exists(),
+            "A versioned backup should retire the live plaintext file",
         )
 
         self._assert_crash_recovery(keyring)

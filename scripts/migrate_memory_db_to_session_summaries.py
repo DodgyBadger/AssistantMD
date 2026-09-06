@@ -6,8 +6,15 @@ from __future__ import annotations
 import argparse
 import shutil
 import sqlite3
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.migration_backups import prepare_migration_backup_path  # noqa: E402
 
 
 def main() -> int:
@@ -30,8 +37,6 @@ def main() -> int:
     old_db = system_root / "memory.db"
     new_db = system_root / "session_summaries.db"
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    backup_directory = system_root / "migration_backups"
-    backup_db = backup_directory / f"memory.db.backup-{timestamp}"
     migrated_old_db = system_root / f"memory.db.migrated-{timestamp}"
 
     if not old_db.exists():
@@ -42,9 +47,9 @@ def main() -> int:
         )
 
     system_root.mkdir(parents=True, exist_ok=True)
-    backup_directory.mkdir(parents=True, exist_ok=True)
-    if backup_db.exists():
-        raise FileExistsError(f"Migration backup already exists: {backup_db}")
+    backup_db = prepare_migration_backup_path(
+        system_root, f"memory.db.backup-{timestamp}"
+    )
     shutil.copy2(old_db, backup_db)
 
     conn = sqlite3.connect(new_db)

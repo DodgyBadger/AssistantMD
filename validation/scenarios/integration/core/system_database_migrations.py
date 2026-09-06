@@ -47,6 +47,12 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         self._create_legacy_ingestion_jobs_db(ingestion_db)
         legacy_backup = system_root / "vault_state.db.backup-legacy"
         legacy_backup.write_bytes(b"legacy migration backup")
+        backup_directory = system_root / MIGRATION_BACKUP_DIRECTORY
+        backup_directory.mkdir()
+        existing_legacy_backup = backup_directory / legacy_backup.name
+        existing_legacy_backup.write_bytes(b"existing migration backup")
+        second_existing_legacy_backup = backup_directory / f"{legacy_backup.name} (2)"
+        second_existing_legacy_backup.write_bytes(b"second existing migration backup")
 
         pending_before_store_initialization = get_system_migration_status(system_root)
         ChatStore(str(system_root))
@@ -71,15 +77,24 @@ class SystemDatabaseMigrationsScenario(BaseScenario):
         self.soft_assert_equal(
             after.pending_count, 0, "Registered migrations should be applied"
         )
-        backup_directory = system_root / MIGRATION_BACKUP_DIRECTORY
         self.soft_assert(
             not legacy_backup.exists(),
             "A migration run should remove managed legacy backups from the system root",
         )
         self.soft_assert_equal(
-            (backup_directory / legacy_backup.name).read_bytes(),
+            existing_legacy_backup.read_bytes(),
+            b"existing migration backup",
+            "A migration run should not overwrite an existing organized backup",
+        )
+        self.soft_assert_equal(
+            second_existing_legacy_backup.read_bytes(),
+            b"second existing migration backup",
+            "A migration run should preserve every existing numbered backup",
+        )
+        self.soft_assert_equal(
+            (backup_directory / f"{legacy_backup.name} (3)").read_bytes(),
             b"legacy migration backup",
-            "A migration run should preserve legacy backups in migration_backups",
+            "A migration run should choose the next free backup version",
         )
 
         target_by_db = {target.db_name: target for target in after.targets}

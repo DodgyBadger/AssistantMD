@@ -76,9 +76,10 @@ migration. It imports static values for `local-user`, assigns known operational
 values such as `LOGFIRE_TOKEN` to `system`, does not import OAuth token/pending
 state, authenticates every imported value, and retires the live YAML file only
 after verification by renaming it to
-`system/migration_backups/secrets.yaml.bak`. An existing
-backup is never overwritten. Normal runtime code has no YAML fallback after
-migration.
+`system/migration_backups/secrets.yaml.bak`. When that path exists, the importer
+uses the next available numbered name, beginning with `secrets.yaml.bak (2)`,
+and never overwrites an existing backup. Normal runtime code has no YAML fallback
+after migration.
 
 ## Rationale
 

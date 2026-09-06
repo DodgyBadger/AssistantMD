@@ -66,7 +66,8 @@ upgrading.
    `ready`.
 
 On first v0.8.0 startup, AssistantMD migrates legacy static secrets into encrypted
-storage and keeps the old file at `system/migration_backups/secrets.yaml.bak`.
+storage and keeps the old file at `system/migration_backups/secrets.yaml.bak`, or
+the next available numbered name when that file already exists.
 Routine `docker compose down` preserves advanced-shell pairing, installed files,
 and workspace data. Do not add `-v` unless you deliberately want to delete those
 Docker volumes.

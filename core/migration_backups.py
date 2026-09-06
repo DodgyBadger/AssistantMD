@@ -13,6 +13,25 @@ def get_migration_backup_directory(system_root: str | Path) -> Path:
     return Path(system_root) / MIGRATION_BACKUP_DIRECTORY
 
 
+def next_available_backup_path(path: Path) -> Path:
+    """Return the base backup path or its next available numbered variant."""
+    if not path.exists():
+        return path
+    version = 2
+    while True:
+        candidate = path.with_name(f"{path.name} ({version})")
+        if not candidate.exists():
+            return candidate
+        version += 1
+
+
+def prepare_migration_backup_path(system_root: str | Path, filename: str) -> Path:
+    """Create the owned backup directory and choose a non-conflicting path."""
+    backup_directory = get_migration_backup_directory(system_root)
+    backup_directory.mkdir(parents=True, exist_ok=True)
+    return next_available_backup_path(backup_directory / filename)
+
+
 def organize_legacy_migration_backups(system_root: str | Path) -> int:
     """Move recognized root-level migration backups into their owned directory."""
     root = Path(system_root)
@@ -24,14 +43,7 @@ def organize_legacy_migration_backups(system_root: str | Path) -> int:
     )
     if not legacy_paths:
         return 0
-    backup_directory = get_migration_backup_directory(root)
-    backup_directory.mkdir(parents=True, exist_ok=True)
     for source in legacy_paths:
-        destination = backup_directory / source.name
-        if destination.exists():
-            raise FileExistsError(
-                "Cannot organize migration backup because the destination already "
-                f"exists: {destination}"
-            )
+        destination = prepare_migration_backup_path(root, source.name)
         source.rename(destination)
     return len(legacy_paths)

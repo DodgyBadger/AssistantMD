@@ -10,7 +10,9 @@ import yaml
 
 from core.access_store import write_transaction
 from core.identity import LOCAL_USER_AUTHORITY, SYSTEM_AUTHORITY, ExecutionAuthority
-from core.migration_backups import get_migration_backup_directory
+from core.migration_backups import (
+    prepare_migration_backup_path,
+)
 
 from .schema import connect_secrets
 from .service import EncryptedSecretsService, SecretWrite
@@ -40,15 +42,6 @@ def migrate_legacy_secrets_yaml(
     """Import, verify, and retire legacy YAML without a runtime fallback."""
     root = Path(system_root)
     source_path = root / "secrets.yaml"
-    legacy_backup_path = root / LEGACY_BACKUP_FILENAME
-    backup_directory = get_migration_backup_directory(root)
-    backup_path = backup_directory / LEGACY_BACKUP_FILENAME
-    if source_path.exists() and (legacy_backup_path.exists() or backup_path.exists()):
-        raise FileExistsError(
-            "Legacy secrets migration cannot preserve secrets.yaml because "
-            f"{LEGACY_BACKUP_FILENAME} already exists. Move or rename the existing "
-            "backup before retrying."
-        )
     state = _read_migration_state(root)
     if state is not None and state[0] == "complete":
         return LegacySecretsMigrationResult(
@@ -90,7 +83,7 @@ def migrate_legacy_secrets_yaml(
         values = _parse_legacy_yaml(source_bytes)
         writes, skipped_oauth_count = _build_writes(values)
         _verify_writes(service, writes)
-        backup_directory.mkdir(parents=True, exist_ok=True)
+        backup_path = prepare_migration_backup_path(root, LEGACY_BACKUP_FILENAME)
         source_path.rename(backup_path)
     else:
         _verify_recorded_items(root, service)

@@ -66,7 +66,8 @@ store initializes—and any legacy `system/secrets.yaml` values migrate—when t
 application next starts with `scripts/dev run`. After AssistantMD verifies the
 encrypted values, it preserves the legacy file as
 `system/migration_backups/secrets.yaml.bak` for
-rollback; the backup is not used by the current runtime.
+rollback. If that name exists, it uses the next available numbered name, such as
+`secrets.yaml.bak (2)`; backups are not used by the current runtime.
 
 `.env.example` documents the required names but contains no usable key.
 `scripts/dev run` loads `.env` when it exists. A missing or unusable key leaves

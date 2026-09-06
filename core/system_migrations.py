@@ -62,8 +62,8 @@ from core.memory.schema import (
     ensure_session_summary_schema,
 )
 from core.migration_backups import (
-    get_migration_backup_directory,
     organize_legacy_migration_backups,
+    prepare_migration_backup_path,
 )
 from core.runtime.paths import get_system_root
 from core.secrets.bootstrap import get_secrets_bootstrap_status
@@ -345,7 +345,6 @@ def _backup_pending_databases(
     status: SystemMigrationStatus, *, excluded_db_names: frozenset[str]
 ) -> dict[str, str]:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    backup_directory = get_migration_backup_directory(status.system_root)
     backups: dict[str, str] = {}
     for target in status.targets:
         if (
@@ -355,10 +354,9 @@ def _backup_pending_databases(
         ):
             continue
         source = Path(target.db_path)
-        backup_directory.mkdir(parents=True, exist_ok=True)
-        backup_path = backup_directory / f"{source.name}.backup-{timestamp}"
-        if backup_path.exists():
-            raise FileExistsError(f"Migration backup already exists: {backup_path}")
+        backup_path = prepare_migration_backup_path(
+            status.system_root, f"{source.name}.backup-{timestamp}"
+        )
         source_conn = sqlite3.connect(source)
         backup_conn = sqlite3.connect(backup_path)
         try:
