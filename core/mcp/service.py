@@ -612,7 +612,7 @@ class MCPConnectionService:
                 },
             )
             raise MCPMutationUnavailableError(
-                "MCP configuration was saved, but runtime invalidation failed; restart AssistantMD."
+                "MCP configuration was saved, but runtime invalidation failed; restart Assistant.md."
             ) from exc
         logger.info(
             "MCP connection mutation completed",

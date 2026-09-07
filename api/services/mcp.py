@@ -430,7 +430,7 @@ def _domain_errors() -> Iterator[None]:
             error_type="MCPMutationUnavailable",
             message=(
                 "MCP configuration was saved, but runtime refresh failed. "
-                "Restart AssistantMD, then inspect the saved state."
+                "Restart Assistant.md, then inspect the saved state."
             ),
             details={"committed": True, "retry_safe": False},
         ) from exc

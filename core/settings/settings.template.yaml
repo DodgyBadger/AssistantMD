@@ -1,4 +1,4 @@
-# AssistantMD Settings Template
+# Assistant.md Settings Template
 #
 # This template seeds `system/settings.yaml` when no user configuration
 # exists. Edit a copy under `system/settings.yaml` rather than this file.
@@ -127,7 +127,7 @@ settings:
     restart_required: false
   mcp_max_concurrent_advanced_shell_stdio_launches:
     value: 4
-    description: "Maximum advanced-shell stdio providers AssistantMD may initialize concurrently. This bounds managed MCP launch fan-out, not commands started directly through the shell tool."
+    description: "Maximum advanced-shell stdio providers Assistant.md may initialize concurrently. This bounds managed MCP launch fan-out, not commands started directly through the shell tool."
     category: "Advanced"
     restart_required: true
   browser_navigation_timeout_seconds:
@@ -473,14 +473,14 @@ providers:
 tools:
   gmail:
     module: core.tools.gmail
-    description: "Read connected Gmail accounts and save bounded PDF attachments into the vault"
+    description: "Read connected Gmail accounts, save bounded PDF attachments, and create unsent drafts when enabled"
     requires_secrets: []
     requires_connection: google.gmail.read
     user_editable: false
     chat_visible: true
   content_import:
     module: core.tools.content_import
-    description: "Submit URLs or vault files for durable import to Markdown and inspect import jobs"
+    description: "Import URLs or vault files to durable Markdown immediately by default, or queue and inspect background jobs"
     requires_secrets: []
     user_editable: false
   web_search:

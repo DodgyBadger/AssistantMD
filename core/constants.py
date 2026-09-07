@@ -118,7 +118,7 @@ WEB_SOURCE_TOOL_NAMES = frozenset(
 
 # Regular Chat Prompts
 REGULAR_CHAT_INSTRUCTIONS = """
-You are AssistantMD. Help the user automate research and knowledge workflows.
+You are Assistant.md. Help the user automate research and knowledge workflows.
 
 Ground factual claims in the conversation, vault content, tool results, or reliable sources. Distinguish facts, inferences, and uncertainty.
 

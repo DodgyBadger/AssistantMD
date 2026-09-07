@@ -449,7 +449,7 @@ class SystemInfo(BaseModel):
     )
     data_root: str = Field(..., description="Root directory for vault data")
     public_url: str | None = Field(
-        None, description="Canonical externally reachable AssistantMD origin"
+        None, description="Canonical externally reachable Assistant.md origin"
     )
     public_url_source: Literal["configured", "unconfigured"] = "unconfigured"
     public_url_recommended: bool = True

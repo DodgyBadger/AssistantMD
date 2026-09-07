@@ -374,7 +374,7 @@
                     const revisions = data.revisions || [];
                     historyLoaded = true;
                     if (!revisions.length) {
-                        historyList.innerHTML = '<p class="text-sm text-txt-secondary">No retained AssistantMD revisions. External edits are not snapshotted.</p>';
+                        historyList.innerHTML = '<p class="text-sm text-txt-secondary">No retained Assistant.md revisions. External edits are not snapshotted.</p>';
                         return;
                     }
                     historyList.innerHTML = revisions.map((revision) => `
@@ -512,7 +512,7 @@
             if (normalized === 'chat') return 'Chat';
             if (normalized === 'workflow') return 'Workflow';
             if (normalized === 'ingestion') return 'Ingestion';
-            return 'AssistantMD';
+            return 'Assistant.md';
         }
 
         function splitMarkdownFrontmatter(content) {

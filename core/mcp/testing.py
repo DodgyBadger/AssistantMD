@@ -94,7 +94,7 @@ async def test_mcp_connection_runtime(
         return _failed_result(
             connection,
             status="unreachable",
-            message="The MCP server could not be reached from AssistantMD.",
+            message="The MCP server could not be reached from Assistant.md.",
             error_type=type(exc).__name__,
         )
     except Exception as exc:

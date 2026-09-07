@@ -23,31 +23,33 @@ class PublicOrigin:
         """Parse and normalize an HTTPS or loopback-development origin."""
         raw = str(value or "").strip()
         if not raw:
-            raise PublicUrlError("AssistantMD public URL cannot be empty.")
+            raise PublicUrlError("Assistant.md public URL cannot be empty.")
         try:
             parsed = urlsplit(raw)
             port = parsed.port
         except ValueError as exc:
-            raise PublicUrlError("AssistantMD public URL has an invalid port.") from exc
+            raise PublicUrlError(
+                "Assistant.md public URL has an invalid port."
+            ) from exc
         scheme = parsed.scheme.lower()
         hostname = parsed.hostname
         if scheme not in {"http", "https"} or hostname is None:
             raise PublicUrlError(
-                "AssistantMD public URL must be an absolute HTTP or HTTPS origin."
+                "Assistant.md public URL must be an absolute HTTP or HTTPS origin."
             )
         if parsed.username is not None or parsed.password is not None:
-            raise PublicUrlError("AssistantMD public URL cannot contain credentials.")
+            raise PublicUrlError("Assistant.md public URL cannot contain credentials.")
         if parsed.query or parsed.fragment:
             raise PublicUrlError(
-                "AssistantMD public URL cannot contain a query string or fragment."
+                "Assistant.md public URL cannot contain a query string or fragment."
             )
         if parsed.path not in {"", "/"}:
             raise PublicUrlError(
-                "AssistantMD public URL cannot contain an application path."
+                "Assistant.md public URL cannot contain an application path."
             )
         if scheme == "http" and not _is_loopback_host(hostname):
             raise PublicUrlError(
-                "AssistantMD public URL requires HTTPS except on a loopback host."
+                "Assistant.md public URL requires HTTPS except on a loopback host."
             )
         normalized_host = _normalize_hostname(hostname)
         host = f"[{normalized_host}]" if ":" in normalized_host else normalized_host
@@ -93,16 +95,16 @@ def _normalize_hostname(hostname: str) -> str:
             ascii_hostname = hostname.encode("idna").decode("ascii").lower()
         except UnicodeError as exc:
             raise PublicUrlError(
-                "AssistantMD public URL has an invalid hostname."
+                "Assistant.md public URL has an invalid hostname."
             ) from exc
         if len(ascii_hostname) > 253 or any(
             not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
             for label in ascii_hostname.rstrip(".").split(".")
         ):
             raise PublicUrlError(
-                "AssistantMD public URL has an invalid hostname."
+                "Assistant.md public URL has an invalid hostname."
             ) from None
         return ascii_hostname.rstrip(".")
     if isinstance(address, ipaddress.IPv6Address) and address.scope_id is not None:
-        raise PublicUrlError("AssistantMD public URL has an invalid hostname.")
+        raise PublicUrlError("Assistant.md public URL has an invalid hostname.")
     return address.compressed

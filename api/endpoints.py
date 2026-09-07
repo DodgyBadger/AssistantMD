@@ -278,10 +278,10 @@ from .services.mcp import (
 from .utils import create_error_response, serialize_exception
 
 # Create API router
-public_router = APIRouter(prefix="/api", tags=["AssistantMD public API"])
+public_router = APIRouter(prefix="/api", tags=["Assistant.md public API"])
 router = APIRouter(
     prefix="/api",
-    tags=["AssistantMD API"],
+    tags=["Assistant.md API"],
     dependencies=[Depends(use_request_authority)],
 )
 logger = UnifiedLogger(tag="api-endpoints")
@@ -293,9 +293,9 @@ _VAULT_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 def _mcp_oauth_callback_page(*, success: bool) -> str:
     title = "MCP OAuth connected" if success else "MCP OAuth failed"
     message = (
-        "Authorization completed. You can close this tab and return to AssistantMD."
+        "Authorization completed. You can close this tab and return to Assistant.md."
         if success
-        else "Authorization could not be completed. Close this tab and retry from AssistantMD."
+        else "Authorization could not be completed. Close this tab and retry from Assistant.md."
     )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -308,9 +308,9 @@ def _mcp_oauth_callback_page(*, success: bool) -> str:
 def _google_oauth_callback_page(*, success: bool) -> str:
     title = "Google account connected" if success else "Google OAuth failed"
     message = (
-        "Authorization completed. You can close this tab and return to AssistantMD."
+        "Authorization completed. You can close this tab and return to Assistant.md."
         if success
-        else "Authorization could not be completed. Close this tab and retry from AssistantMD."
+        else "Authorization could not be completed. Close this tab and retry from Assistant.md."
     )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"

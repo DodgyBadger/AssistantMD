@@ -83,7 +83,7 @@ def require_secrets_ready() -> None:
     if status is not None and not status.ready:
         raise SecretIntegrityError(
             "Encrypted secrets are locked. Restore or configure the installation "
-            "key in .env, then restart AssistantMD."
+            "key in .env, then restart Assistant.md."
         )
 
 

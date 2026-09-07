@@ -919,7 +919,7 @@
         const classSuffix = extraClass ? ` ${extraClass}` : '';
         return `
             <div class="rounded-md border border-border-secondary bg-app-card px-3 py-2 text-xs state-warning${classSuffix}">
-                OpenAI OAuth is experimental and is not officially supported by OpenAI for AssistantMD. Use it at your own risk: it could break if OpenAI changes the flow, and your account could be disabled if OpenAI decides to restrict this access.
+                OpenAI OAuth is experimental and is not officially supported by OpenAI for Assistant.md. Use it at your own risk: it could break if OpenAI changes the flow, and your account could be disabled if OpenAI decides to restrict this access.
             </div>
         `;
     }
@@ -2688,10 +2688,10 @@ async function saveModelRow(rowKey) {
                             </div>
                         </div>
                         <p class="text-xs text-txt-secondary">Save any client ID, client secret, or scope changes before choosing Authorize. Servers that support dynamic registration can leave these fields blank.</p>
-                        <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. AssistantMD detects the callback automatically when this address is reachable from your browser.</p>
+                        <p class="text-xs text-txt-secondary">Authorize opens the server's sign-in page. Assistant.md detects the callback automatically when this address is reachable from your browser.</p>
                         <label class="text-xs text-txt-secondary">Authorization URL<span class="mt-1 flex items-start gap-2"><textarea data-mcp-field="oauth_authorization_url" readonly rows="3" class="min-w-0 flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card font-mono text-xs text-txt-primary resize-y" placeholder="Choose Authorize to generate a URL you can copy into another browser."></textarea><button type="button" data-mcp-copy="oauth_authorization_url" ${iconButton('copy', 'Copy authorization URL')}>${iconSvg('copy')}</button></span></label>
                         <div class="space-y-2">
-                            <p class="text-xs text-txt-secondary">Only use this if the browser cannot reach AssistantMD's callback. Copy the full redirected URL from the browser address bar.</p>
+                            <p class="text-xs text-txt-secondary">Only use this if the browser cannot reach Assistant.md's callback. Copy the full redirected URL from the browser address bar.</p>
                             <div class="flex flex-col gap-2 sm:flex-row"><input data-mcp-field="oauth_redirect" class="flex-1 px-3 py-2 border border-border-secondary rounded-md bg-app-card text-txt-primary" placeholder="Paste the full redirected URL" /><button type="button" data-mcp-action="oauth-complete" class="shrink-0 px-3 py-2 rounded-md border border-border-secondary bg-app-card text-xs font-medium text-txt-primary hover:border-accent">Finish from redirected URL</button></div>
                         </div>
                     </div>` : ''}

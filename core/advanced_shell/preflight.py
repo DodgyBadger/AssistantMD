@@ -166,7 +166,7 @@ def _snapshot(state: AdvancedShellReadiness) -> AdvancedShellPreflightSnapshot:
         AdvancedShellReadiness.DNS_FAILURE: "The advanced-shell hostname cannot be resolved.",
         AdvancedShellReadiness.CONNECTION_FAILURE: "The advanced shell cannot be reached.",
         AdvancedShellReadiness.HOST_KEY_MISMATCH: "The advanced-shell host identity does not match the pinned identity.",
-        AdvancedShellReadiness.AUTHENTICATION_FAILURE: "The advanced shell rejected AssistantMD authentication.",
+        AdvancedShellReadiness.AUTHENTICATION_FAILURE: "The advanced shell rejected Assistant.md authentication.",
         AdvancedShellReadiness.UNAVAILABLE: "Advanced-shell readiness could not be established.",
         AdvancedShellReadiness.READY: "The advanced shell is authenticated and ready.",
     }

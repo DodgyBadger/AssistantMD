@@ -486,7 +486,7 @@ class MCPOAuthCoordinator:
                 },
             )
             raise MCPMutationUnavailableError(
-                "MCP OAuth state was saved, but runtime invalidation failed; restart AssistantMD."
+                "MCP OAuth state was saved, but runtime invalidation failed; restart Assistant.md."
             ) from exc
 
     async def shutdown(self) -> None:

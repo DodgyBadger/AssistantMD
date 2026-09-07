@@ -226,7 +226,7 @@ def validate_settings(
             name="SECRETS_ENCRYPTION_LOCKED",
             message=(
                 "Encrypted secrets are locked. Restore or configure the installation "
-                "key in .env, then restart AssistantMD. Providers and models are "
+                "key in .env, then restart Assistant.md. Providers and models are "
                 "unavailable; existing secret state has not been changed."
             ),
             severity="warning",
@@ -237,7 +237,7 @@ def validate_settings(
             message=(
                 "Canonical public URL is not configured. Local use remains "
                 "available, but reverse-proxy deployments should set "
-                "ASSISTANTMD_PUBLIC_URL in .env and restart AssistantMD."
+                "ASSISTANTMD_PUBLIC_URL in .env and restart Assistant.md."
             ),
             severity="warning",
         )

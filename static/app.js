@@ -1495,7 +1495,7 @@ async function fetchSystemStatus() {
             dashElements.workflowsStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch workflow status</p>';
         }
         if (dashElements.vaultActivityStatus) {
-            dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch AssistantMD activity</p>';
+        dashElements.vaultActivityStatus.innerHTML = '<p class="state-error text-sm">Failed to fetch Assistant.md activity</p>';
         }
     }
 }

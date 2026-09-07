@@ -19,7 +19,7 @@ from core.authentication import (
     OwnerSessionCodec,
 )
 
-router = APIRouter(prefix="/auth", tags=["AssistantMD authentication"])
+router = APIRouter(prefix="/auth", tags=["Assistant.md authentication"])
 _COOKIE_MAX_AGE_SECONDS = 12 * 60 * 60
 _MAXIMUM_SESSION_EXCHANGE_BYTES = 8192
 _COOKIE_EXPIRY_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -190,7 +190,7 @@ def _peer_key(request: Request) -> str:
 
 
 def _login_page() -> str:
-    title = escape("AssistantMD owner sign-in")
+    title = escape("Assistant.md owner sign-in")
     return f"""<!doctype html>
 <html lang="en">
 <head>
