@@ -51,3 +51,11 @@
 9. Confirm that model-provider API keys were imported, then reconnect every existing OAuth account. Legacy OAuth state is not imported into the encrypted store. Configure and test Gmail and MCP connections under **System → Connections**. Gmail attachment downloads and draft creation remain disabled on each connection until explicitly enabled; enabling drafts requires reauthorizing that connection for Gmail compose permission.
 
 On first v0.8.0 startup, Assistant.md migrates legacy non-OAuth static secrets into encrypted storage and keeps the old file at `system/migration_backups/secrets.yaml.bak`, or the next available numbered name when that file already exists. Routine `docker compose down` preserves advanced-shell pairing, installed files, and workspace data. Do not add `-v` unless you deliberately want to delete those Docker volumes.
+
+## Model aliases during upgrades
+
+Model aliases are part of the authoring contract because context scripts, workflows, and other automation can refer to them directly. Keep an existing alias stable when changing the provider model it resolves to. If you rename or remove an alias, update every script and setting that refers to it in the same change.
+
+Packaged model defaults live in `core/settings/settings.template.yaml`, while the active mappings live in the persistent `system/settings.yaml`. Settings repair copies only new or missing model entries from the packaged template; it never overwrites an existing entry with the same alias, and it preserves user-defined models.
+
+When an upgrade changes the packaged `model_string` for an existing alias, delete that alias's complete entry from the `models` section of `system/settings.yaml`, then run **Repair settings from template**. The repair action creates a settings backup and recreates the missing entry from the current packaged seed. Do not delete customized model entries unless you intend to replace those customizations with the packaged defaults.
