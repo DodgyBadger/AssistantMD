@@ -336,31 +336,31 @@ settings:
 models:
   gemini:
     provider: google
-    model_string: gemini-2.5-pro
+    model_string: gemini-3.1-pro-preview
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gemini-flash:
     provider: google
-    model_string: gemini-2.5-flash
+    model_string: gemini-flash-latest
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gemini-flash-lite:
     provider: google
-    model_string: gemini-2.5-flash-lite
+    model_string: gemini-flash-lite-latest
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   sonnet:
     provider: anthropic
-    model_string: claude-sonnet-4-5
+    model_string: claude-sonnet-5
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   opus:
     provider: anthropic
-    model_string: claude-opus-4-1
+    model_string: claude-opus-5
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
@@ -370,33 +370,39 @@ models:
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
+  astra:
+    provider: openai
+    model_string: gpt-6-astra
+    capabilities: ["text", "vision"]
+    description: null
+    user_editable: true
   gpt:
     provider: openai
-    model_string: gpt-5
+    model_string: gpt-5.6-sol
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gpt-mini:
     provider: openai
-    model_string: gpt-5-mini
+    model_string: gpt-5.6-terra
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   gpt-nano:
     provider: openai
-    model_string: gpt-5-nano
+    model_string: gpt-5.6-luna
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
   grok:
     provider: grok
-    model_string: grok-4
+    model_string: grok-4.6-latest
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
-  grok-mini:
+  grok-fast:
     provider: grok
-    model_string: grok-3-mini
+    model_string: grok-4.3-latest
     capabilities: ["text", "vision"]
     description: null
     user_editable: true
@@ -416,18 +422,6 @@ models:
     provider: mistral
     model_string: mistral-medium-latest
     capabilities: ["text", "vision"]
-    description: null
-    user_editable: true
-  magistral-medium:
-    provider: mistral
-    model_string: magistral-medium-latest
-    capabilities: ["text"]
-    description: null
-    user_editable: true
-  magistral-small:
-    provider: mistral
-    model_string: magistral-small-latest
-    capabilities: ["text"]
     description: null
     user_editable: true
   embeddings:
