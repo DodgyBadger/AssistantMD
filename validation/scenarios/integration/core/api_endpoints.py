@@ -536,7 +536,7 @@ class ApiEndpointsScenario(BaseScenario):
         )
         assert rejected_owner.status_code == 422, "MCP owner injection is rejected"
 
-        mcp_create = self.call_api(
+        mcp_create = await self.call_api_async(
             "/api/system/mcp/connections",
             method="POST",
             data={
@@ -591,7 +591,7 @@ class ApiEndpointsScenario(BaseScenario):
             and mcp_test.json()["tool_names"] == ["search", "read"]
         ), "MCP test reports sanitized readiness and discovered tool names"
 
-        mcp_update = self.call_api(
+        mcp_update = await self.call_api_async(
             f"/api/system/mcp/connections/{mcp_id}",
             method="PUT",
             data={
@@ -609,14 +609,14 @@ class ApiEndpointsScenario(BaseScenario):
         assert mcp_update.json()["slug"] == "validation-mcp", "MCP slug stays immutable"
         assert mcp_update.json()["allow_private_http"] is False
 
-        mcp_clear = self.call_api(
+        mcp_clear = await self.call_api_async(
             f"/api/system/mcp/connections/{mcp_id}/credential",
             method="DELETE",
         )
         assert mcp_clear.status_code == 200, "MCP credential clear succeeds"
         assert mcp_clear.json()["credential_present"] is False
 
-        mcp_delete = self.call_api(
+        mcp_delete = await self.call_api_async(
             f"/api/system/mcp/connections/{mcp_id}",
             method="DELETE",
         )

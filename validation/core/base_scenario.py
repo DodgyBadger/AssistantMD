@@ -498,6 +498,24 @@ class BaseScenario(ABC):
         self._log_timeline(f"   -> Status {response.status_code}")
         return response
 
+    async def call_api_async(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        data: dict | None = None,
+        params: dict | None = None,
+        headers: dict | None = None,
+    ) -> APIResponse:
+        """Call an endpoint without blocking runtime work on the scenario loop."""
+        return await asyncio.to_thread(
+            self.call_api,
+            endpoint,
+            method,
+            data,
+            params,
+            headers,
+        )
+
     async def run_chat_task(
         self,
         data: dict,
