@@ -206,7 +206,7 @@ class GmailAttachmentToolScenario(BaseScenario):
                 await service.download_attachment(
                     authority, "message-1", "attachment-1", connection="work"
                 )
-            except ValueError as exc:
+            except GmailError as exc:
                 self.soft_assert(
                     "valid PDF" in str(exc),
                     "Service should reject content without a PDF signature",
@@ -262,17 +262,17 @@ class GmailAttachmentToolScenario(BaseScenario):
                     "/absolute.pdf",
                     "Inbox/file.docx",
                 ):
-                    try:
-                        await tool.function(
-                            operation="download_attachment",
-                            message_id="message-1",
-                            attachment_id="attachment-1",
-                            destination_path=destination,
-                        )
-                    except ValueError:
-                        pass
-                    else:
-                        self.soft_assert(False, f"Tool should reject {destination}")
+                    result = await tool.function(
+                        operation="download_attachment",
+                        message_id="message-1",
+                        attachment_id="attachment-1",
+                        destination_path=destination,
+                    )
+                    self.soft_assert_equal(
+                        result.metadata.get("status"),
+                        "failed",
+                        f"Tool should reject {destination} as a settled result",
+                    )
                 self.soft_assert_equal(
                     len(fake_service.calls),
                     2,
@@ -284,20 +284,16 @@ class GmailAttachmentToolScenario(BaseScenario):
                 use_execution_authority(authority),
                 patch("core.tools.gmail.get_runtime_context", return_value=runtime),
             ):
-                try:
-                    await vaultless.function(
-                        operation="download_attachment",
-                        message_id="message-1",
-                        attachment_id="attachment-1",
-                        destination_path="report.pdf",
-                    )
-                except ValueError as exc:
-                    self.soft_assert(
-                        "vault is required" in str(exc).lower(),
-                        "Vaultless downloads should fail clearly",
-                    )
-                else:
-                    self.soft_assert(False, "Vaultless attachment download should fail")
+                result = await vaultless.function(
+                    operation="download_attachment",
+                    message_id="message-1",
+                    attachment_id="attachment-1",
+                    destination_path="report.pdf",
+                )
+                self.soft_assert(
+                    "vault is required" in str(result.return_value).lower(),
+                    "Vaultless downloads should fail clearly",
+                )
 
 
 class _AttachmentClient:

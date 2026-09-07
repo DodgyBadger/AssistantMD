@@ -41,6 +41,10 @@ class GmailError(RuntimeError):
         self.retryable = retryable
 
 
+class GmailRequestError(ValueError):
+    """Raised when a Gmail operation receives invalid user-controlled input."""
+
+
 @dataclass(frozen=True)
 class GmailAttachment:
     attachment_id: str
@@ -113,9 +117,9 @@ class GmailAPIClient:
         """Search message handles and load compact metadata without message bodies."""
         clean_query = str(query or "").strip()
         if not clean_query:
-            raise ValueError("Gmail search query cannot be empty.")
+            raise GmailRequestError("Gmail search query cannot be empty.")
         if not 1 <= max_results <= 500:
-            raise ValueError("Gmail search results must be between 1 and 500.")
+            raise GmailRequestError("Gmail search results must be between 1 and 500.")
         payload = await self._request(
             "GET",
             "/messages",
@@ -150,7 +154,9 @@ class GmailAPIClient:
         """Load one full message with bounded normalized text."""
         clean_id = _resource_id(message_id, "message")
         if not 1 <= max_characters <= 250_000:
-            raise ValueError("Gmail message characters must be between 1 and 250000.")
+            raise GmailRequestError(
+                "Gmail message characters must be between 1 and 250000."
+            )
         payload = await self._request(
             "GET", f"/messages/{clean_id}", params={"format": "full"}
         )
@@ -166,7 +172,7 @@ class GmailAPIClient:
         """Load a thread with explicit message-count truncation."""
         clean_id = _resource_id(thread_id, "thread")
         if not 1 <= max_messages <= 100:
-            raise ValueError("Gmail thread messages must be between 1 and 100.")
+            raise GmailRequestError("Gmail thread messages must be between 1 and 100.")
         payload = await self._request(
             "GET", f"/threads/{clean_id}", params={"format": "full"}
         )
@@ -243,7 +249,7 @@ class GmailAPIClient:
         """Create one plain-text draft without retrying an ambiguous mutation."""
         clean_subject = _validated_header(subject, "subject", required=True)
         if not isinstance(body, str) or not body:
-            raise ValueError("Gmail draft body cannot be empty.")
+            raise GmailRequestError("Gmail draft body cannot be empty.")
         message = EmailMessage()
         message["Subject"] = clean_subject
         message.set_content(body)
@@ -264,14 +270,17 @@ class GmailAPIClient:
             draft_message = raw_message if isinstance(raw_message, dict) else {}
             message_id = _resource_id(str(draft_message.get("id") or ""), "message")
             thread_id = _resource_id(str(draft_message.get("threadId") or ""), "thread")
-        except (GmailError, ValueError) as exc:
+        except (GmailError, GmailRequestError) as exc:
             definite_categories = {
                 "authentication",
                 "permission",
                 "validation",
                 "not_found",
             }
-            if isinstance(exc, ValueError) or exc.category not in definite_categories:
+            if (
+                isinstance(exc, GmailRequestError)
+                or exc.category not in definite_categories
+            ):
                 raise GmailError(
                     "Gmail draft creation outcome is unknown. Inspect Gmail drafts before retrying.",
                     category="mutation_outcome_unknown",
@@ -527,11 +536,13 @@ def _headers(value: object) -> dict[str, str]:
 def _validated_header(value: str, name: str, *, required: bool = False) -> str:
     clean = str(value or "").strip()
     if required and not clean:
-        raise ValueError(f"Gmail draft {name} cannot be empty.")
+        raise GmailRequestError(f"Gmail draft {name} cannot be empty.")
     if any(ord(character) < 32 or ord(character) == 127 for character in clean):
-        raise ValueError(f"Gmail draft {name} contains an invalid control character.")
+        raise GmailRequestError(
+            f"Gmail draft {name} contains an invalid control character."
+        )
     if len(clean) > 998:
-        raise ValueError(f"Gmail draft {name} is too long.")
+        raise GmailRequestError(f"Gmail draft {name} is too long.")
     return clean
 
 
@@ -613,7 +624,7 @@ def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
 def _resource_id(value: str, kind: str) -> str:
     clean = str(value or "").strip()
     if not clean or any(character in clean for character in "/?#"):
-        raise ValueError(f"Gmail {kind} ID is invalid.")
+        raise GmailRequestError(f"Gmail {kind} ID is invalid.")
     return clean
 
 

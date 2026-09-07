@@ -43,6 +43,10 @@ class GoogleOAuthStateChangedError(ValueError):
     """Raised when an OAuth persistence source changes before commit."""
 
 
+class GoogleConnectionConfigurationError(ValueError):
+    """Raised when persisted Google connection state is invalid."""
+
+
 class GoogleCapability(StrEnum):
     """Built-in capabilities backed by one Google connection."""
 
@@ -392,7 +396,9 @@ class GoogleConnectionService:
                 account_email=str(payload["account_email"]),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("Stored Google OAuth token state is invalid.") from exc
+            raise GoogleConnectionConfigurationError(
+                "Stored Google OAuth token state is invalid."
+            ) from exc
 
     def clear_token_state(
         self, authority: ExecutionAuthority, connection_id: str | None = None

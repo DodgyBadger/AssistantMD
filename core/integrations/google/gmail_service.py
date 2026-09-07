@@ -18,13 +18,19 @@ from .gmail import (
     GmailAPIClient,
     GmailAttachment,
     GmailDraft,
+    GmailError,
     GmailMessage,
+    GmailRequestError,
     GmailSearchResult,
     GmailThread,
 )
 from .oauth import GoogleOAuthCoordinator
 
 logger = UnifiedLogger(tag="gmail-resource")
+
+
+class GmailConfigurationError(ValueError):
+    """Raised when Gmail connection state or policy prevents an operation."""
 
 
 @dataclass(frozen=True)
@@ -213,7 +219,7 @@ class GmailResourceService:
                     "connection_id": selected.connection_id,
                 },
             )
-            raise ValueError(
+            raise GmailConfigurationError(
                 "Gmail attachment downloads are disabled for this connection."
             )
         limit = preferences.attachment_max_mb * 1024 * 1024
@@ -232,7 +238,10 @@ class GmailResourceService:
                 message_id, attachment_id, max_bytes=limit
             )
             if not content.startswith(b"%PDF-"):
-                raise ValueError("Gmail attachment content is not a valid PDF.")
+                raise GmailError(
+                    "Gmail attachment content is not a valid PDF.",
+                    category="provider_response",
+                )
             attachment = GmailAttachment(
                 attachment_id=attachment_id,
                 filename="",
@@ -272,20 +281,22 @@ class GmailResourceService:
         selected = self._resolve_connection(authority, connection)
         preferences = selected.gmail
         if not preferences.draft_creation_enabled:
-            raise ValueError("Gmail draft creation is disabled for this connection.")
+            raise GmailConfigurationError(
+                "Gmail draft creation is disabled for this connection."
+            )
         availability = self._google.capability_availability(
             authority, GoogleCapability.GMAIL_COMPOSE, selected.connection_id
         )
         if not availability.available:
-            raise ValueError(
+            raise GmailConfigurationError(
                 "Gmail draft creation requires adding Gmail compose permission."
             )
         if len(body) > preferences.draft_max_characters:
-            raise ValueError(
+            raise GmailRequestError(
                 "Gmail draft body exceeds this connection's character limit."
             )
         if not body:
-            raise ValueError("Gmail draft body cannot be empty.")
+            raise GmailRequestError("Gmail draft body cannot be empty.")
         logger.info(
             "Gmail draft creation started",
             data={
@@ -323,7 +334,7 @@ class GmailResourceService:
             authority, GoogleCapability.GMAIL_READ, connection.connection_id
         )
         if not availability.available:
-            raise ValueError(
+            raise GmailConfigurationError(
                 "Gmail connection is unavailable. Reconnect Google with Gmail read access."
             )
         return connection, connection.gmail
@@ -347,7 +358,7 @@ class GmailResourceService:
                 )
             )
             suffix = f" Available connections: {available}." if available else ""
-            raise ValueError(f"Google connection was not found.{suffix}")
+            raise GmailConfigurationError(f"Google connection was not found.{suffix}")
         return connection
 
     def _client(

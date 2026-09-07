@@ -30,6 +30,7 @@ if __name__ == "__main__":
     set_bootstrap_roots(data_root=data_root, system_root=system_root)
 
 from core.integrations.google.gmail import GmailAPIClient, GmailError  # noqa: E402
+from core.integrations.google.oauth import GoogleOAuthError  # noqa: E402
 from core.tools.gmail import _write_numbered_attachment  # noqa: E402
 from validation.core.base_scenario import BaseScenario  # noqa: E402
 
@@ -70,7 +71,7 @@ class GmailReadToolsScenario(BaseScenario):
         self.soft_assert_equal(
             (draft.draft_id, draft.message_id, draft.thread_id),
             ("draft-1", "draft-message-1", "draft-thread-1"),
-            "Draft creation should return only stable Gmail handles",
+            "Draft creation should return confirmation identifiers",
         )
         draft_request = next(
             request for request in requests if request.url.path.endswith("/drafts")
@@ -109,6 +110,56 @@ class GmailReadToolsScenario(BaseScenario):
             )
         else:
             self.soft_assert(False, "Ambiguous draft creation should fail explicitly")
+
+        pre_request_attempts: list[httpx.Request] = []
+        oauth_failure_client = GmailAPIClient(
+            access_token_provider=lambda: _failed_access_token(
+                GoogleOAuthError("Google authorization must be reconnected.")
+            ),
+            http_client_factory=lambda: _gmail_client(pre_request_attempts),
+            sleep=_no_sleep,
+        )
+        try:
+            await oauth_failure_client.create_draft(
+                subject="Not dispatched",
+                body="Body",
+            )
+        except GoogleOAuthError:
+            pass
+        else:
+            self.soft_assert(
+                False,
+                "Pre-request OAuth failures should retain configuration semantics",
+            )
+        self.soft_assert_equal(
+            pre_request_attempts,
+            [],
+            "OAuth failures should occur before any draft request is dispatched",
+        )
+
+        unexpected_failure_client = GmailAPIClient(
+            access_token_provider=lambda: _failed_access_token(
+                ValueError("unexpected token bug")
+            ),
+            http_client_factory=lambda: _gmail_client(pre_request_attempts),
+            sleep=_no_sleep,
+        )
+        try:
+            await unexpected_failure_client.create_draft(
+                subject="Not dispatched",
+                body="Body",
+            )
+        except ValueError as exc:
+            self.soft_assert_equal(
+                str(exc),
+                "unexpected token bug",
+                "Unexpected pre-request failures should preserve fail-fast behavior",
+            )
+        else:
+            self.soft_assert(
+                False,
+                "Unexpected pre-request failures should not become mutation outcomes",
+            )
 
         request_timeout_attempts = 0
 
@@ -466,6 +517,10 @@ class GmailReadToolsScenario(BaseScenario):
 
 async def _access_token() -> str:
     return "access-token"
+
+
+async def _failed_access_token(error: Exception) -> str:
+    raise error
 
 
 async def _no_sleep(_seconds: float) -> None:
