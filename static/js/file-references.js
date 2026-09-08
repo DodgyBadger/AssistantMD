@@ -787,12 +787,12 @@
         function candidateMatches(text) {
             const patterns = [
                 {
-                    regex: /@([^@\n<>()\[\]{},;:!?]*?\.(?:md|markdown|txt))/gi,
+                    regex: /@([^@\n<>()\[\]{};:!?]*?\.(?:md|markdown|txt))/gi,
                     group: 0,
                     priority: 0,
                 },
                 {
-                    regex: /@((?:[\w .-]+\/)+)/gi,
+                    regex: /@((?:[\w .,@-]+\/)+[\w.@-]+\/?)/gi,
                     group: 0,
                     priority: 0,
                 },

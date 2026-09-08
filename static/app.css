@@ -2784,6 +2784,7 @@ summary.connection-card-summary .summary-title {
     color: rgb(var(--accent-primary));
     text-decoration: underline;
     text-underline-offset: 2px;
+    text-align: left;
     background: transparent;
     border: 0;
     padding: 0;
