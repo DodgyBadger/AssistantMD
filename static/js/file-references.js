@@ -713,18 +713,20 @@
                     }
                     return;
                 }
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = element instanceof HTMLElement && element.tagName === 'CODE'
+                const link = document.createElement('a');
+                link.href = '#';
+                link.className = element instanceof HTMLElement && element.tagName === 'CODE'
                     ? 'vault-file-link vault-file-link-code'
                     : 'vault-file-link';
-                button.textContent = `@${resolution.path}`;
-                button.dataset.vaultFilePath = resolution.path;
-                button.dataset.vaultFileKind = resolution.kind;
-                button.title = resolution.kind === 'directory'
+                link.textContent = `@${resolution.path}`;
+                link.dataset.vaultFileEnhanced = 'true';
+                link.dataset.vaultFilePath = resolution.path;
+                link.dataset.vaultFileKind = resolution.kind;
+                link.title = resolution.kind === 'directory'
                     ? `Browse ${resolution.path}`
                     : `Open ${resolution.path}`;
-                button.addEventListener('click', () => {
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
                     if (resolution.kind === 'directory') {
                         openDirectory(resolution.path);
                     } else {
@@ -733,7 +735,7 @@
                         });
                     }
                 });
-                element.replaceWith(button);
+                element.replaceWith(link);
             });
         }
 
