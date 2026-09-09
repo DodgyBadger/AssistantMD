@@ -2781,6 +2781,7 @@ summary.connection-card-summary .summary-title {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 .vault-file-link {
+    display: inline;
     color: rgb(var(--accent-primary));
     text-decoration: underline;
     text-underline-offset: 2px;
