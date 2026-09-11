@@ -8,7 +8,7 @@ Only add accounts and servers you trust. A connected account can expose private 
 
 Assistant.md needs an OAuth client from a Google Cloud project before it can ask for access to Gmail.
 
-1. Set `ASSISTANTMD_PUBLIC_URL` to the address where you open Assistant.md, then restart it. This gives Assistant.md a stable callback address for Google.
+1. Set `ASSISTANTMD_PUBLIC_URL` in `.env` to the address where you open Assistant.md, then restart it. This gives Assistant.md a stable callback address for Google.
 2. In **System → Connections**, choose **Add Google** and copy the **Authorized redirect URI** shown on the new connection.
 3. In [Google Cloud](https://console.cloud.google.com/), create or select a project, enable the Gmail API, and configure the Google Auth consent screen. If the app is in testing, add the Google account you will connect as a test user.
 4. Create an OAuth client for a **Web application**. Add the URI copied from Assistant.md as an authorized redirect URI.
@@ -32,7 +32,7 @@ You can add more than one Google account. Mark one as the default; Assistant.md 
 
 See the [`gmail` reference](../tools/gmail.md) for supported operations and limits.
 
-## Connect an MCP server
+## Connect an external MCP server
 
 An MCP connection makes a server's tools available to the primary chat. Obtain the server URL, transport, authentication instructions, and recommended tool list from the server provider.
 

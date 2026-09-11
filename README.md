@@ -26,7 +26,7 @@ Your files remain readable, portable, and useful without Assistant.md. The syste
 - **Explicit security controls:** Store credentials encrypted, authorize connections independently, configure ingress authentication, and keep restricted execution as the default.
 - **Focused interface:** Work in a clean, minimal UI with focus and dark modes.
 
-Assistant.md is useful with its default setup, but its behavior is deliberately composable. Edit Markdown guidance for simple customization, or use sandboxed Python when you need custom context assembly and repeatable workflows. See the [Build Guide](docs/use/build-guide.md) to get started.
+Assistant.md is useful with its default setup, but its behavior is deliberately composable. Edit Markdown guidance for simple customization, or use sandboxed Python when you need custom context assembly and repeatable workflows. See [Getting the Most from Assistant.md](docs/use/getting-the-most.md) to get started.
 
 ## Documentation
 
@@ -34,7 +34,7 @@ Assistant.md is useful with its default setup, but its behavior is deliberately 
 
 - **[Installation Guide](docs/setup/installation.md)**
 - **[Connections](docs/use/connections.md)** — connect Google accounts and remote or local MCP servers
-- **[Build Guide](docs/use/build-guide.md)** — start here for the composable building blocks and default setup
+- **[Getting the Most from Assistant.md](docs/use/getting-the-most.md)** — start with the defaults and add capability as your needs grow
 - **[Authoring Reference](docs/use/authoring.md)** — workflow scripts and context assembly scripts
 - **[Importing Content](docs/use/importing-content.md)** — import monitoring, queue controls, and timing configuration
 - **[Security Considerations](docs/setup/security.md)**

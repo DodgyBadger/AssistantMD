@@ -107,7 +107,7 @@
                             ? `<span class="chat-start-workspace-path">${utils.escapeHtml(workspacePath)}</span>`
                             : renderWorkspaceEntryControls()}
                     </div>
-                    <p class="chat-start-workspace-help">A workspace is a folder in your vault. Setting this helps orient the chat agent. See <a href="https://github.com/DodgyBadger/AssistantMD/blob/main/docs/use/build-guide.md" target="_blank" rel="noopener noreferrer">build-guide</a> for more info.</p>
+                    <p class="chat-start-workspace-help">A workspace is a folder in your vault. Setting this helps orient the chat agent. See <a href="https://github.com/DodgyBadger/Assistant.md/blob/main/docs/use/getting-the-most.md" target="_blank" rel="noopener noreferrer">Getting the Most from Assistant.md</a> for more info.</p>
                 </div>
             `;
         }

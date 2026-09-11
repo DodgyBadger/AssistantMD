@@ -1,6 +1,12 @@
 # Upgrading
 
-⚠️ Beta software. Check the [release notes](https://github.com/DodgyBadger/AssistantMD/releases/latest) before upgrading.
+⚠️ Beta software. Check the [release notes](https://github.com/DodgyBadger/Assistant.md/releases/latest) before upgrading.
+
+Existing checkouts can keep their current local folder name. If `git remote get-url origin` still points to the former `DodgyBadger/AssistantMD` address, update it once before pulling:
+
+```bash
+git remote set-url origin https://github.com/DodgyBadger/Assistant.md.git
+```
 
 ## Upgrading to v0.8.0
 
@@ -15,7 +21,7 @@
 
    Do not copy the old file back over the new tracked `docker-compose.yml`.
 
-3. Copy `.env.example` to `.env` if needed. Preserve an existing encryption key; otherwise follow [Configure `.env`](installation.md#4-configure-env) to generate one. Move the old Compose values into `.env`:
+3. Copy `.env.example` to `.env` if needed. Preserve an existing encryption key; otherwise follow [Configure `.env`](installation.md#3-configure-env) to generate one. Move the old Compose values into `.env`:
 
    ```dotenv
    ASSISTANTMD_DATA_PATH=/old/host/path/previously-mounted-at-app-data
@@ -58,4 +64,4 @@ Model aliases are part of the authoring contract because context scripts, workfl
 
 Packaged model defaults live in `core/settings/settings.template.yaml`, while the active mappings live in the persistent `system/settings.yaml`. Settings repair copies only new or missing model entries from the packaged template; it never overwrites an existing entry with the same alias, and it preserves user-defined models.
 
-When an upgrade changes the packaged `model_string` for an existing alias, delete that alias's complete entry from the `models` section of `system/settings.yaml`, then run **Repair settings from template**. The repair action creates a settings backup and recreates the missing entry from the current packaged seed. Do not delete customized model entries unless you intend to replace those customizations with the packaged defaults.
+When an upgrade changes the packaged `model_string` for an existing alias, open **System → Models**, delete that model, then select **Repair settings from template** in System Notices. The repair action creates a settings backup and restores the model from the current packaged defaults. Do not delete a customized model unless you intend to replace it with the packaged version.

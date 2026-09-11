@@ -46,8 +46,8 @@ Use the general-purpose-host entrypoint when those tradeoffs are not worthwhile.
 ## Clone and set up the checkout
 
 ```bash
-git clone https://github.com/DodgyBadger/AssistantMD.git
-cd AssistantMD
+git clone https://github.com/DodgyBadger/Assistant.md.git
+cd Assistant.md
 scripts/dev setup
 ```
 
