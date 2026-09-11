@@ -401,7 +401,7 @@
                 }
                 entry.persisted = true;
                 persistedToolEntriesById.set(toolCall.tool_call_id, entry);
-                entry.tokenCount = normalizeToolTokenCount(toolCall.token_count);
+                setToolEntryTokenCount(entry, toolCall.token_count);
                 setToolEntryState(entry, toolCall.status || 'interrupted');
             });
 
@@ -1118,9 +1118,8 @@
             }
 
             if (payload.event === 'tool_call_finished') {
-                entry.tokenCount = normalizeToolTokenCount(payload.token_count);
+                setToolEntryTokenCount(entry, payload.token_count);
                 setToolEntryState(entry, toolResultState(payload));
-                updateToolDetail(entry);
                 if (activeToolDetailEntry === entry) {
                     if (entry.persisted) {
                         void loadToolCallDetail(entry, { force: true });
@@ -1277,11 +1276,10 @@
                 const committed = committedById.get(entry.toolId);
                 entry.persisted = Boolean(committed);
                 entry.detailUnavailable = !committed;
-                entry.tokenCount = normalizeToolTokenCount(committed?.token_count);
+                setToolEntryTokenCount(entry, committed?.token_count);
                 if (committed?.status) {
                     setToolEntryState(entry, committed.status);
                 }
-                updateToolDetail(entry);
             });
             if (
                 activeToolDetailEntry
@@ -1378,6 +1376,12 @@
             if (value === null || value === undefined || value === '') return null;
             const count = Number(value);
             return Number.isInteger(count) && count >= 0 ? count : null;
+        }
+
+        function setToolEntryTokenCount(entry, value) {
+            if (!entry) return;
+            entry.tokenCount = normalizeToolTokenCount(value);
+            updateToolDetail(entry);
         }
 
         function openToolCallDetails(entry) {
