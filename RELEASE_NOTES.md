@@ -47,6 +47,9 @@ v0.8.0 makes Assistant.md extensible beyond its built-in tools. It can connect t
 - Consolidated the developer architecture, setup, security, tool, and decision documentation around the current runtime and connection model.
 - Hardened connection cleanup, cancellation, startup recovery, network policy, advanced-shell pairing, and release-image consistency.
 - Updated the supported Compose layout so future topology changes arrive through the tracked base file while deployment-specific paths, mounts, networks, and build choices live in `.env` or `docker-compose.override.yml`.
+- Nightly session summarization now recovers from invalid streamed structured output by retrying through a validation-compatible execution path.
+- Recovery cards no longer show reconstructed archived tool-call details. Current tool statuses remain stable while their detail modal is opened and closed.
+- Chat now keeps tool arguments and results out of routine browser payloads. The compact tool list shows only safe status metadata and estimated result size; full details are fetched on demand and cleared when the modal closes.
 
 ### Migrating to v0.8.0
 
