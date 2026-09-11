@@ -31,10 +31,13 @@ def classify_tool_result_state(
         .strip()
         .lower()
     )
+    if status in {"cancelled", "interrupted"}:
+        return "interrupted"
     if normalized_outcome in {"failed", "denied"} or status in {
         "error",
         "failed",
         "failure",
+        "denied",
     }:
         return "failed"
     return "completed"

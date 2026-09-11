@@ -225,7 +225,7 @@ const chatRendering = window.ChatRendering.create({
         openChatSettings: () => sessionControls.openSessionBrowserModal(),
         retryLatestFailure,
         enhanceFileLinks: (container) => fileReferences.enhanceFileLinks(container),
-        renderEditProposalArtifact: (container, artifactRef) => editProposals.renderArtifact(container, artifactRef),
+        renderEditProposalArtifact: (container, artifactRef, options) => editProposals.renderArtifact(container, artifactRef, options),
     },
 });
 
@@ -1052,11 +1052,12 @@ async function fetchSessions(vault, preferredSessionId = '') {
     }
 }
 
-async function loadSession(sessionId) {
+async function loadSession(sessionId, options = {}) {
     const vault = chatElements.vaultSelector?.value || '';
     if (!vault || !sessionId) {
         return;
     }
+    chatRendering.closeToolCallDetails();
     let loadedSessionId = '';
     try {
         state.pendingDeferredReview = null;
@@ -1086,7 +1087,7 @@ async function loadSession(sessionId) {
         if (chatElements.workspacePathInput) {
             chatElements.workspacePathInput.value = payload.workspace?.path || '';
         }
-        renderPersistedSession(payload);
+        renderPersistedSession(payload, options);
         if (state.pendingDeferredReview) {
             const reviewMessage = createAssistantStreamingMessage();
             handleDeferredReviewEvent(reviewMessage, state.pendingDeferredReview);
@@ -1105,6 +1106,28 @@ async function loadSession(sessionId) {
     }
     if (loadedSessionId && !state.activeChatTaskId && state.sessionId === loadedSessionId) {
         await reattachActiveChatTask(loadedSessionId, vault);
+    }
+}
+
+async function reconcileCommittedToolCalls(context, vault, sessionId) {
+    try {
+        const response = await fetch(
+            `api/chat/sessions/${encodeURIComponent(sessionId)}?vault_name=${encodeURIComponent(vault)}`,
+            { cache: 'no-store' }
+        );
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        if (state.sessionId !== sessionId || chatElements.vaultSelector?.value !== vault) {
+            return;
+        }
+        chatRendering.reconcileToolCallPersistence(context, payload.tool_calls);
+    } catch (error) {
+        console.warn('Unable to reconcile committed tool details:', error);
+        if (state.sessionId === sessionId && chatElements.vaultSelector?.value === vault) {
+            chatRendering.reconcileToolCallPersistence(context, []);
+        }
     }
 }
 
@@ -1154,8 +1177,8 @@ async function reattachActiveChatTask(sessionId, vault) {
     }
 }
 
-function renderPersistedSession(payload) {
-    chatRendering.renderPersistedSession(payload);
+function renderPersistedSession(payload, options = {}) {
+    chatRendering.renderPersistedSession(payload, options);
 }
 
 
@@ -1827,10 +1850,18 @@ async function streamStartedChatTask(started, vault, abortController) {
         toolCount: assistantMessage.toolStatusMap.size,
         status: streamResult.finished ? 'done' : 'incomplete'
     });
+    if (streamResult.finishReason === 'tool_review_required') {
+        await reconcileCommittedToolCalls(
+            assistantMessage,
+            vault,
+            state.sessionId || ''
+        );
+    }
     if (vault && streamResult.finishReason !== 'tool_review_required') {
         await fetchSessions(vault, state.sessionId || '');
         if (state.sessionId) {
-            await loadSession(state.sessionId);
+            const reopenToolCallId = chatRendering.getActiveToolDetailId();
+            await loadSession(state.sessionId, { reopenToolCallId });
         }
     }
 }

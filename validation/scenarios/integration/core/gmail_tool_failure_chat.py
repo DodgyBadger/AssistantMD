@@ -142,10 +142,11 @@ class GmailToolFailureChatScenario(BaseScenario):
                 "failed",
                 "The Gmail tool call should settle in the failed state",
             )
-            self.soft_assert_equal(
-                finished.get("result_metadata", {}).get("failure_kind"),
-                "not_found",
-                "The streamed tool event should retain the Gmail failure kind",
+            self.soft_assert(
+                "result" not in finished
+                and "result_metadata" not in finished
+                and "artifact_ref" not in finished,
+                "The streamed failure event should omit tool result details",
             )
         self.assert_no_failures()
         self.teardown_scenario()

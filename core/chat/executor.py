@@ -687,34 +687,6 @@ def _get_process_rss_bytes() -> int | None:
     return None
 
 
-def _truncate_preview(value: str | None, limit: int = 200) -> str | None:
-    """
-    Safely truncate long strings for streaming metadata.
-
-    Returns the original value if within limit, otherwise appends ellipsis.
-    """
-    if not value:
-        return value
-    if len(value) <= limit:
-        return value
-    return value[: limit - 1] + "…"
-
-
-def _normalize_tool_args(args: Any) -> str | None:
-    """
-    Convert tool call arguments to a compact JSON/string representation.
-    """
-    if args is None:
-        return None
-    if isinstance(args, str):
-        return _truncate_preview(args.strip())
-    try:
-        serialized = json.dumps(args, ensure_ascii=False)
-        return _truncate_preview(serialized)
-    except (TypeError, ValueError):
-        return _truncate_preview(str(args))
-
-
 def _normalize_tool_detail(value: Any) -> Any:
     """
     Convert streamed tool details into JSON-safe data without preview truncation.
@@ -733,21 +705,6 @@ def _normalize_tool_detail(value: Any) -> Any:
         return json.loads(json.dumps(value, ensure_ascii=False))
     except (TypeError, ValueError):
         return str(value)
-
-
-def _normalize_tool_result(result: Any) -> str | None:
-    """
-    Convert tool results into a readable preview string.
-    """
-    if result is None:
-        return None
-    if isinstance(result, str):
-        return _truncate_preview(result.strip(), limit=240)
-    try:
-        serialized = json.dumps(result, ensure_ascii=False)
-        return _truncate_preview(serialized, limit=240)
-    except (TypeError, ValueError):
-        return _truncate_preview(str(result), limit=240)
 
 
 def _build_model_capability_details(

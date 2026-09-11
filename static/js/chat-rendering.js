@@ -6,6 +6,7 @@
         let currentEmptyStateMessage = CHAT_EMPTY_STATE_MESSAGE;
         let workspaceEditorOpen = false;
         let activeToolDetailEntry = null;
+        const persistedToolEntriesById = new Map();
 
         function isChatPlaceholderNode(node) {
             if (!node || !(node instanceof HTMLElement)) return false;
@@ -36,6 +37,8 @@
         function renderChatEmptyState(message = CHAT_EMPTY_STATE_MESSAGE) {
             const container = elements.chatMessages;
             if (!container) return;
+            closeToolCallDetails();
+            persistedToolEntriesById.clear();
             currentEmptyStateMessage = message;
             container.innerHTML = '';
             if (message === CHAT_EMPTY_STATE_MESSAGE) {
@@ -182,11 +185,13 @@
         }
 
 
-        function renderPersistedSession(payload) {
+        function renderPersistedSession(payload, options = {}) {
+            closeToolCallDetails();
+            persistedToolEntriesById.clear();
             elements.chatMessages.innerHTML = '';
 
             const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-            const toolEventsById = groupToolEventsById(payload?.tool_events);
+            const toolCallsById = groupToolCallsById(payload?.tool_calls);
             const pendingToolCallIds = new Set();
 
             if (messages.length === 0) {
@@ -202,6 +207,12 @@
                 if (message.is_tool_message) {
                     collectToolIds(message.tool_call_ids, pendingToolCallIds);
                     collectToolIds(message.tool_return_ids, pendingToolCallIds);
+                    if (message.role === 'assistant' && (message.content || message.thinking_content)) {
+                        renderPersistedAssistantMessage(message.content || '', [], {
+                            sequenceIndex: forkSequenceIndex,
+                            thinkingText: message.thinking_content || ''
+                        });
+                    }
                     return;
                 }
 
@@ -214,9 +225,9 @@
                 }
 
                 if (message.role === 'assistant') {
-                    const assistantToolEvents = toolEventsForIds(toolEventsById, pendingToolCallIds);
+                    const assistantToolCalls = toolCallsForIds(toolCallsById, pendingToolCallIds);
                     pendingToolCallIds.clear();
-                    renderPersistedAssistantMessage(message.content || '', assistantToolEvents, {
+                    renderPersistedAssistantMessage(message.content || '', assistantToolCalls, {
                         sequenceIndex: forkSequenceIndex,
                         thinkingText: message.thinking_content || ''
                     });
@@ -230,6 +241,10 @@
             });
 
             renderLatestFailureAction(payload?.latest_failure);
+            const reopenEntry = persistedToolEntriesById.get(options.reopenToolCallId || '');
+            if (reopenEntry) {
+                openToolCallDetails(reopenEntry);
+            }
         }
 
         function renderLatestFailureAction(latestFailure) {
@@ -310,18 +325,16 @@
             };
         }
 
-        function groupToolEventsById(toolEvents) {
+        function groupToolCallsById(toolCalls) {
             const grouped = new Map();
-            if (!Array.isArray(toolEvents)) {
+            if (!Array.isArray(toolCalls)) {
                 return grouped;
             }
-            toolEvents.forEach((event) => {
-                if (!event || !event.tool_call_id) {
+            toolCalls.forEach((toolCall) => {
+                if (!toolCall || !toolCall.tool_call_id) {
                     return;
                 }
-                const existing = grouped.get(event.tool_call_id) || [];
-                existing.push(event);
-                grouped.set(event.tool_call_id, existing);
+                grouped.set(toolCall.tool_call_id, toolCall);
             });
             return grouped;
         }
@@ -341,18 +354,18 @@
             });
         }
 
-        function toolEventsForIds(toolEventsById, toolCallIds) {
+        function toolCallsForIds(toolCallsById, toolCallIds) {
             const selected = [];
             toolCallIds.forEach((toolId) => {
-                const events = toolEventsById.get(toolId);
-                if (Array.isArray(events)) {
-                    selected.push(...events);
+                const toolCall = toolCallsById.get(toolId);
+                if (toolCall) {
+                    selected.push(toolCall);
                 }
             });
             return selected;
         }
 
-        function renderPersistedAssistantMessage(content, toolEvents, options = {}) {
+        function renderPersistedAssistantMessage(content, toolCalls, options = {}) {
             const context = createAssistantStreamingMessage();
             context.fullText = content || '';
             context.thinkingText = options.thinkingText || '';
@@ -360,61 +373,35 @@
             context.thinkingExpanded = false;
             context.sequenceIndex = Number.isInteger(options.sequenceIndex) ? options.sequenceIndex : null;
             renderAssistantMarkdown(context, { finalize: true });
-            hydratePersistedToolEvents(context, toolEvents);
+            hydratePersistedToolCalls(context, toolCalls);
             finalizeAssistantMessage(context, {
                 sessionId: state.sessionId || 'unknown',
                 messageCount: 1,
-                toolCount: Array.isArray(toolEvents) ? toolEvents.length : 0,
+                toolCount: Array.isArray(toolCalls) ? toolCalls.length : 0,
                 status: 'done'
             });
         }
 
-        function hydratePersistedToolEvents(context, toolEvents) {
-            if (!context || !Array.isArray(toolEvents) || toolEvents.length === 0) {
+        function hydratePersistedToolCalls(context, toolCalls) {
+            if (!context || !Array.isArray(toolCalls) || toolCalls.length === 0) {
                 return;
             }
 
-            toolEvents.forEach((event) => {
-                if (!event || !event.tool_call_id) {
+            toolCalls.forEach((toolCall) => {
+                if (!toolCall || !toolCall.tool_call_id) {
                     return;
                 }
 
-                let entry = context.toolStatusMap.get(event.tool_call_id);
+                let entry = context.toolStatusMap.get(toolCall.tool_call_id);
                 if (!entry) {
                     ensureToolCallsSection(context);
-                    entry = createToolStatusEntry(context, event.tool_call_id, {
-                        tool_name: event.tool_name,
-                        arguments: event.args || null,
-                        arguments_detail: event.args || null
+                    entry = createToolStatusEntry(context, toolCall.tool_call_id, {
+                        tool_name: toolCall.tool_name
                     });
                 }
-
-                entry.events.push(event);
-
-                if (event.args) {
-                    entry.args = event.args;
-                    entry.detailArgs = event.args;
-                }
-
-                if (event.event_type !== 'call') {
-                    const resultPayload = {};
-                    if (event.result_text) {
-                        resultPayload.text = event.result_text;
-                    }
-                    if (event.artifact_ref) {
-                        resultPayload.artifact_ref = event.artifact_ref;
-                    }
-                    if (event.result_metadata && Object.keys(event.result_metadata).length > 0) {
-                        resultPayload.metadata = event.result_metadata;
-                    }
-                    entry.result = Object.keys(resultPayload).length > 0 ? resultPayload : event.event_type;
-                    entry.detailResult = entry.result;
-                    entry.resultMetadata = event.result_metadata || {};
-                    entry.artifactRef = event.artifact_ref || resultPayload.metadata?.artifact_ref || entry.artifactRef || '';
-                    setToolEntryState(entry, toolResultState(event));
-                }
-
-                updateToolDetail(entry);
+                entry.persisted = true;
+                persistedToolEntriesById.set(toolCall.tool_call_id, entry);
+                setToolEntryState(entry, toolCall.status || 'interrupted');
             });
 
             context.toolStatusMap.forEach((entry) => {
@@ -1124,19 +1111,14 @@
             }
 
             if (payload.event === 'tool_call_finished') {
-                if (payload.result !== undefined && payload.result !== null) {
-                    entry.result = payload.result;
-                    entry.detailResult = payload.result_detail !== undefined && payload.result_detail !== null
-                        ? payload.result_detail
-                        : payload.result;
-                }
-                entry.artifactRef = payload.artifact_ref || artifactRefFromValue(entry.detailResult) || artifactRefFromValue(entry.result) || entry.artifactRef || '';
-                entry.resultMetadata = payload.result_metadata || {};
-                entry.events.push(payload);
                 setToolEntryState(entry, toolResultState(payload));
                 updateToolDetail(entry);
                 if (activeToolDetailEntry === entry) {
-                    void loadToolCallDetail(entry, { force: true });
+                    if (entry.persisted) {
+                        void loadToolCallDetail(entry, { force: true });
+                    } else {
+                        refreshToolCallDetails(entry);
+                    }
                 }
 
                 const hasRunning = Array.from(context.toolStatusMap.values())
@@ -1146,13 +1128,6 @@
                     setAssistantStatus(context, 'Continuing response', 'thinking');
                 }
             } else if (payload.event === 'tool_call_started') {
-                if (payload.arguments) {
-                    entry.args = payload.arguments;
-                    entry.detailArgs = payload.arguments_detail !== undefined && payload.arguments_detail !== null
-                        ? payload.arguments_detail
-                        : payload.arguments;
-                }
-                entry.events.push(payload);
                 setToolEntryState(entry, 'running');
                 updateToolDetail(entry);
                 startToolElapsedTimer(context);
@@ -1185,25 +1160,22 @@
 
             context.toolList.classList.remove('hidden');
             context.toolList.appendChild(container);
-            const artifactContainer = document.createElement('div');
-            artifactContainer.className = 'tool-artifact-container';
-            context.artifactList.appendChild(artifactContainer);
             const entry = {
                 container,
-                artifactContainer,
                 summary,
                 line,
                 stateIcon,
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
-                args: payload.arguments || null,
-                detailArgs: payload.arguments_detail !== undefined && payload.arguments_detail !== null
-                    ? payload.arguments_detail
-                    : payload.arguments || null,
-                result: null,
+                persisted: false,
+                detailUnavailable: false,
+                detailArgs: null,
                 detailResult: null,
-                resultMetadata: {},
-                artifactRef: payload.artifact_ref || '',
+                detailMetadata: {},
+                detailArtifactRef: '',
+                detailVault: '',
+                detailSessionId: '',
+                detailEvents: [],
                 state: 'running',
                 startedAt: Date.now(),
                 finishedAt: null,
@@ -1211,7 +1183,8 @@
                 detailLoading: false,
                 detailError: '',
                 detailRequestId: 0,
-                events: []
+                detailAbortController: null,
+                modalAbortController: null
             };
             setToolEntryState(entry, 'running');
             updateToolDetail(entry);
@@ -1283,6 +1256,33 @@
             callbacks.scrollChatToBottom();
         }
 
+        function reconcileToolCallPersistence(context, toolCalls) {
+            if (!context?.toolStatusMap) return;
+            const committedById = new Map();
+            (Array.isArray(toolCalls) ? toolCalls : []).forEach((toolCall) => {
+                if (toolCall?.tool_call_id) {
+                    committedById.set(toolCall.tool_call_id, toolCall);
+                }
+            });
+            context.toolStatusMap.forEach((entry) => {
+                const committed = committedById.get(entry.toolId);
+                entry.persisted = Boolean(committed);
+                entry.detailUnavailable = !committed;
+                if (committed?.status) {
+                    setToolEntryState(entry, committed.status);
+                }
+            });
+            if (
+                activeToolDetailEntry
+                && context.toolStatusMap.get(activeToolDetailEntry.toolId) === activeToolDetailEntry
+            ) {
+                refreshToolCallDetails(activeToolDetailEntry);
+                if (activeToolDetailEntry.persisted) {
+                    void loadToolCallDetail(activeToolDetailEntry);
+                }
+            }
+        }
+
         function parseSseEvent(rawEvent) {
             if (!rawEvent) return null;
 
@@ -1347,130 +1347,21 @@
             return false;
         }
 
-        function pruneEmptyToolValue(value) {
-            value = normalizeToolDisplayValue(value);
-            if (isEmptyToolValue(value)) return null;
-            if (Array.isArray(value)) {
-                const items = value
-                    .map(pruneEmptyToolValue)
-                    .filter(item => item !== null);
-                return items.length ? items : null;
-            }
-            if (value && typeof value === 'object') {
-                const entries = Object.entries(value)
-                    .map(([key, item]) => [key, pruneEmptyToolValue(item)])
-                    .filter(([, item]) => item !== null);
-                if (entries.length === 0) return null;
-                return Object.fromEntries(entries);
-            }
-            return value;
-        }
-
-        function formatInlineToolValue(value) {
-            value = pruneEmptyToolValue(value);
-            if (value === null) return '';
-            if (typeof value === 'string') return value.trim();
-            if (Array.isArray(value)) {
-                return value.map(formatInlineToolValue).filter(Boolean).join(', ');
-            }
-            if (typeof value === 'object') {
-                return Object.entries(value)
-                    .map(([key, item]) => {
-                        const formatted = formatInlineToolValue(item);
-                        return formatted ? `${key}: ${formatted}` : '';
-                    })
-                    .filter(Boolean)
-                    .join(', ');
-            }
-            return String(value);
-        }
-
-        function formatToolPreview(value, fallback = '') {
-            const detail = formatInlineToolValue(value).replace(/\s+/g, ' ').trim();
-            if (!detail) return fallback;
-            return detail.length > 80 ? `${detail.slice(0, 77)}...` : detail;
-        }
-
-        function truncateToolTooltip(value) {
-            const detail = formatInlineToolValue(value).replace(/\s+/g, ' ').trim();
-            if (!detail) return '';
-            return detail.length > 400 ? `${detail.slice(0, 397)}...` : detail;
-        }
-
-        function appendToolCallLine(entry, argsValue) {
+        function updateToolDetail(entry) {
+            if (!entry) return;
             entry.line.innerHTML = '';
-
             const name = document.createElement('span');
             name.className = 'tool-status-name';
             name.textContent = entry.toolName;
             entry.line.appendChild(name);
-
-            if (argsValue === null) {
-                return;
-            }
-
-            entry.line.appendChild(document.createTextNode(' ('));
-            if (argsValue && typeof argsValue === 'object' && !Array.isArray(argsValue)) {
-                Object.entries(argsValue).forEach(([key, value], index) => {
-                    if (index > 0) {
-                        entry.line.appendChild(document.createTextNode(', '));
-                    }
-                    const keySpan = document.createElement('span');
-                    keySpan.className = 'tool-status-arg-key';
-                    keySpan.textContent = key;
-                    const valueSpan = document.createElement('span');
-                    valueSpan.className = 'tool-status-arg-value';
-                    valueSpan.textContent = formatInlineToolValue(value);
-                    entry.line.appendChild(keySpan);
-                    entry.line.appendChild(document.createTextNode(': '));
-                    entry.line.appendChild(valueSpan);
-                });
-            } else {
-                const valueSpan = document.createElement('span');
-                valueSpan.className = 'tool-status-arg-value';
-                valueSpan.textContent = formatInlineToolValue(argsValue);
-                entry.line.appendChild(valueSpan);
-            }
-            entry.line.appendChild(document.createTextNode(')'));
-        }
-
-        function updateToolDetail(entry) {
-            if (!entry) return;
-
-            const hasArgs = !isEmptyToolValue(entry.args);
-            const prunedArgs = hasArgs ? pruneEmptyToolValue(entry.args) : null;
-            appendToolCallLine(entry, prunedArgs);
-            entry.container.title = [
-                hasArgs ? truncateToolTooltip(prunedArgs) : 'No args',
-            ].filter(Boolean).join(' ');
-            if (
-                entry.toolName === 'propose_file_edits'
-                && entry.artifactRef
-                && entry.artifactContainer
-                && callbacks.renderEditProposalArtifact
-            ) {
-                callbacks.renderEditProposalArtifact(entry.artifactContainer, entry.artifactRef);
-            }
-        }
-
-        function artifactRefFromValue(value) {
-            if (!value) return '';
-            if (typeof value === 'object' && !Array.isArray(value)) {
-                return typeof value.artifact_ref === 'string' ? value.artifact_ref : '';
-            }
-            if (typeof value !== 'string') return '';
-            try {
-                const parsed = JSON.parse(value);
-                return parsed && typeof parsed.artifact_ref === 'string' ? parsed.artifact_ref : '';
-            } catch (error) {
-                return '';
-            }
+            entry.container.title = 'Open tool details';
         }
 
         function openToolCallDetails(entry) {
             if (!entry) return;
             closeToolCallDetails();
             activeToolDetailEntry = entry;
+            entry.modalAbortController = new AbortController();
 
             const overlay = document.createElement('div');
             overlay.id = 'chat-tool-call-modal';
@@ -1502,22 +1393,35 @@
             document.addEventListener('keydown', handleToolCallModalKeydown);
             document.body.appendChild(overlay);
             refreshToolCallDetails(entry);
-            void loadToolCallDetail(entry);
+            if (entry.persisted) {
+                void loadToolCallDetail(entry);
+            }
         }
 
         async function loadToolCallDetail(entry, options = {}) {
             const vault = elements.vaultSelector?.value || '';
             const sessionId = state.sessionId || '';
-            if (!entry || !vault || !sessionId || (entry.detailLoaded && !options.force)) return;
+            if (
+                !entry
+                || !entry.persisted
+                || entry.detailUnavailable
+                || !vault
+                || !sessionId
+                || (entry.detailLoaded && !options.force)
+            ) return;
 
+            entry.detailAbortController?.abort();
+            const abortController = new AbortController();
             const requestId = entry.detailRequestId + 1;
             entry.detailRequestId = requestId;
+            entry.detailAbortController = abortController;
             entry.detailLoading = true;
             entry.detailError = '';
             refreshToolCallDetails(entry);
             try {
                 const response = await fetch(
-                    `api/chat/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(entry.toolId)}?vault_name=${encodeURIComponent(vault)}`
+                    `api/chat/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(entry.toolId)}?vault_name=${encodeURIComponent(vault)}`,
+                    { cache: 'no-store', signal: abortController.signal }
                 );
                 if (!response.ok) {
                     if (response.status === 404 && entry.state === 'running') return;
@@ -1525,9 +1429,7 @@
                 }
                 const payload = await response.json();
                 if (entry.detailRequestId !== requestId) return;
-                if (payload.args !== undefined && payload.args !== null) {
-                    entry.detailArgs = payload.args;
-                }
+                entry.detailArgs = payload.args ?? null;
                 if (payload.result_text !== undefined && payload.result_text !== null) {
                     entry.detailResult = {
                         text: payload.result_text,
@@ -1536,16 +1438,22 @@
                             : {}),
                         ...(payload.artifact_ref ? { artifact_ref: payload.artifact_ref } : {})
                     };
+                } else {
+                    entry.detailResult = null;
                 }
-                entry.resultMetadata = payload.result_metadata || {};
-                entry.artifactRef = payload.artifact_ref || entry.artifactRef || '';
+                entry.detailMetadata = payload.result_metadata || {};
+                entry.detailArtifactRef = payload.artifact_ref || '';
+                entry.detailVault = vault;
+                entry.detailSessionId = sessionId;
+                entry.detailEvents = Array.isArray(payload.events) ? payload.events : [];
                 entry.detailLoaded = true;
             } catch (error) {
-                if (entry.detailRequestId === requestId) {
+                if (error?.name !== 'AbortError' && entry.detailRequestId === requestId) {
                     entry.detailError = error.message || 'Full tool detail is unavailable.';
                 }
             } finally {
                 if (entry.detailRequestId === requestId) {
+                    entry.detailAbortController = null;
                     entry.detailLoading = false;
                     refreshToolCallDetails(entry);
                 }
@@ -1564,28 +1472,26 @@
                 { label: 'Elapsed', value: formatToolElapsed(entry), elapsed: true },
                 { label: 'Context', value: 'Retained in active chat context.' }
             ];
-            const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
-                ? entry.detailArgs
-                : entry.args;
-            const resultForDetail = entry.detailResult !== undefined && entry.detailResult !== null
-                ? entry.detailResult
-                : entry.result;
-            if (!isEmptyToolValue(argsForDetail)) {
-                sections.push({ label: 'Args', value: argsForDetail, kind: 'args' });
+            if (!isEmptyToolValue(entry.detailArgs)) {
+                sections.push({ label: 'Args', value: entry.detailArgs, kind: 'args' });
             }
-            if (!isEmptyToolValue(resultForDetail)) {
-                sections.push({ label: 'Result', value: resultForDetail, kind: 'result' });
+            if (!isEmptyToolValue(entry.detailResult)) {
+                sections.push({ label: 'Result', value: entry.detailResult, kind: 'result' });
             }
-            if (entry.state === 'failed' && !isEmptyToolValue(entry.resultMetadata)) {
-                sections.push({ label: 'Failure', value: entry.resultMetadata });
+            if (entry.state === 'failed' && !isEmptyToolValue(entry.detailMetadata)) {
+                sections.push({ label: 'Failure', value: entry.detailMetadata });
             }
             if (entry.detailLoading) {
                 sections.push({ label: 'Full detail', value: 'Loading…' });
             } else if (entry.detailError) {
                 sections.push({ label: 'Full detail', value: entry.detailError });
+            } else if (entry.detailUnavailable) {
+                sections.push({ label: 'Full detail', value: 'No execution detail is available for this tool call.' });
+            } else if (!entry.persisted) {
+                sections.push({ label: 'Full detail', value: 'Available when this response finishes.' });
             }
-            if (entry.events.length > 0) {
-                sections.push({ label: 'Events', value: entry.events });
+            if (entry.detailEvents.length > 0) {
+                sections.push({ label: 'Events', value: entry.detailEvents });
             }
 
             body.replaceChildren();
@@ -1594,15 +1500,58 @@
                 if (elapsed) section.dataset.toolCallElapsed = 'true';
                 body.appendChild(section);
             });
+            if (
+                entry.detailLoaded
+                && entry.toolName === 'propose_file_edits'
+                && entry.detailArtifactRef
+                && callbacks.renderEditProposalArtifact
+            ) {
+                const artifactContainer = document.createElement('div');
+                callbacks.renderEditProposalArtifact(
+                    artifactContainer,
+                    entry.detailArtifactRef,
+                    {
+                        signal: entry.modalAbortController?.signal,
+                        vaultName: entry.detailVault,
+                        sessionId: entry.detailSessionId
+                    }
+                );
+                body.appendChild(artifactContainer);
+            }
         }
 
         function closeToolCallDetails() {
+            const entry = activeToolDetailEntry;
+            activeToolDetailEntry = null;
             const modal = document.getElementById('chat-tool-call-modal');
             if (modal) {
                 modal.remove();
             }
-            activeToolDetailEntry = null;
+            clearToolCallDetail(entry);
             document.removeEventListener('keydown', handleToolCallModalKeydown);
+        }
+
+        function getActiveToolDetailId() {
+            return activeToolDetailEntry?.toolId || '';
+        }
+
+        function clearToolCallDetail(entry) {
+            if (!entry) return;
+            entry.detailAbortController?.abort();
+            entry.detailAbortController = null;
+            entry.modalAbortController?.abort();
+            entry.modalAbortController = null;
+            entry.detailRequestId += 1;
+            entry.detailArgs = null;
+            entry.detailResult = null;
+            entry.detailMetadata = {};
+            entry.detailArtifactRef = '';
+            entry.detailVault = '';
+            entry.detailSessionId = '';
+            entry.detailEvents = [];
+            entry.detailLoaded = false;
+            entry.detailLoading = false;
+            entry.detailError = '';
         }
 
         function handleToolCallModalKeydown(event) {
@@ -1834,7 +1783,10 @@
             setAssistantStatus,
             handleToolEvent,
             finalizeAssistantMessage,
+            reconcileToolCallPersistence,
             renderMarkdownPreview,
+            closeToolCallDetails,
+            getActiveToolDetailId,
         });
     }
 

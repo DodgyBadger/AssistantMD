@@ -1636,10 +1636,7 @@ async def _publish_tool_call_started(
         "event": "tool_call_started",
         "tool_call_id": tool_id,
         "tool_name": tool_name,
-        "arguments": chat_executor._normalize_tool_args(tool_args),
     }
-    if tool_name == "code_execution":
-        payload["arguments_detail"] = chat_executor._normalize_tool_detail(tool_args)
     chat_executor.logger.set_sinks(["validation"]).info(
         "Streaming tool call started",
         data={
@@ -1693,17 +1690,9 @@ async def _publish_tool_call_finished(
         "event": "tool_call_finished",
         "tool_call_id": tool_id,
         "tool_name": tool_name,
-        "result": chat_executor._normalize_tool_result(result_content),
         "outcome": outcome,
         "terminal_state": terminal_state,
     }
-    if result_metadata:
-        payload["result_metadata"] = result_metadata
-    artifact_ref = _artifact_ref_from_tool_result(result_content)
-    if artifact_ref:
-        payload["artifact_ref"] = artifact_ref
-    if tool_name == "code_execution":
-        payload["result_detail"] = chat_executor._normalize_tool_detail(result_content)
     result_text = tool_result_as_text(result_content)
     chat_executor.logger.set_sinks(["validation"]).info(
         "Streaming tool call finished",
@@ -1751,19 +1740,3 @@ def _tool_result_event_metadata(result_part: Any) -> dict[str, Any]:
         for key in _TOOL_RESULT_EVENT_METADATA_KEYS
         if key in metadata
     }
-
-
-def _artifact_ref_from_tool_result(result_content: Any) -> str | None:
-    if not isinstance(result_content, str):
-        return None
-    try:
-        payload = json.loads(result_content)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    artifact_ref = payload.get("artifact_ref")
-    if artifact_ref is None:
-        return None
-    value = str(artifact_ref).strip()
-    return value or None

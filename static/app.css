@@ -2102,9 +2102,6 @@ details summary::-webkit-details-marker {
     overflow: hidden;
     box-sizing: border-box;
 }
-.tool-artifact-container:empty {
-    display: none;
-}
 .tool-status {
     width: 100%;
     max-width: 100%;
@@ -2229,14 +2226,6 @@ details summary::-webkit-details-marker {
 .tool-status-name {
     font-weight: 700;
     color: rgb(var(--text-primary));
-}
-.tool-status-arg-key {
-    color: rgb(var(--accent-primary));
-    font-weight: 600;
-}
-.tool-status-arg-value {
-    color: rgb(var(--text-secondary));
-    font-weight: 400;
 }
 .tool-status-body {
     display: flex;

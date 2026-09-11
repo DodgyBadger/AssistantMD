@@ -1192,7 +1192,7 @@ class ChatSessionMessageInfo(BaseModel):
 
 
 class ChatSessionToolEventInfo(BaseModel):
-    """Persisted structured tool event for UI rehydration."""
+    """Persisted structured tool event for explicit detail inspection."""
 
     tool_call_id: str = Field(..., description="Tool call identifier")
     tool_name: str = Field(..., description="Tool name")
@@ -1209,6 +1209,16 @@ class ChatSessionToolEventInfo(BaseModel):
     )
     artifact_ref: str | None = Field(
         None, description="Cache/artifact reference when present"
+    )
+
+
+class ChatSessionToolCallInfo(BaseModel):
+    """Non-confidential tool-call metadata for session rehydration."""
+
+    tool_call_id: str = Field(..., description="Tool call identifier")
+    tool_name: str = Field(..., description="Tool name")
+    status: Literal["running", "completed", "failed", "interrupted"] = Field(
+        ..., description="Tool call lifecycle state"
     )
 
 
@@ -1294,8 +1304,9 @@ class ChatSessionDetailResponse(BaseModel):
     messages: list[ChatSessionMessageInfo] = Field(
         default_factory=list, description="Persisted messages"
     )
-    tool_events: list[ChatSessionToolEventInfo] = Field(
-        default_factory=list, description="Persisted tool events"
+    tool_calls: list[ChatSessionToolCallInfo] = Field(
+        default_factory=list,
+        description="Effective tool calls with non-confidential lifecycle metadata",
     )
 
 
