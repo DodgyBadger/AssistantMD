@@ -188,8 +188,6 @@
             const messages = Array.isArray(payload?.messages) ? payload.messages : [];
             const toolEventsById = groupToolEventsById(payload?.tool_events);
             const pendingToolCallIds = new Set();
-            const effectiveToolCallIds = toolCallIdsForMessages(messages);
-            let archivedToolEvents = toolEventsExceptIds(toolEventsById, effectiveToolCallIds);
 
             if (messages.length === 0) {
                 renderChatEmptyState('Selected session has no persisted messages.');
@@ -209,11 +207,9 @@
 
                 if (isCompactionSummaryMessage(message)) {
                     pendingToolCallIds.clear();
-                    renderPersistedAssistantMessage(message.content || '', archivedToolEvents, {
-                        sequenceIndex: forkSequenceIndex,
-                        archivedToolEvents: true
+                    renderPersistedAssistantMessage(message.content || '', [], {
+                        sequenceIndex: forkSequenceIndex
                     });
-                    archivedToolEvents = [];
                     return;
                 }
 
@@ -232,12 +228,6 @@
                     sequenceIndex: forkSequenceIndex
                 });
             });
-
-            if (archivedToolEvents.length > 0) {
-                renderPersistedAssistantMessage('Tool activity archived by compaction.', archivedToolEvents, {
-                    archivedToolEvents: true
-                });
-            }
 
             renderLatestFailureAction(payload?.latest_failure);
         }
@@ -336,21 +326,6 @@
             return grouped;
         }
 
-        function toolCallIdsForMessages(messages) {
-            const ids = new Set();
-            if (!Array.isArray(messages)) {
-                return ids;
-            }
-            messages.forEach((message) => {
-                if (!message || !message.is_tool_message) {
-                    return;
-                }
-                collectToolIds(message.tool_call_ids, ids);
-                collectToolIds(message.tool_return_ids, ids);
-            });
-            return ids;
-        }
-
         function isCompactionSummaryMessage(message) {
             return String(message?.content || '').includes('AssistantMD compacted chat history');
         }
@@ -377,19 +352,6 @@
             return selected;
         }
 
-        function toolEventsExceptIds(toolEventsById, excludedToolCallIds) {
-            const selected = [];
-            toolEventsById.forEach((events, toolId) => {
-                if (excludedToolCallIds.has(toolId)) {
-                    return;
-                }
-                if (Array.isArray(events)) {
-                    selected.push(...events);
-                }
-            });
-            return selected;
-        }
-
         function renderPersistedAssistantMessage(content, toolEvents, options = {}) {
             const context = createAssistantStreamingMessage();
             context.fullText = content || '';
@@ -397,7 +359,6 @@
             context.collapseThinking = Boolean(context.thinkingText);
             context.thinkingExpanded = false;
             context.sequenceIndex = Number.isInteger(options.sequenceIndex) ? options.sequenceIndex : null;
-            context.archivedToolEvents = Boolean(options.archivedToolEvents);
             renderAssistantMarkdown(context, { finalize: true });
             hydratePersistedToolEvents(context, toolEvents);
             finalizeAssistantMessage(context, {
@@ -845,8 +806,7 @@
                 errorMessages: [],
                 toolSummary: null,
                 postProcessTimer: null,
-                toolElapsedTimer: null,
-                archivedToolEvents: false
+                toolElapsedTimer: null
             };
         }
 
@@ -867,7 +827,7 @@
 
             const title = document.createElement('span');
             title.className = 'tool-status-title';
-            title.textContent = context.archivedToolEvents ? 'Archived tool calls (0)' : 'Tool calls (0)';
+            title.textContent = 'Tool calls (0)';
 
             summary.appendChild(chevron);
             summary.appendChild(title);
@@ -890,8 +850,7 @@
             }
 
             const total = context.toolStatusMap.size;
-            const label = context.archivedToolEvents ? 'Archived tool calls' : 'Tool calls';
-            context.toolCallsSummaryTitle.textContent = `${label} (${total})`;
+            context.toolCallsSummaryTitle.textContent = `Tool calls (${total})`;
         }
 
         function appendAssistantDelta(context, delta) {
@@ -1245,11 +1204,10 @@
                 detailResult: null,
                 resultMetadata: {},
                 artifactRef: payload.artifact_ref || '',
-                archived: Boolean(context.archivedToolEvents),
                 state: 'running',
                 startedAt: Date.now(),
                 finishedAt: null,
-                detailLoaded: Boolean(context.archivedToolEvents),
+                detailLoaded: false,
                 detailLoading: false,
                 detailError: '',
                 detailRequestId: 0,
@@ -1483,7 +1441,6 @@
             const prunedArgs = hasArgs ? pruneEmptyToolValue(entry.args) : null;
             appendToolCallLine(entry, prunedArgs);
             entry.container.title = [
-                entry.archived ? 'Archived by compaction.' : '',
                 hasArgs ? truncateToolTooltip(prunedArgs) : 'No args',
             ].filter(Boolean).join(' ');
             if (
@@ -1608,12 +1565,7 @@
                 { label: 'Tool call ID', value: entry.toolId || '' },
                 { label: 'Status', value: toolStateLabel(entry) },
                 { label: 'Elapsed', value: formatToolElapsed(entry), elapsed: true },
-                {
-                    label: 'Context',
-                    value: entry.archived
-                        ? 'Archived by compaction; the tool event is persisted but no longer part of active chat context.'
-                        : 'Retained in active chat context.'
-                }
+                { label: 'Context', value: 'Retained in active chat context.' }
             ];
             const argsForDetail = entry.detailArgs !== undefined && entry.detailArgs !== null
                 ? entry.detailArgs
