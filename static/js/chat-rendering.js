@@ -1539,9 +1539,6 @@
                 }
                 entry.resultMetadata = payload.result_metadata || {};
                 entry.artifactRef = payload.artifact_ref || entry.artifactRef || '';
-                if (entry.state !== 'running') {
-                    setToolEntryState(entry, toolResultState({ result_metadata: entry.resultMetadata }));
-                }
                 entry.detailLoaded = true;
             } catch (error) {
                 if (entry.detailRequestId === requestId) {
