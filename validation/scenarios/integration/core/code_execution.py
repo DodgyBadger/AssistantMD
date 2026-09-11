@@ -320,13 +320,15 @@ class CodeExecutionScenario(BaseScenario):
                 any(
                     event.get("event") == "tool_call_finished"
                     and event.get("tool_name") == "code_execution"
+                    and isinstance(event.get("token_count"), int)
+                    and event["token_count"] >= 0
                     and "result" not in event
                     and "result_detail" not in event
                     and "result_metadata" not in event
                     and "artifact_ref" not in event
                     for event in streaming_events
                 ),
-                "Streaming tool finish events should omit result details",
+                "Streaming tool finish events should expose only safe result metadata",
             )
 
             current_case["name"] = "allow_write"

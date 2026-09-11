@@ -1682,9 +1682,19 @@ async def _publish_tool_call_finished(
         outcome=outcome,
         metadata=result_metadata,
     )
+    result_text = tool_result_as_text(result_content)
+    metadata_token_count = result_metadata.get("token_count")
+    token_count = (
+        metadata_token_count
+        if isinstance(metadata_token_count, int)
+        and not isinstance(metadata_token_count, bool)
+        and metadata_token_count >= 0
+        else estimate_token_count(result_text)
+    )
     tool_activity[tool_id] = {
         "tool_name": tool_name,
         "status": terminal_state,
+        "token_count": token_count,
     }
     payload = {
         "event": "tool_call_finished",
@@ -1692,8 +1702,8 @@ async def _publish_tool_call_finished(
         "tool_name": tool_name,
         "outcome": outcome,
         "terminal_state": terminal_state,
+        "token_count": token_count,
     }
-    result_text = tool_result_as_text(result_content)
     chat_executor.logger.set_sinks(["validation"]).info(
         "Streaming tool call finished",
         data={
@@ -1715,6 +1725,7 @@ async def _publish_tool_call_finished(
 
 
 _TOOL_RESULT_EVENT_METADATA_KEYS = (
+    "token_count",
     "status",
     "state",
     "error_type",

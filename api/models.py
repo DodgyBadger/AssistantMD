@@ -1220,6 +1220,9 @@ class ChatSessionToolCallInfo(BaseModel):
     status: Literal["running", "completed", "failed", "interrupted"] = Field(
         ..., description="Tool call lifecycle state"
     )
+    token_count: int | None = Field(
+        None, description="Estimated token count for the tool result"
+    )
 
 
 class ChatToolCallDetailResponse(BaseModel):

@@ -2081,22 +2081,31 @@ details summary::-webkit-details-marker {
     box-sizing: border-box;
 }
 .tool-calls-section {
-    margin-top: 0.75rem;
+    width: fit-content;
+    margin-top: 0.35rem;
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    border: 1px solid rgb(var(--border-primary) / 0.6);
-    border-radius: 0.6rem;
-    background: rgb(var(--bg-elevated) / 0.5);
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    background: transparent;
     overflow: hidden;
+}
+.tool-calls-section[open] {
+    width: min(100%, 32rem);
+    border-color: rgb(var(--border-primary) / 0.5);
+    background: rgb(var(--bg-elevated) / 0.35);
 }
 .message-footer .tool-calls-section {
     margin-top: 0;
-    width: 100%;
+    width: fit-content;
+}
+.message-footer .tool-calls-section[open] {
+    width: min(100%, 32rem);
 }
 .tool-calls-section .tool-status-list {
     margin: 0;
-    padding: 0.3rem 0.4rem 0.4rem;
+    padding: 0.2rem 0.25rem 0.25rem;
     border-top: 1px solid rgb(var(--border-primary) / 0.45);
     max-width: 100%;
     overflow: hidden;
@@ -2144,6 +2153,18 @@ details summary::-webkit-details-marker {
     color: rgb(var(--text-primary));
     overflow: hidden;
     box-sizing: border-box;
+}
+.tool-calls-section > .tool-status-summary {
+    gap: 0.25rem;
+    padding: 0.12rem 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: rgb(var(--text-secondary));
+}
+.tool-calls-section > .tool-status-summary .tool-status-chevron {
+    width: 1rem;
+    height: 1rem;
+    font-size: 0.75rem;
 }
 .tool-status-state-icon {
     display: inline-flex;
@@ -2226,6 +2247,10 @@ details summary::-webkit-details-marker {
 .tool-status-name {
     font-weight: 700;
     color: rgb(var(--text-primary));
+}
+.tool-status-token-count {
+    font-weight: 500;
+    color: rgb(var(--text-secondary));
 }
 .tool-status-body {
     display: flex;

@@ -101,7 +101,7 @@ class ChatToolReplayContractScenario(BaseScenario):
             tool_name="probe_gamma",
             event_type="result",
             result_text="gamma interrupted",
-            result_metadata={"status": "cancelled"},
+            result_metadata={"status": "cancelled", "token_count": 4},
         )
         store.add_tool_event(
             session_id=session_id,
@@ -126,7 +126,11 @@ class ChatToolReplayContractScenario(BaseScenario):
             tool_name="probe_beta",
             event_type="result",
             result_text="beta result",
-            result_metadata={"status": "denied", "failure_kind": "probe_failure"},
+            result_metadata={
+                "status": "denied",
+                "failure_kind": "probe_failure",
+                "token_count": 2,
+            },
         )
         store.add_tool_event(
             session_id=session_id,
@@ -143,7 +147,10 @@ class ChatToolReplayContractScenario(BaseScenario):
             tool_name="probe_alpha",
             event_type="result",
             result_text="alpha result",
-            result_metadata={"fetched_at": datetime(2026, 8, 9, 1, 2, tzinfo=UTC)},
+            result_metadata={
+                "fetched_at": datetime(2026, 8, 9, 1, 2, tzinfo=UTC),
+                "token_count": 3,
+            },
         )
 
         detail_response = self.call_api(
@@ -210,19 +217,22 @@ class ChatToolReplayContractScenario(BaseScenario):
                     "tool_call_id": "probe-a",
                     "tool_name": "probe_alpha",
                     "status": "completed",
+                    "token_count": 3,
                 },
                 {
                     "tool_call_id": "probe-b",
                     "tool_name": "probe_beta",
                     "status": "failed",
+                    "token_count": 2,
                 },
                 {
                     "tool_call_id": "probe-c",
                     "tool_name": "probe_gamma",
                     "status": "interrupted",
+                    "token_count": 4,
                 },
             ],
-            "Session detail should expose only safe tool identity and lifecycle metadata",
+            "Session detail should expose only safe tool identity, lifecycle, and size metadata",
         )
         self.soft_assert(
             "tool_events" not in detail,

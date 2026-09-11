@@ -401,6 +401,7 @@
                 }
                 entry.persisted = true;
                 persistedToolEntriesById.set(toolCall.tool_call_id, entry);
+                entry.tokenCount = normalizeToolTokenCount(toolCall.token_count);
                 setToolEntryState(entry, toolCall.status || 'interrupted');
             });
 
@@ -1047,7 +1048,13 @@
 
         function updateToolElapsed(entry) {
             if (!entry) return;
-            entry.container.setAttribute('aria-label', `${entry.toolName}: ${toolStateLabel(entry)}`);
+            const tokenLabel = entry.tokenCount === null
+                ? ''
+                : `, ${entry.tokenCount.toLocaleString()} ${entry.tokenCount === 1 ? 'token' : 'tokens'}`;
+            entry.container.setAttribute(
+                'aria-label',
+                `${entry.toolName}: ${toolStateLabel(entry)}${tokenLabel}`
+            );
             if (activeToolDetailEntry === entry) {
                 const elapsedBlock = document.querySelector(
                     '#chat-tool-call-modal [data-tool-call-elapsed] .tool-status-block'
@@ -1111,6 +1118,7 @@
             }
 
             if (payload.event === 'tool_call_finished') {
+                entry.tokenCount = normalizeToolTokenCount(payload.token_count);
                 setToolEntryState(entry, toolResultState(payload));
                 updateToolDetail(entry);
                 if (activeToolDetailEntry === entry) {
@@ -1167,6 +1175,7 @@
                 stateIcon,
                 toolId,
                 toolName: payload.tool_name || 'Tool call',
+                tokenCount: normalizeToolTokenCount(payload.token_count),
                 persisted: false,
                 detailUnavailable: false,
                 detailArgs: null,
@@ -1268,9 +1277,11 @@
                 const committed = committedById.get(entry.toolId);
                 entry.persisted = Boolean(committed);
                 entry.detailUnavailable = !committed;
+                entry.tokenCount = normalizeToolTokenCount(committed?.token_count);
                 if (committed?.status) {
                     setToolEntryState(entry, committed.status);
                 }
+                updateToolDetail(entry);
             });
             if (
                 activeToolDetailEntry
@@ -1354,7 +1365,19 @@
             name.className = 'tool-status-name';
             name.textContent = entry.toolName;
             entry.line.appendChild(name);
+            if (entry.tokenCount !== null) {
+                const count = document.createElement('span');
+                count.className = 'tool-status-token-count';
+                count.textContent = ` (${entry.tokenCount.toLocaleString()} ${entry.tokenCount === 1 ? 'token' : 'tokens'})`;
+                entry.line.appendChild(count);
+            }
             entry.container.title = 'Open tool details';
+        }
+
+        function normalizeToolTokenCount(value) {
+            if (value === null || value === undefined || value === '') return null;
+            const count = Number(value);
+            return Number.isInteger(count) && count >= 0 ? count : null;
         }
 
         function openToolCallDetails(entry) {

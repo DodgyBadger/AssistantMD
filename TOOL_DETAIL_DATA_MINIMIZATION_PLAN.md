@@ -2,7 +2,7 @@
 
 ## Objective
 
-Keep tool arguments and results out of ordinary eager chat-session and live tool-lifecycle payloads. The tool list will show only the tool name and lifecycle status. Complete details will be returned only by the authenticated per-call detail endpoint after the user opens a tool modal, and client-held detail references will be cleared when the modal closes. Deferred-review payloads remain a deliberate exception because users need the proposed arguments to make and edit approval decisions.
+Keep tool arguments and results out of ordinary eager chat-session and live tool-lifecycle payloads. The compact tool list will show only the tool name, lifecycle status, and estimated result token count. Complete details will be returned only by the authenticated per-call detail endpoint after the user opens a tool modal, and client-held detail references will be cleared when the modal closes. Deferred-review payloads remain a deliberate exception because users need the proposed arguments to make and edit approval decisions.
 
 ## Scope and invariants
 

@@ -35,6 +35,7 @@ from core.settings.store import (
     get_enabled_tools_config,
 )
 from core.tools.failures import classify_tool_result_state
+from core.tools.utils import estimate_token_count
 from core.vault_state.pathing import (
     resolve_configured_vault_root,
     resolve_vault_relative_path,
@@ -759,6 +760,7 @@ def _effective_tool_call_info(
                 tool_call_id=tool_call_id,
                 tool_name=call_events[0].tool_name,
                 status=_stored_tool_call_status(call_events),
+                token_count=_stored_tool_call_token_count(call_events),
             )
         )
     return summaries
@@ -795,6 +797,25 @@ def _stored_tool_call_status(
     return classify_tool_result_state(
         metadata=_load_json_object(result_event.result_metadata_json) or {}
     )
+
+
+def _stored_tool_call_token_count(
+    events: list[StoredChatToolEvent],
+) -> int | None:
+    """Return the stored estimated result size for a completed tool call."""
+    result_event = next(
+        (event for event in reversed(events) if event.event_type != "call"),
+        None,
+    )
+    if result_event is None:
+        return None
+    metadata = _load_json_object(result_event.result_metadata_json) or {}
+    value = metadata.get("token_count")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    if result_event.result_text is None:
+        return 0
+    return estimate_token_count(result_event.result_text)
 
 
 def _chat_session_message_info(message: StoredChatMessage) -> ChatSessionMessageInfo:
